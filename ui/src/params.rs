@@ -100,6 +100,10 @@ pub struct Screen {
     message: String,
     /// The page last published to the screen knobs.
     published: Value,
+    /// The FM view's operator last chosen by touch (0 to 7); the cursor's tile overrides it.
+    operator: usize,
+    /// Where each FM operator's most recent voice is on its envelope (the dots), when the plugin says.
+    positions: Vec<Option<views::Along>>,
     pub out: Vec<Out>,
 }
 
@@ -140,6 +144,8 @@ impl Screen {
             view_held: None,
             message: String::new(),
             published: Value::Null,
+            operator: 0,
+            positions: vec![],
             out: vec![],
         }
     }
@@ -208,13 +214,53 @@ impl Screen {
         self.publish();
     }
 
-    /// The tiles shown, by priority, for the device's screen knobs (as ParameterGrid::publishScreen).
+    /// The FM operator view of the page shown, if it has one.
+    fn fm(&self) -> Option<&views::FmShape> {
+        self.laid.panels.iter().find_map(|p| match &p.view {
+            views::View::Fm(f) => Some(f),
+            _ => None,
+        })
+    }
+
+    /// The FM view's selected operator (0 to 7): the one whose parameter the cursor's tile is, else the one last touched.
+    fn selected_operator(&self) -> usize {
+        let on_cursor = self.cursor.and_then(|c| self.laid.tiles.get(c)).and_then(|t| self.fm()?.operator_of(t.param));
+        on_cursor.unwrap_or(self.operator)
+    }
+
+    /// Where each FM operator's most recent voice is on its envelope line, from the plugin (`None`: no dot for
+    /// it). The only call that draws dots: nothing runs while it is not called, and a repaint costs one
+    /// page's drawing, so a source that has nothing to say simply stops calling (after a last call with every
+    /// operator `None`, which takes the dots away). Whether a page wants them: `wants_positions`.
+    #[allow(dead_code)] // the engine's side is a proposal; the tests call it
+    pub fn set_positions(&mut self, positions: Vec<Option<views::Along>>) {
+        if positions == self.positions {
+            return;
+        }
+        self.positions = positions;
+        self.show();
+    }
+
+    /// Whether the page shown has an FM view, which draws dots when `set_positions` gives it positions.
+    #[allow(dead_code)]
+    pub fn wants_positions(&self) -> bool {
+        self.fm().is_some()
+    }
+
+    /// The tiles shown, by priority, for the device's screen knobs (as ParameterGrid::publishScreen). On a page
+    /// with an FM view the selected operator's parameters come first, so the knobs play the operator in view.
     fn publish(&mut self) {
         if self.params.is_empty() {
             return;
         }
         let mut shown: Vec<usize> = self.laid.tiles.iter().map(|t| t.param).collect();
         by_priority(&self.params, &mut shown);
+        if let Some(own) = self.fm().and_then(|f| f.operators.get(self.selected_operator())).map(|o| o.params()) {
+            let mut first: Vec<usize> = own.into_iter().filter(|p| shown.contains(p)).collect();
+            shown.retain(|p| !first.contains(p));
+            first.extend(shown);
+            shown = first;
+        }
         let name = self.entries.get(self.entry).map(|(p, _)| self.pages[*p].0.clone()).unwrap_or_default();
         let params: Vec<Value> = shown.iter().take(64).map(|&i| json!({"kind": "parameter", "node": self.node, "param": self.params[i].id})).collect();
         let screen = json!({"name": name, "params": params});
@@ -418,6 +464,10 @@ impl Screen {
             w: panel.rect.w,
             h: panel.rect.h,
             top: grid::envelope_top(scale, spacing),
+            scale,
+            spacing,
+            selected: self.selected_operator(),
+            positions: &self.positions,
         };
         f(&ctx)
     }
@@ -427,10 +477,10 @@ impl Screen {
         let held = self.view_held.as_ref().filter(|h| h.0 == k).map(|h| &h.1);
         let drawn = self.with_view(panel, |c| (views::draw(&panel.view, c), held.map(|h| views::touched(&panel.view, c, h)).unwrap_or_default(), c.focus));
         let (d, taken, focus) = drawn;
-        let shapes: Vec<GridShape> = d.shapes.into_iter().map(|s| GridShape { ink: s.ink as i32, fill: s.fill, width: s.width, commands: s.commands.into() }).collect();
+        let shapes: Vec<GridShape> = d.shapes.into_iter().map(|s| GridShape { ink: s.ink.0, fill: s.fill, width: s.width, commands: s.commands.into() }).collect();
         let points: Vec<GridPoint> = d.handles.iter().map(|h| GridPoint { x: h.at.0, y: h.at.1, lit: focus.is_some_and(|f| h.params.contains(&f)), held: !taken.is_empty() && h.params == taken }).collect();
-        let labels: Vec<GridLabel> = d.labels.into_iter().map(|l| GridLabel { x: l.x, y: l.y, w: l.w, h: l.h, text: l.text.into(), ink: l.ink as i32, bold: l.bold, align: l.align }).collect();
-        let boxes: Vec<GridBox> = d.boxes.into_iter().map(|b| GridBox { x: b.x, y: b.y, w: b.w, h: b.h, fill: b.fill as i32, edge: b.edge.map_or(-1, |e| e as i32), text: b.text.into(), text_ink: b.text_ink as i32, bold: b.bold }).collect();
+        let labels: Vec<GridLabel> = d.labels.into_iter().map(|l| GridLabel { x: l.x, y: l.y, w: l.w, h: l.h, text: l.text.into(), ink: l.ink.0, bold: l.bold, align: l.align }).collect();
+        let boxes: Vec<GridBox> = d.boxes.into_iter().map(|b| GridBox { x: b.x, y: b.y, w: b.w, h: b.h, fill: b.fill.0, edge: b.edge.map_or(-1, |e| e.0), text: b.text.into(), text_ink: b.text_ink.0, bold: b.bold }).collect();
         GridPanel {
             x: panel.rect.x,
             y: panel.rect.y,
@@ -661,6 +711,8 @@ impl Screen {
 
     pub fn act(&mut self, action: Action) -> Outcome {
         let outcome = self.handle(action);
+        self.operator = self.selected_operator();
+        self.publish();
         self.show();
         outcome
     }
@@ -795,11 +847,15 @@ impl Screen {
     pub fn view_down(&mut self, panel: i32, x: f32, y: f32) -> bool {
         let k = panel as usize;
         let Some(p) = self.laid.panels.get(k) else { return false };
-        let Some((held, ids)) = self.with_view(p, |c| views::grab(&p.view, c, (x, y)).map(|h| (h.clone(), views::touched(&p.view, c, &h)))) else { return false };
+        let Some((held, ids, operator)) = self.with_view(p, |c| views::grab(&p.view, c, (x, y)).map(|h| (h.clone(), views::touched(&p.view, c, &h), views::operator_held(&p.view, c, &h)))) else { return false };
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = None;
         self.search_cursor = false;
+        if let Some(n) = operator {
+            self.operator = n;
+            self.publish();
+        }
         for i in ids {
             self.begin(self.params[i].id);
         }

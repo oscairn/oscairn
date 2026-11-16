@@ -99,7 +99,55 @@ key map, FM operators.
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
-| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | views.rs `draw_fm`, `fm_of`, `algorithm_layout`, `fm_grab`/`fm_drag`/`release`; tests/views.rs | done (two guards the reference lacks: operators past 8 are skipped, and a feedback with no target operator is not drawn: it indexes boxes[-1]) |
+| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | src/fm.rs (the owner's own design, below: not the reference's) with views.rs `View::Fm`; tests/fm*.rs | done, differing from the reference by the owner's decision (2026-11-15); the reference's two guards stay (operators past 8 are skipped, a feedback with no target operator is not drawn) |
+
+## The FM operator view: the owner's design (2026-11-15), a difference from the reference
+
+The owner looked at the reference's layout (the algorithm as a vertical stack in a box at the left, a column per
+operator with a level bar, a ratio box and a tiny envelope) and asked: "fm algos should be horizontal, next to a
+graph with different color lines for each operator to show their config. not sure if theres a way to show dots
+moving along those lines as a note is played, some synth software does that." So this view is Oscairn's own
+(src/fm.rs); the JUCE `Operators` (ParameterGrid.cpp ~731) is not matched, on purpose. The panel is 350 high in
+touch mode (300 in the reference): the diagram and the graph side by side over a strip of operator cells.
+
+- Flow convention, kept for every algorithm: signal runs left to right. An operator's column is its distance from
+  the output: the carriers in the last column, what modulates a carrier one column left, and so on; the carriers'
+  wires meet an output line at the right edge (labeled "Out"). Each wire has the color of the operator it comes
+  from and ends on the target's left edge (an arrow), several into one box land at spread points on its edge;
+  an operator feeding two shows one wire that forks. Wires are orthogonal and keep to gutters between columns.
+  A wire that skips a column passes through a point reserved in it (`Flow::nodes` with no operator), so no wire
+  runs through a box. Rows come from sweeps that put each node at the mean row of what it is wired to
+  (`algorithm_layout`), which gives no crossings for a stack four deep, two stacks sharing a modulator, a wire that
+  skips a column, and the eight-operator fixture. Feedback (and modulation that runs backward in a cycle) is a loop
+  drawn out of the top of a box into the gap above its row, up a box's side to a lane above every row, across, and
+  down into the box it feeds with an arrow: a self feedback is a small loop above its own box. Loops cross wires
+  but never a box.
+- Colors: a fixed palette of eight per theme (THEME.md "Operator colors"), operator n always the same color in a
+  theme. The operator's box, its cell's number, level bar, the wires it feeds and its line in the graph use it;
+  every box and cell is numbered and every line end in the graph carries the number as a tag, so color is never the
+  only mark. An operator at level 0 (the data has no on/off field) is drawn dimmed, its line flat at the plot's foot.
+- Graph: one plot of every operator's amplitude envelope on common axes (stage by stage left to right on one time
+  scale, level up), each line scaled by the operator's output level (`operatorLevel`; an operator without one is
+  drawn at full height: the normalized form, only where the data gives no level). The envelope comes from the same
+  fields as the envelope view (`grid::envelope_layout_in`, the one layout `grid::envelope_layout` uses): named
+  ADSR stages or rates and levels. Where every time field has `seconds` the stage widths share one scale across
+  operators (the longest of all), else each uses its own normalized axis. The selected operator's line is thicker,
+  on top, and the only one with handles (touch drags a node: its time across, its level up, for that operator
+  only); the others are thin.
+- Strip: a cell per operator (number chip and level text, level bar, ratio (edged in the accent while the fixed
+  switch is on, with the switch's text before the ratio's when the box is wide enough for both at 70% type), fine and detune), in the operator's color.
+- Choosing an operator, without touch: the dial and arrows move the cursor over the page's tiles as before; the
+  operator whose parameter the cursor's tile is becomes the selected one, its field in the strip gets the
+  cursor's border, its handles show, and the knobs under the screen play its parameters first (`controllers.view`
+  `screen` lists the selected operator's level, ratio, fine, detune, fixed and envelope parameters before the rest,
+  republished when the choice changes). With touch: a tap on a box, a cell or a line chooses it; the level bar,
+  ratio, fine and detune boxes are dragged as before; a drag across the diagram steps the algorithm, a tap on its
+  left or right half steps it back or on.
+- Dots (`Screen::set_positions`, `fm::Along`): the graph draws a dot (a halo and a dot in the operator's color)
+  at a position along each operator's line when it is given: a fraction of the line's length or of one segment.
+  Nothing calls it yet and no plugin gives positions (the layout extension has no such data;
+  notes/ui-live-positions-proposal.md, outside the repository, proposes one). The view is whole without dots;
+  with none given nothing runs: no timer, no repaint.
 
 ## Checklist (shell)
 

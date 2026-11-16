@@ -57,6 +57,8 @@ pub(super) fn open_with(s: &mut Screen, list: serde_json::Value, values: &[(u32,
 /// A view measured in the picture: the window, the panel as the screen gave it, and where its top left is
 /// in the window's pixels (`k` pixels to the panel's pixel).
 pub(super) struct Shot {
+    /// Measure a line of this color on this ground (RGB 0 to 255) instead of the accent's green.
+    pub tint: Option<([f64; 3], [f64; 3])>,
     pub s: Screen,
     pub panel: crate::GridPanel,
     pub origin: (f64, f64),
@@ -103,7 +105,7 @@ pub(super) fn view_shot(list: &serde_json::Value, values: &[(u32, f64)], text: &
     let before = panels(&s.ui)[..which].iter().filter(|q| (q.h - panel.h).abs() < 0.5).count();
     let y0 = *same.get(before).unwrap_or_else(|| panic!("{w}x{h}@{scale}: the panel's rows (wanted {expected} tall) in {bands:?}"));
     let x0 = (0..w).find(|&x| lit(x, y0 + expected / 2)).expect("the panel's left edge");
-    (Shot { s, panel, origin: (x0 as f64, y0 as f64), k }, p)
+    (Shot { tint: None, s, panel, origin: (x0 as f64, y0 as f64), k }, p)
 }
 
 impl Shot {
@@ -113,6 +115,14 @@ impl Shot {
             return 0.;
         }
         let p = self.s.pixels[y as usize * self.s.w + x as usize];
+        if let Some((color, ground)) = self.tint {
+            // The share of the color over the ground; a pixel of another hue (a line crossing) is none.
+            let (d, v) = ([color[0] - ground[0], color[1] - ground[1], color[2] - ground[2]], [f64::from(p.r) - ground[0], f64::from(p.g) - ground[1], f64::from(p.b) - ground[2]]);
+            let len2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            let share = (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / len2;
+            let off = (0..3).map(|i| (v[i] - share * d[i]).powi(2)).sum::<f64>().sqrt();
+            return if off > 0.15 * len2.sqrt() { 0. } else { ((share - 0.3) / 0.7).max(0.) };
+        }
         // The fill under a curve is the accent lightly (about 0.17): not the line.
         (((f64::from(p.g) - f64::from(p.r)) / 255. - 0.3) / 0.7).max(0.)
     }

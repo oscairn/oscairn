@@ -445,7 +445,17 @@ component ViewPanel inherits Section {
     property <length> last;
     // The theme's color for a view's ink (src/views.rs `Ink`).
     pure function ink(i: int) -> color {
-        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : i == 10 ? Theme.zone-faint : Theme.on-accent;
+        // 32 and up: an operator's color dimmed; 24 and up: the text on it; 16 and up: the color (src/palette.rs).
+        if (i >= 32) {
+            return Theme.operators[i - 32].with-alpha(Theme.dim);
+        }
+        if (i >= 24) {
+            return Theme.operators-on[i - 24];
+        }
+        if (i >= 16) {
+            return Theme.operators[i - 16];
+        }
+        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : i == 10 ? Theme.zone-faint : i == 12 ? Theme.focus : i == 13 ? transparent : Theme.on-accent;
     }
     pure function stroke(w: int) -> length {
         return w == 0 ? Theme.hair : w == 1 ? Theme.thin : Theme.cursor-width;
@@ -490,7 +500,7 @@ component ViewPanel inherits Section {
             height: parent.height;
             text: b.text;
             color: root.ink(b.text-ink);
-            font-size: Theme.small * max(0.7, min(1.0, (parent.width - 2 * Theme.pad-tight) / max(1px, measure.preferred-width)));
+            font-size: Theme.small * max(0.7, min(1.0, (parent.width - 2 * Theme.pad-tight) / max(1px, measure.preferred-width), (parent.height - 2 * Theme.hair) / max(1px, Theme.small * 1.25)));
             font-weight: b.bold ? 700 : 400;
             horizontal-alignment: center;
             vertical-alignment: center;

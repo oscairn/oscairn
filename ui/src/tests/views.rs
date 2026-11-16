@@ -237,7 +237,7 @@ fn the_filter_response_follows_the_reference() {
 
 /// A parameter that is part of a view: its number, its field's name and the zone or element it is of.
 #[allow(clippy::too_many_arguments)]
-fn viewed(id: u32, name: &str, max: f64, stepped: bool, view: u32, field: &str, index: u32) -> serde_json::Value {
+pub(super) fn viewed(id: u32, name: &str, max: f64, stepped: bool, view: u32, field: &str, index: u32) -> serde_json::Value {
     let mut p = plugin_param(id, name, max, stepped, "auto", 0, 0);
     p["view"] = json!(view);
     p["field"] = json!(field);
@@ -381,7 +381,7 @@ fn the_key_map_scaling_line_is_drawn_where_its_path_is() {
 
 // A four-operator FM synth: an algorithm of four routings (a chain, two stacks, all carriers, three into
 // one), the feedback, a level and a ratio and an envelope per operator.
-fn fm_plugin() -> serde_json::Value {
+pub(super) fn fm_plugin() -> serde_json::Value {
     let routing = |inputs: [u8; 4], carriers: u8, from: u8, to: u8| json!({"inputs": [inputs[0], inputs[1], inputs[2], inputs[3], 0, 0, 0, 0], "carriers": carriers, "feedbackFrom": from, "feedbackTo": to});
     let mut algorithm = viewed(1, "Algorithm", 3., true, 1, "algorithm", 0);
     algorithm["algorithms"] = json!([
@@ -403,7 +403,7 @@ fn fm_plugin() -> serde_json::Value {
     json!({ "parameters": p })
 }
 
-fn fm_text(id: u32, v: f64) -> String {
+pub(super) fn fm_text(id: u32, v: f64) -> String {
     match id {
         1 => format!("{}", v as i64 + 1),
         2 => format!("{}", v as i64),
@@ -413,193 +413,10 @@ fn fm_text(id: u32, v: f64) -> String {
     }
 }
 
-fn fm_values(algorithm: f64) -> Vec<(u32, f64)> {
+pub(super) fn fm_values(algorithm: f64) -> Vec<(u32, f64)> {
     let mut v = vec![(1, algorithm), (2, 5.), (11, 99.), (12, 70.), (13, 40.), (14, 10.), (21, 2.), (22, 4.), (23, 8.), (24, 1.)];
     v.extend([(40, 0.05), (41, 0.4), (42, 0.3), (43, 0.1), (44, 0.5), (45, 0.4), (46, 0.3), (47, 0.3), (48, 0.2), (49, 0.2), (50, 0.4), (51, 0.2)]);
     v
-}
-
-// The algorithm layouts of the reference: each carrier on the bottom row, each modulator above what it
-// modulates, centered, pushed right until none overlap.
-#[test]
-fn algorithms_are_laid_out_as_the_reference_does() {
-    use crate::views::algorithm_layout;
-    let pos = |r: [u8; 11], n| algorithm_layout(&r, n).iter().map(|p| (p.row, p.x)).collect::<Vec<_>>();
-    // 4 -> 3 -> 2 -> 1, feedback aside: a column of four.
-    assert_eq!(pos([0b10, 0b100, 0b1000, 0, 0, 0, 0, 0, 0b1, 4, 4], 4), [(0, 0.), (1, 0.), (2, 0.), (3, 0.)]);
-    // 2 -> 1 and 4 -> 3: two stacks, centered about the middle.
-    assert_eq!(pos([0b10, 0, 0b1000, 0, 0, 0, 0, 0, 0b101, 0, 0], 4), [(0, -0.5), (1, -0.5), (0, 0.5), (1, 0.5)]);
-    // All carriers: one row.
-    assert_eq!(pos([0; 11], 4), [(0, 0.); 4].iter().enumerate().map(|(i, _)| (0, i as f32 - 1.5)).collect::<Vec<_>>());
-    let mut all = [0u8; 11];
-    all[8] = 0b1111;
-    assert_eq!(pos(all, 4), [(0, -1.5), (0, -0.5), (0, 0.5), (0, 1.5)]);
-    // 2, 3 and 4 into 1: the three modulators side by side over it.
-    assert_eq!(pos([0b1110, 0, 0, 0, 0, 0, 0, 0, 0b1, 0, 0], 4), [(0, -1.), (1, -1.), (1, 0.), (1, 1.)]);
-    // More than eight are not drawn; a loop (1 and 2 into each other) is cut and every operator is placed.
-    assert_eq!(algorithm_layout(&[0; 11], 12).len(), 8);
-    assert_eq!(algorithm_layout(&[0b10, 0b01, 0, 0, 0, 0, 0, 0, 0b1, 0, 0], 2).len(), 2);
-}
-
-// The FM view is described by the plugin's data: found beside the algorithm, titled with its algorithm's
-// and feedback's text, with the routing drawn, a column per operator, and the operators' envelopes drawn
-// as views of their own too (as the reference does). An operator the plugin gives no envelope draws none.
-#[test]
-fn an_fm_view_is_described_by_the_plugin_and_drawn() {
-    let mut s = Screen::new();
-    let ui = &s.ui.clone_strong();
-    let _p = open_with(&mut s, fm_plugin(), &fm_values(0.), &fm_text);
-    let all = panels(ui);
-    assert_eq!(all.len(), 5, "the operators, then each described envelope (one per operator)");
-    assert_eq!((all[0].title.as_str(), all[0].h), ("Algorithm 1  \u{b7}  Feedback 5", 300.));
-    assert_eq!(all[1].title.as_str(), "Envelope");
-    let boxes: Vec<crate::GridBox> = all[0].boxes.iter().collect();
-    let numbered: Vec<(&str, i32)> = boxes.iter().take(4).map(|b| (b.text.as_str(), b.fill)).collect();
-    assert_eq!(numbered, [("1", 0), ("2", 4), ("3", 4), ("4", 4)], "operator 1 is the carrier of the chain, filled in the accent");
-    // Operator 4's ratio shows the plugin's text; a column per operator named Op n.
-    let ratios: Vec<String> = boxes.iter().filter(|b| b.fill == 4 && b.text.starts_with('x')).map(|b| b.text.to_string()).collect();
-    assert_eq!(ratios, ["x2", "x3", "x5", "x1"]);
-    let names: Vec<String> = all[0].labels.iter().filter(|l| l.text.starts_with("Op ")).map(|l| l.text.to_string()).collect();
-    assert_eq!(names, ["Op 1", "Op 2", "Op 3", "Op 4"]);
-    // The routing: wires (the chain's three), the feedback loop, the output line; every column carries an envelope.
-    let ink = |k: usize| all[0].shapes.row_data(k).map(|s| (s.ink, s.width));
-    assert_eq!((ink(1), ink(2)), (Some((1, 1)), Some((0, 1))), "the wires in the muted ink, then the feedback in the accent");
-    assert_eq!(all[0].shapes.row_count(), 4 + 2 * 4, "frame, wires, feedback, output line, and a frame and line for four envelopes");
-    // Another algorithm: a different routing (four carriers, no wires or feedback).
-    let mut s = Screen::new();
-    let _q = open_with(&mut s, fm_plugin(), &fm_values(2.), &fm_text);
-    let all = panels(&s.ui);
-    assert_eq!(all[0].title.as_str(), "Algorithm 3  \u{b7}  Feedback 5");
-    assert!(all[0].boxes.iter().take(4).all(|b| b.fill == 0), "four carriers");
-    // A plugin that gives no routings: the operators in a row, nothing but the frame to say how they connect.
-    let mut list = fm_plugin();
-    list["parameters"][0]["algorithms"] = json!([]);
-    let mut s = Screen::new();
-    let _r = open_with(&mut s, list, &fm_values(0.), &fm_text);
-    let all = panels(&s.ui);
-    assert!(all[0].boxes.iter().take(4).all(|b| b.fill == 4));
-    let xs: Vec<f32> = all[0].boxes.iter().take(4).map(|b| b.x).collect();
-    assert!(xs.windows(2).all(|w| w[0] < w[1]) && (xs[1] - xs[0] - (xs[2] - xs[1])).abs() < 0.01, "in a row, evenly: {xs:?}");
-}
-
-// Touch: dragging across the routing steps the algorithm (24 px a step, whole steps), a tap on its left or
-// right half steps it back or on; a level bar sets its level where it is touched and as it is dragged; a
-// ratio steps by 12 px up or down; each inside gestures; values stop at the ends.
-#[test]
-fn an_fm_view_is_edited_by_touch() {
-    let mut s = Screen::new();
-    let ui = &s.ui.clone_strong();
-    let mut p = open_with(&mut s, fm_plugin(), &fm_values(1.), &fm_text);
-    sent(&mut p.out);
-    let routing = {
-        let v = super::envelope::vertices(&panels(ui)[0].shapes.row_data(0).unwrap().commands);
-        ((v[0].0 - 0.5) as f32, (v[0].1 - 0.5) as f32, (v[2].0 + 0.5) as f32, (v[2].1 + 0.5) as f32)
-    };
-    let mid = ((routing.0 + routing.2) / 2., (routing.1 + routing.3) / 2.);
-    // Across the routing: 30 px right is one step on, 60 px two, back past the start one step off.
-    assert!(p.view_down(0, mid.0, mid.1));
-    p.view_move(0, mid.0 + 30., mid.1);
-    p.view_move(0, mid.0 + 60., mid.1);
-    p.view_move(0, mid.0 - 30., mid.1);
-    p.view_move(0, mid.0 + 1000., mid.1);
-    p.view_up(0, mid.0 + 1000., mid.1);
-    let out = sent(&mut p.out);
-    let sets: Vec<serde_json::Value> = out.iter().filter(|o| o.0 == "params.set").map(|o| o.1.clone()).collect();
-    assert_eq!(sets, [set(1, 2.).1, set(1, 3.).1, set(1, 0.).1, set(1, 3.).1], "1 + 1, 1 + 2, 1 - 1, and the end");
-    assert_eq!((out.first().unwrap(), out.last().unwrap()), (&gesture(1, true), &gesture(1, false)));
-    // A tap on the left half steps back, on the right half on.
-    p.view_down(0, routing.0 + 20., mid.1);
-    p.view_up(0, routing.0 + 20., mid.1);
-    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
-    assert_eq!(sets, [set(1, 2.).1], "from 3 back to 2");
-    p.view_down(0, routing.2 - 20., mid.1);
-    p.view_up(0, routing.2 - 20., mid.1);
-    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
-    assert_eq!(sets, [set(1, 3.).1], "from 2 on to 3");
-    // The level bars and ratios, found as the view drew them.
-    let boxes: Vec<crate::GridBox> = panels(ui)[0].boxes.iter().collect();
-    let bar = boxes.iter().filter(|b| b.fill == 4 && b.text.is_empty()).nth(1).expect("operator 2's level bar").clone();
-    assert!(p.view_down(0, bar.x + bar.w / 2., bar.y + bar.h * 0.25));
-    let sets: Vec<f64> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"][0]["value"].as_f64().unwrap()).collect();
-    assert!(sets.len() == 1 && (sets[0] - 74.25).abs() < 0.01, "touched a quarter of the way down: {sets:?}");
-    p.view_move(0, bar.x, bar.y - 500.);
-    p.view_up(0, bar.x, bar.y - 500.);
-    let out = sent(&mut p.out);
-    assert!(out.contains(&set(12, 99.)) && out.contains(&gesture(12, false)), "dragged up past the top: {out:?}");
-    let ratio = boxes.iter().filter(|b| b.fill == 4 && b.text.starts_with('x')).nth(3).expect("operator 4's ratio").clone();
-    assert!(p.view_down(0, ratio.x + 2., ratio.y + ratio.h / 2.));
-    p.view_move(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
-    p.view_up(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
-    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
-    assert_eq!(sets, [set(24, 3.).1], "25 px up is two steps: 1 + 2");
-    assert!(!p.view_down(0, routing.0 + 5., routing.1 - 30.), "away from the routing and every bar takes nothing");
-}
-
-// The FM view's lines in the accent (the feedback loop, each operator's envelope) are drawn where their
-// paths are, unscaled, at two sizes and two scales; they are short, so measured every 2 px.
-#[test]
-fn the_fm_lines_are_drawn_where_their_paths_are() {
-    // Shapes: the routing's frame, the wires, the feedback loop, the output line, then a frame and a line
-    // for each operator's envelope.
-    // The panel is 300 high: windows that hold it (1280x720 at 2 shows 360).
-    let m = Measure { step: 2., least: 6, sizes: &[((1280, 720), 1.), ((1920, 1080), 1.), ((1920, 1080), 2.)] };
-    let mut report = String::new();
-    for (name, shape) in [("feedback loop", 2), ("operator 1's envelope", 5), ("operator 2's envelope", 7)] {
-        report += &check_line_with(name, &fm_plugin(), &fm_values(0.), &fm_text, 0, shape, &m);
-    }
-    println!("{report}");
-}
-
-// Everything the FM view draws lies inside its panel (the routing, the columns, and each operator's
-// envelope: its frame, its line and its stroke), at 1280x720 and the FANTOM's 1.55, under every theme;
-// the four operators each have an envelope, below the ratio and above the panel's edge.
-#[test]
-fn the_fm_view_lies_inside_its_panel() {
-    fit_to_window();
-    for (size, scale) in [((1280, 720), 1.), ((1280, 720), 1.55)] {
-        let mut s = Screen::sized(size.0, size.1);
-        s.set_scale(scale);
-        s.frame();
-        let mut p = open_with(&mut s, fm_plugin(), &fm_values(0.), &fm_text);
-        for t in &all_themes() {
-            theme::apply(&s.ui, t);
-            s.frame();
-            p.shown();
-            s.frame();
-            let panel = &panels(&s.ui)[0];
-            let (w, h) = (panel.w, panel.h);
-            let at = format!("in {} at {scale}", t.id);
-            let inside = |what: &str, (l, t, r, b): (f32, f32, f32, f32)| {
-                assert!(l >= 0. && t >= 0. && r <= w && b <= h, "{what} ({l:.1}, {t:.1}, {r:.1}, {b:.1}) lies outside the {w}x{h} panel {at}");
-            };
-            let mut frames = Vec::new();
-            for (k, shape) in panel.shapes.iter().enumerate() {
-                let (xs, ys): (Vec<f64>, Vec<f64>) = super::envelope::vertices(&shape.commands).into_iter().unzip();
-                let reach = f64::from(shape.width) / 2. + 0.5; // a line's stroke
-                let bounds = (
-                    (xs.iter().copied().fold(f64::MAX, f64::min) - reach) as f32,
-                    (ys.iter().copied().fold(f64::MAX, f64::min) - reach) as f32,
-                    (xs.iter().copied().fold(f64::MIN, f64::max) + reach) as f32,
-                    (ys.iter().copied().fold(f64::MIN, f64::max) + reach) as f32,
-                );
-                inside(&format!("shape {k}"), bounds);
-                if k >= 4 && k % 2 == 0 {
-                    frames.push(bounds); // an envelope's frame; its line follows
-                }
-            }
-            for b in panel.boxes.iter() {
-                inside(&format!("box {:?}", b.text), (b.x, b.y, b.x + b.w, b.y + b.h));
-            }
-            for l in panel.labels.iter() {
-                inside(&format!("label {:?}", l.text), (l.x, l.y, l.x + l.w, l.y + l.h));
-            }
-            assert_eq!(frames.len(), 4, "an envelope for each operator {at}");
-            let ratio = panel.boxes.iter().filter(|b| b.text.starts_with('x')).map(|b| b.y + b.h).fold(0., f32::max);
-            for (n, f) in frames.iter().enumerate() {
-                assert!(f.1 > ratio && f.3 < h && f.3 - f.1 > 40., "operator {}'s envelope ({f:?}) is below the ratios ({ratio}) and whole {at}", n + 1);
-            }
-        }
-    }
 }
 
 // An FM-X-like synth: eight operators, each with a level, a ratio, a fine ratio and an envelope (the last
@@ -607,7 +424,7 @@ fn the_fm_view_lies_inside_its_panel() {
 // stack four deep (4 into 3 into 2 into 1), operator 5 modulated by 6 and 7, operator 8 alone. The first
 // routing feeds back from operator 7 into operator 6 (a different one), the second from operator 4 into itself.
 // Every parameter has a module path: a plugin of more than 24 without one is split by its names' first words.
-fn fm8_plugin() -> serde_json::Value {
+pub(super) fn fm8_plugin() -> serde_json::Value {
     let routing = |inputs: [u8; 8], from: u8, to: u8| json!({"inputs": inputs, "carriers": 0b1001_0001, "feedbackFrom": from, "feedbackTo": to});
     let inputs = [0b10, 0b100, 0b1000, 0, 0b110_0000, 0, 0, 0];
     let mut algorithm = viewed(1, "Algorithm", 1., true, 1, "algorithm", 0);
@@ -630,7 +447,7 @@ fn fm8_plugin() -> serde_json::Value {
     json!({ "parameters": p })
 }
 
-fn fm8_text(id: u32, v: f64) -> String {
+pub(super) fn fm8_text(id: u32, v: f64) -> String {
     match id {
         1 => format!("{}", v as i64 + 1),
         2 => format!("{}", v as i64),
@@ -642,7 +459,7 @@ fn fm8_text(id: u32, v: f64) -> String {
     }
 }
 
-fn fm8_values(algorithm: f64) -> Vec<(u32, f64)> {
+pub(super) fn fm8_values(algorithm: f64) -> Vec<(u32, f64)> {
     let mut v = vec![(1, algorithm), (2, 5.), (406, 0.), (407, 1.), (408, 1.)];
     for n in 1..=8u32 {
         v.push((100 + n, 99. - 11. * f64::from(n - 1)));
@@ -655,86 +472,6 @@ fn fm8_values(algorithm: f64) -> Vec<(u32, f64)> {
     v
 }
 
-// What the reference does at eight operators (ParameterGrid::Operators::layout): the same as at four: the routing
-// keeps its share (36% of the width, at most 360) and the columns divide what is left equally, narrower, none
-// wrapped or scrolled. So at eight everything must still lie inside its column and the panel, the operators of the
-// diagram (eight, on rows by their routing) must not overlap, and the columns must not overlap each other.
-#[test]
-fn eight_operators_lie_inside_their_columns_and_the_panel() {
-    fit_to_window();
-    for (size, scale) in [((1280, 720), 1.), ((1280, 720), 1.55)] {
-        for algorithm in [0., 1.] {
-            let mut s = Screen::sized(size.0, size.1);
-            s.set_scale(scale);
-            s.frame();
-            let mut p = open_with(&mut s, fm8_plugin(), &fm8_values(algorithm), &fm8_text);
-            for t in &all_themes() {
-                theme::apply(&s.ui, t);
-                s.frame();
-                p.shown();
-                s.frame();
-                let panel = &panels(&s.ui)[0];
-                let (w, h) = (panel.w, panel.h);
-                let at = format!("in {} at {scale}, algorithm {algorithm}", t.id);
-                let boxes: Vec<crate::GridBox> = panel.boxes.iter().collect();
-                for b in &boxes {
-                    assert!(b.x >= 0. && b.y >= 0. && b.x + b.w <= w && b.y + b.h <= h, "box {:?} outside the panel {at}", b.text);
-                }
-                let names: Vec<crate::GridLabel> = panel.labels.iter().filter(|l| l.text.starts_with("Op ")).collect();
-                assert_eq!(names.len(), 8, "a column for each operator {at}");
-                for l in panel.labels.iter() {
-                    assert!(l.x >= 0. && l.y >= 0. && l.x + l.w <= w && l.y + l.h <= h, "label {:?} outside the panel {at}", l.text);
-                }
-                // The routing's eight boxes: numbered, none over another.
-                let diagram: Vec<&crate::GridBox> = boxes.iter().filter(|b| b.text.len() == 1 && b.text.chars().all(|c| c.is_ascii_digit())).collect();
-                assert_eq!(diagram.len(), 8, "eight operators in the diagram {at}");
-                let apart = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| a.2 <= b.0 || b.2 <= a.0 || a.3 <= b.1 || b.3 <= a.1;
-                for (i, a) in diagram.iter().enumerate() {
-                    for b in &diagram[i + 1..] {
-                        assert!(apart((a.x, a.y, a.x + a.w, a.y + a.h), (b.x, b.y, b.x + b.w, b.y + b.h)), "operators {} and {} overlap {at}", a.text, b.text);
-                    }
-                }
-                // The columns: each name, ratio and its envelope's frame inside its own column, which are in order and apart.
-                let ratios: Vec<&crate::GridBox> = boxes.iter().filter(|b| b.text.starts_with('x') || b.text.starts_with("Fixed")).collect();
-                assert_eq!(ratios.len(), 8, "a ratio for each operator {at}");
-                let frames: Vec<(f64, f64)> = panel
-                    .shapes
-                    .iter()
-                    .enumerate()
-                    .filter(|(k, _)| *k >= 4 && k % 2 == 0)
-                    .map(|(_, s)| {
-                        let (xs, _): (Vec<f64>, Vec<f64>) = super::envelope::vertices(&s.commands).into_iter().unzip();
-                        (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max))
-                    })
-                    .collect();
-                assert_eq!(frames.len(), 8, "an envelope for each operator {at}");
-                for n in 0..8 {
-                    let r = ratios[n];
-                    assert!(f64::from(r.x) - 0.6 <= frames[n].0 && frames[n].1 <= f64::from(r.x + r.w) + 0.6, "operator {}'s envelope lies in its column {at}", n + 1);
-                    assert!(names[n].x + names[n].w <= r.x + r.w + 0.6 && names[n].x >= r.x - 0.6, "operator {}'s name lies in its column {at}", n + 1);
-                    if n > 0 {
-                        assert!(ratios[n - 1].x + ratios[n - 1].w <= r.x, "columns {} and {} are apart {at}", n, n + 1);
-                    }
-                }
-                // Nothing the reference would show is shortened: ratio texts fit their boxes.
-                assert!(ratios.iter().all(|r| !r.text.is_empty()), "every ratio says something {at}");
-            }
-        }
-    }
-}
-
-// The eight-operator view's lines (the feedback loop from one operator to another, and each envelope) are drawn
-// where their paths are, at two sizes.
-#[test]
-fn the_eight_operator_lines_are_drawn_where_their_paths_are() {
-    let m = Measure { step: 2., least: 4, sizes: &[((1280, 720), 1.), ((1920, 1080), 1.), ((1920, 1080), 2.)] };
-    let mut report = String::new();
-    for (name, shape) in [("feedback loop 7 into 6", 2), ("operator 1's envelope", 5), ("operator 8's envelope", 19)] {
-        report += &check_line_with(name, &fm8_plugin(), &fm8_values(0.), &fm8_text, 0, shape, &m);
-    }
-    println!("{report}");
-}
-
 #[test]
 fn eight_operator_pictures() {
     pictures("grid-fm8", fm8_plugin(), &fm8_values(0.), &fm8_text);
@@ -743,9 +480,10 @@ fn eight_operator_pictures() {
 
 /// A page's picture under the default theme at 1 and at the FANTOM's 1.55 (target/screens) and under the odd
 /// theme (target/theme-shots), as NAME, NAME@1.55 and NAME-odd.
-fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
+pub(super) fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
     fit_to_window();
     let mut s = Screen::new();
+    theme::apply(&s.ui, &all_themes()[0]);
     let mut p = open_with(&mut s, list, values, text);
     s.frame();
     png(&s, name);

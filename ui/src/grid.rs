@@ -26,7 +26,7 @@ const ENVELOPE: f32 = 180.;
 const LFO: f32 = 140.;
 const FILTER: f32 = 160.;
 const MAP: f32 = 180.;
-const FM: f32 = 300.;
+const FM: f32 = 350.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -784,6 +784,8 @@ pub struct EnvLayout {
     pub handles: Vec<EnvHandle>,
     pub line: String,
     pub fill: String,
+    /// The line's vertices.
+    pub points: Vec<(f32, f32)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -794,18 +796,26 @@ pub struct EnvHandle {
 }
 
 pub fn envelope_layout(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, w: f32, h: f32, top: f32) -> EnvLayout {
-    let (left, right, bottom) = (14., w - 14., h - 10.);
-    let (aw, ah) = (right - left, bottom - top);
+    envelope_layout_in(e, params, norm, (14., top, w - 14., h - 10.), 1., 0.)
+}
+
+/// An envelope laid out in the area (left, top, right, bottom): levels are scaled by `gain` (0 to 1: an
+/// operator's output level in a shared plot) and stage times by `longest` seconds when it is more than the
+/// envelope's own longest stage (so several envelopes share one time scale), else by its own.
+pub fn envelope_layout_in(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, area: (f32, f32, f32, f32), gain: f32, longest_of_all: f64) -> EnvLayout {
+    let (left, top, right, bottom) = area;
+    let (aw, ah) = (right - left, (bottom - top) * gain);
     let hold = aw * 0.14;
     let segment = (aw - hold) / e.points.len().max(1) as f32;
     let least = (20f32).min(segment / 4.);
     let times: Vec<&Param> = e.points.iter().filter_map(|p| p.time).map(|t| params[t]).collect();
-    let longest = longest_stage(&times);
+    let own = longest_stage(&times);
+    let longest = if own > 0. { own.max(longest_of_all) } else { 0. };
     let across = |t: usize, rate: bool| stage_across(params[t], norm(t), rate, longest);
     let level = |p: Option<usize>, fixed: f64| bottom - norm_or(p, fixed, norm) as f32 * ah;
     let mut x = left;
     let start = level(e.start, 0.);
-    let mut line = format!("M {left:.1} {start:.1}");
+    let mut points = vec![(left, start)];
     let mut handles = Vec::new();
     for p in &e.points {
         let from = x;
@@ -813,15 +823,16 @@ pub fn envelope_layout(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> 
             x += least + across(t, p.rate) as f32 * (segment - least);
         }
         let y = level(p.level, p.fixed);
-        line += &format!(" L {x:.1} {y:.1}");
+        points.push((x, y));
         handles.push(EnvHandle { at: (x, y), from });
         if p.sustain {
             x += hold;
-            line += &format!(" L {x:.1} {y:.1}");
+            points.push((x, y));
         }
     }
+    let line = points.iter().enumerate().map(|(k, (x, y))| format!("{} {x:.1} {y:.1}", if k == 0 { "M" } else { " L" })).collect::<String>();
     let fill = format!("{line} L {x:.1} {bottom:.1} L {left:.1} {bottom:.1} Z");
-    EnvLayout { bottom, height: ah, segment, least, longest, handles, line, fill }
+    EnvLayout { bottom, height: ah, segment, least, longest, handles, line, fill, points }
 }
 
 fn norm_or(p: Option<usize>, fixed: f64, norm: &dyn Fn(usize) -> f64) -> f64 {

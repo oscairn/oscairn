@@ -330,3 +330,21 @@ and the parameter pages; the Parts work's `Theme.bar-cursor` stays): 208 tests a
   disk the meters have no names and short bars and the mark says "slow"; at 1280 across at scale 1 everything shows. Measured by the test in every built-in theme and the tight odd one at 826, 800, 640 and 1280 across, with and without a slow
   disk: the meters end inside the bar, the name has at least its least, the mark fits between the name and the tempo. NOT held in the roomy odd
   theme (type 1.39, spacing 1.6) below 1200 across: its fixed parts alone are wider (the meters end at 839 of 826 with a slow disk).
+
+Branch `rust-app-fm` (from `rust-app` 3cbfb25f; baseline 147 tests, `cargo clippy --offline --all-targets` clean): the FM operator view
+redesigned on the owner's request (2026-11-15; ui/GRID.md "The FM operator view", a recorded difference from the reference).
+- src/fm.rs: the algorithm as a horizontal flow (carriers at the right meeting an output line, layers by distance from the output,
+  rows by sweeps that minimize crossings, wires orthogonal through gutters and reserved points so none crosses a box, feedback as a
+  loop), one graph of every operator's envelope scaled by its level on one time scale, a strip of operator cells, the operator chosen by
+  tap or by the cursor's tile (the knobs play it first), dots from `Screen::set_positions` (no source yet: notes/ui-live-positions-proposal.md).
+  src/palette.rs: eight operator colors per theme (ui/THEME.md section 3). `grid::envelope_layout_in` is the envelope's layout in any area,
+  with a gain and a shared longest stage. The FM panel is 350 high (was 300).
+- Tests (155 passed: the old FM tests are replaced by tests/fm.rs, fm_view.rs, fm_touch.rs, fm_dots.rs, fm_lines.rs, palette.rs): flows on
+  the five routings (parallel, chain eight deep, two stacks sharing a modulator, a wire skipping a column, the eight-operator fixture)
+  and the four-operator one; boxes apart and inside the panel, every wire endpoint on a box edge or the output line, no segment through a
+  box, texts fitting at 70% (estimated at 0.6 em a character), at 1280x720 at 1 and 1.55 in six themes; every operator's line measured in the
+  rendered pixels (worst 0.19 px of the 0.6 limit, at 1 and 2); a dot's centroid worst 0.16 px of 0.75 (measured at 1 and 2: the harness finds
+  the panel's origin to a whole pixel, so the fractional 1.55 is not measured). Pictures: ui/target/screens/grid-fm-*.png (+ @1.55),
+  ui/target/theme-shots/fm-*-THEME@1.55.png.
+- Not done or not verified: not run on a unit; no operator on/off field exists in the data (level 0 is the only "off"); the dots have no source.
+

@@ -54,10 +54,10 @@ impl Export {
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         let mut lines = vec![head(&format!("Export {}", if self.name.is_empty() { "Untitled" } else { &self.name })), line(self.file.display().to_string())];
         if self.performance {
-            lines.extend(wrap("Samples and the Sounds of unedited parts always go.", 38).into_iter().map(line));
+            lines.extend(wrap("Samples and the Sounds of unedited parts always go.", INFO_WIDTH).into_iter().map(line));
         }
         lines.push(head("Signature"));
-        lines.extend(wrap("Signing shows others the export came from you; it is off unless you choose a key", 38).into_iter().map(line));
+        lines.extend(wrap("Signing shows others the export came from you; it is off unless you choose a key", INFO_WIDTH).into_iter().map(line));
         lines
     }
 
@@ -94,7 +94,7 @@ impl Whole {
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         let mut lines = vec![head("Export library")];
         let said = if self.setlists.is_empty() { "Your own Performances and Sounds, with every sample and plugin they use." } else { "Your own Performances and Sounds, and the setlists chosen here with the Performances they name:" };
-        lines.extend(wrap(said, 38).into_iter().map(line));
+        lines.extend(wrap(said, INFO_WIDTH).into_iter().map(line));
         lines
     }
 

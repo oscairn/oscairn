@@ -194,6 +194,30 @@ fn at_rest_it_costs_no_request_and_no_frame() {
     assert!(s.f.engine.try_request(Duration::from_millis(500)).is_none(), "nothing is asked at rest");
 }
 
+// The Catalog on the shell: Install... then Catalog, the repository read by a job the shell asks about on its own timer, the
+// plugin scan answered at once where no scanner is beside the program, and the packages listed.
+#[test]
+fn the_catalog_is_read_on_the_shell() {
+    let mut s = Shelf::new("library-catalog");
+    shell::library_in_rust(true);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    s.e.repos = vec![("https://repo.example".into(), "Example".into(), true)];
+    s.e.repo_packages = vec![(
+        "https://repo.example".into(),
+        Ok(vec![json!({"id": "org.example.pads", "name": "Dawn Pads", "summary": "Invented", "license": "CC0", "publisher": "Ada", "publisherKey": "0123456789abcdef", "tags": [],
+            "versions": [{"version": "1.0.0", "channel": "stable", "yanked": "", "incompatible": "", "sha256": "aa", "size": 1000, "installed": 2000, "types": {"oscairn.performance": 2}, "dependencies": [], "withdrawn": null, "exports": []}]})]),
+    )];
+    let ui = s.ui();
+    super::library_shots::bar_do(&mut s, "Install");
+    ui.global::<crate::MenuState>().invoke_tapped(0); // Catalog
+    s.serve();
+    assert_eq!(title(&ui), "Library › Catalog");
+    assert_eq!(super::library::labels(&ui), ["Dawn Pads  1.0.0"], "{:?} {:?}", s.e.methods(), super::library::info(&ui));
+    assert_eq!(tabs(&ui), ["Performances", "Sounds", "Plugins", "Content"]);
+    assert!(s.e.methods().contains(&"packages.job".to_string()));
+}
+
 // Home's tile says what is installed as the JUCE launcher does: the plugin packages first, only when there are any, the
 // Sounds last, only when there are some.
 #[test]

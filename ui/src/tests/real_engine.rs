@@ -1497,6 +1497,7 @@ fn real_library() {
     };
     shell::library_in_rust(true);
     library::library(&mut r);
+    library::library_second(&mut r);
     eprintln!("\nFINDINGS ({}):\n{}", r.findings.len(), r.findings.join("\n"));
 }
 

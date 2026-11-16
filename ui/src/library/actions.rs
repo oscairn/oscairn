@@ -43,6 +43,7 @@ mod entry {
     pub const DELETE: usize = 7;
     pub const EXPORT: usize = 8;
     pub const AUDITION: usize = 9;
+    pub const IMPORT: usize = 10;
     /// A submenu of colors: None, then the nine.
     pub const COLOR: usize = 100;
     /// A tag's menu.
@@ -92,6 +93,9 @@ impl Screen {
         items.push(menu::Item::sub("Color", colors).enabled(writable));
         items.push(menu::Item::choice(if item.own() { "Duplicate" } else { "Copy into my own, to edit" }, entry::COPY).enabled(!item.read_only));
         items.push(menu::Item::choice("Export...", entry::EXPORT).enabled(!item.in_place));
+        if item.kind == "performance" {
+            items.push(menu::Item::choice("Import into the open Performance...", entry::IMPORT));
+        }
         items.push(menu::Item::choice("Delete...", entry::DELETE).enabled(!item.in_place));
         self.menu = Some((item.title().to_string(), items));
         self.menu_for = Some(MenuFor::Item(item.id));
@@ -139,6 +143,7 @@ impl Screen {
                         self.b.reset_cursor();
                     }
                     entry::COPY => self.push(Request::Do(Do::Copy(item.title().into(), item.own())), "library.copy", json!({"id": id})),
+                    entry::IMPORT => self.import_start(&id),
                     entry::EXPORT => {
                         let name = item.title().to_string();
                         self.files_open(super::files::Want::Save, "olib", &name, super::files::After::ExportItem(id), &format!("Export {name}"), false);
@@ -178,6 +183,14 @@ impl Screen {
         let outcome = match self.notice_for.take() {
             Some(NoticeFor::SaveFirst) => self.save_first(choice),
             Some(NoticeFor::Alert) => Outcome::Stay,
+            Some(NoticeFor::Replace(o)) => {
+                self.replace_answer(*o, choice);
+                Outcome::Stay
+            }
+            Some(NoticeFor::Code(ctx, q)) => {
+                self.code_answer(ctx, *q, choice);
+                Outcome::Stay
+            }
             Some(other @ (NoticeFor::Overwrite(..) | NoticeFor::RemovePlugin(_) | NoticeFor::Uninstall(..))) => {
                 self.library_noticed(other, choice);
                 Outcome::Stay

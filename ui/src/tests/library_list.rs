@@ -116,7 +116,7 @@ fn a_favorite_is_toggled_from_the_menu() {
 #[test]
 fn an_empty_library_says_what_is_installed() {
     let r = Rig::new(vec![]);
-    assert_eq!(labels(r.ui()), ["Filters"]);
+    assert_eq!(labels(r.ui()), ["Filters", "Browse the Catalog"], "an empty list has a way to the Catalog");
     assert!(info(r.ui()).join(" ").contains("0 of 0 Performances No Performances yet."), "{:?}", info(r.ui()));
     let mut r = Rig::new(vec![]);
     r.e.plugin_packages = 5;

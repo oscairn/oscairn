@@ -16,9 +16,12 @@
 //! opening is asked again until it is not refused, and the screen shows what is loading.
 
 mod actions;
+mod catalog;
+mod catalog_flow;
 mod export;
 mod files;
 mod filters;
+mod import;
 mod install;
 mod item;
 mod jobs;
@@ -27,7 +30,7 @@ mod open;
 mod setlist;
 
 pub use filters::Installed;
-pub use item::{count, empty_saying, library_line, wrap, Item, Kind};
+pub use item::{count, empty_saying, library_line, wrap, Item, Kind, INFO_WIDTH};
 #[cfg(test)]
 pub use libraries::platform;
 #[cfg(test)]
@@ -64,6 +67,8 @@ pub enum Request {
     Lib(libraries::Req),
     /// A long request: an install, an export, a build copied in (jobs.rs).
     Job(jobs::Job),
+    /// The Catalog's reads and installs (catalog_flow.rs).
+    Pkg(catalog_flow::Req),
     /// audition.start, audition.stop, audition.get.
     Audition(open::Aud),
     /// An edit of an item or a tag: the answer says what happened.
@@ -106,6 +111,8 @@ pub enum Outcome {
 enum Row {
     Filters,
     Item(usize),
+    /// The empty list's button to the Catalog.
+    Browse,
     /// Row `n` of the page the mode shows (the file chooser, the install and export choices).
     Page(usize),
     Favorites,
@@ -148,6 +155,12 @@ enum Mode {
     Export(export::Export),
     /// The library's export.
     ExportLibrary(export::Whole),
+    /// Another Performance's parts and scenes to bring in (import.rs).
+    Import(import::Import),
+    /// The packages the repositories offer (catalog_flow.rs).
+    Catalog(Box<catalog_flow::Catalog>),
+    /// One package of the Catalog.
+    Package(Box<catalog::Offer>),
 }
 
 /// What the keyboard is open for.
@@ -165,6 +178,8 @@ enum Asking {
     KeyName,
     /// The exported library's name.
     LibraryName,
+    /// What the Catalog is searched for.
+    CatalogSearch,
 }
 
 /// What a menu the screen asked for is about.
@@ -188,6 +203,10 @@ enum NoticeFor {
     RemovePlugin(Box<libraries::PluginRef>),
     /// A library to uninstall: its ID and name.
     Uninstall(String, String),
+    /// A different build installed: the repository's is offered over it.
+    Replace(Box<catalog::Offer>),
+    /// Code this device does not trust: the install and the question.
+    Code(catalog_flow::Ctx, Box<catalog::CodeQuestion>),
 }
 
 /// What the top bar's actions are, in order.
@@ -248,7 +267,7 @@ pub struct Screen {
     /// Whether this screen is the one shown: the list and the tabs are written only then.
     active: bool,
     /// The tabs as last written: whether shown, which, the cursor.
-    tabs_shown: Option<(bool, usize, Option<usize>)>,
+    tabs_shown: Option<(u8, usize, Option<usize>)>,
     /// The Setlist app's state file, which says which setlist is open (setlist.rs).
     state_file: Option<std::path::PathBuf>,
     /// The modes this one was entered from (libraries.rs `enter`, `leave`).
@@ -263,6 +282,15 @@ pub struct Screen {
     waiting_menu: Option<libraries::Waiting>,
     /// The Performance's graph, for the plugins it uses.
     graph: Value,
+    /// The Catalog being read: which, and the plugins the scanner found that come with the app.
+    catalog_generation: u64,
+    scanned: bool,
+    bundled: std::collections::BTreeMap<String, String>,
+    want_scan: bool,
+    /// Keys still being trusted before an install is tried again.
+    trusting_left: usize,
+    /// The Performance whose parts and scenes are being read: its name and folder.
+    importing: Option<(String, String)>,
     pub out: Vec<Out>,
 }
 
@@ -304,6 +332,12 @@ impl Screen {
             made_key: None,
             waiting_menu: None,
             graph: Value::Null,
+            catalog_generation: 0,
+            scanned: false,
+            bundled: Default::default(),
+            want_scan: false,
+            trusting_left: 0,
+            importing: None,
             out: vec![],
         }
     }
@@ -342,6 +376,11 @@ impl Screen {
 
     /// The kind shown, and the screen's own state when the engine was asked something that no longer matters.
     pub fn show_page(&mut self, page: usize) {
+        if matches!(self.mode, Mode::Catalog(_)) {
+            self.tab_at = None;
+            self.catalog_tab(page);
+            return self.show();
+        }
         let Some(kind) = Kind::ALL.get(page).copied() else { return };
         self.tab_at = None;
         if kind != self.kind {
@@ -363,7 +402,23 @@ impl Screen {
     }
 
     fn tabs_visible(&self) -> bool {
-        self.mode == Mode::List
+        matches!(self.mode, Mode::List | Mode::Catalog(_))
+    }
+
+    /// The tabs of the mode shown: the kinds, or the Catalog's four; and the one chosen.
+    fn tab_names(&self) -> Vec<String> {
+        match &self.mode {
+            Mode::List => Kind::ALL.iter().map(|k| k.plural().to_string()).collect(),
+            Mode::Catalog(_) => catalog_flow::TABS.iter().map(|t| t.1.to_string()).collect(),
+            _ => vec![],
+        }
+    }
+
+    fn tab_current(&self) -> usize {
+        match &self.mode {
+            Mode::Catalog(c) => catalog_flow::TABS.iter().position(|t| t.0 == c.kind).unwrap_or(0),
+            _ => Kind::ALL.iter().position(|k| *k == self.kind).unwrap_or(0),
+        }
     }
 
     /// The bar's title: the Library, the kind, and the list or the item open in it.
@@ -379,6 +434,9 @@ impl Screen {
             Mode::Install(i) => path.extend([self.kind.plural().to_string(), format!("Install {}", if i.name.is_empty() { "an archive" } else { &i.name })]),
             Mode::Export(e) => path.extend([self.kind.plural().to_string(), format!("Export {}", if e.name.is_empty() { "Untitled" } else { &e.name })]),
             Mode::ExportLibrary(_) => path.extend([self.kind.plural().to_string(), "Export library".into()]),
+            Mode::Import(i) => path.extend([self.kind.plural().to_string(), format!("Import from {}", if i.name.is_empty() { "Untitled" } else { &i.name })]),
+            Mode::Catalog(_) => path.push("Catalog".into()),
+            Mode::Package(o) => path.extend(["Catalog".to_string(), o.title().to_string()]),
         }
         path
     }
@@ -450,6 +508,10 @@ impl Screen {
                     let tint = color(&item.color);
                     (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row(item.title().into(), self.detail(item), 2) })
                 }));
+                // Nothing of the kind and nothing narrowing it: a way to the Catalog (LibraryPane.cpp: "Browse the Catalog").
+                if self.total == 0 && !self.filters.narrowed() && self.kind != Kind::Setlist {
+                    rows.push((Row::Browse, row("Browse the Catalog".into(), String::new(), 2)));
+                }
                 rows
             }
             Mode::Filters => vec![
@@ -483,6 +545,9 @@ impl Screen {
                     })
                     .collect()
             }
+            Mode::Import(i) => i.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
+            Mode::Catalog(c) => c.rows().into_iter().enumerate().map(|(i, r)| (Row::Page(i), r)).collect(),
+            Mode::Package(o) => Screen::package_rows(o).into_iter().enumerate().map(|(i, r)| (Row::Page(i), r.0)).collect(),
             Mode::Files(f) => f.rows().into_iter().enumerate().map(|(i, r)| (Row::Page(i), r)).collect(),
             Mode::Install(i) => i.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
             Mode::Export(e) => e.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
@@ -513,6 +578,9 @@ impl Screen {
         let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         match &self.mode {
+            Mode::Import(i) => return i.info(),
+            Mode::Catalog(c) => return c.info(),
+            Mode::Package(o) => return self.package_info(o),
             Mode::Files(f) => return f.info(),
             Mode::Install(i) => return i.info(),
             Mode::Export(e) => return e.info(),
@@ -526,12 +594,12 @@ impl Screen {
             if !item.tags.is_empty() {
                 lines.push(line(item.tags.join(", ")));
             }
-            lines.extend(wrap(&item.description, 38).into_iter().map(line));
+            lines.extend(wrap(&item.description, INFO_WIDTH).into_iter().map(line));
             let from = if item.own() { "My own".to_string() } else { format!("Locked: {}", self.filters.source_name(&item.library, &self.libraries)) };
             lines.push(line(from));
             if !item.unfit.is_empty() {
                 lines.push(head("Does not fit this device"));
-                lines.extend(wrap(&item.unfit, 38).into_iter().map(line));
+                lines.extend(wrap(&item.unfit, INFO_WIDTH).into_iter().map(line));
             }
             if self.job.as_ref().is_some_and(|j| j.id == item.id) {
                 lines.push(head("Opening"));
@@ -545,9 +613,9 @@ impl Screen {
             Mode::List => {
                 lines.push(line(format!("{} of {}", self.items.len(), count(self.total, self.kind))));
                 if self.total == 0 && !self.filters.narrowed() && !self.setup.is_empty() {
-                    lines.extend(wrap(&self.setup, 38).into_iter().map(line));
+                    lines.extend(wrap(&self.setup, INFO_WIDTH).into_iter().map(line));
                 } else if self.total == 0 && !self.filters.narrowed() {
-                    lines.extend(wrap(&empty_saying(self.kind, self.plugins), 38).into_iter().map(line));
+                    lines.extend(wrap(&empty_saying(self.kind, self.plugins), INFO_WIDTH).into_iter().map(line));
                 } else if self.total == 0 {
                     lines.push(line("Nothing matches".into()));
                 }
@@ -556,21 +624,26 @@ impl Screen {
             _ => lines.push(line(self.kind.plural().into())),
         }
         if !self.setup.is_empty() && self.total != 0 {
-            lines.extend(wrap(&self.setup, 38).into_iter().map(line));
+            lines.extend(wrap(&self.setup, INFO_WIDTH).into_iter().map(line));
         }
         lines
     }
 
     fn show_tabs(&mut self) {
         let Some(ui) = self.ui.upgrade().filter(|_| self.active) else { return };
-        let state = (self.tabs_visible(), Kind::ALL.iter().position(|k| *k == self.kind).unwrap_or(0), self.tab_at.filter(|_| self.tabs_visible()));
+        let set = match &self.mode {
+            Mode::List => 1,
+            Mode::Catalog(_) => 2,
+            _ => 0,
+        };
+        let state = (set, self.tab_current(), self.tab_at.filter(|_| self.tabs_visible()));
         if self.tabs_shown == Some(state) {
             return;
         }
         let was = self.tabs_shown.replace(state);
         let lib = ui.global::<LibraryState>();
         if was.map(|w| w.0) != Some(state.0) {
-            let names: Vec<String> = if state.0 { Kind::ALL.iter().map(|k| k.plural().to_string()).collect() } else { vec![] };
+            let names: Vec<String> = self.tab_names();
             let tabs::Abbreviated { heading, shorts } = tabs::abbreviate(&names);
             let labels: Vec<TabLabel> = shorts
                 .into_iter()
@@ -604,6 +677,9 @@ impl Screen {
             Mode::Tags => "Tags",
             Mode::Edit(_) => "Fields",
             Mode::Files(_) => "Files",
+            Mode::Import(_) => "Choices",
+            Mode::Catalog(_) => "Packages",
+            Mode::Package(_) => "Details",
             Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) => "Choices",
         };
         let n = rows.len();
@@ -639,6 +715,9 @@ impl Screen {
 
     /// The screen's actions on the top bar.
     pub fn bar_tools(&self) -> Vec<Tool> {
+        if let Mode::Catalog(c) = &self.mode {
+            return vec![Tool::new(if c.search.is_empty() { "Search".to_string() } else { format!("Search: {}", c.search) })];
+        }
         if self.mode != Mode::List {
             return if self.mode == Mode::Tags { vec![Tool { label: "Options".into(), enabled: self.tag_under_cursor().is_some(), on: false }] } else { vec![] };
         }
@@ -658,6 +737,10 @@ impl Screen {
 
     /// Does bar action `i`.
     pub fn tool(&mut self, i: usize) -> Outcome {
+        if let Mode::Catalog(c) = &self.mode {
+            self.asking = Some(Asking::CatalogSearch);
+            return Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), c.search.clone());
+        }
         if self.mode == Mode::Tags {
             if let Some(tag) = self.tag_under_cursor() {
                 self.tag_menu(&tag);
@@ -751,6 +834,7 @@ impl Screen {
                 false
             }
             Request::Job(job) => self.job_reply(job, result),
+            Request::Pkg(r) => self.pkg_reply(r, result),
             Request::Audition(what) => self.auditioned(what, result),
             Request::Do(what) => self.done(what, result),
         };
@@ -844,6 +928,7 @@ impl Screen {
                 }
             }
             Row::Item(i) => return self.item_pressed(i),
+            Row::Browse => self.catalog_for_kind(),
             Row::Page(i) => return self.page_press(i),
             Row::EditName => return self.ask(Asking::EditName),
             Row::EditDescription => return self.ask(Asking::EditDescription),
@@ -862,6 +947,9 @@ impl Screen {
     fn page_press(&mut self, at: usize) -> Outcome {
         match &self.mode {
             Mode::Files(_) => return self.files_press(at),
+            Mode::Import(_) => self.import_press(at),
+            Mode::Catalog(_) => self.catalog_press(at),
+            Mode::Package(_) => self.package_press(at),
             Mode::Install(_) => self.install_press(at),
             Mode::Export(_) => self.export_press(at),
             Mode::ExportLibrary(_) => return self.export_library_press(at),
@@ -905,7 +993,7 @@ impl Screen {
                 self.b.reset_cursor();
                 Outcome::Stay
             }
-            Mode::Files(_) | Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) => {
+            Mode::Files(_) | Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) | Mode::Import(_) | Mode::Catalog(_) | Mode::Package(_) => {
                 self.leave();
                 Outcome::Stay
             }
@@ -914,7 +1002,7 @@ impl Screen {
 
     /// The tabs have the cursor: the dial walks them and leaves for the list past the last; left and right along them.
     fn act_tabs(&mut self, action: Action, at: usize) -> Outcome {
-        let last = Kind::ALL.len() - 1;
+        let last = self.tab_names().len().saturating_sub(1);
         match action {
             Action::Move { pane: None | Some(0), by } => {
                 let to = at as i64 + i64::from(by);
@@ -954,7 +1042,7 @@ impl Screen {
         let up = matches!(action, Action::Move { pane: None | Some(0), by } if by < 0) || matches!(action, Action::Arrow { dy, .. } if dy < 0);
         if up && self.tabs_visible() && matches!(self.b.cursor.at, Some(0)) {
             self.b.cursor = self.b.cursor.clear();
-            self.tab_at = Some(Kind::ALL.iter().position(|k| *k == self.kind).unwrap_or(0));
+            self.tab_at = Some(self.tab_current());
             self.show();
             return Outcome::Stay;
         }
@@ -1015,6 +1103,12 @@ impl Screen {
                 if let Mode::Edit(d) = &mut self.mode {
                     d.tags = text.trim().to_string();
                 }
+            }
+            Some(Asking::CatalogSearch) => {
+                if let Mode::Catalog(c) = &mut self.mode {
+                    c.search = text.trim().to_string();
+                }
+                self.b.reset_cursor();
             }
             Some(Asking::SaveName) => self.save_named(text.trim()),
             Some(other) => self.text_entered(other, text),

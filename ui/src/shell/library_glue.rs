@@ -37,7 +37,25 @@ impl App {
         if self.screen == Screen::Library {
             self.show_bar();
         }
+        if self.library.take_scan() {
+            self.library_scan();
+        }
         r
+    }
+
+    /// The plugins that come with the app, by ID and version, for the Catalog's "Built in": the plugin scanner run as the
+    /// chain's is (scan.rs), off the UI thread; with no scanner beside the program none are known.
+    fn library_scan(&mut self) {
+        let (dir, helper) = (crate::scan::plugin_dir(super::PLUGIN_DIR.with(|d| d.borrow().clone()).as_deref()), crate::scan::scanner());
+        if !helper.is_file() {
+            self.library.scanned(Default::default());
+            return;
+        }
+        let weak = self.ui.clone();
+        std::thread::spawn(move || {
+            let found: std::collections::BTreeMap<String, String> = crate::scan::scan_versions(&dir, &helper, crate::scan::TIMEOUT).into_iter().collect();
+            let _ = weak.upgrade_in_event_loop(move |_| with_app(|a| a.on_library(|l| l.scanned(found))));
+        });
     }
 
     /// A navigation action or tap for the Library, and where it takes the shell.

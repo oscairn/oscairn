@@ -74,6 +74,8 @@ pub enum Req {
     Setlists,
     /// library.contents of the archive chosen.
     Contents,
+    /// performance.contents of the Performance to import from.
+    Held,
 }
 
 /// What a menu was opened for here.
@@ -377,6 +379,7 @@ impl Screen {
             }
             (Req::Setlists, Err(_)) => self.say("The engine is busy; try again in a moment."),
             (Req::Contents, result) => self.contents_reply(result),
+            (Req::Held, result) => self.held_reply(result),
         }
     }
 
@@ -427,7 +430,7 @@ impl Screen {
         match what {
             Menus::Install => {
                 match choice {
-                    1 => self.say("The Catalog is not built yet"),
+                    1 => self.catalog_for_kind(),
                     _ => self.files_open(Want::File, "olib", "", After::Install, "Install a library, an exported Performance or Sound, or a plugin package", false),
                 }
                 Outcome::Stay

@@ -107,7 +107,7 @@ impl Install {
         let mut rows = Vec::new();
         let radio = |label: &str, on: bool| SettingData { label: label.into(), value: if on { "Chosen" } else { "" }.into(), kind: 1, on, ..Default::default() };
         if !self.package() {
-            rows.push(radio("Into my Sounds and Performances, to edit", self.own));
+            rows.push(radio("Into my own, to edit", self.own));
             rows.push(radio("As a locked library", !self.own));
         }
         for i in &self.items {
@@ -125,7 +125,10 @@ impl Install {
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         let warn = |t: String| InfoLine { text: t.into(), failed: true, ..Default::default() };
         let mut lines = vec![head(&format!("Install {}", if self.name.is_empty() { "an archive" } else { &self.name }))];
-        lines.extend(wrap(&describe_signer(&self.signer), 38).into_iter().map(line));
+        lines.extend(wrap(&describe_signer(&self.signer), INFO_WIDTH).into_iter().map(line));
+        if !self.package() {
+            lines.extend(wrap("Into my own: your own Sounds and Performances, to edit. As a locked library: a library of its own, which Save does not change.", INFO_WIDTH).into_iter().map(line));
+        }
         let mut unknown = Vec::new();
         let mut revoked = Vec::new();
         for c in &self.code {
@@ -137,29 +140,29 @@ impl Install {
             }
         }
         // Each plugin a bullet, wrapped (the reference indents its lines by two spaces).
-        let bullets = |list: Vec<String>| -> Vec<InfoLine> { list.iter().flat_map(|u| wrap(u, 36).into_iter().enumerate().map(|(i, l)| warn(if i == 0 { format!("• {l}") } else { l }))).collect() };
+        let bullets = |list: Vec<String>| -> Vec<InfoLine> { list.iter().flat_map(|u| wrap(u, INFO_WIDTH - 2).into_iter().enumerate().map(|(i, l)| warn(if i == 0 { format!("• {l}") } else { l }))).collect() };
         if !unknown.is_empty() {
-            lines.extend(wrap("These plugins run code from an unknown source:", 38).into_iter().map(warn));
+            lines.extend(wrap("These plugins run code from an unknown source:", INFO_WIDTH).into_iter().map(warn));
             lines.extend(bullets(unknown));
         }
         if !revoked.is_empty() {
-            lines.extend(wrap("Signed by a revoked key, so not installed:", 38).into_iter().map(warn));
+            lines.extend(wrap("Signed by a revoked key, so not installed:", INFO_WIDTH).into_iter().map(warn));
             lines.extend(bullets(revoked));
         }
         if !self.code.is_empty() {
             lines.push(head("Plugins"));
             for c in &self.code {
                 let s = format!("{} {} ({}): {}{}", c.name, c.version, c.platform, describe_signer(c), if c.status == "revoked" { ", not installed" } else { "" });
-                lines.extend(wrap(&s, 38).into_iter().map(line));
+                lines.extend(wrap(&s, INFO_WIDTH).into_iter().map(line));
             }
         }
         if !self.license.is_empty() || self.source.is_some() {
             lines.push(head("License"));
             if !self.license.is_empty() {
-                lines.extend(wrap(&self.license, 38).into_iter().map(line));
+                lines.extend(wrap(&self.license, INFO_WIDTH).into_iter().map(line));
             }
             if let Some((url, revision)) = &self.source {
-                lines.extend(wrap(&format!("Source: {url} at {revision}"), 38).into_iter().map(line));
+                lines.extend(wrap(&format!("Source: {url} at {revision}"), INFO_WIDTH).into_iter().map(line));
             }
         }
         lines

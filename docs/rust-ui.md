@@ -599,8 +599,8 @@ as proportions of the width, not fixed pixels.
 ## Library
 
 The Library app (`ui/src/library/`, `ui/slint/library.slint`, `ui/LIBRARY-APP.md` is the checklist, 45 rows) is being
-ported whole; **the tile still hands the display to the JUCE app** until every row is built (`library_glue.rs`
-`PORTED`), and `OSCAIRN_UI_LIBRARY=1` opens the Rust one for development. Built so far, the first cut:
+ported whole; **the tile still hands the display to the JUCE app** until it is judged whole (`library_glue.rs`
+`PORTED`), and `OSCAIRN_UI_LIBRARY=1` opens the Rust one for development. All 45 rows are built (43 ticked, 2 n/a). The first cut:
 
 - **The screen** is the shared list screen (`browser.rs`, the Part screen's component laid by the shell in the area the
   tabs leave) under the shared tab family: Performances, Sounds and Setlists, in a strip or a rail as the theme's
@@ -626,6 +626,15 @@ ported whole; **the tile still hands the display to the JUCE app** until every r
   `packages.installed` on connecting.
 - Tests: `src/tests/library*.rs` against `library_fake.rs`, a fake engine that answers as the real handlers do
   (`ui/LIBRARY-APP.md` "Verified shapes").
+
+The second cut: a file chooser over the local file system (`files.rs`: Up, folders, files with sizes, Save here, Choose
+this folder); installing an archive (`install.rs`: signer, own or locked, which items, the plugin builds, the warning for
+code from an unknown source and the refusal for a revoked key, Install anyway); exporting an item and the library
+(`export.rs`: edited parts' Sounds, signature or a new key, written beside and renamed over an old file); the Libraries
+menu (`libraries.rs`: folders indexed in place, a hidden tag shown again, plugins in the store with builds and removal,
+a library uninstalled); the Catalog (`catalog.rs`, `catalog_flow.rs`: repositories read with `packages.list` jobs polled
+by `packages.job`, tabs, a package's details, install and update, trust questions); importing parts and scenes
+(`import.rs`). Long requests go through `jobs.rs`, each asked again while the engine is busy.
 
 ## Adding a screen
 

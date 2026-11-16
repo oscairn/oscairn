@@ -35,12 +35,12 @@ pub fn on(menu: &[(String, bool)]) -> Vec<&str> {
 fn the_menu_is_by_kind_and_ownership() {
     let mut r = Rig::new(library());
     let own = options_for(&mut r, "Brass Corner");
-    assert_eq!(own.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Delete..."]);
-    assert_eq!(on(&own), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Delete..."]);
+    assert_eq!(own.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Import into the open Performance...", "Delete..."]);
+    assert_eq!(on(&own), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Import into the open Performance...", "Delete..."]);
     let locked = options_for(&mut r, "Untitled");
     assert_eq!(locked[6].0, "Copy into my own, to edit");
     assert!(!locked[4].1 && !locked[5].1, "a locked library's item cannot be edited or colored");
-    assert!(locked[6].1 && locked[8].1);
+    assert!(locked[6].1 && locked[9].1);
     let starred = options_for(&mut r, "Evening Strings");
     assert_eq!(starred[3].0, "Remove from favorites");
     r.c.show_page(1);
@@ -57,7 +57,7 @@ fn the_menu_is_by_kind_and_ownership() {
     items[3].in_place = true;
     let mut r = Rig::new(items);
     let held = options_for(&mut r, "Brass Corner");
-    assert!(!held[4].1 && !held[5].1 && !held[6].1 && !held[8].1, "read only and in place: no edit, color, copy or delete: {held:?}");
+    assert!(!held[4].1 && !held[5].1 && !held[6].1 && !held[7].1 && !held[9].1, "read only and in place: no edit, color, copy or delete: {held:?}");
 }
 
 // Edit name, description and tags: three texts on the keyboard, tags split on commas, trimmed and each once; Save sends

@@ -539,6 +539,12 @@ pub fn library_in_rust(on: bool) {
     with_app(|a| a.library_in_rust = on)
 }
 
+/// Tests: the folder the Library's file chooser starts in.
+#[cfg(test)]
+pub fn library_files_dir(dir: PathBuf) {
+    with_app(|a| a.library.set_files_dir(dir))
+}
+
 /// A navigation action from any source, on the UI thread.
 #[cfg(test)]
 pub fn act(action: Action) {

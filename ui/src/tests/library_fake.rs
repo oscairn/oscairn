@@ -108,6 +108,19 @@ pub struct Library {
     pub plugins: Vec<Value>,
     /// Signing keys: name, ID.
     pub keys: Vec<(String, String)>,
+    /// The package repositories: address, name, enabled.
+    pub repos: Vec<(String, String, bool)>,
+    /// What each repository lists (`packages.job`'s `packages`), or why it cannot be read; a package may carry `_code`, the
+    /// signers of its plugin code, which an install checks.
+    pub repo_packages: Vec<(String, Result<Vec<Value>, String>)>,
+    /// How many times a job is asked about before it ends.
+    pub job_polls: u32,
+    /// The jobs started: what each is, and how many questions it has had.
+    jobs: Vec<(Value, u32)>,
+    /// The packages installed from a repository: `packages.installed`'s records.
+    pub installed_packages: Vec<Value>,
+    /// The trust store.
+    pub trusted: Vec<Value>,
     next: u32,
     recents: u32,
 }
@@ -133,6 +146,12 @@ impl Library {
             folders: vec![],
             plugins: vec![],
             keys: vec![],
+            repos: vec![],
+            repo_packages: vec![],
+            job_polls: 1,
+            jobs: vec![],
+            installed_packages: vec![],
+            trusted: vec![],
             next: 100,
             recents: 0,
         }
@@ -342,6 +361,101 @@ impl Library {
                 self.changed();
                 Ok(json!({"loaded": true}))
             }
+            "packages.repositories" => {
+                self.fields(p, &[], &[])?;
+                Ok(json!({"repositories": self.repos.iter().map(|(a, n, e)| json!({"address": a, "name": n, "key": "k", "id": "0123456789abcdef", "origin": "user", "enabled": e})).collect::<Vec<_>>()}))
+            }
+            "packages.list" | "packages.install" => {
+                let install = method == "packages.install";
+                if install {
+                    self.fields(p, &["source", "id", "version", "acceptUnsignedCode", "replace"], &["source", "id"])?;
+                } else {
+                    self.fields(p, &["source"], &["source"])?;
+                }
+                self.jobs.push((json!({"method": method, "params": p}), 0));
+                Ok(json!({"job": self.jobs.len()}))
+            }
+            "packages.job" => {
+                self.fields(p, &["job"], &["job"])?;
+                let at = p["job"].as_u64().unwrap_or(0) as usize;
+                if at == 0 || at > self.jobs.len() {
+                    return Err(refused(-32602, "No such job"));
+                }
+                self.jobs[at - 1].1 += 1;
+                let (what, asked) = self.jobs[at - 1].clone();
+                let id = at as u64;
+                let mut doc = json!({"job": id, "state": "running", "error": "", "repository": "", "name": "", "claimedName": "", "rootKey": "", "serial": 1, "packages": [], "package": "", "version": "", "installed": {"added": 0, "skipped": 0, "notes": [], "code": []}});
+                if asked <= self.job_polls {
+                    return Ok(doc);
+                }
+                let params = what["params"].clone();
+                let source = params["source"].as_str().unwrap_or_default().to_string();
+                let listed = self.repo_packages.iter().find(|r| r.0 == source).map(|r| r.1.clone());
+                if what["method"] == "packages.list" {
+                    match listed {
+                        Some(Ok(packages)) => {
+                            doc["state"] = json!("done");
+                            doc["name"] = json!(self.repos.iter().find(|r| r.0 == source).map(|r| r.1.clone()).unwrap_or_default());
+                            doc["packages"] = json!(packages.iter().map(|x| { let mut x = x.clone(); if let Some(o) = x.as_object_mut() { o.remove("_code"); } x }).collect::<Vec<_>>());
+                        }
+                        Some(Err(why)) => {
+                            doc["state"] = json!("failed");
+                            doc["error"] = json!(why);
+                        }
+                        None => {
+                            doc["state"] = json!("failed");
+                            doc["error"] = json!("cannot reach the repository");
+                        }
+                    }
+                    return Ok(doc);
+                }
+                // An install.
+                let id_wanted = params["id"].as_str().unwrap_or_default().to_string();
+                let package = listed.and_then(|l| l.ok()).and_then(|l| l.into_iter().find(|x| x["id"] == id_wanted));
+                let Some(package) = package else {
+                    doc["state"] = json!("failed");
+                    doc["error"] = json!(format!("refused: no package {id_wanted}"));
+                    return Ok(doc);
+                };
+                let code = package["_code"].clone();
+                let accept = params["acceptUnsignedCode"] == true;
+                // Code from a key not trusted, or unsigned, is refused unless the user said yes (RFC 0006, RFC 0031).
+                let blocked = code.as_array().is_some_and(|c| c.iter().any(|s| s["status"] == "unsigned" || (s["status"] == "unknown" && !self.trusted.iter().any(|t| t["key"] == s["publicKey"]))));
+                if blocked && !accept {
+                    doc["state"] = json!("failed");
+                    doc["error"] = json!("refused: the plugins in this package run code from an unknown source");
+                    doc["name"] = json!(self.repos.iter().find(|r| r.0 == source).map(|r| r.1.clone()).unwrap_or_default());
+                    doc["installed"]["code"] = code;
+                    return Ok(doc);
+                }
+                let version = params["version"].as_str().map(String::from).unwrap_or_else(|| package["versions"][0]["version"].as_str().unwrap_or_default().to_string());
+                self.installed_packages.retain(|x| x["id"] != id_wanted);
+                self.installed_packages.push(json!({"id": id_wanted, "version": version, "kind": "plugin", "repository": source, "sha256": package["versions"][0]["sha256"], "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}));
+                doc["state"] = json!("done");
+                doc["package"] = json!(package["name"]);
+                doc["version"] = json!(version);
+                doc["installed"] = json!({"added": 1, "skipped": 0, "notes": ["Its builds are in the plugin store"], "code": []});
+                Ok(doc)
+            }
+            "trust.list" => {
+                self.fields(p, &[], &[])?;
+                Ok(json!({"keys": self.trusted}))
+            }
+            "trust.set" => {
+                self.fields(p, &["key", "name", "scope", "revoked"], &["key", "name", "scope"])?;
+                self.trusted.retain(|t| t["key"] != p["key"]);
+                self.trusted.push(json!({"id": "x", "key": p["key"], "name": p["name"], "scope": p["scope"], "revoked": p["revoked"] == true}));
+                Ok(json!({"accepted": true}))
+            }
+            "performance.contents" => {
+                self.fields(p, &["directory"], &["directory"])?;
+                Ok(json!({"parts": [{"id": 1, "name": "Lead", "bus": false}, {"id": 2, "name": "Bus A", "bus": true}], "scenes": [{"id": 1, "name": "Verse"}, {"id": 2, "name": "Chorus"}]}))
+            }
+            "performance.import" => {
+                self.fields(p, &["directory", "parts", "scenes"], &["directory"])?;
+                self.changed();
+                Ok(json!({"parts": [3], "notes": []}))
+            }
             "library.contents" => {
                 self.fields(p, &["file"], &["file"])?;
                 let file = p["file"].as_str().unwrap_or_default();
@@ -539,9 +653,10 @@ impl Library {
             }
             "packages.installed" => {
                 self.fields(p, &[], &[])?;
-                let list: Vec<Value> = (0..self.plugin_packages)
+                let mut list: Vec<Value> = (0..self.plugin_packages)
                     .map(|i| json!({"id": format!("org.example.plugin{i}"), "version": "1.0.0", "kind": "plugin", "repository": "", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}))
                     .collect();
+                list.extend(self.installed_packages.clone());
                 Ok(json!({"packages": list}))
             }
             "packages.preinstalled" => {

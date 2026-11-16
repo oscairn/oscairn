@@ -145,7 +145,8 @@ impl Files {
     pub fn info(&self) -> Vec<InfoLine> {
         let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
-        let mut lines = vec![head(&self.title), line(self.dir.display().to_string())];
+        let mut lines = vec![head(&self.title)];
+        lines.extend(wrap_path(&self.dir.display().to_string(), INFO_WIDTH).into_iter().map(line));
         if !self.error.is_empty() {
             lines.push(InfoLine { text: self.error.as_str().into(), failed: true, ..Default::default() });
         } else if self.entries.is_empty() {
@@ -215,9 +216,24 @@ pub enum Pressed {
     Chosen(PathBuf),
 }
 
+/// A path on lines of at most `width` characters, broken after a slash (a word of a path is not cut unless it must be).
+pub fn wrap_path(path: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for part in path.split_inclusive('/') {
+        match lines.last_mut() {
+            Some(l) if l.chars().count() + part.chars().count() <= width => l.push_str(part),
+            _ => lines.push(part.to_string()),
+        }
+    }
+    lines.into_iter().flat_map(|l| l.chars().collect::<Vec<_>>().chunks(width).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>()).collect()
+}
+
 /// "1.2 MB", as `juce::File::descriptionOfSizeInBytes` words a size.
 pub fn size_text(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["bytes", "KB", "MB", "GB"];
+    if bytes == 1 {
+        return "1 byte".into();
+    }
     if bytes < 1024 {
         return format!("{bytes} bytes");
     }
@@ -312,7 +328,16 @@ mod tests {
     }
 
     #[test]
+    fn a_path_is_wrapped_after_its_slashes() {
+        assert_eq!(wrap_path("/var/folders/hq/T/oscairn", 16), ["/var/folders/hq/", "T/oscairn"]);
+        let lines = wrap_path("/a/b/c/d", 4);
+        assert_eq!(lines, ["/a/", "b/c/", "d"]);
+        assert!(wrap_path("/an-extremely-long-folder-name-without-any-break", 10).iter().all(|l| l.chars().count() <= 10));
+    }
+
+    #[test]
     fn sizes_are_worded_as_juces_are() {
+        assert_eq!(size_text(1), "1 byte");
         assert_eq!(size_text(10), "10 bytes");
         assert_eq!(size_text(2048), "2.0 KB");
         assert_eq!(size_text(5 << 20), "5.0 MB");

@@ -1163,6 +1163,8 @@ mod library_items;
 mod library_setlist;
 mod library_install;
 mod library_manage;
+mod library_catalog;
+mod library_import;
 mod library_shots;
 mod library_shell;
 mod piano;

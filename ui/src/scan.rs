@@ -157,6 +157,11 @@ impl Reader<'_> {
 
 /// The helper's output read as `decodeScan` does, every count and length bounded; None for anything it would refuse.
 pub fn decode(bytes: &[u8]) -> Option<Vec<Plugin>> {
+    decode_versions(bytes).map(|found| found.into_iter().map(|(p, _)| p).collect())
+}
+
+/// The same, each plugin with its own version (which the Library's Catalog compares with a repository's).
+pub fn decode_versions(bytes: &[u8]) -> Option<Vec<(Plugin, String)>> {
     if bytes.len() > MAX_WIRE {
         return None;
     }
@@ -169,7 +174,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<Plugin>> {
     let mut plugins = Vec::new();
     for _ in 0..count {
         let mut p = Plugin { path: r.field()?, id: r.field()?, name: r.field()?, vendor: r.field()?, ..Default::default() };
-        let _version = r.field()?;
+        let version = r.field()?;
         let _description = r.field()?;
         let features = r.number()?;
         if features > 128 {
@@ -188,7 +193,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<Plugin>> {
         if p.path.is_empty() || p.id.is_empty() || p.name.is_empty() {
             return None;
         }
-        plugins.push(p);
+        plugins.push((p, version));
     }
     let failures = r.number()?;
     if failures > 8192 {
@@ -211,6 +216,19 @@ pub fn scan(folder: &Path, helper: &Path, timeout: Duration) -> Vec<Plugin> {
         }
     }
     plugins
+}
+
+/// The same, each plugin's ID with its own version: what the Library's Catalog tells the plugins that come with the app by.
+pub fn scan_versions(folder: &Path, helper: &Path, timeout: Duration) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for extension in [".clap", ".lv2"] {
+        for binary in find_binaries(folder, extension) {
+            if let Some(plugins) = run_helper(helper, &binary, timeout).ok().and_then(|b| decode_versions(&b)) {
+                found.extend(plugins.into_iter().map(|(p, v)| (p.id, v)));
+            }
+        }
+    }
+    found
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ fn sounds(shelf: &mut Shelf) {
 }
 
 /// A bar action by its label, through "More" where the bar folds its actions into one.
-fn bar_do(s: &mut Shelf, label: &str) {
+pub(super) fn bar_do(s: &mut Shelf, label: &str) {
     s.f.screen.frame();
     let ui = s.ui();
     let labels: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
@@ -153,4 +153,137 @@ fn pictures_of_the_library() {
         }
     }
     let _ = (labels, Fake::new(vec![]));
+}
+
+/// A row of the list pressed as the dial does: the cursor moved onto it, then Confirm; the shell answered.
+fn press(s: &mut Shelf, label: &str) {
+    let ui = s.ui();
+    let names: Vec<String> = super::library::labels(&ui);
+    let target = names.iter().position(|l| l == label).unwrap_or_else(|| panic!("{label} in {names:?}"));
+    let now = super::library::rows(&ui).iter().position(|r| r.cursor);
+    match now {
+        None => {
+            shell::act(Action::Move { pane: None, by: 1 });
+            shell::act(Action::Move { pane: None, by: target as i32 });
+        }
+        Some(at) => shell::act(Action::Move { pane: None, by: target as i32 - at as i32 }),
+    }
+    shell::act(Action::Confirm(None));
+    s.serve();
+}
+
+/// A menu's choice by its label, tapped, the menu's view turned to it when it is not in the first.
+fn tap_menu(s: &mut Shelf, label: &str) {
+    s.f.screen.frame();
+    let ui = s.ui();
+    for _ in 0..6 {
+        let menu: Vec<String> = ui.global::<crate::MenuState>().get_rows().iter().map(|r| r.label.to_string()).collect();
+        if let Some(at) = menu.iter().position(|l| l == label) {
+            ui.global::<crate::MenuState>().invoke_tapped(at as i32);
+            s.serve();
+            return;
+        }
+        ui.global::<crate::MenuState>().invoke_turn(1);
+    }
+    panic!("{label} not in the menu");
+}
+
+// Pictures of the second cut's screens: the file chooser, the install choices with the warnings, the export choices, the
+// Libraries menu, the Catalog (reading, listed, a package) and the import choices, in the keyboard's window and, in the
+// dark theme, the others.
+#[test]
+fn pictures_of_the_second_cut() {
+    fit_to_window();
+    let dir = std::env::temp_dir().join(format!("oscairn-ui-shots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Songs and Sounds")).unwrap();
+    std::fs::write(dir.join("Aaa Friend Pack.olib"), b"x").unwrap();
+    std::fs::write(dir.join("A Performance With A Very Long File Name To See How It Is Cut Off.olib"), vec![0u8; 9000]).unwrap();
+    for i in 0..30 {
+        std::fs::write(dir.join(format!("Archive {i:02}.olib")), b"x").unwrap();
+    }
+    let code = json!([
+        {"kind": "clap", "name": "Fuzz Box", "version": "1.2", "platform": "linux-arm64", "status": "unknown", "key": "aaaabbbbccccdddd", "keyName": "", "publicKey": "pub"},
+        {"kind": "clap", "name": "Hiss", "version": "0.1", "platform": "macos-arm64", "status": "unsigned", "key": "", "keyName": "", "publicKey": ""},
+        {"kind": "clap", "name": "Old Organ", "version": "3.0", "platform": "linux-arm64", "status": "revoked", "key": "1111222233334444", "keyName": "Bob", "publicKey": "p2"}]);
+    let archive = json!({"id": "friend-pack", "name": "Friend Pack", "kind": "library", "items": [{"kind": "performance", "id": "x1", "name": "Dawn Pad"}, {"kind": "sound", "id": "x2", "name": "Warm Bass"}, {"kind": "performance", "id": "x3", "name": "Dusk Lead With A Name Long Enough To Be Cut"}],
+        "code": code, "signer": {"kind": "archive", "name": "", "version": "", "platform": "", "status": "unknown", "key": "0123456789abcdef", "keyName": "Ada", "publicKey": ""}, "license": "CC0-1.0", "source": {"url": "https://example.org/friend-pack", "revision": "v1.2.0"}});
+    let pkg = |id: &str, name: &str, types: serde_json::Value| json!({"id": id, "name": name, "summary": "An invented package with a summary long enough that it has to be cut", "license": "CC0", "publisher": "Ada Lovelace Audio", "publisherKey": "0123456789abcdef", "tags": ["demo"],
+        "versions": [{"version": "1.2.0", "channel": "stable", "yanked": "", "incompatible": "", "sha256": "aabbccddeeff00112233", "size": 5242880, "installed": 12582912, "types": types, "dependencies": [{"id": "org.example.base", "version": "1.0"}], "withdrawn": null,
+            "exports": [{"platform": "linux-arm64", "address": "https://repo.example/exports/a/1.2.0/a-1.2.0-linux-arm64.olib"}]}]});
+    for (window, (w, h, scale), themes) in [("keyboard", (1280, 720, 1.55f32), vec!["dark", "odd", "joined"]), ("desktop", (1280, 720, 1.), vec!["dark"]), ("small", (800, 480, 1.), vec!["dark"])] {
+        for theme_name in themes {
+            let theme = match theme_name {
+                "dark" => theme::chosen(&theme::Places::default(), "oscairn-dark", ""),
+                "odd" => odd_theme(),
+                _ => joined_theme(),
+            };
+            let mut s = Shelf::new(&format!("l2-{}-{theme_name}", &window[..3]));
+            let ui = s.ui();
+            shell::library_in_rust(true);
+            shell::set_text_on_screen(false);
+            s.f.screen.resize(w, h);
+            s.f.screen.set_scale(scale);
+            theme::apply(&ui, &theme);
+            s.e.items = big(40);
+            s.e.libraries = vec![("friend".into(), "A Friend's".into())];
+            s.e.archives = vec![(dir.join("Aaa Friend Pack.olib").display().to_string(), archive.clone())];
+            s.e.keys = vec![("stage-key".into(), "0011223344556677".into())];
+            s.e.folders = vec!["/music/Samples".into()];
+            s.e.plugins = vec![json!({"format": "clap", "id": "org.example.fuzz", "version": "1.2", "name": "Fuzz Box", "platforms": ["linux-arm64", "macos-arm64"], "bytes": 3_000_000, "usedBy": ["Warm Strings 000"], "open": false, "license": ""})];
+            s.e.repos = vec![("https://repo.example".into(), "Example Repository".into(), true)];
+            s.e.repo_packages = vec![("https://repo.example".into(), Ok((0..14).map(|i| pkg(&format!("org.example.p{i}"), &format!("Invented Package {i:02}"), if i % 3 == 0 { json!({"clap": 1}) } else { json!({"oscairn.performance": 2}) })).collect()))];
+            s.e.job_polls = 0;
+            let shoot = |s: &mut Shelf, what: &str| {
+                s.f.screen.frame();
+                s.f.screen.frame();
+                png(&s.f.screen, &format!("library2-{window}-{theme_name}-{what}"));
+            };
+            shell::goto(shell::Screen::Library);
+            s.serve();
+            // The file chooser, from Install... then File.
+            s.e.items[0].favorite = true;
+            shell::library_files_dir(dir.clone());
+            super::library_shots::bar_do(&mut s, "Install");
+            tap_menu(&mut s, "File");
+            shoot(&mut s, "files");
+            // The install choices, with the warnings.
+            press(&mut s, "Aaa Friend Pack.olib");
+            shoot(&mut s, "install");
+            shell::act(Action::Cancel(None)); // Back: out of the choices
+            s.serve();
+            // The export choices.
+            shell::act(Action::Move { pane: None, by: 1 });
+            shell::act(Action::Move { pane: None, by: 2 });
+            super::library_shots::bar_do(&mut s, "Options");
+            tap_menu(&mut s, "Export...");
+            press(&mut s, "Save here");
+            shoot(&mut s, "export");
+            shell::act(Action::Cancel(None));
+            s.serve();
+            // The Libraries menu.
+            super::library_shots::bar_do(&mut s, "Libraries");
+            s.serve();
+            shoot(&mut s, "libraries");
+            shell::act(Action::Cancel(None));
+            // The Catalog, being read and listed, a package, and the questions.
+            super::library_shots::bar_do(&mut s, "Install");
+            tap_menu(&mut s, "Catalog");
+            shoot(&mut s, "catalog");
+            ui.global::<crate::LibraryState>().invoke_show_page(2);
+            shoot(&mut s, "catalog-plugins");
+            press(&mut s, "Invented Package 00  1.2.0");
+            shoot(&mut s, "package");
+            shell::act(Action::Cancel(None));
+            shell::act(Action::Cancel(None));
+            s.serve();
+            // The import choices.
+            shell::act(Action::Move { pane: None, by: 1 });
+            shell::act(Action::Move { pane: None, by: 2 });
+            super::library_shots::bar_do(&mut s, "Options");
+            tap_menu(&mut s, "Import into the open Performance...");
+            shoot(&mut s, "import");
+            shell::goto(shell::Screen::Home);
+        }
+    }
 }

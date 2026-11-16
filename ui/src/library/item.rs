@@ -153,6 +153,10 @@ pub fn empty_saying(kind: Kind, plugins: usize) -> String {
     }
 }
 
+/// How many characters a line of the panel is wrapped at: what the panel holds at the roomiest type a theme can ask for,
+/// where a line wider than it would shrink to 70% and then be cut.
+pub const INFO_WIDTH: usize = 34;
+
 /// A sentence on lines of at most `width` characters, broken at spaces (a word longer than a line is kept whole).
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();

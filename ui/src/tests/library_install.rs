@@ -68,7 +68,7 @@ fn a_file_is_chosen_and_its_contents_asked_about() {
     assert_eq!(r.e.methods(), ["library.contents"]);
     assert_eq!(r.e.called("library.contents"), [json!({"file": dir.join("pack.olib").display().to_string()})]);
     // A library archive is installed locked by default; Performances first, then Sounds.
-    assert_eq!(labels(r.ui()), ["Into my Sounds and Performances, to edit", "As a locked library", "Dawn Pad", "Dusk Lead", "Warm Bass", "Install", "Cancel"]);
+    assert_eq!(labels(r.ui()), ["Into my own, to edit", "As a locked library", "Dawn Pad", "Dusk Lead", "Warm Bass", "Install", "Cancel"]);
     let on: Vec<bool> = rows(r.ui()).iter().map(|x| x.on).collect();
     assert_eq!(on, [false, true, true, true, true, false, false]);
     assert_eq!(rows(r.ui())[2].value.to_string(), "Performance");
@@ -100,7 +100,7 @@ fn the_choices_make_the_request() {
     assert_eq!(rows(r.ui()).iter().map(|x| x.on).collect::<Vec<_>>()[..2], [true, false]);
     r.press_row("As a locked library");
     assert_eq!(rows(r.ui()).iter().map(|x| x.on).collect::<Vec<_>>()[..2], [false, true]);
-    r.press_row("Into my Sounds and Performances, to edit");
+    r.press_row("Into my own, to edit");
     // Untick two: one is asked for.
     r.press_row("Brass Corner");
     r.press_row("Warm Bass");

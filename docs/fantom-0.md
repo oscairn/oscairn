@@ -1625,7 +1625,7 @@ on the display; `--engine-only` the engine alone.
    For example `OSCAIRN_WORKER_BUDGET_US=2000 ./oscairn-fantom-start`.
 
    The first-party plugins read their own device settings from the environment when an instance
-   is created (`OSCAIRN_SAMPLER_MAX_VOICES`, `OSCAIRN_SAMPLER_MEMORY`, `OSCAIRN_ANALOG_FAST_OSC`,
+   is created (`OSCAIRN_SAMPLER_MAX_VOICES`, `OSCAIRN_ANALOG_FAST_OSC`,
    `OSCAIRN_FM_POLYPHONY` and so on), and the workers inherit the engine's environment, which
    `start-chroot.sh` empties. So the start script hands on every variable named
    `OSCAIRN_SAMPLER_*`, `OSCAIRN_ANALOG_*`, `OSCAIRN_FM_*`, `OSCAIRN_ARPEGGIATOR_*` or
@@ -1635,10 +1635,17 @@ on the display; `--engine-only` the engine alone.
    refused with a message and a nonzero exit, not quoted. For example
    `OSCAIRN_SAMPLER_MAX_VOICES=64 ./oscairn-fantom-start --dry-run` shows it on the engine's line.
 
+   The Sampler reads four: `OSCAIRN_SAMPLER_MAX_VOICES` (1 to 64, default none, its fixed pool of
+   64; it caps the instance, which all of a Performance's sampled parts share),
+   `OSCAIRN_SAMPLER_MAX_VOICES_PER_SOUND` (1 to 64, default none; caps each sound),
+   `OSCAIRN_SAMPLER_INTERPOLATION` (`hermite`, for comparisons only) and
+   `OSCAIRN_SAMPLER_DECODE_WHOLE` (`1`, for comparisons and tests, never on the device: it holds
+   whole samples in RAM). The FANTOM sets none of them; the host's voice budget sheds by measured
+   load.
+
    The bundle's `etc/default/oscairn-engine` also holds the FANTOM's device defaults, from
    `os/buildroot/board/fantom-bundle/overlay/etc/default/oscairn-engine-device` (which
-   `post-build.sh` appends after the profile's): `OSCAIRN_SAMPLER_MAX_VOICES=28` (the Sampler
-   costs about 45 us a voice on this CPU against a 1.33 ms allowance) and
+   `post-build.sh` appends after the profile's):
    `OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog` (arpeggiated Analog patches overlap about 8
    voices at about 2 ms per block, until its faster oscillator ships). To switch that extra block
    off, start with `OSCAIRN_WORKER_EXTRA_BLOCK=none ./oscairn-fantom-start` (any value naming no

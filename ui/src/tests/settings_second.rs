@@ -280,8 +280,11 @@ fn about_says_what_this_is() {
     r.page(Id::About);
     assert_eq!(r.e.methods(), ["packages.preinstalled"]);
     assert_eq!(labels(r.ui()), ["Oscairn", "Source", "Engine", "License"]);
-    assert_eq!(value_of(r.ui(), "Oscairn"), env!("CARGO_PKG_VERSION"), "a build with no release in its environment says its crate's");
-    assert_eq!(value_of(r.ui(), "Source"), "Development build");
+    // (CMake gives the build the release it is made for: ctest's run is built with it; a plain cargo build has none.)
+    assert_eq!(value_of(r.ui(), "Oscairn"), option_env!("OSCAIRN_RELEASE").filter(|v| !v.is_empty()).unwrap_or(env!("CARGO_PKG_VERSION")), "the release the build was given, else its crate's");
+    if option_env!("OSCAIRN_SOURCE_COMMIT").is_none_or(str::is_empty) {
+        assert_eq!(value_of(r.ui(), "Source"), "Development build");
+    }
     assert_eq!(value_of(r.ui(), "Engine"), "0.1.0-alpha.1");
     assert_eq!(value_of(r.ui(), "License"), "AGPL-3.0-or-later");
     let text = info(r.ui()).join(" ");

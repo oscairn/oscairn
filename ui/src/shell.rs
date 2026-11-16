@@ -218,6 +218,8 @@ pub struct App {
     question: Option<(Screen, notice::Notice)>,
     /// The Library tile opens the Rust app (library_glue.rs: not yet, until every screen of it is built).
     library_in_rust: bool,
+    /// Tests: the memory memory.shell says instead of this process's (a test binary holds every test's windows: far more than a shell).
+    memory_override: Option<u64>,
     /// The Settings tile opens the Rust app (settings_glue.rs: not yet, until every page of it is built).
     settings_in_rust: bool,
     /// Whether the plugin scanner has been started (the first time the chain is opened).
@@ -498,6 +500,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             settings: settings_app::Screen::new(ui, profile),
             question: None,
             library_in_rust: library_glue::in_rust(),
+            memory_override: None,
             settings_in_rust: settings_glue::in_rust(),
             scan_started: false,
             keyboard: None,
@@ -553,6 +556,12 @@ pub fn goto(screen: Screen) {
 #[cfg(test)]
 pub fn library_in_rust(on: bool) {
     with_app(|a| a.library_in_rust = on)
+}
+
+/// Tests: the memory the shell tells the engine it holds.
+#[cfg(test)]
+pub fn memory_override(bytes: Option<u64>) {
+    with_app(|a| a.memory_override = bytes)
 }
 
 /// Tests: the folder the Library's file chooser starts in.
@@ -660,7 +669,7 @@ impl App {
                 self.send_view();
                 // The session's setup is the engine's, from the profile (docs/rust-ui.md, "Session
                 // setup"); only this UI's own memory is the UI's to send.
-                if let Some(bytes) = resident_bytes() {
+                if let Some(bytes) = self.memory_override.or_else(resident_bytes) {
                     self.send(Request::Shell, "memory.shell", json!({ "bytes": bytes }));
                 }
                 self.send(Request::Reopen, "performance.reopen", json!({}));

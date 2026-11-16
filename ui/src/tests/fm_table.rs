@@ -923,5 +923,8 @@ fn the_page_reads_its_values_again_after_an_undo() {
     sent(&mut p.out);
     p.values_again();
     let out = sent(&mut p.out);
-    assert_eq!(out.iter().filter(|o| o.0 == "params.get").count(), 1, "{out:?}");
+    // Every parameter, those of the views (the envelope's handles) too, not only those with a tile, in requests of at most 128.
+    let asked: Vec<usize> = out.iter().filter(|o| o.0 == "params.get").map(|o| o.1["values"].as_array().unwrap().len()).collect();
+    assert!(!asked.is_empty() && asked.iter().all(|&n| n <= 128), "{asked:?}");
+    assert_eq!(asked.iter().sum::<usize>(), list(Spec { ops: 4, ..ENGINE })["parameters"].as_array().unwrap().len());
 }

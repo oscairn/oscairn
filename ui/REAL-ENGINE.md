@@ -25,8 +25,10 @@ Found and fixed in this run:
 1. **An envelope drag is one undo step** now: one `params.set` carries both values (`edit.history` says "synth Decay and 1 more";
    one `edit.undo` returns both). The first run's "Left" item is done.
 2. **After the Undo of that request no `params.changed` came** (the engine sent none for the undo of a request of two values), so
-   the page showed the dragged values with the engine's back: the page reads its values again behind an Undo or a Redo shown on a
-   plugin page (`Screen::values_again`). The harness then ran clean.
+   the page showed the dragged values with the engine's back: the page reads every parameter of its plugin again behind an Undo or a
+   Redo shown on a plugin page (`Screen::values_again`, in requests of 128: the engine's limit, which a sequencer's thousands of
+   parameters met at first). The harness itself had left the page with a Cancel before the drag (the Undo was another screen's):
+   fixed. The last full run of `real_engine` on a fresh engine: 1 finding, the presets one.
 3. Joining: the shell's status key (the cost-at-rest compare) did not carry the MIDI port counter the Settings page watches; it does
    now (`midiPortList`), and the Settings' test of it passes again.
 

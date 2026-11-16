@@ -389,7 +389,12 @@ impl Screen {
     /// Every value read again: after an Undo or a Redo, which the engine does not always say with a `params.changed` (the undo of
     /// a request that set two values said nothing against the real engine).
     pub fn values_again(&mut self) {
-        self.ask_values();
+        // Every parameter of the plugin, not only those with a tile: a view (an envelope, an operator table) holds the rest.
+        // (The engine takes 128 values to a request: `limits.parameterChanges`.)
+        let values: Vec<Value> = self.params.iter().map(|p| json!({"node": self.node, "param": p.id})).collect();
+        for chunk in values.chunks(128) {
+            self.out.push((Request::Values, "params.get", json!({"values": chunk})));
+        }
     }
 
     /// The plugin plays one sound of an instance other nodes share (`graph.get`'s `shared`): the host sets its Output bus, and

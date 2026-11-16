@@ -138,7 +138,8 @@ pub struct About {
 
 impl About {
     pub fn new() -> About {
-        About::with(option_env!("OSCAIRN_RELEASE").unwrap_or(env!("CARGO_PKG_VERSION")), option_env!("OSCAIRN_SOURCE_COMMIT").unwrap_or(""))
+        // (CMake gives both, empty when it has none: an empty release is no release.)
+        About::with(option_env!("OSCAIRN_RELEASE").filter(|v| !v.is_empty()).unwrap_or(env!("CARGO_PKG_VERSION")), option_env!("OSCAIRN_SOURCE_COMMIT").unwrap_or(""))
     }
 
     pub fn with(release: &str, commit: &str) -> About {

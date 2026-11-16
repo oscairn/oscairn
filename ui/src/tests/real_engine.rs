@@ -1407,7 +1407,12 @@ fn params_page(r: &mut Real, node: u64, name: &str) {
         r.act(Action::Move { pane: None, by: 3 });
         r.act(Action::Confirm(None));
     });
-    r.act(Action::Cancel(None));
+    // Out of the value taken for the dial, if it still is one (a Cancel past it would leave the page, and the view's drag
+    // would be on a screen that is not shown: the top bar's Undo would be another screen's).
+    if r.screen.ui.global::<crate::GridState>().get_tiles().iter().any(|t| t.editing) {
+        r.act(Action::Cancel(None));
+    }
+    r.on(7, &format!("Parameters of {name}: after the dial"));
     // A view (an envelope's, an operator's), on the first page that has one: a handle dragged.
     let _ = panels;
     let with_view = (0..pages.len().max(1)).find(|&k| {

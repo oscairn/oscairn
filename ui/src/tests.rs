@@ -805,6 +805,8 @@ fn session_setup_matches_the_juce_app() {
         let _ = tx.send(e);
     })
     .unwrap();
+    // A shell's size, not this test binary's (every test's windows are in it: more than the device allows its UI).
+    shell::memory_override(Some(64 << 20));
     let bar = || screen.ui.global::<Bar>();
     run_shell_until(&events, || !bar().get_performance().is_empty()); // connected, memory.shell and the reopen answered before
     let shell = rust.call("memory.state", json!({}))["shell"].as_u64().unwrap();

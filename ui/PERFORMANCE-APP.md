@@ -143,7 +143,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| E1 | Library sounds list (query, search, tags, favorites) | `library.query` | - | list, press | [ ] |
+| E1 | Library sounds list (query, search, tags, favorites) | `library.query`, `library.libraries`, `library.favorite` | - | list, press | [x] src/sounds.rs: as LibraryPane.cpp's pane: the search typed on the keyboard, a Filters row (Favorites, Recent, Library = everything / my own / an installed library, Tags = the matches' with counts, the chosen first, all must match), each change `library.query` again; a Sound's row has its tags and description, Locked, Does not fit this device, Auditioning (kept here from the audition started, the reference polls `audition.get`), a star and its color where the theme puts it; its actions add it to the favorites or take it out. Not built: the tag colors, hiding a tag, the compact and pill views, Options (edit, copy, delete, export), install (Library app items, not the chooser's). Tests: tests/sounds_filters.rs |
 | E2 | Load a sound into the part | `parts.loadSound` | - | press | [x] |
 | E3 | New part from a sound | `parts.fromSound` | - | action | [x] |
 | E4 | Save the part as a sound (name, as new) | `parts.saveSound` | - | action, keyboard | [x] |

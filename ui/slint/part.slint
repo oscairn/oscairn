@@ -3,7 +3,7 @@
 // the left (each its name and value; a cursor is a focus border, a value being changed with the
 // dial an accent one), what the part is made of on the right, read only.
 
-import { Theme, Section, Button, Cursor, FitText } from "theme.slint";
+import { Theme, Section, Button, Cursor, FitText, RowMark, RowStyle } from "theme.slint";
 
 export struct SettingData {
     label: string,
@@ -16,6 +16,8 @@ export struct SettingData {
     role: int, // a plugin's role: 1 an instrument, 2 an effect, 3 the rest, 0 not a plugin (the value's color)
     off: bool, // a plugin switched off: faint
     failed: bool, // a plugin that failed and is silent: outlined in the danger color
+    tint: color, // an item's own color, where the theme puts it (drawListRow): the whole row or a mark in it
+    tinted: bool,
 }
 
 export struct InfoLine {
@@ -54,21 +56,30 @@ component Row inherits Section {
     property <length> switch-height: 24px;
     property <length> switch-room: 56px;
     property <length> buttons: data.kind == 0 ? 2 * Theme.touch + Theme.pad-tight : data.kind == 1 && data.switch ? root.switch-room : 0px;
-    fill: data.editing ? Theme.accent.with-alpha(Theme.wash-light) : Theme.surface;
+    fill: data.editing ? Theme.accent.with-alpha(Theme.wash-light) : data.tinted && Theme.rows == RowStyle.fill ? Theme.row-fill(data.tint, Theme.surface, Theme.text, false) : Theme.surface;
     opacity: data.off ? Theme.dim : 1;
+    RowMark {
+        tint: data.tint;
+        shown: data.tinted;
+    }
     TouchArea {
         clicked => { root.tapped(); }
     }
+    // The item's color mark takes room from the text beside it: at the left (and a dot) from the label, at the right
+    // from the value, so the two never overlap.
+    property <length> mark-room: data.tinted && Theme.rows != RowStyle.fill ? 2 * Theme.mark + Theme.pad-tight : 0px;
+    property <length> label-room: Theme.rows == RowStyle.right ? 0px : root.mark-room;
+    property <length> value-room: Theme.rows == RowStyle.right ? root.mark-room : 0px;
     FitText {
-        x: Theme.pad;
-        width: parent.width * 0.4 - Theme.pad;
+        x: Theme.pad + root.label-room;
+        width: parent.width * 0.4 - Theme.pad - root.label-room;
         height: parent.height;
         text: data.label;
         align: TextHorizontalAlignment.left;
     }
     FitText {
         x: parent.width * 0.4;
-        width: parent.width * 0.6 - Theme.pad - root.buttons;
+        width: parent.width * 0.6 - Theme.pad - root.buttons - root.value-room;
         height: parent.height;
         text: data.value;
         ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;

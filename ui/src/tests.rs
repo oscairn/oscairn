@@ -1084,6 +1084,7 @@ mod keyboard;
 mod pages;
 mod chain;
 mod chain_splits;
+mod sounds_filters;
 mod piano;
 mod shellpages;
 mod envelope;

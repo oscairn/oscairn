@@ -197,13 +197,14 @@ fn sound_chooser() {
     let s = Screen::new();
     let ui = &s.ui;
     let mut c = sounds_screen(&s);
-    assert_eq!(sent(&mut c.out), [("library.query", json!({"kind": "sound", "limit": 1000}))]);
+    assert_eq!(sent(&mut c.out), [("library.query", json!({"kind": "sound", "limit": 1000})), ("library.libraries", json!({}))]);
     c.reply(
         crate::sounds::Request::Query,
         Ok(json!({"items": [{"id": "s1", "name": "Warm Rhodes", "tags": ["keys"], "description": "Soft"}, {"id": "s2", "name": "Fat Bass", "tags": []}], "total": 2})),
     );
-    assert_eq!(labels(ui), ["Search", "Warm Rhodes", "Fat Bass"]);
-    assert_eq!(rows(ui)[0].1, "all ›");
+    assert_eq!(labels(ui), ["Search", "Filters", "Warm Rhodes", "Fat Bass"]);
+    assert_eq!((rows(ui)[0].1.as_str(), rows(ui)[1].1.as_str()), ("all ›", "none ›"));
+    assert_eq!(rows(ui)[2].1, "keys   Soft", "tags, then the description");
     assert!(info(ui).contains(&(false, "From “Warm Rhodes”".into())));
     // Search: the keyboard is asked for; the text narrows the query.
     c.act(Action::Move { pane: None, by: 1 });
@@ -212,13 +213,15 @@ fn sound_chooser() {
     assert_eq!(sent(&mut c.out), [("library.query", json!({"kind": "sound", "limit": 1000, "text": "bass"}))]);
     assert_eq!(rows(ui)[0].1, "bass ›");
     c.reply(crate::sounds::Request::Query, Ok(json!({"items": [{"id": "s2", "name": "Fat Bass", "tags": []}], "total": 2})));
-    assert_eq!((labels(ui), info(ui)[3].1.clone()), (vec!["Search".to_string(), "Fat Bass".to_string()], "1 of 2 Sounds".to_string()));
+    assert_eq!((labels(ui), info(ui)[3].1.clone()), (vec!["Search".to_string(), "Filters".to_string(), "Fat Bass".to_string()], "1 of 2 Sounds".to_string()));
     // Fat Bass: its actions, each a request.
     c.act(Action::Move { pane: None, by: 1 });
-    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Move { pane: None, by: 2 });
     c.act(Action::Confirm(None));
     assert_eq!(labels(ui)[0], "Load into this part");
     assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Fat Bass", "the sound under the cursor when it was pressed");
+    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Confirm(None));
     c.act(Action::Move { pane: None, by: 1 });
     c.act(Action::Confirm(None));
     c.act(Action::Move { pane: None, by: 1 });
@@ -234,7 +237,8 @@ fn sound_chooser() {
     assert_eq!(out[1], ("parts.fromSound", json!({"id": "s2"})));
     assert_eq!(out[2], ("audition.start", json!({"id": "s2", "part": 10})));
     assert_eq!(out[3], ("audition.stop", json!({})));
-    assert_eq!(out[4], ("parts.saveSound", json!({"part": 10, "new": false})));
+    assert_eq!(out[4], ("library.favorite", json!({"id": "s2", "favorite": true})));
+    assert_eq!(out[5], ("parts.saveSound", json!({"part": 10, "new": false})));
     // Save as new: the keyboard, then the name.
     c.act(Action::Move { pane: None, by: 1 });
     assert_eq!(c.act(Action::Confirm(None)), crate::sounds::Outcome::Prompt("Name of the new Sound".into(), "Keys".into()));

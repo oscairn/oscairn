@@ -165,7 +165,7 @@ fn read_state(file: &std::path::Path) -> Option<(String, Option<usize>)> {
     Some((v["setlist"].as_str()?.to_string(), v["current"].as_u64().map(|c| c as usize)))
 }
 
-fn color(hex: &str) -> Option<Color> {
+pub(crate) fn color(hex: &str) -> Option<Color> {
     let v = u32::from_str_radix(hex.strip_prefix('#').filter(|h| h.len() == 6)?, 16).ok()?;
     Some(Color::from_rgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8))
 }

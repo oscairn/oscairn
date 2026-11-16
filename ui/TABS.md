@@ -28,7 +28,7 @@ unchanged.
 | Controls: "By scene" | rows of mappings versus a table | one toggle button | no | the reference's `toggle(..."By scene")`: an on/off |
 | Part screen's rows (Sound, Insert effects, Keyboard...) | nothing: one list of rows | rows | no | one scrolling list, not sibling views |
 | Setlist: the setlists pane and the slots pane | two panes shown together, the cursor goes between them | two lists | no | both are on screen at once; neither replaces the other |
-| Sounds chooser | one list with a search | a list and a search row | no | there are no categories in the Rust screen or the reference's chooser (tags, E1, are not built); a tag filter would be tabs when it exists |
+| Sounds chooser | one list with a search | a list and a search row | no | the reference's tags are a filter, several of them chosen at once (all must match), not siblings of which one shows: a Filters row opens a list of Favorites, Recent, Library and Tags, one scrolling list a level down each time, not tabs |
 | Chain: a split's lanes, a lane's plugins and settings | the chain screen's levels: the part's chain, a split's lanes, a lane | rows | no | one scrolling list a level down each time (a press opens, Cancel goes back), as the reference's chain row and panel: the lane's plugins and settings are not alternatives (the reference shows both at once), so they are one list, not tabs |
 | Mixer's paging buttons, the Parts and Setlist views of a long list | which slice of a list | ‹ › buttons | no | paging, not sibling views |
 | Settings pages | Settings is a JUCE app: not in `ui/` | - | n/a | the same component is for it when it is ported |

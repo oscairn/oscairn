@@ -102,7 +102,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     let r = next(&mut f, "library.query");
     assert_eq!(r["params"], json!({"kind": "sound", "limit": 1000}));
     f.reply(&r, json!({"result": {"items": [{"id": "s1", "name": "Warm Rhodes"}], "total": 1}}));
-    assert_eq!(rows(&ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Search", "Warm Rhodes"]);
+    assert_eq!(rows(&ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Search", "Filters", "Warm Rhodes"]);
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 4);
 }

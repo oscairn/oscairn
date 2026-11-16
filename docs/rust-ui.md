@@ -535,7 +535,13 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
 - **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
   narrows it), and for the one pressed `parts.loadSound`, `parts.fromSound`, `audition.start` and
   `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals
-  (staged edits, the library busy) are said. Tags, favorites and the sources are not shown.
+  (staged edits, the library busy) are said. As the library pane narrows the list: a Filters row opens
+  Favorites and Recent (switches), Library (everything, my own, or an installed library from
+  `library.libraries`) and Tags (those of the matches with their counts, the chosen first, all of the chosen
+  must match), each change asking `library.query` again with `favorites`, `recent`, `source`, `tags`; a Sound's
+  row has its tags and description, "Locked", "Does not fit this device", "Auditioning" and a star, its color as
+  the theme puts a row's, and its actions add it to the favorites or take it out (`library.favorite`).
+  Tests: `src/tests/sounds_filters.rs`.
 
 ### Playing keyboard
 

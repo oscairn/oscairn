@@ -442,7 +442,7 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; uint32_t contexts = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here; contexts: the nodes one instance of it carried at most when parts shared it (0: not seen sharing)
         Budget budget_;
         uint64_t shell_ = 0; // the UI's own resident memory (setShellMemory), reserved beside budget_.system
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
@@ -491,6 +491,7 @@ namespace oscairn
         void pollPressure();
         uint32_t noteLimit(NodeId node) const; // its part's, or 0
         using Feeds = std::map<std::string, std::vector<std::string>>; // each part's buses (estimateOf)
+        std::optional<Measurement> measurementFor(const std::string& key) const; // by plugin key, as costOf finds it: the build's, or the most of its builds'
         Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel

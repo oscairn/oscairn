@@ -7,7 +7,8 @@ make a plugin fit the instrument better. LV2 plugins load too when Oscairn is bu
 LV2 (see the [developer guide](developer-guide.md)); this page is about CLAP.
 
 This page describes the current host and is updated as features land. Each fact below was
-checked against `core/clap-host/src/Host.cpp`, `core/plugin-host/` and `core/control/`
+checked against the Rust CLAP host (`core/clap-host/rust`, the default; `core/clap-host/src/Host.cpp` is its
+C++ reference, `-DOSCAIRN_CLAP_HOST=cpp`), `core/plugin-host/` and `core/control/`
 unless it says otherwise.
 
 ## Start here

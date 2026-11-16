@@ -87,7 +87,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let none = json!({"undo": "", "redo": ""});
     let mut g = graph();
     ui.global::<crate::Bar>().invoke_action(3); // Scene
-    assert_eq!((ui.get_screen(), ui.global::<crate::Bar>().get_where().as_str()), (8, "Scene"));
+    assert_eq!((ui.get_screen(), title(&ui)), (8, "Scene setup".to_string()), "the scene's name comes with its graph");
     for _ in 0..4 {
         // The screen asks again for what it shows: the Performance, the graph, the history.
         let r = f.engine.request();
@@ -154,7 +154,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["glide"], 100, "steps of the menu's times, one a click");
     f.reply(&r, done());
-    shell::act(Action::Cancel(None)); // ends the change, the cursor stays
+    shell::act(Action::Confirm(None)); // a press ends the change, the cursor stays (Cancel would leave the screen)
     assert_eq!(ui.get_screen(), 8);
     // Now the curve and the launch change, by the dial (and by touch: + on the row).
     shell::act(Action::Move { pane: None, by: 1 });
@@ -176,20 +176,19 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["curve"], "equal-power");
     f.reply(&r, done());
-    shell::act(Action::Cancel(None));
+    shell::act(Action::Confirm(None)); // a press ends the change
     ui.global::<crate::PartState>().invoke_step(10, 1); // the launch's +
     let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"], json!({"scene": 2, "glide": 100, "curve": "equal-power", "launch": "beat"}));
     f.reply(&r, done());
     assert_eq!(rows(&f)[10].1, "On the next beat");
-    // A refusal is said; Cancel drops the cursor, then goes back to Play.
+    // A refusal is said; Cancel is Back in one step: to Play.
     shell::act(Action::Move { pane: None, by: 0 });
     ui.global::<crate::PartState>().invoke_tapped(0); // Store, by touch
     let r = scene_edit(&mut f, &mut g, "scenes.store");
     f.reply(&r, json!({"error": {"code": -32602, "message": "no such scene"}}));
     assert!(ui.global::<crate::PartState>().get_message().contains("no such scene"));
     let _ = request_in(&mut f, "graph.get", &none, &g); // the page set right
-    shell::act(Action::Cancel(None));
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 3);
 }

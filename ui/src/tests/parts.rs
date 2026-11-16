@@ -6,7 +6,7 @@
 use super::bar::{play_on_the_shell, request_in};
 use super::*;
 use crate::parts::{Outcome, Screen as Parts};
-use crate::{PartState, PartsState, PlayState};
+use crate::{PartsState, PlayState};
 
 pub fn parts_graph() -> serde_json::Value {
     let node = |id: u64, name: &str, inputs: u64, outputs: u64, notes_in: u64, enabled: bool| {
@@ -317,7 +317,8 @@ fn touch_opens_a_part_drags_the_sliders_and_taps_mute() {
 // a view turns it, Page Up and Down turn it with no cursor, and a taller window shows more at once.
 #[test]
 fn the_rows_a_view_holds_fill_the_height_and_the_cursor_turns_the_view() {
-    let mut s = Screen::sized(1280, 360);
+    // 312 is the old 360: the screen's own header row is gone, so the same views take 48 more logical pixels.
+    let mut s = Screen::sized(1280, 312);
     let mut p = parts_screen(&mut s, &parts_graph());
     let ui = &s.ui;
     let names = |ui: &Shell| rows(ui).into_iter().map(|r| r.0).collect::<Vec<_>>();
@@ -379,7 +380,8 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     let labels = |ui: &Shell| ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>();
     assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Scene", "Learn", "Edit"]);
     ui.global::<Bar>().invoke_action(5);
-    assert_eq!((ui.get_screen(), shell::handover(), ui.global::<Bar>().get_where().as_str()), (9, None, "Edit"));
+    assert_eq!((ui.get_screen(), shell::handover(), title(&ui)), (9, None, "Parts".to_string()));
+    assert_eq!(ui.global::<PartsState>().get_title().as_str(), "Grand", "the Performance's name");
     assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play"], "the toggle back");
     let r = request_in(&mut f, "session.status", &none, &graph);
     f.reply(&r, json!({"result": {"midiInputs": [{"kind": "builtIn", "name": "Built in", "source": 0}], "failures": [{"node": 4, "name": "Bass", "reason": "gone"}]}}));
@@ -401,7 +403,7 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     // A press on the first part opens its Part screen, and Back returns here, not to Play.
     shell::act(Action::Move { pane: Some(0), by: 1 });
     shell::act(Action::Confirm(None));
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (4, "Part"));
+    assert_eq!((ui.get_screen(), title(&ui)), (4, "Keys".to_string()));
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 9, "Cancel from the Part screen: the list it came from");
     assert!(rows(&ui).iter().all(|r| r.2 < 0), "the cursor went with the screen");
@@ -410,7 +412,7 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     assert_eq!(ui.get_screen(), 3);
     ui.global::<PlayState>().invoke_part_tapped(0);
     assert_eq!(ui.get_screen(), 4);
-    ui.global::<PartState>().invoke_back();
+    ui.global::<Bar>().invoke_back_tapped();
     assert_eq!(ui.get_screen(), 3);
     // The list's own Play action and Back button go to Play; Play's Cancel then goes Home, not back to the list.
     ui.global::<Bar>().invoke_action(5);
@@ -418,7 +420,7 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     ui.global::<Bar>().invoke_action(3);
     assert_eq!(ui.get_screen(), 3);
     ui.global::<Bar>().invoke_action(5);
-    ui.global::<PartsState>().invoke_back();
+    ui.global::<Bar>().invoke_back_tapped();
     assert_eq!(ui.get_screen(), 3);
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 0, "Play went back to where it was opened from");
@@ -435,8 +437,7 @@ fn the_list_draws_in_every_theme_at_two_sizes() {
         let mut s = Screen::sized(w, h);
         let mut p = parts_screen(&mut s, &parts_graph());
         s.ui.global::<Bar>().set_performance("Grand Piano".into());
-        s.ui.global::<Bar>().set_where("Edit".into());
-        s.ui.global::<Bar>().set_home_button(true);
+        set_title(&s.ui, &["Parts"]);
         p.meters(&json!({"meters": [{"part": 11, "stolen": 7, "hardChokes": 2}]}));
         p.status(&json!({"failures": [{"node": 5, "name": "Pad", "reason": "it crashed"}]}));
         mv(&mut p, Some(0), 1);

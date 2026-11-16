@@ -72,7 +72,6 @@ export global PartsState {
     in-out property <length> heading-pitch: 0px;
     in-out property <length> slack: 0px; // the gap that a view's last row needs no room for
     callback resized();
-    callback back();
     callback open(int); // a row's part
     callback level(int, float); // a row, the slider's new place
     callback send(int, int, float); // a row, the send's place in it, the slider's new place
@@ -407,7 +406,6 @@ component Titles inherits Rectangle {
 export component Parts inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> header: Theme.touch;
     property <length> titles-height: Theme.small + Theme.pad-narrow;
     property <length> row-height: Theme.touch + 2 * Theme.pad-tight;
     property <length> heading-height: Theme.small + Theme.pad-narrow;
@@ -418,7 +416,7 @@ export component Parts inherits Rectangle {
     property <int> lines: tools == 0 ? 0 : ceil(tools / across);
     property <length> tool-width: (self.width - 2 * Theme.margin - (across - 1) * Theme.gap) / across;
     property <length> tools-height: lines * Theme.touch + max(0, lines - 1) * Theme.gap;
-    property <length> titles-y: Theme.margin + header + Theme.gap;
+    property <length> titles-y: Theme.margin;
     property <length> list-y: titles-y + titles-height + Theme.gap;
     property <length> tools-y: self.height - Theme.margin - footer - Theme.gap - tools-height;
     property <length> list-height: max(0px, tools-y - Theme.gap - list-y);
@@ -434,26 +432,6 @@ export component Parts inherits Rectangle {
         PartsState.slack = gap;
     }
 
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { PartsState.back(); }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
-        height: root.header;
-        text: PartsState.title;
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
     if !PartsState.empty: Titles {
         x: Theme.margin;
         y: root.titles-y;

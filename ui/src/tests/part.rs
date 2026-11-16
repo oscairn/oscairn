@@ -190,7 +190,7 @@ fn part_cursor_edits_and_requests() {
     let list: Vec<_> = rows(ui).into_iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(list.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Any device", "Built in", "All external", "All USB", "Network", "KeyLab 61", "Port 1 (DIN 1)"], "the built-in input is the Built in choice already");
     assert_eq!(list[0].1, "✓");
-    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Plays from: press to tick or untick");
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Plays from");
     mv(&mut part, 1); // the first move shows the cursor: on Any
     mv(&mut part, 5);
     press(&mut part);
@@ -319,7 +319,7 @@ fn part_on_the_shell() {
     nav(&mut f, "move:1", 0);
     nav(&mut f, "move:1", 1);
     nav(&mut f, "confirm:1", 1);
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str(), part.get_name().as_str()), (4, "Part", "Keys"), "a press on the part opens it");
+    assert_eq!((ui.get_screen(), title(&ui), part.get_name().as_str()), (4, "Keys".to_string(), "Keys"), "a press on the part opens it");
     // Moves on either pane move the cursor; a press on Pan, the dial; a tap on Mute.
     nav(&mut f, "move:0", 1);
     nav(&mut f, "move", 1);
@@ -329,7 +329,7 @@ fn part_on_the_shell() {
     let r = next(&mut f, "parts.pan");
     assert_eq!((r["method"].as_str(), r["params"].clone()), (Some("parts.pan"), json!({"part": 10, "pan": 0.2})));
     f.reply(&r, json!({"result": {"accepted": true}}));
-    nav(&mut f, "cancel", 1);
+    nav(&mut f, "confirm", 1); // a press ends the change (Cancel would leave the screen)
     part.invoke_tapped(2);
     let r = next(&mut f, "parts.level");
     assert_eq!((r["method"].as_str(), r["params"]["mute"].clone()), (Some("parts.level"), json!(true)));
@@ -367,7 +367,7 @@ fn part_on_the_shell() {
     png(&f.screen, "part");
     // Back (touch) to Play; a tap on a strip's name opens that part; Cancel goes back, and Play's
     // Cancel goes to where Play was opened from.
-    part.invoke_back();
+    ui.global::<Bar>().invoke_back_tapped();
     assert_eq!(ui.get_screen(), 3);
     ui.global::<crate::PlayState>().invoke_part_tapped(1);
     assert_eq!((ui.get_screen(), part.get_name().to_string()), (4, "Low".to_string()));
@@ -378,14 +378,14 @@ fn part_on_the_shell() {
     assert_eq!(ui.get_screen(), 0, "Play's Cancel goes Home, where it was opened from");
     let r = next(&mut f, "unsubscribe");
     assert_eq!((r["method"].as_str(), r["params"]["topics"][0].as_str()), (Some("unsubscribe"), Some("controls.changed")), "left only when neither Play nor Part is shown");
-    // The list pages (eleven rows fit at 720 px) and the handover row gives the display away.
+    // The list pages (twelve rows fit at 720 px, the header row's room being the bar's) and the handover row gives the display away.
     ui.global::<HomeState>().invoke_tapped(0);
     ui.global::<crate::PlayState>().invoke_part_tapped(0);
     assert_eq!(ui.get_screen(), 4);
-    assert_eq!(rows(&ui).len(), 11);
+    assert_eq!(rows(&ui).len(), 12);
     shell::act(Action::End(1));
     shell::act(Action::End(1));
-    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Sound", false), ("Insert effects", false), ("Name", false), ("Remove part", true)], "the cursor turned the view");
+    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Name", false), ("Remove part", true)], "the cursor turned the view");
     // Rename from the shell: a press on Name opens the keyboard over the list; typing goes to it
     // alone (End finds Done), Done sends parts.name and the commit; Cancel closes it with nothing sent.
     shell::act(Action::Move { pane: None, by: -1 });

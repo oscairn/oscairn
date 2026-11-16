@@ -130,12 +130,54 @@ export component RecordingMark inherits Rectangle {
     }
 }
 
+// The title: the path of what is open, as long as it fits. A path too long for the room loses its leading
+// parts (the options the bar is given, longest first); the shortest left is then set at 70% of the type, and only then cut.
+component PathTitle inherits Rectangle {
+    in property <[string]> options;
+    in property <string> notice; // what the last action said: in the title's place for a while
+    in property <color> ink: Theme.text;
+    in property <length> size: Theme.body;
+    in property <bool> bold: true;
+    in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
+    property <length> room: root.width;
+    property <int> n: root.notice != "" ? 1 : min(4, root.options.length);
+    property <string> t0: root.notice != "" ? root.notice : root.options.length > 0 ? root.options[0] : "";
+    property <string> t1: root.options.length > 1 ? root.options[1] : "";
+    property <string> t2: root.options.length > 2 ? root.options[2] : "";
+    property <string> t3: root.options.length > 3 ? root.options[3] : "";
+    property <length> w0: m0.preferred-width;
+    property <length> w1: m1.preferred-width;
+    property <length> w2: m2.preferred-width;
+    property <length> w3: m3.preferred-width;
+    // The longest option that fits whole; else the last, at 70%.
+    out property <int> at: n > 0 && w0 <= room + 0.5px ? 0 : n > 1 && w1 <= room + 0.5px ? 1 : n > 2 && w2 <= room + 0.5px ? 2 : n > 3 && w3 <= room + 0.5px ? 3 : -1;
+    out property <bool> shrunk: at < 0 && n > 0;
+    out property <bool> cut: at < 0 && n > 0 && (n == 1 ? w0 : n == 2 ? w1 : n == 3 ? w2 : w3) * 0.7 > room + 0.5px;
+    out property <string> shown: at == 0 ? t0 : at == 1 ? t1 : at == 2 ? t2 : at == 3 ? t3 : n == 1 ? t0 : n == 2 ? t1 : n == 3 ? t2 : t3;
+    m0 := Text { visible: false; text: root.t0; font-size: root.size; font-weight: root.bold ? 700 : 400; }
+    m1 := Text { visible: false; text: root.t1; font-size: root.size; font-weight: root.bold ? 700 : 400; }
+    m2 := Text { visible: false; text: root.t2; font-size: root.size; font-weight: root.bold ? 700 : 400; }
+    m3 := Text { visible: false; text: root.t3; font-size: root.size; font-weight: root.bold ? 700 : 400; }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.shown;
+        color: root.ink;
+        font-size: root.size * (root.shrunk ? 0.7 : 1.0);
+        font-weight: root.bold ? 700 : 400;
+        horizontal-alignment: root.align;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 // One action of the screen shown (undo, save, ...): a button; `cursor` is the focus border.
 export struct BarAction {
     label: string,
     enabled: bool,
     cursor: bool,
     icon: int, // 0 none, 1 undo, 2 redo: what a narrow bar draws in place of the words
+    on: bool, // a toggle of the screen that is on (lit)
 }
 
 component ActionButton inherits Rectangle {
@@ -156,6 +198,7 @@ component ActionButton inherits Rectangle {
         height: Columns.action;
         text: root.icon-only ? "" : root.data.label;
         enabled: root.data.enabled;
+        on: root.data.on;
         clicked => { root.clicked(); }
     }
     if root.icon-only: Image {
@@ -192,8 +235,16 @@ export global Bar {
     in property <string> recording-time; // "m:ss"
     in property <bool> recording-behind; // its writer is behind: the disk is slow
     out property <length> recording-width: !recording ? 0px : Theme.small + Columns.rec-text + (recording-behind ? Theme.pad-narrow + Columns.rec-slow : 0px);
-    in property <string> where: "Home";
+    // Where the musician is, as the path of what is open, longest first: each option drops one more leading
+    // part and starts "… › " (the bar picks the longest that fits, then shrinks the shortest to 70%, then cuts).
+    in property <[string]> path;
+    // The title is the Performance's name (Play): a field, a tap on it is Save As New.
+    in property <bool> title-field;
     in property <bool> home-button;
+    // Back: the screen has somewhere to go back to; the cursor on it.
+    in property <bool> back;
+    in property <bool> back-cursor;
+    callback back-tapped();
     in property <string> performance;
     in property <string> scene;
     in property <string> tempo;
@@ -217,6 +268,10 @@ export component TopBar inherits Rectangle {
     out property <length> tempo-x: tempo.x;
     out property <length> pill-x: pill.x;
     out property <length> pill-width: pill.width;
+    // The title as drawn: which of the path's options, whether it is at 70% of the type, whether that is cut.
+    out property <string> title-shown: title.shown;
+    out property <bool> title-shrunk: title.shrunk;
+    out property <bool> title-cut: title.cut;
     // What a narrow bar gives up, in this order: the actions (their words, undo and redo first, then all of them folded
     // into "More") while the name keeps its comfortable room; then the name's room down to its least; then the
     // meters' names, then their bars' length. The recording mark and the tempo stay.
@@ -241,22 +296,23 @@ export component TopBar inherits Rectangle {
     property <length> w-full: n-actions > 0 ? full.preferred-width : 0px;
     property <length> w-icons: n-actions > 0 ? icons.preferred-width : 0px;
     property <length> w-more: n-actions > 0 ? more-measure.preferred-width + 2 * Theme.pad-wide : 0px;
+    property <length> back-w: Bar.back ? back-measure.preferred-width + 2 * Theme.pad-wide : 0px;
     property <length> tempo-width: round(Theme.small * 6.5 / 1px) * 1px;
-    // The items of the line: Home's button, where, the name (the rest), the actions, the recording mark, the tempo, the meters.
-    property <int> items: (Bar.home-button ? 1 : 0) + 2 + (n-actions > 0 ? 1 : 0) + (Bar.recording ? 1 : 0) + 1 + (any ? 1 : 0);
+    // The items of the line: Home's button, Back, the title (the rest), the actions, the recording mark, the tempo, the meters.
+    property <int> items: (Bar.home-button ? 1 : 0) + (Bar.back ? 1 : 0) + 1 + (n-actions > 0 ? 1 : 0) + (Bar.recording ? 1 : 0) + 1 + (any ? 1 : 0);
     // What the name has of the line when the actions take `actions` and the meters `meters`.
     pure function room-for(actions: length, meters: length, rec: length) -> length {
-        return root.width - Theme.margin - Theme.pad - (Bar.home-button ? Theme.touch : 0px) - where-measure.preferred-width - actions - rec - tempo-width - meters - (items - 1) * gap;
+        return root.width - Theme.margin - Theme.pad - (Bar.home-button ? Theme.touch : 0px) - back-w - actions - rec - tempo-width - meters - (items - 1) * gap;
     }
     height: Theme.bar-height;
     background: Theme.background;
     changed actions-mode => { Bar.more = self.actions-mode == 2; Bar.more-changed(); }
     init => { Bar.more = self.actions-mode == 2; }
-    where-measure := Text {
+    back-measure := Text {
         visible: false;
-        font-size: Theme.body;
+        font-size: Theme.button;
         font-weight: 700;
-        text: Bar.where;
+        text: "Back";
     }
     more-measure := Text {
         visible: false;
@@ -305,29 +361,18 @@ export component TopBar inherits Rectangle {
                 colorize: Theme.text;
             }
         }
-        Text {
-            vertical-alignment: center;
-            font-size: Theme.body;
-            font-weight: 700;
-            color: Theme.text;
-            text: Bar.where;
+        if Bar.back: ActionButton {
+            data: { label: "Back", enabled: true, cursor: Bar.back-cursor, icon: 0, on: false };
+            clicked => { Bar.back-tapped(); }
         }
-        // The open Performance and its scene: a pill, as wide as what is left (at least `pill-min`).
+        // The title: the path of what is open, as wide as what is left (at least `pill-min`); on Play the
+        // Performance's name in a field, where a tap is Save As New.
         pill := Rectangle {
             horizontal-stretch: 1;
-            min-width: Bar.performance != "" ? Columns.pill-min : 0px;
-            if Bar.performance != "": Field {
+            min-width: Columns.pill-min;
+            if Bar.title-field: Field {
                 y: (parent.height - self.height) / 2;
                 height: Columns.pill;
-                FitText {
-                    x: Theme.pad-wide;
-                    width: parent.width - 2 * Theme.pad-wide;
-                    height: parent.height;
-                    align: left;
-                    size: Theme.small;
-                    ink: Bar.notice == "" ? Theme.text : Theme.accent;
-                    text: Bar.notice != "" ? Bar.notice : Bar.scene == "" ? Bar.performance : Bar.performance + "  ·  " + Bar.scene;
-                }
                 TouchArea {
                     clicked => { Bar.pill-tapped(); }
                 }
@@ -336,6 +381,16 @@ export component TopBar inherits Rectangle {
                     shown: Bar.pill-cursor;
                     always: true;
                 }
+            }
+            title := PathTitle {
+                x: Bar.title-field ? Theme.pad-wide : 0px;
+                width: parent.width - 2 * self.x;
+                height: parent.height;
+                options: Bar.path;
+                notice: Bar.notice;
+                size: Bar.title-field ? Theme.small : Theme.body;
+                bold: !Bar.title-field;
+                ink: Bar.notice == "" ? Theme.text : Theme.accent;
             }
         }
         if root.n-actions > 0 && root.actions-mode < 2: HorizontalLayout {
@@ -348,7 +403,7 @@ export component TopBar inherits Rectangle {
             }
         }
         if root.n-actions > 0 && root.actions-mode == 2: ActionButton {
-            data: { label: "More", enabled: true, cursor: Bar.more-cursor, icon: 0 };
+            data: { label: "More", enabled: true, cursor: Bar.more-cursor, icon: 0, on: false };
             clicked => { Bar.more-tapped(); }
         }
         if Bar.recording: RecordingMark {

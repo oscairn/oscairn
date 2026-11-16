@@ -505,6 +505,11 @@ impl Screen {
         self.asking = None;
     }
 
+    /// Back from anywhere on the screen: up a level, else out of the screen.
+    pub fn back(&mut self) -> Outcome {
+        self.handle(Nav::Back)
+    }
+
     fn handle(&mut self, nav: Nav) -> Outcome {
         let outcome = match nav {
             Nav::Press(at) => self.press(at),

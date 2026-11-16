@@ -46,12 +46,9 @@ fn the_master_is_the_last_stop_of_the_right_pane_and_the_dial_moves_its_fader() 
     f.reply(&r, json!({"result": {"accepted": true}}));
     let r = request_in(&mut f, "graph.commit", &none, &play_graph());
     f.reply(&r, json!({"result": {"revision": 1}}));
-    // Cancel ends the change and keeps the cursor; the next drops it, the next goes back.
+    // Cancel is Back in one step, with the master's fader being changed: Play goes back to where it was opened from.
     shell::act(Action::Cancel(None));
-    assert_eq!(master(), (true, false));
-    shell::act(Action::Cancel(None));
-    assert_eq!(master(), (false, false));
-    assert_eq!(ui.get_screen(), 3);
+    assert_eq!(ui.get_screen(), 0);
 }
 
 // One test, as it writes the user's keyboard.txt (the tests' own folder) and two at once would meet there.

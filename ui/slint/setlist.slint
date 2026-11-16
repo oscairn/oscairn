@@ -54,11 +54,10 @@ export component Setlist inherits Rectangle {
     property <length> line: 24px; // the message line above the buttons
     property <length> number-column: 64px; // a list view's room for the slot's number
     property <length> slot-row: 56px; // a slot's height in the list view
-    property <length> header: Theme.touch;
     property <length> footer: Theme.touch + line + Theme.gap;
     property <length> slots-x: list-width + 2 * Theme.margin;
     property <length> slots-width: self.width - slots-x - Theme.margin;
-    property <length> slots-height: self.height - header - footer - 2 * Theme.margin - 2 * Theme.gap;
+    property <length> slots-height: self.height - footer - 2 * Theme.margin - Theme.gap;
     property <int> across: SetlistState.grid ? SetlistState.columns : 1;
     property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + gap) / (slot-row + gap)));
     property <length> cell-width: (slots-width - (across - 1) * gap) / across;
@@ -96,37 +95,12 @@ export component Setlist inherits Rectangle {
         }
     }
 
-    Text {
-        x: root.slots-x;
-        y: Theme.margin;
-        width: root.slots-width / 2;
-        height: root.header;
-        vertical-alignment: center;
-        overflow: elide;
-        font-size: Theme.title;
-        font-weight: 700;
-        color: Theme.text;
-        text: SetlistState.name;
-    }
-    Text {
-        x: root.slots-x + root.slots-width / 2;
-        y: Theme.margin;
-        width: root.slots-width / 2;
-        height: root.header;
-        horizontal-alignment: right;
-        vertical-alignment: center;
-        overflow: elide;
-        font-size: Theme.body;
-        color: Theme.muted;
-        text: SetlistState.page + "   " + SetlistState.view;
-    }
-
     for slot[i] in SetlistState.slots: Section {
         property <color> base: slot.playing ? Theme.raised : Theme.surface;
         property <bool> odd: !SetlistState.grid && mod(i, 2) == 1;
         property <color> lifted: Theme.row-base(self.base, self.odd);
         x: root.slots-x + mod(i, root.across) * (root.cell-width + root.gap);
-        y: Theme.margin + root.header + Theme.gap + floor(i / root.across) * (root.cell-height + root.gap);
+        y: Theme.margin + floor(i / root.across) * (root.cell-height + root.gap);
         width: root.cell-width;
         height: root.cell-height;
         // The item's color where the theme puts it (drawListRow): the whole slot, or a mark in it.
@@ -174,12 +148,24 @@ export component Setlist inherits Rectangle {
     Text {
         x: root.slots-x;
         y: root.height - root.footer - Theme.margin;
-        width: root.slots-width;
+        width: root.slots-width * 0.55;
         height: root.line;
         overflow: elide;
         font-size: Theme.small;
         color: Theme.muted;
         text: SetlistState.message;
+    }
+    // Which page of the setlist the slots are, and which of its slots.
+    Text {
+        x: root.slots-x + root.slots-width * 0.55;
+        y: root.height - root.footer - Theme.margin;
+        width: root.slots-width * 0.45;
+        height: root.line;
+        horizontal-alignment: right;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: SetlistState.page + "   " + SetlistState.view;
     }
     HorizontalLayout {
         x: root.slots-x;

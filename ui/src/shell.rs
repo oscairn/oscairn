@@ -197,7 +197,9 @@ pub struct App {
     history: topbar::History,
     /// The top bar's actions as shown, and the stop the cursor is on (the Performance's name is
     /// stop 0 when shown, then each action): None while the screen has the cursor.
-    bar_list: Vec<(topbar::Do, String, bool)>,
+    bar_list: Vec<topbar::Act>,
+    /// The title's options as last set on the bar.
+    shown_path: Vec<String>,
     bar_at: Option<usize>,
     /// The bar is too narrow for its actions and shows one "More", a menu of them (`Bar.more`).
     bar_more: bool,
@@ -263,6 +265,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ui.global::<Bar>().on_more_tapped(|| with_app(|a| a.bar_tap(0)));
     ui.global::<Bar>().on_more_changed(|| with_app(|a| a.show_bar()));
     ui.global::<Bar>().on_pill_tapped(|| with_app(|a| a.bar_pill()));
+    ui.global::<Bar>().on_back_tapped(|| with_app(|a| a.bar_back()));
     ui.on_key(|text| key(&text));
     ui.on_key_released(|text| {
         with_app(|a| {
@@ -318,10 +321,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     part.on_tapped(|i| with_app(|a| a.list_tap(i)));
     part.on_step(|i, by| with_app(|a| a.list_step(i, by)));
     part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
-    part.on_back(|| with_app(|a| a.back()));
     part.on_resized(|| with_app(|a| a.refit()));
     let list = ui.global::<PartsState>();
-    list.on_back(|| with_app(|a| a.go(Screen::Play)));
     list.on_open(|i| with_app(|a| a.parts_act(|p| p.tap_open(i))));
     list.on_mute(|i| with_app(|a| a.on_parts(|p| p.tap_mute(i))));
     list.on_level(|i, f| with_app(|a| a.on_parts(|p| p.level(i, f))));
@@ -330,18 +331,14 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     list.on_tool(|i| with_app(|a| a.parts_act(|p| p.tap_tool(i))));
     list.on_resized(|| with_app(|a| a.on_parts(parts::Screen::shown)));
     let mix = ui.global::<MixerState>();
-    mix.on_back(|| with_app(|a| a.go(Screen::Parts)));
     mix.on_level(|i, f| with_app(|a| a.on_mixer(|m| m.level(i, f))));
     mix.on_pan(|i, f| with_app(|a| a.on_mixer(|m| m.pan(i, f))));
     mix.on_send(|i, j, f| with_app(|a| a.on_mixer(|m| m.send(i, j, f))));
     mix.on_mute(|i| with_app(|a| a.on_mixer(|m| m.tap_mute(i))));
     mix.on_solo(|i| with_app(|a| a.on_mixer(|m| m.tap_solo(i))));
     mix.on_held(|i, control, down| with_app(|a| a.on_mixer(|m| m.hold(i, control, down))));
-    mix.on_turn(|by| with_app(|a| a.on_mixer(|m| m.turn(by))));
-    mix.on_turn_sends(|by| with_app(|a| a.on_mixer(|m| m.turn_sends(by))));
     mix.on_resized(|| with_app(|a| a.on_mixer(mixer::Screen::shown)));
     let ctl = ui.global::<ControlsState>();
-    ctl.on_back(|| with_app(|a| a.go(Screen::Parts)));
     ctl.on_level(|i, f| with_app(|a| a.on_controls(|c| c.level(i, f))));
     ctl.on_range(|i, end, f| with_app(|a| a.on_controls(|c| c.range(i, end, f))));
     ctl.on_held(|i, cell, down| with_app(|a| a.on_controls(|c| c.hold(i, cell, down))));
@@ -351,10 +348,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ctl.on_turn_columns(|by| with_app(|a| a.on_controls(|c| c.turn_columns(by))));
     ctl.on_resized(|| with_app(|a| a.on_controls(controls::Screen::shown)));
     let rt = ui.global::<RoutingState>();
-    rt.on_back(|| with_app(|a| a.go(Screen::Parts)));
     rt.on_tapped(|kind, i| with_app(|a| a.routing_act(|r| r.tap(kind, i))));
     rt.on_chevron(|kind, i| with_app(|a| a.on_routing(|r| r.tap_chevron(kind, i))));
-    rt.on_tool(|i| with_app(|a| a.on_routing(|r| r.tap_tool(i))));
     rt.on_panel_press(|row, cell| with_app(|a| a.routing_act(|r| r.tap_cell(row, cell))));
     rt.on_panel_moved(|row, cell, f| with_app(|a| a.on_routing(|r| r.level(row, cell, f))));
     rt.on_panel_held(|row, cell, down| with_app(|a| a.on_routing(|r| r.hold(row, cell, down))));
@@ -375,7 +370,6 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     grid.on_show_page(|k| with_app(|a| a.on_params(|p| p.show_page(k))));
     grid.on_show_tab(|k| with_app(|a| a.on_params(|p| p.show_tab(k))));
     grid.on_scrolled(|by| with_app(|a| a.on_params(|p| p.scrolled(by))));
-    grid.on_search_tap(|| with_app(|a| a.params_act(|p| p.search_tap())));
     grid.on_view_down(|v, x, y| {
         let mut taken = false;
         with_app(|a| taken = a.on_params(|p| p.view_down(v, x, y)));
@@ -383,8 +377,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     });
     grid.on_view_move(|v, x, y| with_app(|a| a.on_params(|p| p.view_move(v, x, y))));
     grid.on_view_up(|v, x, y| with_app(|a| a.on_params(|p| p.view_up(v, x, y))));
-    grid.on_back(|| with_app(|a| a.back()));
-    grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
+        grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
     let keys = ui.global::<KeyboardState>();
     keys.on_pressed(|i| with_app(|a| a.keyboard_press(i)));
     keys.on_released(|| with_app(|a| a.repeat.stop()));
@@ -434,6 +427,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             performance_name: String::new(),
             history: topbar::History::default(),
             bar_list: vec![],
+            shown_path: vec![],
             bar_at: None,
             bar_more: false,
             bar_menu: false,
@@ -461,6 +455,12 @@ pub fn dispatch(event: Event<Request>) {
 /// on a screen with a typing keyboard, else a navigation action. True when it was taken.
 pub fn key(text: &str) -> bool {
     APP.with(|a| a.borrow_mut().as_mut().is_some_and(|app| app.key(text)))
+}
+
+/// Shows `screen` at once, with whatever state it has: for the tests of what every screen has in common.
+#[cfg(test)]
+pub fn goto(screen: Screen) {
+    with_app(|a| a.go(screen))
 }
 
 /// A navigation action from any source, on the UI thread.
@@ -656,9 +656,6 @@ impl App {
         });
         self.ask(Request::Memory, "memory.state");
         self.ask(Request::Transport, "transport.get");
-        if self.stale {
-            self.ask_performance();
-        }
     }
 
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
@@ -835,10 +832,10 @@ impl App {
             bar.set_ram_level(level(next.ram));
         }
         let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds) != (&was.performance, &was.audio_device, was.performances, was.sounds);
-        let named = (next.performance.is_empty()) != (was.performance.is_empty());
+        let named = (&next.performance, &next.scene) != (&was.performance, &was.scene); // Play's title, and the name is a stop of the bar's cursor
         self.shown = next;
         if named {
-            self.show_bar(); // the name is a stop of the bar's cursor
+            self.show_bar();
         }
         if lines_changed {
             self.show_home();
@@ -904,6 +901,10 @@ impl App {
         }
         if self.menu.is_some() {
             return self.menu_act(action);
+        }
+        // Cancel is Back, in one step from anywhere on a screen (the bar's cursor, a list's cursor, a value being changed).
+        if matches!(action, Action::Cancel(_)) && self.screen != Screen::Home {
+            return self.bar_back();
         }
         if self.bar_at.is_some() {
             return self.bar_act(action);
@@ -976,32 +977,120 @@ impl App {
         });
     }
 
-    /// The stops the top bar's cursor visits: the Performance's name (Save As New) when shown,
-    /// then each action, or "More" alone when the bar folds them into it.
-    fn bar_stops(&self) -> usize {
-        usize::from(!self.shown.performance.is_empty()) + if self.bar_more { 1.min(self.bar_list.len()) } else { self.bar_list.len() }
+    /// Whether the title is the Performance's name in a field (Play's): a stop of the bar's cursor, Save As New.
+    fn pill_shown(&self) -> bool {
+        self.screen == Screen::Play && !self.shown.performance.is_empty()
     }
 
-    /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
+    /// Whether the bar has a Back button: every screen but Home has somewhere to go back to.
+    fn back_shown(&self) -> bool {
+        self.screen != Screen::Home && !(self.screen == Screen::Opening && self.hands_over)
+    }
+
+    /// The stops before the actions: Back, then the Performance's name.
+    fn bar_lead(&self) -> usize {
+        usize::from(self.back_shown()) + usize::from(self.pill_shown())
+    }
+
+    /// The stops the top bar's cursor visits: Back, the Performance's name (Save As New) when it is the
+    /// title, then each action, or "More" alone when the bar folds them into it.
+    fn bar_stops(&self) -> usize {
+        self.bar_lead() + if self.bar_more { 1.min(self.bar_list.len()) } else { self.bar_list.len() }
+    }
+
+    /// The parts of the path of what is open, from the outermost: what the bar's title says. Play's is the
+    /// Performance's name and scene.
+    fn path(&self) -> Vec<String> {
+        let part = |s: &mut Vec<String>, name: &str| s.push(if name.is_empty() { "Part".to_string() } else { name.to_string() });
+        let ui = self.ui();
+        let mut parts: Vec<String> = Vec::new();
+        match self.screen {
+            Screen::Home => parts.push("Home".into()),
+            Screen::Setlist => {
+                parts.push("Setlist".into());
+                parts.extend(ui.as_ref().map(|u| u.global::<SetlistState>().get_name().to_string()));
+            }
+            Screen::Opening => parts.push(ui.as_ref().map(|u| u.get_opening().to_string()).unwrap_or_default()),
+            Screen::Play => {
+                let s = &self.shown;
+                parts.push(if s.scene.is_empty() { s.performance.clone() } else { format!("{}  ·  {}", s.performance, s.scene) });
+            }
+            Screen::Part => {
+                part(&mut parts, &self.part.name());
+                parts.extend(self.part.menu_name().map(String::from));
+            }
+            Screen::Chain | Screen::Sounds => {
+                // The part, what the screen is, then the level open in it (the list's own title: a plugin, a lane, filters).
+                let what = if self.screen == Screen::Chain { "Insert effects" } else { "Sound" };
+                if let Some(ui) = &ui {
+                    let state = ui.global::<PartState>();
+                    part(&mut parts, state.get_name().as_str());
+                    parts.push(what.to_string());
+                    let title = state.get_title();
+                    let level = title.strip_prefix("Sound: ").unwrap_or(title.as_str());
+                    if !level.is_empty() && level != what {
+                        parts.push(level.to_string());
+                    }
+                }
+            }
+            Screen::Scene => {
+                if let Some(ui) = &ui {
+                    let state = ui.global::<PartState>();
+                    parts.push(state.get_name().to_string());
+                    parts.push("Scene setup".into());
+                }
+            }
+            Screen::Params => {
+                parts.push(self.chain.part_name());
+                parts.push("Insert effects".into());
+                parts.push(self.params.name().to_string());
+            }
+            Screen::Parts => parts.push("Parts".into()),
+            Screen::Mixer => parts.extend(["Parts", "Mixer"].map(String::from)),
+            Screen::Controls => parts.extend(["Parts", "Controls"].map(String::from)),
+            Screen::Routing => parts.extend(["Parts", "Routing"].map(String::from)),
+        }
+        parts
+    }
+
+    /// What the screen shown offers the bar besides undo, redo and save.
+    fn screen_tools(&self) -> Vec<topbar::Tool> {
+        match self.screen {
+            Screen::Routing => self.routing.bar_tools(),
+            Screen::Mixer => self.mixer.bar_tools(),
+            Screen::Params => self.params.bar_tools(),
+            _ => vec![],
+        }
+    }
+
+    /// The top bar: its title, Back, the actions for the screen shown and the cursor on them, each set only when it changed.
     fn show_bar(&mut self) {
         let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn)) } else { vec![] };
+        let mut list: Vec<topbar::Act> = self.screen_tools().into_iter().enumerate().map(|(i, t)| topbar::Act { what: topbar::Do::Tool(i), label: t.label, enabled: t.enabled, on: t.on }).collect();
+        if has_actions(self.screen) {
+            let then = topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn);
+            list.extend(topbar::actions(&self.history, then).into_iter().map(|(what, label, enabled)| topbar::Act { what, label, enabled, on: false }));
+        }
+        self.bar_list = list;
+        let path = topbar::path_options(&self.path());
+        let (back, field, home) = (self.back_shown(), self.screen == Screen::Play, self.screen != Screen::Home);
         let Some(ui) = self.ui() else { return };
         self.bar_more = ui.global::<Bar>().get_more() && !self.bar_list.is_empty();
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
-        let pill = usize::from(!self.shown.performance.is_empty());
+        let lead = self.bar_lead();
         let more = self.bar_more;
         let rows: Vec<BarAction> = self
             .bar_list
             .iter()
             .enumerate()
-            .map(|(i, (what, label, enabled))| BarAction {
-                label: label.as_str().into(),
-                enabled: *enabled,
-                cursor: !more && self.bar_at == Some(i + pill),
-                icon: match what {
+            .map(|(i, a)| BarAction {
+                label: a.label.as_str().into(),
+                enabled: a.enabled,
+                cursor: !more && self.bar_at == Some(i + lead),
+                on: a.on,
+                icon: match a.what {
                     topbar::Do::Undo => 1,
                     topbar::Do::Redo => 2,
                     _ => 0,
@@ -1011,8 +1100,25 @@ impl App {
         crate::setlist::update(&self.bar_rows, rows);
         ui.global::<crate::Theme>().set_bar_cursor(self.bar_at.is_some());
         let bar = ui.global::<Bar>();
-        bar.set_more_cursor(more && self.bar_at == Some(pill));
-        let on_pill = pill == 1 && self.bar_at == Some(0);
+        if self.shown_path != path {
+            bar.set_path(slint::ModelRc::new(VecModel::from(path.iter().map(|p| SharedString::from(p.as_str())).collect::<Vec<_>>())));
+            self.shown_path = path;
+        }
+        if bar.get_back() != back {
+            bar.set_back(back);
+        }
+        if bar.get_title_field() != field {
+            bar.set_title_field(field);
+        }
+        if bar.get_home_button() != home {
+            bar.set_home_button(home);
+        }
+        bar.set_more_cursor(more && self.bar_at == Some(lead));
+        let on_back = back && self.bar_at == Some(0);
+        if bar.get_back_cursor() != on_back {
+            bar.set_back_cursor(on_back);
+        }
+        let on_pill = self.pill_shown() && self.bar_at == Some(usize::from(back));
         if bar.get_pill_cursor() != on_pill {
             bar.set_pill_cursor(on_pill);
         }
@@ -1020,21 +1126,25 @@ impl App {
 
     /// Does what stop `stop` of the bar does.
     fn bar_do(&mut self, stop: usize) {
-        let pill = usize::from(!self.shown.performance.is_empty());
-        if stop < pill {
+        let back = usize::from(self.back_shown());
+        if stop < back {
+            return self.go_back();
+        }
+        if self.pill_shown() && stop == back {
             return self.save(true);
         }
+        let lead = self.bar_lead();
         if self.bar_more {
             // "More" is the one stop: a menu of the actions, those that cannot be done now dimmed.
-            let items = self.bar_list.iter().enumerate().map(|(i, (_, label, enabled))| menu::Item { enabled: *enabled, ..menu::Item::choice(label.as_str(), i) }).collect();
+            let items = self.bar_list.iter().enumerate().map(|(i, a)| menu::Item { enabled: a.enabled, ..menu::Item::choice(a.label.as_str(), i) }).collect();
             self.bar_menu = true;
             return self.open_menu(self.screen, "More", items);
         }
-        let Some((what, _, enabled)) = self.bar_list.get(stop - pill).cloned() else { return };
-        if !enabled {
+        let Some(act) = self.bar_list.get(stop - lead).cloned() else { return };
+        if !act.enabled {
             return;
         }
-        self.bar_run(what);
+        self.bar_run(act.what);
     }
 
     /// Does an action of the top bar.
@@ -1046,6 +1156,7 @@ impl App {
             topbar::Do::Learn => self.on_play(|p| p.learn_toggle()),
             topbar::Do::Edit => self.go(Screen::Parts),
             topbar::Do::Play => self.go(Screen::Play),
+            topbar::Do::Tool(i) => self.run_tool(i),
             topbar::Do::Scene => {
                 if let Some(id) = self.last_graph["scene"].as_u64() {
                     self.scene.open(id);
@@ -1055,18 +1166,35 @@ impl App {
         }
     }
 
+    /// The screen's own action `i` of the bar.
+    fn run_tool(&mut self, i: usize) {
+        match self.screen {
+            Screen::Routing => self.on_routing(|r| r.tap_tool(i as i32)),
+            Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
+            Screen::Params => self.params_act(|p| p.search_tap()),
+            _ => {}
+        }
+    }
+
     fn bar_tap(&mut self, i: usize) {
         self.bar_at = None;
-        let pill = usize::from(!self.shown.performance.is_empty());
-        self.bar_do(i + pill);
+        let lead = self.bar_lead();
+        self.bar_do(i + lead);
         self.show_bar();
     }
 
     fn bar_pill(&mut self) {
         self.bar_at = None;
-        if has_actions(self.screen) && !self.shown.performance.is_empty() {
-            self.bar_do(0);
+        if self.pill_shown() {
+            self.save(true);
         }
+        self.show_bar();
+    }
+
+    /// Back on the bar, by touch or the dial: what the device's back button does too.
+    fn bar_back(&mut self) {
+        self.bar_at = None;
+        self.go_back();
         self.show_bar();
     }
 
@@ -1104,7 +1232,11 @@ impl App {
                     self.bar_do(at);
                 }
             }
-            Action::Cancel(_) => self.bar_at = None,
+            // Back in one step, as everywhere on a screen: the bar's Back and the device's back button do the same.
+            Action::Cancel(_) => {
+                self.bar_back();
+                return;
+            }
         }
         self.show_bar();
     }
@@ -1113,7 +1245,7 @@ impl App {
     /// for it: the third list pane (`move:2`), the Tab key, or the dial moving up out of the top
     /// of the screen's list. True when it did.
     fn bar_enter(&mut self, action: Action) -> bool {
-        if !has_actions(self.screen) || self.bar_stops() == 0 {
+        if self.bar_stops() == 0 {
             return false;
         }
         let first = match action {
@@ -1138,6 +1270,7 @@ impl App {
             Screen::Chain => self.chain.at_top(),
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
+            Screen::Params => self.params.at_top(),
             _ => false,
         }
     }
@@ -1207,6 +1340,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.part.out) {
             self.send(Request::Part(request), method, params);
         }
+        if self.screen == Screen::Part {
+            self.show_bar();
+        }
         r
     }
 
@@ -1235,6 +1371,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.parts.out) {
             self.send(Request::Parts(request), method, params);
         }
+        if self.screen == Screen::Parts {
+            self.show_bar();
+        }
         r
     }
 
@@ -1243,6 +1382,9 @@ impl App {
         let r = f(&mut self.mixer);
         for (request, method, params) in std::mem::take(&mut self.mixer.out) {
             self.send(Request::Mixer(request), method, params);
+        }
+        if self.screen == Screen::Mixer {
+            self.show_bar();
         }
         r
     }
@@ -1275,6 +1417,9 @@ impl App {
             } else if !self.routing.metering() && self.meters.running() {
                 self.meters.stop();
             }
+        }
+        if self.screen == Screen::Routing {
+            self.show_bar();
         }
         r
     }
@@ -1346,7 +1491,7 @@ impl App {
             Some(menu::Outcome::Choose(id)) => {
                 let screen = self.menu.take().map(|(s, _)| s);
                 if std::mem::take(&mut self.bar_menu) {
-                    if let Some((what, _, true)) = self.bar_list.get(id).cloned() {
+                    if let Some(topbar::Act { what, enabled: true, .. }) = self.bar_list.get(id).cloned() {
                         self.bar_run(what);
                     }
                     self.show_bar();
@@ -1455,6 +1600,9 @@ impl App {
         if let Some((title, items)) = self.chain.take_menu() {
             self.open_menu(Screen::Chain, &title, items);
         }
+        if self.screen == Screen::Chain {
+            self.show_bar();
+        }
         r
     }
 
@@ -1463,6 +1611,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.sounds.out) {
             self.send(Request::Sounds(request), method, params);
         }
+        if self.screen == Screen::Sounds {
+            self.show_bar();
+        }
         r
     }
 
@@ -1470,6 +1621,9 @@ impl App {
         let r = f(&mut self.params);
         for (request, method, params) in std::mem::take(&mut self.params.out) {
             self.send(Request::Params(request), method, params);
+        }
+        if self.screen == Screen::Params {
+            self.show_bar();
         }
         r
     }
@@ -1504,6 +1658,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.scene.out) {
             self.send(Request::Scene(request), method, params);
         }
+        if self.screen == Screen::Scene {
+            self.show_bar();
+        }
         r
     }
 
@@ -1537,16 +1694,28 @@ impl App {
         }
     }
 
-    /// Back at the top of the list screens: one screen up.
-    fn back(&mut self) {
+    /// Back, from anywhere on a screen, whatever its cursor or a value being changed is doing: one step up the
+    /// path the bar's title shows. The bar's Back button, the Escape key and a device's back button (the profile's
+    /// panel map says which control is `cancel`) all come here. A screen's own list (the Part's devices, a
+    /// dropdown, a chain's lane) closes or goes up first; a menu or a keyboard over the screen is closed by
+    /// `act` before it gets here.
+    fn go_back(&mut self) {
         match self.screen {
-            Screen::Part => self.go(self.part_from),
+            Screen::Home => {}
+            Screen::Opening => {
+                if !self.hands_over {
+                    self.go(Screen::Home);
+                }
+            }
+            Screen::Setlist => self.go(Screen::Home),
+            Screen::Play => self.go(self.play_from),
+            Screen::Part => self.part_act(|p| p.back()),
             Screen::Parts => self.go(Screen::Play),
             Screen::Mixer | Screen::Controls | Screen::Routing => self.go(Screen::Parts),
-            Screen::Chain | Screen::Sounds => self.go(Screen::Part),
+            Screen::Chain => self.chain_act(|c| c.back()),
+            Screen::Sounds => self.sounds_act(|c| c.back()),
             Screen::Scene => self.go(Screen::Play),
-            Screen::Params => self.go(Screen::Chain),
-            _ => {}
+            Screen::Params => self.params_act(|p| p.back()),
         }
     }
 
@@ -1759,23 +1928,6 @@ impl App {
         }
         if let Some(ui) = self.ui() {
             ui.set_screen(screen as i32);
-            let bar = ui.global::<Bar>();
-            bar.set_where(match screen {
-                Screen::Home => "Home".into(),
-                Screen::Setlist => "Setlist".into(),
-                Screen::Play => "Play".into(),
-                Screen::Part => "Part".into(),
-                Screen::Chain => "Insert effects".into(),
-                Screen::Sounds => "Sound".into(),
-                Screen::Scene => "Scene".into(),
-                Screen::Parts => "Edit".into(),
-                Screen::Mixer => "Mixer".into(),
-                Screen::Controls => "Controls".into(),
-                Screen::Routing => "Routing".into(),
-                Screen::Params => "Parameters".into(),
-                Screen::Opening => ui.get_opening(),
-            });
-            bar.set_home_button(screen != Screen::Home);
         }
         if screen == Screen::Setlist {
             self.on_setlist(setlist::Screen::shown);

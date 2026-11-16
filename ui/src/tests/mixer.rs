@@ -292,7 +292,7 @@ fn the_strips_and_sends_a_view_holds_follow_the_window() {
     let names = |ui: &Shell| strips(ui).into_iter().map(|r| r.0).collect::<Vec<_>>();
     let view = |ui: &Shell| ui.global::<MixerState>().get_view().to_string();
     assert_eq!((names(ui), view(ui).as_str()), (vec!["Keys".to_string(), "Low".to_string(), "Pad".to_string()], "Strips 1–3 of 6 · Sends 1–1 of 2"));
-    assert!(state.get_more_strips() && state.get_more_sends());
+    assert_eq!(m.bar_tools().iter().map(|t| (t.label.as_str(), t.enabled)).collect::<Vec<_>>(), [("‹ Strips", false), ("Strips ›", true), ("‹ Sends", false), ("Sends ›", true)], "the pagers are the top bar's");
     assert_eq!(state.get_strips().row_data(0).unwrap().sends.row_count(), 1, "a send shown in a window this short");
     assert_eq!(state.get_send_names().iter().map(|n| n.to_string()).collect::<Vec<_>>(), ["Reverb"]);
     m.act(Action::Page(1));
@@ -385,7 +385,7 @@ fn the_mixer_opens_from_the_parts_list_and_goes_back_to_it() {
     let tools = ui.global::<PartsState>().get_tools();
     assert_eq!((tools.row_data(0).unwrap().label.as_str(), tools.row_data(0).unwrap().enabled), ("Mixer", true), "the button is on");
     ui.global::<PartsState>().invoke_tool(0);
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (10, "Mixer"));
+    assert_eq!((ui.get_screen(), title(&ui)), (10, "Parts › Mixer".to_string()));
     assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play"]);
     request_in(&mut f, "graph.get", &none, &g);
     // The meters are asked every 50 ms while shown.
@@ -414,16 +414,13 @@ fn the_mixer_opens_from_the_parts_list_and_goes_back_to_it() {
     assert_eq!(r["params"]["pan"], json!(0.0));
     let r = request_in(&mut f, "graph.commit", &none, &g);
     f.reply(&r, json!({"result": {"accepted": true}}));
-    // Cancel ends the change, then drops the cursor, then goes back to the list.
-    shell::act(Action::Cancel(None));
-    shell::act(Action::Cancel(None));
-    assert_eq!(ui.get_screen(), 10);
+    // Cancel is Back in one step, from a fader being changed too: to the list.
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 9);
     // Back, and the bar's Play.
     ui.global::<PartsState>().invoke_tool(0);
     assert_eq!(ui.get_screen(), 10);
-    ui.global::<MixerState>().invoke_back();
+    ui.global::<Bar>().invoke_back_tapped();
     assert_eq!(ui.get_screen(), 9);
     ui.global::<PartsState>().invoke_tool(0);
     ui.global::<Bar>().invoke_action(3);
@@ -441,8 +438,7 @@ fn the_mixer_draws_in_every_theme_at_several_sizes() {
         let mut s = Screen::sized(w, h);
         let mut m = mixer_screen(&mut s, &graph());
         s.ui.global::<Bar>().set_performance("Grand Piano".into());
-        s.ui.global::<Bar>().set_where("Mixer".into());
-        s.ui.global::<Bar>().set_home_button(true);
+        set_title(&s.ui, &["Parts", "Mixer"]);
         m.meters(&peaks);
         mv(&mut m, Some(1), 1);
         mv(&mut m, Some(1), 1);

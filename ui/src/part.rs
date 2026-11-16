@@ -215,6 +215,29 @@ impl Screen {
         self.cursor.at == Some(0) && !self.editing && self.menu.is_none()
     }
 
+    /// The part's name, for the bar's title.
+    pub fn name(&self) -> String {
+        self.part["name"].as_str().unwrap_or_default().to_string()
+    }
+
+    /// The list the part's settings give way to (devices, outputs), named for the bar's title.
+    pub fn menu_name(&self) -> Option<&'static str> {
+        self.menu.map(|(m, _)| if m == Menu::Devices { "Plays from" } else { "MIDI out" })
+    }
+
+    /// Back from anywhere on the screen: a list of devices closes, else the screen goes. What is being
+    /// changed is applied already, so nothing is lost.
+    pub fn back(&mut self) -> Outcome {
+        self.removing = false;
+        self.editing = false;
+        self.cursor = self.cursor.clear();
+        if self.menu.take().is_some() {
+            self.show();
+            return Outcome::Stay;
+        }
+        Outcome::Back
+    }
+
     pub fn open(&mut self, id: u32) {
         self.id = id as u64;
         self.active = true;
@@ -618,14 +641,7 @@ impl Screen {
         state.set_info_more(lines.len() > per);
         update(&self.info, lines.into_iter().skip(self.info_cursor.first).take(per).collect());
         state.set_name(self.part["name"].as_str().unwrap_or_default().into());
-        state.set_title(
-            match self.menu {
-                Some((Menu::Devices, _)) => "Plays from: press to tick or untick",
-                Some((Menu::MidiOut, _)) => "MIDI out: press to tick or untick",
-                None => "",
-            }
-            .into(),
-        );
+        state.set_title(self.menu_name().unwrap_or_default().into());
         let what = match self.menu {
             Some((Menu::Devices, _)) => "Devices",
             Some((Menu::MidiOut, _)) => "Outputs",

@@ -191,6 +191,14 @@ pub mod tests {
             self.reader.read_line(&mut l).unwrap();
             serde_json::from_str(&l).unwrap()
         }
+        /// The next request if one comes within `wait`, else None (for a test that answers what it is asked until the shell is quiet).
+        pub fn try_request(&mut self, wait: Duration) -> Option<Value> {
+            self.writer.set_read_timeout(Some(wait)).unwrap(); // the socket's option, shared by the reader's end
+            let mut l = String::new();
+            let read = self.reader.read_line(&mut l);
+            self.writer.set_read_timeout(None).unwrap();
+            read.ok().filter(|n| *n > 0).and_then(|_| serde_json::from_str(&l).ok())
+        }
         pub fn answer(&mut self) {
             let id = self.request()["id"].clone();
             self.send(&format!("{}\n", json!({"jsonrpc":"2.0","id":id,"result":{}})));

@@ -113,8 +113,6 @@ export global GridState {
     // The search button in the header (a plugin of more than 24 parameters): the text searched for, and the cursor on it.
     in property <bool> search-shown;
     in property <string> search;
-    in property <bool> search-cursor;
-    callback search-tap();
     // A dropdown open over the grid: its values and the one under the cursor.
     in property <bool> list-open;
     in property <string> list-title;
@@ -139,7 +137,6 @@ export global GridState {
     callback show-tab(int);
     callback scrolled(length);
     callback resized(); // the tiles' area changed size: laid out again
-    callback back();
 }
 
 // A waveform drawn as a path (a saw, square, sine, triangle, noise, pulse, saw down, sample and hold), in the text's color.
@@ -586,12 +583,9 @@ export component Grid inherits Rectangle {
     // The sections' gap (none in a theme whose sections join); a heading's height (ParameterGrid's).
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> heading: 28px;
-    property <length> header: Theme.touch;
-    // The search button ends the header row (a plugin of more than 24 parameters).
-    property <length> search-width: GridState.search-shown ? Theme.button-width * 1.5 : 0px;
     // The pages are a column at the left on a window tall enough to spare the width, else a strip over the tabs.
     property <bool> column: self.height >= Theme.column-from;
-    property <length> top: Theme.margin + header + Theme.gap;
+    property <length> top: Theme.margin;
     property <length> footer: GridState.message == "" ? 0 : Theme.touch;
     property <length> area-width: tabs.content-width;
     property <length> area-height: tabs.content-height;
@@ -610,39 +604,6 @@ export component Grid inherits Rectangle {
         GridState.view-height = area-height;
     }
 
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { GridState.back(); }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: root.width - self.x - Theme.margin - (root.search-width > 0 ? root.search-width + 2 * Theme.gap : 0px);
-        height: root.header;
-        text: GridState.name;
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
-    // The search: a button in the header row, the text searched for after it while one is on (not lit: the cursor's ring would vanish on the accent); a press opens the keyboard.
-    if GridState.search-shown: Button {
-        x: root.width - Theme.margin - root.search-width;
-        y: Theme.margin;
-        width: root.search-width;
-        height: root.header;
-        text: GridState.search == "" ? "Search" : "Search: " + GridState.search;
-        clicked => { GridState.search-tap(); }
-        Cursor {
-            shown: GridState.search-cursor;
-            corner: Theme.button-radius(parent.height);
-        }
-    }
     tabs := TabPages {
         x: Theme.margin;
         y: root.top;

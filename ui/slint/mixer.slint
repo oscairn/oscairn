@@ -34,21 +34,18 @@ export global MixerState {
     in property <int> buses; // every bus, shown or not
     in property <string> view; // "Strips 1–5 of 9", "Sends 1–2 of 5"
     in property <string> message;
-    in property <bool> more-strips; // some strips are out of this view
-    in property <bool> more-sends;
     // How many strips a view holds besides the master, and how many sends a strip shows: set by the screen.
     in-out property <int> strips-per-view: 1;
     in-out property <int> sends-per-view: 1;
+    // The height the strips have: set by the screen, for the tests of what the top bar gave it.
+    in-out property <length> strips-height;
     callback resized();
-    callback back();
     callback level(int, float); // a strip (-1 the master) and the fader's new place
     callback pan(int, float); // a strip (-1 the master) and the slider's new place, 0..1
     callback send(int, int, float); // a strip, the send's place among those shown, the slider's new place
     callback mute(int);
     callback solo(int);
     callback held(int, int, bool); // a strip (-1 the master), its control, a finger on it or off it
-    callback turn(int); // strips: towards the start (-1) or the end (1)
-    callback turn-sends(int);
 }
 
 // A slider with its name above it, a touch target tall in all: dragged or tapped it says where, a
@@ -254,38 +251,14 @@ component Strip inherits Section {
     }
 }
 
-// A paging pair in the header: previous, what it pages, next.
-component Pager inherits HorizontalLayout {
-    in property <string> label;
-    callback turn(int);
-    spacing: Theme.gap;
-    Button {
-        width: Theme.touch;
-        text: "‹";
-        clicked => { root.turn(-1); }
-    }
-    Text {
-        text: root.label;
-        color: Theme.muted;
-        font-size: Theme.small;
-        vertical-alignment: center;
-    }
-    Button {
-        width: Theme.touch;
-        text: "›";
-        clicked => { root.turn(1); }
-    }
-}
-
 export component Mixer inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> header: Theme.touch;
     property <length> footer: Theme.small + 2 * Theme.pad-tight;
     property <length> strip-min: Theme.button-width;
     // The room between the parts and the buses, and before the master.
     property <length> group-gap: Theme.pad;
-    property <length> strips-y: Theme.margin + header + Theme.gap;
+    property <length> strips-y: Theme.margin;
     property <length> strips-height: self.height - strips-y - Theme.margin - footer - Theme.gap;
     property <length> strips-width: self.width - 2 * Theme.margin;
     property <int> across: max(2, floor((strips-width - 2 * group-gap + gap) / (strip-min + gap)));
@@ -295,49 +268,15 @@ export component Mixer inherits Rectangle {
     property <length> fixed: (Theme.body + 2 * Theme.pad-tight) + (Theme.small + 2 * Theme.pad-tight) + Theme.touch + 2 * Theme.pad-tight + row-h + 3 * Theme.touch;
     property <int> fit-sends: max(1, floor((strips-height - fixed) / row-h));
     property <int> sends: min(MixerState.buses, MixerState.sends-per-view);
+    changed strips-height => { MixerState.strips-height = strips-height; }
     changed across => { MixerState.strips-per-view = across - 1; MixerState.resized(); }
     changed fit-sends => { MixerState.sends-per-view = fit-sends; MixerState.resized(); }
     init => {
         MixerState.strips-per-view = across - 1;
         MixerState.sends-per-view = fit-sends;
+        MixerState.strips-height = strips-height;
     }
 
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { MixerState.back(); }
-    }
-    // Strips ‹ ›, then Sends ‹ ›, at the header's right end: only when something is out of view.
-    pagers := HorizontalLayout {
-        x: root.width - Theme.margin - self.preferred-width;
-        y: Theme.margin;
-        width: self.preferred-width;
-        height: root.header;
-        spacing: Theme.gap;
-        if MixerState.more-strips: Pager {
-            label: "Strips";
-            turn(by) => { MixerState.turn(by); }
-        }
-        if MixerState.more-sends: Pager {
-            label: "Sends";
-            turn(by) => { MixerState.turn-sends(by); }
-        }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: max(0px, pagers.x - self.x - Theme.gap);
-        height: root.header;
-        text: "Mixer";
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
 
     for strip[i] in MixerState.strips: Strip {
         x: Theme.margin + i * (root.cell + root.gap) + (strip.bus ? root.group-gap : 0px);

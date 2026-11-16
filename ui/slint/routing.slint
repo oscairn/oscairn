@@ -61,12 +61,6 @@ export struct PanelRowData {
     cells: [PanelCellData],
 }
 
-export struct RoutingToolData {
-    label: string,
-    on: bool,
-    cursor: bool,
-}
-
 export global RoutingState {
     in property <[RoutingBox]> frames;
     in property <[RoutingBox]> boxes;
@@ -85,7 +79,6 @@ export global RoutingState {
     in property <bool> frames-collapsible;
     in property <[PanelRowData]> panel;
     in property <bool> more-panel;
-    in property <[RoutingToolData]> tools;
     in property <string> message;
     in property <string> view;
     // What the screen needs to fit the drawing and the panel: set by the screen's component.
@@ -96,10 +89,8 @@ export global RoutingState {
     in-out property <int> panel-rows: 1; // rows a view of the panel holds
     in-out property <int> panel-units: 1; // button widths across the panel
     callback resized();
-    callback back();
     callback tapped(int, int); // a kind (0 a frame, 1 a box, 2 a control) and its place in that list
     callback chevron(int, int); // a frame (0) or a box (1): expand or collapse
-    callback tool(int);
     callback panel-press(int, int); // a row of the view and a cell
     callback panel-moved(int, int, float); // a row, a cell, the slider's new place
     callback panel-held(int, int, bool);
@@ -387,21 +378,8 @@ component PanelCell inherits Rectangle {
 export component Routing inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> header: Theme.touch;
     property <length> footer: Theme.small + 2 * Theme.pad-tight;
-    property <int> tool-count: RoutingState.tools.length;
-    // The buttons share the header's line with Back and the title when they all fit there, else take lines under it.
-    property <length> title-width: title-measure.preferred-width + Theme.pad;
-    property <length> tools-x: Theme.margin + Theme.button-width + 2 * Theme.gap + title-width;
-    property <length> tool-min: Theme.button-width * 1.3;
-    property <bool> inline: tool-count > 0 && tool-count * (tool-min + Theme.gap) - Theme.gap <= self.width - Theme.margin - tools-x;
-    property <int> across: inline ? tool-count : max(1, min(tool-count, floor((self.width - 2 * Theme.margin + Theme.gap) / (tool-min + Theme.gap))));
-    property <int> tool-lines: tool-count == 0 || inline ? 0 : ceil(tool-count / across);
-    property <length> tool-left: inline ? tools-x : Theme.margin;
-    property <length> tool-width: (self.width - Theme.margin - tool-left - (across - 1) * Theme.gap) / across;
-    property <length> tools-y: inline ? Theme.margin : Theme.margin + header + Theme.gap;
-    property <length> tools-height: tool-lines * Theme.touch + max(0, tool-lines - 1) * Theme.gap;
-    property <length> body-y: inline ? Theme.margin + header + Theme.gap : tools-y + tools-height + (tool-lines > 0 ? Theme.gap : 0px);
+    property <length> body-y: Theme.margin;
     property <length> body-bottom: self.height - Theme.margin - footer - Theme.gap;
     property <length> body-height: max(0px, body-bottom - body-y);
     // The drawing above, the panel for what is chosen below it. The panel takes the rows it has, a view of at
@@ -438,47 +416,6 @@ export component Routing inherits Rectangle {
         RoutingState.panel-units = units;
     }
 
-    title-measure := Text {
-        visible: false;
-        text: "Routing";
-        font-size: Theme.title;
-        font-weight: 700;
-    }
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { RoutingState.back(); }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: root.inline ? root.title-width : root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
-        height: root.header;
-        text: "Routing";
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
-    for tool[i] in RoutingState.tools: Rectangle {
-        x: root.tool-left + mod(i, root.across) * (root.tool-width + Theme.gap);
-        y: root.tools-y + floor(i / root.across) * (Theme.touch + Theme.gap);
-        width: root.tool-width;
-        height: Theme.touch;
-        Button {
-            on: tool.on;
-            text: tool.label;
-            clicked => { RoutingState.tool(i); }
-        }
-        Cursor {
-            shown: tool.cursor;
-            corner: Theme.button-radius(Theme.touch);
-        }
-    }
     // The drawing: frames under the wires, the wires, the boxes, the control lines and their pills.
     view := Flickable {
         x: Theme.margin + root.inset;

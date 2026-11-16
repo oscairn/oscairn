@@ -493,9 +493,9 @@ fn tile_density_follows_the_references_rules_and_has_more_room() {
             if name == "FANTOM-07" {
                 let numbers = (vw.round() as i32, vh.round() as i32, columns, in_view, reference_columns, reference_in_view);
                 let expected = match what {
-                    "knobs, two pages" => (814, 309, 3, 6, 2, 2),
-                    "knobs, one page" => (814, 357, 3, 6, 3, 3),
-                    _ => (814, 357, 3, 12, 3, 3),
+                    "knobs, two pages" => (814, 357, 3, 6, 2, 2),
+                    "knobs, one page" => (814, 405, 3, 9, 3, 3),
+                    _ => (814, 405, 3, 12, 3, 3),
                 };
                 assert_eq!(numbers, expected, "FANTOM-07 {what}");
             }

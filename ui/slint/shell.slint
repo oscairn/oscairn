@@ -12,11 +12,11 @@ import { Parts, PartsState, PartRowData, ChipData, SendData, ToolData } from "pa
 import { Mixer, MixerState, MixStrip } from "mixer.slint";
 import { Controls, ControlsState, ControlRowData, TableRowData, TableCellData, ControlToolData } from "controls.slint";
 import { Menu, MenuState, MenuRow } from "menu.slint";
-import { Routing, RoutingState, RoutingBox, RoutingWire, RoutingLink, PanelCellData, PanelRowData, RoutingToolData } from "routing.slint";
+import { Routing, RoutingState, RoutingBox, RoutingWire, RoutingLink, PanelCellData, PanelRowData } from "routing.slint";
 import { Grid, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint } from "grid.slint";
 import { Keyboard, KeyboardState, KeyData } from "keyboard.slint";
 import { Piano, PianoState, PianoKey, PianoBand, PianoControl } from "piano.slint";
-export { Theme, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle, Bar, BarAction, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, KnobButton, PlayLayout, PartState, SettingData, InfoLine, PartsState, PartRowData, ChipData, SendData, ToolData, MixerState, MixStrip, ControlsState, ControlRowData, TableRowData, TableCellData, ControlToolData, MenuState, MenuRow, RoutingState, RoutingBox, RoutingWire, RoutingLink, PanelCellData, PanelRowData, RoutingToolData, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
+export { Theme, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle, Bar, BarAction, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, KnobButton, PlayLayout, PartState, SettingData, InfoLine, PartsState, PartRowData, ChipData, SendData, ToolData, MixerState, MixStrip, ControlsState, ControlRowData, TableRowData, TableCellData, ControlToolData, MenuState, MenuRow, RoutingState, RoutingBox, RoutingWire, RoutingLink, PanelCellData, PanelRowData, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -37,6 +37,9 @@ export component Shell inherits Window {
     out property <length> tempo-x: bar.tempo-x;
     out property <length> pill-x: bar.pill-x;
     out property <length> pill-width: bar.pill-width;
+    out property <string> title-shown: bar.title-shown;
+    out property <bool> title-shrunk: bar.title-shrunk;
+    out property <bool> title-cut: bar.title-cut;
     out property <length> rec-width: bar.rec-width;
     out property <int> actions-mode: bar.actions-mode;
     out property <int> meters-mode: bar.meters-mode;

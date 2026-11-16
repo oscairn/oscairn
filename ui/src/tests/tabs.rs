@@ -101,7 +101,6 @@ fn tab_rows_enlarged() {
 #[derive(Debug, PartialEq)]
 enum On {
     Nothing,
-    Search,
     Page(i32),
     Tab(i32),
     Tile(usize),
@@ -110,12 +109,11 @@ enum On {
 fn on(ui: &Shell) -> On {
     let g = ui.global::<GridState>();
     let tile = g.get_tiles().iter().position(|t| t.cursor);
-    match (g.get_search_cursor(), g.get_page_cursor(), g.get_tab_cursor(), tile) {
-        (false, -1, -1, None) => On::Nothing,
-        (true, -1, -1, None) => On::Search,
-        (false, p, -1, None) => On::Page(p),
-        (false, -1, t, None) => On::Tab(t),
-        (false, -1, -1, Some(t)) => On::Tile(t),
+    match (g.get_page_cursor(), g.get_tab_cursor(), tile) {
+        (-1, -1, None) => On::Nothing,
+        (p, -1, None) => On::Page(p),
+        (-1, t, None) => On::Tab(t),
+        (-1, -1, Some(t)) => On::Tile(t),
         other => panic!("more than one cursor: {other:?}"),
     }
 }
@@ -162,16 +160,13 @@ fn the_cursor_moves_over_the_tab_rows_and_a_press_opens() {
     at(&mut p, Action::Confirm(None));
     assert_eq!((g.get_tab(), on(&ui)), (2, On::Tab(2)));
     assert_eq!(asked_ids(&requested(&mut p)), [30, 31, 32, 33]);
-    // The arrows: along the row, clamped; up to the pages (on the one shown) and the search; down again.
+    // The arrows: along the row, clamped; up to the pages (on the one shown), the first stop; the search is the top bar's.
     at(&mut p, Action::Arrow { dx: -1, dy: 0 });
     assert_eq!(on(&ui), On::Tab(1));
     at(&mut p, Action::Arrow { dx: 0, dy: -1 });
     assert_eq!(on(&ui), On::Page(0));
     at(&mut p, Action::Arrow { dx: 0, dy: -1 });
-    assert_eq!(on(&ui), On::Search);
-    at(&mut p, Action::Arrow { dx: 0, dy: -1 });
-    assert_eq!(on(&ui), On::Search, "nothing above it");
-    at(&mut p, Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!(on(&ui), On::Page(0), "nothing above it");
     at(&mut p, Action::Arrow { dx: 1, dy: 0 });
     assert_eq!((on(&ui), g.get_page()), (On::Page(1), 0), "along the pages, nothing opened");
     // A press on a page opens it: its first (here only) entry, a page without tabs, so no row of tabs.
@@ -201,14 +196,13 @@ fn the_cursor_moves_over_the_tab_rows_and_a_press_opens() {
     assert_eq!(on(&ui), On::Tab(7));
     p.show_tab(3);
     assert_eq!((g.get_tab(), on(&ui)), (3, On::Nothing));
-    // Cancel: the cursor, then the screen.
+    // Back, from wherever the cursor is, leaves the screen at once and drops the cursor.
     at(&mut p, Action::Move { pane: None, by: 1 });
     at(&mut p, Action::Move { pane: None, by: -1 });
     assert_eq!(on(&ui), On::Tab(3));
-    assert_eq!(p.act(Action::Cancel(None)), crate::params::Outcome::Stay);
+    assert_eq!(p.back(), crate::params::Outcome::Back);
     assert_eq!(on(&ui), On::Nothing);
-    assert_eq!(p.act(Action::Cancel(None)), crate::params::Outcome::Back);
-    // The dial alone reaches everything: back from the first tile through the tabs, the pages and the search.
+    // The dial alone reaches everything: back from the first tile through the tabs and the pages.
     at(&mut p, Action::Move { pane: None, by: 1 });
     let mut seen = vec![on(&ui)];
     for _ in 0..40 {
@@ -218,9 +212,10 @@ fn the_cursor_moves_over_the_tab_rows_and_a_press_opens() {
         }
     }
     assert_eq!(seen.first(), Some(&On::Tile(0)));
-    assert_eq!(seen.last(), Some(&On::Search));
+    assert_eq!(seen.last(), Some(&On::Page(0)));
+    assert!(p.at_top(), "and there moving up leaves for the top bar");
     assert!(seen.contains(&On::Tab(3)) && seen.contains(&On::Page(0)), "{seen:?}");
-    // And forward again, through the search, the pages and the tabs to the tiles.
+    // And forward again, through the pages and the tabs to the tiles.
     for _ in 0..40 {
         at(&mut p, Action::Move { pane: None, by: 1 });
     }
@@ -255,8 +250,7 @@ fn the_cursor_in_the_column_arrangement() {
     p.act(Action::Arrow { dx: -1, dy: 0 });
     assert_eq!(on(&ui), On::Page(0), "left from the first tab: the pages, on the one shown");
     p.act(Action::Arrow { dx: 0, dy: -1 });
-    assert_eq!(on(&ui), On::Search, "up the column: the search");
-    p.act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!(on(&ui), On::Page(0), "up the column: nothing above the first page");
     p.act(Action::Arrow { dx: 0, dy: 1 });
     p.act(Action::Confirm(None));
     assert_eq!((g.get_page(), on(&ui)), (1, On::Page(1)));
@@ -284,8 +278,8 @@ fn bars(s: &Screen, scale: f32, column: bool) -> (Box4, Box4) {
     let t = s.ui.global::<Theme>();
     let (margin, gap, touch, pages) = (t.get_margin(), t.get_gap(), t.get_touch(), t.get_pages_width());
     let to = |v: f32| (v * scale).round() as usize;
-    // Under the shell's top bar, Back and the title.
-    let top = t.get_bar_height() + margin + touch + gap;
+    // Under the shell's top bar, which carries Back and the title.
+    let top = t.get_bar_height() + margin;
     let width = s.w as f32 / scale;
     if column {
         let tabs_x = margin + pages + gap;

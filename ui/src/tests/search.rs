@@ -84,9 +84,9 @@ fn the_search_lists_matches_from_every_page() {
     assert!(!s.ui.global::<crate::GridState>().get_search_shown());
 }
 
-// Without touch: back from the first tile the cursor is on the row of pages and, back once more, on the search
-// (up from the first row twice does the same), a press asks for the text, down goes to the pages and the first
-// tile; Cancel backs out one layer at a time: the cursor, the search, then the screen.
+// Without touch: back from the first tile the cursor is on the row of pages and goes no further (the search is
+// a button of the top bar, which the dial reaches from the first stop: params.rs `at_top`); the bar's Search asks
+// for the text and says what was searched for; a page key ends the search.
 #[test]
 fn the_search_by_the_cursor() {
     let mut s = Screen::new();
@@ -96,41 +96,29 @@ fn the_search_by_the_cursor() {
     let g = ui.global::<crate::GridState>();
     let mut p = open_with(&mut s, big_plugin(), &[], &text);
     let on_tile = || ui.global::<crate::GridState>().get_tiles().iter().position(|t| t.cursor);
+    let label = |p: &crate::params::Screen| p.bar_tools().into_iter().map(|t| t.label).collect::<Vec<_>>();
+    assert_eq!(label(&p), ["Search"]);
+    assert!(!p.at_top(), "no cursor yet");
     p.act(Action::Move { pane: None, by: 1 });
-    assert_eq!((on_tile(), g.get_search_cursor()), (Some(0), false));
+    assert_eq!(on_tile(), Some(0));
+    assert!(!p.at_top(), "a tile under the pages is not the first stop");
     p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, 0, false), "before the first tile: the pages, on the one shown");
+    assert_eq!((on_tile(), g.get_page_cursor()), (None, 0), "before the first tile: the pages, on the one shown");
+    assert!(p.at_top(), "the pages are the first stop: moving up leaves for the bar");
     p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, -1, true), "before the pages: the search");
-    assert_eq!(p.act(Action::Confirm(None)), Outcome::Prompt("Search parameters".into(), String::new()));
+    assert_eq!((on_tile(), g.get_page_cursor()), (None, 0), "nothing before the pages");
+    // The bar's button asks for the text.
+    assert_eq!(p.search_tap(), Outcome::Prompt("Search parameters".into(), String::new()));
     p.entered("res");
     assert_eq!(names(ui), ["Resonance"]);
-    assert!(g.get_search_cursor(), "the cursor stays on the search");
-    // Down to the pages and to the first tile, and up from the first row to the search again.
-    p.act(Action::Arrow { dx: 0, dy: 1 });
-    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, 0, false));
-    p.act(Action::Arrow { dx: 0, dy: 1 });
-    assert_eq!((on_tile(), g.get_search_cursor()), (Some(0), false));
-    p.act(Action::Arrow { dx: 0, dy: -1 });
-    p.act(Action::Arrow { dx: 0, dy: -1 });
-    assert_eq!((on_tile(), g.get_search_cursor()), (None, true));
-    assert_eq!(p.act(Action::Confirm(None)), Outcome::Prompt("Search parameters".into(), "res".into()), "the text now is the keyboard's start");
-    // Cancel: the field, the search, the screen.
-    assert_eq!(p.act(Action::Cancel(None)), Outcome::Stay);
-    assert!(!g.get_search_cursor() && g.get_search().as_str() == "res");
-    assert_eq!(p.act(Action::Cancel(None)), Outcome::Stay);
-    assert_eq!((g.get_search().as_str(), names(ui).len()), ("", 10), "the search ended");
-    assert_eq!(p.act(Action::Cancel(None)), Outcome::Back);
-    // Turning the page ends a search, too; the search is reached from a later page's first tile as well:
-    // back to the pages (on the second), along to the first, then the search.
+    assert_eq!(label(&p), ["Search: res"]);
+    // Back leaves the screen from anywhere; a dropdown that is open closes first.
+    assert_eq!(p.back(), Outcome::Back);
+    // Turning the page ends a search, too.
     p.entered("pan");
     p.act(Action::Page(1));
     assert_eq!((g.get_search().as_str(), g.get_page()), ("", 1));
-    p.act(Action::Move { pane: None, by: 1 });
-    for _ in 0..3 {
-        p.act(Action::Move { pane: None, by: -1 });
-    }
-    assert!(g.get_search_cursor(), "{:?}", names(ui));
+    assert_eq!(label(&p), ["Search"]);
 }
 
 // Pictures for a look by eye: the search button in the header, with a search and the cursor on it, at 1 and at the
@@ -164,10 +152,8 @@ fn the_search_by_touch() {
     let g = ui.global::<crate::GridState>();
     let mut p = open_with(&mut s, big_plugin(), &[], &text);
     assert_eq!(p.search_tap(), Outcome::Prompt("Search parameters".into(), String::new()));
-    assert!(g.get_search_cursor());
     p.entered("level");
     p.tap(1, -1);
-    assert!(!g.get_search_cursor());
     assert_eq!(g.get_search().as_str(), "level", "a tile touched leaves the search");
     assert_eq!(p.search_tap(), Outcome::Prompt("Search parameters".into(), "level".into()));
 }
@@ -230,11 +216,9 @@ fn the_search_on_the_shell_uses_the_keyboard() {
     assert_eq!(ui.get_screen(), 7);
     answer(&mut f, "params.list", big_plugin());
     assert!(ui.global::<crate::GridState>().get_search_shown());
-    // The search: the cursor up from the first row (the pages, then the search), a press, the keyboard is open over the page.
-    shell::act(Action::Move { pane: None, by: 1 });
-    shell::act(Action::Arrow { dx: 0, dy: -1 });
-    shell::act(Action::Arrow { dx: 0, dy: -1 });
-    shell::act(Action::Confirm(None));
+    // The search is the top bar's first action: the dial up out of the first row reaches the bar, which ends
+    // in the actions; a tap on the bar's Search opens the keyboard over the page.
+    ui.global::<crate::Bar>().invoke_action(0);
     assert!(ui.global::<crate::KeyboardState>().get_open());
     assert_eq!(ui.global::<crate::KeyboardState>().get_title().as_str(), "Search parameters");
     for c in ["c", "u", "t"] {
@@ -245,7 +229,7 @@ fn the_search_on_the_shell_uses_the_keyboard() {
     assert_eq!(ui.global::<crate::GridState>().get_search().as_str(), "cut");
     assert_eq!(ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect::<Vec<_>>(), ["Cutoff"]);
     // Again, and Escape closes it with nothing: the search is as it was.
-    shell::act(Action::Confirm(None));
+    ui.global::<crate::Bar>().invoke_action(0);
     assert!(ui.global::<crate::KeyboardState>().get_open());
     assert!(shell::key(&slint::SharedString::from(slint::platform::Key::Escape)));
     assert!(!ui.global::<crate::KeyboardState>().get_open());

@@ -113,8 +113,7 @@ How (a) works:
   the JUCE app are never played again in the shell. It tells the engine that lists are on screen
   (`controllers.view` `lists`) on connecting and when it hands the display over.
 - **The cursor** is apart from any selection: none until the first move, which shows it on the
-  first item shown; a 2 px `focus` border, as the JUCE lists draw it; moving opens nothing; Cancel drops it, and with none
-  goes back; it drops on a tap and when its screen goes; past the visible items the list turns a
+  first item shown; a 2 px `focus` border, as the JUCE lists draw it; moving opens nothing; Cancel is Back (below), not a step that drops it first; it drops on a tap and when its screen goes; past the visible items the list turns a
   page.
 - **Themes are the JUCE app's** (below): the same folders and the same choice.
 
@@ -162,6 +161,22 @@ holds only what shows before that); a key a theme lacks or cannot use is the def
 The resource bars fill with `accent`, then `warning` and `danger`; cursors are a `focus` border.
 Without a theme folder on disk (a development build) the themes this program was built with are
 used, with the built-in Inter font.
+
+## The top bar carries the chrome
+
+Every screen but Home has Back on the bar, and no screen draws a Back button or a title row of its own (a test reads
+the screens' .slint for one). The bar's left side is Home, Back and the title: the path of what is open (the
+Performance's name and scene in a field on Play, where a tap is Save As New; "Keys", "Keys › Insert effects › Chorus",
+"Parts › Mixer" below it), shortened from the left (`… › `), then its last part shrunk to 70% of the type, then cut. Then
+the screen's own actions (the parameter pages' Search, Routing's "+ Plugin", "Parts collapsed" and "Meters", the Mixer's
+strip and send pagers), then Undo, Redo, Save and the rest, then the recording mark, the tempo and the meters. A narrow bar
+folds all the actions to icons and then into one "More" before it cuts anything; Back and the recording mark stay.
+Without touch: Back is the bar's first cursor stop, and Cancel (Escape; a device's back button, `cancel` in its panel
+map, which the engine counts in `controllers`' `navigation`) is Back in one step from anywhere on a screen, whatever the
+screen's cursor or a value being changed is doing; a menu, a keyboard or a dropdown over the screen takes the Cancel
+first. Back goes one step up the path: out of a screen to the one it was opened from, up a level of the chain or the
+sound chooser, closing the Part's list of devices. Each screen has the old header row's height (a touch target and a gap)
+for its content.
 
 ## The top bar
 

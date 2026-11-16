@@ -53,13 +53,13 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     };
     ui.global::<crate::PlayState>().invoke_part_tapped(0);
     assert_eq!(ui.get_screen(), 4);
-    // The last view of the Part list: Sound, Insert effects, Name, Remove part.
+    // The last view of the Part list: Name, Remove part (twelve rows a view; Sound and Insert effects end the one before).
     shell::act(Action::End(1));
     shell::act(Action::End(1));
     shell::act(Action::Move { pane: None, by: -2 });
-    assert_eq!(rows(&ui)[1].0, "Insert effects");
+    assert_eq!(rows(&ui)[11].0, "Insert effects");
     shell::act(Action::Confirm(None));
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (5, "Insert effects"));
+    assert_eq!((ui.get_screen(), title(&ui)), (5, "Keys › Insert effects".to_string()));
     assert_eq!(rows(&ui)[1].0, "1. Chorus");
     // Chorus, then its Parameters.
     shell::act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor
@@ -70,7 +70,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     assert_eq!(rows(&ui)[0].0, "Parameters");
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None));
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (7, "Parameters"));
+    assert_eq!((ui.get_screen(), title(&ui)), (7, "Keys › Insert effects › Chorus".to_string()));
     let r = next(&mut f, "params.list");
     assert_eq!(r["params"], json!({"node": 2}));
     f.reply(&r, json!({"result": super::pages::param_list()}));
@@ -98,7 +98,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     shell::act(Action::Move { pane: None, by: -3 });
     assert!(rows(&ui).iter().any(|r| r.0 == "Sound"));
     shell::act(Action::Confirm(None));
-    assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (6, "Sound"));
+    assert_eq!((ui.get_screen(), title(&ui)), (6, "Keys › Sound".to_string()));
     let r = next(&mut f, "library.query");
     assert_eq!(r["params"], json!({"kind": "sound", "limit": 1000}));
     f.reply(&r, json!({"result": {"items": [{"id": "s1", "name": "Warm Rhodes"}], "total": 1}}));

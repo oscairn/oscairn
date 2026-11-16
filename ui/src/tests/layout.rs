@@ -86,14 +86,22 @@ fn only_one_cursor_shows_the_bars_or_the_screens() {
     f.screen.frame();
     let (top, below) = (focus_pixels(&f.screen, 0, 48), focus_pixels(&f.screen, 48, f.screen.h));
     assert!(top > 0 && below == 0, "the bar's alone: {top} in the bar, {below} below");
-    // The dial up out of the list's first cell is the bar's too, and Cancel gives it back.
-    shell::act(Action::Cancel(None));
+    // The dial past the bar's last stop gives the cursor back to the list.
+    for _ in 0..12 {
+        if ui.global::<crate::Theme>().get_bar_cursor() {
+            shell::act(Action::Move { pane: None, by: 1 });
+        }
+    }
+    f.screen.frame();
+    assert!(focus_pixels(&f.screen, 48, f.screen.h) > 0 && focus_pixels(&f.screen, 0, 48) == 0, "given back");
+    // The dial up out of the list's first cell is the bar's too, and Cancel (Back, in one step) leaves with it.
     shell::act(Action::Move { pane: None, by: -1 });
     f.screen.frame();
     assert!(focus_pixels(&f.screen, 0, 48) > 0 && focus_pixels(&f.screen, 48, f.screen.h) == 0);
     shell::act(Action::Cancel(None));
     f.screen.frame();
-    assert!(focus_pixels(&f.screen, 48, f.screen.h) > 0 && focus_pixels(&f.screen, 0, 48) == 0, "given back");
+    assert_eq!(ui.get_screen(), 3, "Back from the Parts list: Play");
+    assert!(focus_pixels(&f.screen, 0, 48) == 0, "the bar's cursor went with it");
 }
 
 // Play, the Part screen, the chain, the sound chooser and the Parts list count the rows their room holds again

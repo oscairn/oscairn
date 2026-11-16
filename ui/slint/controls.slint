@@ -61,7 +61,6 @@ export global ControlsState {
     in-out property <length> slack: 0px;
     in-out property <int> columns: 1; // scene columns the table shows
     callback resized();
-    callback back();
     callback level(int, float); // a control's row, the fader's place
     callback range(int, bool, float); // a target's row, the end (true) or the start, the slider's place
     callback held(int, int, bool); // a row, its cell, a finger on the slider or off it
@@ -393,14 +392,13 @@ component TargetRow inherits Section {
 export component Controls inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> header: Theme.touch;
     property <length> footer: Theme.small + 2 * Theme.pad-tight;
     property <int> tool-count: ControlsState.tools.length;
     property <int> across: max(1, min(tool-count, floor((self.width - 2 * Theme.margin + Theme.gap) / (Theme.button-width + Theme.gap))));
     property <int> lines: tool-count == 0 ? 0 : ceil(tool-count / across);
     property <length> tool-width: (self.width - 2 * Theme.margin - (across - 1) * Theme.gap) / across;
     property <length> tools-height: lines * Theme.touch + max(0, lines - 1) * Theme.gap;
-    property <length> list-y: Theme.margin + header + Theme.gap;
+    property <length> list-y: Theme.margin;
     property <length> tools-y: self.height - Theme.margin - footer - Theme.gap - tools-height;
     property <length> list-height: max(0px, tools-y - Theme.gap - list-y);
     property <length> list-width: self.width - 2 * Theme.margin;
@@ -427,26 +425,6 @@ export component Controls inherits Rectangle {
         ControlsState.columns = fit-columns;
     }
 
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { ControlsState.back(); }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
-        height: root.header;
-        text: "Controls";
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
     if !ControlsState.table: VerticalLayout {
         x: Theme.margin;
         y: root.list-y;

@@ -125,6 +125,52 @@ pub enum Do {
     Edit,
     /// The Parts list's way back to Play.
     Play,
+    /// The screen's own action `n` (`Tool`): Search, Routing's three buttons, the Mixer's pagers.
+    Tool(usize),
+}
+
+/// An action of the screen shown that is not Undo, Redo or Save: the top bar carries it, first among the actions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tool {
+    pub label: String,
+    pub enabled: bool,
+    /// A toggle that is on now.
+    pub on: bool,
+}
+
+impl Tool {
+    pub fn new(label: impl Into<String>) -> Tool {
+        Tool { label: label.into(), enabled: true, on: false }
+    }
+}
+
+/// One action as the bar lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Act {
+    pub what: Do,
+    pub label: String,
+    pub enabled: bool,
+    pub on: bool,
+}
+
+/// The title the bar shows for a path of what is open, as the options it chooses from, longest first: the whole
+/// path, then each with one more leading part dropped and "… › " in its place (at most four).
+pub fn path_options(parts: &[String]) -> Vec<String> {
+    let parts: Vec<&str> = parts.iter().map(String::as_str).filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return vec![String::new()];
+    }
+    (0..parts.len().min(4))
+        .map(|k| {
+            // The last option always keeps the last part, whatever the depth.
+            let k = if k == 3 { parts.len() - 1 } else { k };
+            if k == 0 {
+                parts.join(" › ")
+            } else {
+                format!("… › {}", parts[k..].join(" › "))
+            }
+        })
+        .collect()
 }
 
 /// What undo and redo would now do, by the edit's name (edit.history; empty: nothing).

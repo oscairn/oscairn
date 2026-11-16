@@ -28,7 +28,7 @@ use crate::nav::Action;
 use crate::scan::Plugin;
 use crate::setlist::update;
 use crate::wires::{self, BoxKind, Graph, Layout, Metrics, Pt, WireState, GRAPH_INPUT, GRAPH_OUTPUT, NOTES_PORT};
-use crate::{PanelCellData, PanelRowData, RoutingBox, RoutingLink, RoutingState, RoutingToolData, RoutingWire, Shell, Theme};
+use crate::{PanelCellData, PanelRowData, RoutingBox, RoutingLink, RoutingState, RoutingWire, Shell, Theme};
 use serde_json::{json, Value};
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -119,7 +119,6 @@ enum Pick {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Stop {
-    Tool(usize),
     /// The nth of the order.
     Canvas(usize),
     /// A cell of a row of the whole panel.
@@ -211,13 +210,6 @@ struct PLink {
     width: f32,
     alpha: f32,
     dot: (f32, f32),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct PTool {
-    label: String,
-    on: bool,
-    cursor: bool,
 }
 
 /// Changes `model` to `now`, a row set only where it differs from `last`.
@@ -444,7 +436,6 @@ pub struct Screen {
     wires: Rc<VecModel<RoutingWire>>,
     links: Rc<VecModel<RoutingLink>>,
     panel: Rc<VecModel<PanelRowData>>,
-    tools: Rc<VecModel<RoutingToolData>>,
     last_frames: Vec<PBox>,
     last_boxes: Vec<PBox>,
     last_controls: Vec<PBox>,
@@ -458,7 +449,6 @@ pub struct Screen {
     box_ids: Vec<usize>,
     /// Lane wirings waiting for the control that was made for them.
     pending: HashMap<u64, LaneOp>,
-    last_tools: Vec<PTool>,
     /// Requests for the shell to send.
     pub out: Vec<Out>,
 }
@@ -502,7 +492,6 @@ impl Screen {
             wires: Rc::new(VecModel::default()),
             links: Rc::new(VecModel::default()),
             panel: Rc::new(VecModel::default()),
-            tools: Rc::new(VecModel::default()),
             last_frames: vec![],
             last_boxes: vec![],
             last_controls: vec![],
@@ -514,7 +503,6 @@ impl Screen {
             frame_ids: vec![],
             box_ids: vec![],
             pending: HashMap::new(),
-            last_tools: vec![],
             out: vec![],
         };
         let state = window.global::<RoutingState>();
@@ -524,7 +512,6 @@ impl Screen {
         state.set_wires(ModelRc::from(s.wires.clone()));
         state.set_links(ModelRc::from(s.links.clone()));
         state.set_panel(ModelRc::from(s.panel.clone()));
-        state.set_tools(ModelRc::from(s.tools.clone()));
         s
     }
 
@@ -947,13 +934,6 @@ impl Screen {
             self.last_panel = compare;
             self.last_editing = editing;
         }
-        let tools = self.tool_list();
-        let tool_at = match self.stop {
-            Some(Stop::Tool(t)) => Some(t),
-            _ => None,
-        };
-        let tools_now: Vec<PTool> = tools.iter().enumerate().map(|(i, (label, on))| PTool { label: label.to_string(), on: *on, cursor: tool_at == Some(i) }).collect();
-        sync(&self.tools, &mut self.last_tools, tools_now, |t| RoutingToolData { label: t.label.as_str().into(), on: t.on, cursor: t.cursor });
         let state = ui.global::<RoutingState>();
         state.set_scale(self.scale as f32);
         state.set_panel_need(rows.len() as i32);
@@ -966,8 +946,9 @@ impl Screen {
         state.set_view(if rows.len() > per { format!("Panel {}–{} of {}", self.panel_first + 1, end, rows.len()) } else { String::new() }.into());
     }
 
-    fn tool_list(&self) -> Vec<(&'static str, bool)> {
-        vec![("+ Plugin", false), ("Parts collapsed", self.collapsed), ("Meters", self.meters_on)]
+    /// The screen's own actions, which the top bar carries: add a plugin, the parts collapsed, the meters.
+    pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
+        vec![crate::topbar::Tool::new("+ Plugin"), crate::topbar::Tool { on: self.collapsed, ..crate::topbar::Tool::new("Parts collapsed") }, crate::topbar::Tool { on: self.meters_on, ..crate::topbar::Tool::new("Meters") }]
     }
 
     // The panel.
@@ -1458,7 +1439,6 @@ impl Screen {
     /// What a press on `stop` does.
     fn press(&mut self, stop: Stop) -> Outcome {
         match stop {
-            Stop::Tool(t) => self.press_tool(t),
             Stop::Canvas(i) => {
                 if let Some(p) = self.order.get(i).copied() {
                     return self.press_pick(p);
@@ -1476,8 +1456,7 @@ impl Screen {
     // The cursor.
 
     fn stops(&self) -> Vec<Stop> {
-        let mut v: Vec<Stop> = (0..self.tool_list().len()).map(Stop::Tool).collect();
-        v.extend((0..self.order.len()).map(Stop::Canvas));
+        let mut v: Vec<Stop> = (0..self.order.len()).map(Stop::Canvas).collect();
         v.extend(self.panel_stops().into_iter().map(|(r, c)| Stop::Panel(r, c)));
         v
     }
@@ -1542,7 +1521,7 @@ impl Screen {
 
     /// The cursor is on the first stop: moving up leaves for the top bar's actions.
     pub fn at_top(&self) -> bool {
-        self.stop == Some(Stop::Tool(0)) && !self.editing
+        self.stop == self.stops().first().copied() && !self.editing
     }
 
     /// A navigation action.

@@ -71,9 +71,6 @@ fn cursor(ui: &Shell) -> Option<String> {
     if let Some(b) = s.get_controls().iter().find(|b| b.cursor) {
         return Some(format!("control {}", b.name));
     }
-    if let Some(i) = s.get_tools().iter().position(|t| t.cursor) {
-        return Some(format!("tool {i}"));
-    }
     for (r, row) in s.get_panel().iter().enumerate() {
         if let Some(c) = row.cells.iter().position(|c| c.cursor) {
             return Some(format!("panel {r}.{c}"));
@@ -128,7 +125,7 @@ fn menu_of(r: &mut Routing, s: &Screen) -> crate::menu::Menu {
 #[test]
 fn the_page_draws_boxes_wires_chips_and_control_lines() {
     let mut s = Screen::sized(1280, 720);
-    let _r = routing_screen(&mut s, &graph());
+    let r = routing_screen(&mut s, &graph());
     let state = s.ui.global::<RoutingState>();
     assert_eq!(boxes(&s.ui), ["Keys & MIDI", "Line in", "Keys", "Bass", "Reverb", "Master FX", "LFO", "Main out"]);
     let keys = state.get_boxes().iter().find(|b| b.name == "Keys").unwrap();
@@ -144,7 +141,7 @@ fn the_page_draws_boxes_wires_chips_and_control_lines() {
     assert!(w.commands.starts_with("M "));
     assert!(w.alpha > 0.5 && w.width > 0.);
     assert!(state.get_scale() > 0.3 && state.get_scale() <= 1.);
-    assert_eq!(state.get_tools().iter().map(|t| (t.label.to_string(), t.on)).collect::<Vec<_>>(), [("+ Plugin".into(), false), ("Parts collapsed".into(), true), ("Meters".into(), false)]);
+    assert_eq!(r.bar_tools().iter().map(|t| (t.label.to_string(), t.on)).collect::<Vec<_>>(), [("+ Plugin".into(), false), ("Parts collapsed".into(), true), ("Meters".into(), false)]);
     assert_eq!(panel(&s.ui), [("Select a plugin to wire it, or to set the level of each source into it.".to_string(), vec![])]);
 }
 
@@ -227,9 +224,9 @@ fn the_cursor_moves_over_boxes_and_the_panel() {
     assert_eq!(r.act(Action::Cancel(None)), Outcome::Stay);
     assert_eq!(cursor(&ui), None);
     assert_eq!(r.act(Action::Cancel(None)), Outcome::Back);
-    // Up from the first button: the top bar's.
+    // Up from the first place: the top bar's (its buttons are the bar's, not stops of the page).
     r.act(Action::End(-1));
-    assert_eq!(cursor(&ui).as_deref(), Some("tool 0"));
+    assert_eq!(cursor(&ui).as_deref(), Some("Keys & MIDI"));
     assert!(r.at_top());
 }
 
@@ -410,7 +407,7 @@ fn parts_collapse_and_expand_and_the_choice_is_kept() {
     assert!(state.get_boxes().iter().all(|b| !b.part));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "expanded\n");
     assert!(!crate::settings::routing_collapsed());
-    assert!(!state.get_tools().row_data(1).unwrap().on);
+    assert!(!r.bar_tools()[1].on);
     r.tap_tool(1);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "collapsed\n");
     assert!(crate::settings::routing_collapsed());
@@ -497,7 +494,7 @@ fn wires_take_the_color_of_their_level_with_meters_on() {
     let state = s.ui.global::<RoutingState>();
     let before: Vec<_> = state.get_wires().iter().map(|w| (w.color, w.alpha)).collect();
     r.tap_tool(2);
-    assert!(r.metering() && state.get_tools().row_data(2).unwrap().on);
+    assert!(r.metering() && r.bar_tools()[2].on);
     r.meters(&json!({"meters": [{"wire": 5, "peak": 0.9, "channels": [0.9]}, {"wire": 8, "peak": 0.3}, {"wire": 6, "peak": 0.05}, {"wire": 1, "peak": 0.9}, {"wire": 3, "peak": 0.0004}]}));
     let after: Vec<_> = state.get_wires().iter().map(|w| (w.color, w.alpha)).collect();
     let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
@@ -629,8 +626,7 @@ fn the_page_draws_in_every_theme_at_several_sizes() {
                 r.shown();
             }
             s.ui.global::<crate::Bar>().set_performance("Grand Piano".into());
-            s.ui.global::<crate::Bar>().set_where("Routing".into());
-            s.ui.global::<crate::Bar>().set_home_button(true);
+            set_title(&s.ui, &["Parts", "Routing"]);
             let ui = s.ui.clone_strong();
             r.tap(1, at(&ui, "Master FX"));
             r.tap_tool(2);
@@ -706,8 +702,8 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     let tools = ui.global::<PartsState>().get_tools();
     assert_eq!((tools.row_data(2).unwrap().label.as_str(), tools.row_data(2).unwrap().enabled), ("Routing", true), "the button is on");
     ui.global::<PartsState>().invoke_tool(2);
-    assert_eq!((ui.get_screen(), ui.global::<crate::Bar>().get_where().as_str()), (12, "Routing"));
-    assert_eq!(ui.global::<crate::Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["Undo Volume of Keys", "Redo", "Save", "Play"]);
+    assert_eq!((ui.get_screen(), title(&ui)), (12, "Parts › Routing".to_string()));
+    assert_eq!(ui.global::<crate::Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["+ Plugin", "Parts collapsed", "Meters", "Undo Volume of Keys", "Redo", "Save", "Play"], "the screen's own actions first");
     // The graph is asked and drawn; nothing is chosen.
     want(&mut f, "graph.get", &none, &shared);
     f.screen.frame();
@@ -725,7 +721,7 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     let r = want(&mut f, "graph.commit", &none, &shared);
     f.reply(&r, json!({"result": {"accepted": true}}));
     // Meters on: the wires' peaks are asked on a timer, off: no more.
-    ui.global::<RoutingState>().invoke_tool(2);
+    ui.global::<crate::Bar>().invoke_action(2); // Meters, the top bar's
     f.screen.frame();
     std::thread::sleep(std::time::Duration::from_millis(120));
     f.screen.frame();
@@ -733,7 +729,7 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     f.reply(&r, json!({"result": {"meters": [{"wire": 6, "peak": 0.9}]}}));
     let danger = ui.global::<crate::Theme>().get_danger();
     assert!(ui.global::<RoutingState>().get_wires().iter().any(|w| w.color == danger), "the wire that carries 0.9 is red");
-    ui.global::<RoutingState>().invoke_tool(2);
+    ui.global::<crate::Bar>().invoke_action(2); // Meters, the top bar's
     // Cancel with the cursor on nothing goes back to the list.
     crate::shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 9);
@@ -747,18 +743,17 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     ui.global::<RoutingState>().invoke_tapped(1, at(&ui, "Keys"));
     assert_eq!(panel(&ui)[0].1, ["Open part", "Expand"]);
     ui.global::<RoutingState>().invoke_panel_press(0, 0);
-    assert_eq!((ui.get_screen(), ui.global::<crate::Bar>().get_where().as_str()), (4, "Part"));
+    assert_eq!((ui.get_screen(), title(&ui)), (4, "Keys".to_string()));
     crate::shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 12, "back to Routing, not the list");
     // A control's pill goes to the Controls page; its Back returns to the list.
     ui.global::<RoutingState>().invoke_tapped(2, 0);
     assert_eq!(ui.get_screen(), 11);
-    // The bar's Play from Routing goes to Play.
-    ui.global::<PartsState>().invoke_back();
-    ui.global::<crate::ControlsState>().invoke_back();
+    // The bar's Back from Controls goes to the list; the bar's Play from Routing goes to Play.
+    ui.global::<crate::Bar>().invoke_back_tapped();
     assert_eq!(ui.get_screen(), 9);
     ui.global::<PartsState>().invoke_tool(2);
-    ui.global::<crate::Bar>().invoke_action(3);
+    ui.global::<crate::Bar>().invoke_action(6); // Play, after the page's own three
     assert_eq!(ui.get_screen(), 3, "Play");
     f.screen.frame();
 }

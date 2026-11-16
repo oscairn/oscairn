@@ -34,6 +34,21 @@ impl Platform for Headless {
     }
 }
 
+/// What the top bar's title says in full: the path of what is open, "Part › Insert effects".
+pub fn title(ui: &Shell) -> String {
+    ui.global::<Bar>().get_path().row_data(0).map(|s| s.to_string()).unwrap_or_default()
+}
+
+/// Sets the bar's title (and Back) the way the shell does, for a picture of a screen made without it.
+pub fn set_title(ui: &Shell, parts: &[&str]) {
+    let parts: Vec<String> = parts.iter().map(|p| p.to_string()).collect();
+    let options: Vec<slint::SharedString> = crate::topbar::path_options(&parts).into_iter().map(Into::into).collect();
+    let bar = ui.global::<Bar>();
+    bar.set_path(slint::ModelRc::new(slint::VecModel::from(options)));
+    bar.set_back(true);
+    bar.set_home_button(true);
+}
+
 /// A rectangle in the window's pixels: x, y, width, height.
 pub type Rect = (i32, i32, i32, i32);
 
@@ -133,6 +148,14 @@ pub fn at_fantom_scale(s: &mut Screen, name: &str, refresh: impl FnOnce()) {
 }
 
 impl Screen {
+    /// The window `w` x `h` physical pixels (a device's screen, a desktop window).
+    pub fn resize(&mut self, w: usize, h: usize) {
+        self.w = w;
+        self.h = h;
+        self.pixels = vec![Rgb8Pixel::default(); w * h];
+        self.window.set_size(PhysicalSize::new(w as u32, h as u32));
+    }
+
     pub fn set_scale(&mut self, scale: f32) {
         self.ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
         self.window.set_size(PhysicalSize::new(self.w as u32, self.h as u32));
@@ -411,7 +434,7 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!(cursor(&f.screen), Some(3));
     navigation(&mut f, json!({"move": 11, "confirm": 6}));
     let s = &mut f.screen;
-    assert_eq!((s.ui.get_screen(), s.ui.global::<Bar>().get_where().as_str(), s.ui.global::<Bar>().get_home_button()), (1, "Setlist", true));
+    assert_eq!((s.ui.get_screen(), title(&s.ui).as_str(), s.ui.global::<Bar>().get_home_button(), s.ui.global::<Bar>().get_back()), (1, "Setlist", true, true));
     assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
     assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
     s.ui.global::<HomeState>().invoke_tapped(4); // Settings: a JUCE screen
@@ -593,10 +616,8 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.navigation(nav(2, 2, pv, 1, 0));
     let names = f.screen.ui.global::<SetlistState>().get_setlists().iter().collect::<Vec<_>>();
     assert_eq!((names[0].cursor, names[0].shown), (true, true), "shown on the first setlist by the first move");
-    // Cancel: the cursors go; Cancel again: Home.
+    // Cancel is Back in one step, with the cursors where they are: Home.
     f.navigation(nav(2, 2, pv, 1, 1));
-    assert_eq!((cursor(&f), f.screen.ui.get_screen()), (None, 1));
-    f.navigation(nav(2, 2, pv, 1, 2));
     assert_eq!(f.screen.ui.get_screen(), 0);
 }
 
@@ -927,7 +948,7 @@ fn play_by_panes_touch_and_meters() {
     let play = ui.global::<crate::PlayState>();
     let strips = |f: &Fixture| f.screen.ui.global::<crate::PlayState>().get_strips().iter().collect::<Vec<_>>();
     let scenes = |f: &Fixture| f.screen.ui.global::<crate::PlayState>().get_scenes().iter().collect::<Vec<_>>();
-    assert_eq!(f.screen.ui.global::<Bar>().get_where().as_str(), "Play");
+    assert_eq!(title(&f.screen.ui), "Grand  ·  Chorus");
     let names: Vec<_> = strips(&f).iter().map(|s| (s.name.to_string(), s.detail.to_string())).collect();
     assert_eq!(names, [("Keys".into(), "Rhodes · Any device · C2–C7".into()), ("Bass".into(), "Bass · Any device · C-1–B3".into()), ("Reverb".into(), "Bus · Hall".into())]);
     assert!(play.get_has_master() && (play.get_master().fraction - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "the master's level 1 of 0..2");
@@ -1035,9 +1056,7 @@ fn play_by_panes_touch_and_meters() {
     assert!(repainted.2 < 200, "a meter repaints its strip, not the screen: {repainted:?}");
     f.screen.save("play-meters");
     png(&f.screen, "play-meters");
-    // Cancel: the cursors go; Cancel again: back to Home, the subscription ended, no more meters.
-    nav(&mut f, "cancel", 1);
-    assert_eq!((strips(&f).iter().any(|s| s.cursor), f.screen.ui.get_screen()), (false, 3));
+    // Cancel is Back in one step, the cursors where they are: Home, the subscription ended, no more meters.
     nav(&mut f, "cancel", 1);
     assert_eq!(f.screen.ui.get_screen(), 0);
     let r = next_edit(&mut f);
@@ -1127,6 +1146,7 @@ mod wires;
 mod routing;
 mod controls;
 mod layout;
+mod chrome;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the
 // optional two, the metrics, the eight style choices, the wires, the splash's colors, and what is

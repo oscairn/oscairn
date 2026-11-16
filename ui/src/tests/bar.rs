@@ -70,9 +70,11 @@ fn undo_redo_and_save_on_the_top_bar() {
     assert_eq!(labels(&f), [("Undo".into(), false, false), ("Redo Volume of Keys".into(), true, false), ("Save".into(), true, false), ("Scene".into(), true, false), ("Learn".into(), true, false), ("Edit".into(), true, false)]);
     // A disabled one does nothing.
     ui.global::<Bar>().invoke_action(0);
-    // The third pane enters the bar at the name (Save As New); the cursor then goes along the actions.
+    // The third pane enters the bar at Back; the cursor then goes to the name (Save As New) and along the actions.
     shell::act(Action::Move { pane: Some(2), by: 1 });
-    assert!(ui.global::<Bar>().get_pill_cursor());
+    assert!(ui.global::<Bar>().get_back_cursor() && !ui.global::<Bar>().get_pill_cursor());
+    shell::act(Action::Move { pane: None, by: 1 });
+    assert!(ui.global::<Bar>().get_pill_cursor() && !ui.global::<Bar>().get_back_cursor());
     shell::act(Action::Move { pane: None, by: 1 });
     assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [true, false, false, false, false, false]);
     shell::act(Action::Move { pane: None, by: 1 });
@@ -88,22 +90,20 @@ fn undo_redo_and_save_on_the_top_bar() {
     assert_eq!(r["params"], json!({}));
     f.reply(&r, json!({"result": {"id": "p1"}}));
     assert_eq!(ui.global::<Bar>().get_notice().as_str(), "Performance saved.");
-    // Past the last stop the cursor goes back to the screen; Cancel gives it back at once.
+    // Past the last stop the cursor goes back to the screen.
     shell::act(Action::Move { pane: None, by: 1 }); // Scene
     shell::act(Action::Move { pane: None, by: 1 }); // Learn
     shell::act(Action::Move { pane: None, by: 1 }); // Edit
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(labels(&f).iter().all(|l| !l.2));
-    shell::act(Action::Move { pane: Some(2), by: 0 });
-    shell::act(Action::Cancel(None));
-    assert!(labels(&f).iter().all(|l| !l.2) && !ui.global::<Bar>().get_pill_cursor());
-    assert_eq!(ui.get_screen(), 3, "Cancel gave the cursor back, it did not leave Play");
     // The dial moving up out of the first scene reaches the last stop; Tab reaches the first and gives it back.
     shell::act(Action::Move { pane: Some(0), by: 1 });
     shell::act(Action::Move { pane: None, by: -1 });
     assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [false, false, false, false, false, true]);
     assert!(shell::key("\t") && labels(&f).iter().all(|l| !l.2));
-    assert!(shell::key("\t") && ui.global::<Bar>().get_pill_cursor());
+    assert!(shell::key("\t") && ui.global::<Bar>().get_back_cursor(), "Tab enters at the first stop, Back");
+    shell::act(Action::Move { pane: None, by: 1 });
+    assert!(ui.global::<Bar>().get_pill_cursor());
     // The name: Save As New asks for the name on the keyboard, which starts as the Performance's.
     shell::act(Action::Confirm(None));
     assert!(ui.global::<crate::KeyboardState>().get_open());
@@ -116,6 +116,12 @@ fn undo_redo_and_save_on_the_top_bar() {
     f.screen.frame();
     f.screen.save("bar-notice");
     png(&f.screen, "bar-notice");
+    // Cancel is Back in one step, with the cursor on the bar as anywhere: Play goes back to Home.
+    shell::act(Action::Move { pane: None, by: -1 }); // from the name to Back
+    assert!(ui.global::<Bar>().get_back_cursor());
+    shell::act(Action::Cancel(None));
+    assert_eq!(ui.get_screen(), 0, "Cancel with the cursor on the bar left Play");
+    assert!(!ui.global::<Bar>().get_back_cursor() && !ui.global::<crate::Theme>().get_bar_cursor());
 }
 
 // A Performance not in the library has no id: Save asks the name first, a blank name keeps its own, Cancel saves nothing.
@@ -144,7 +150,7 @@ fn the_bar_draws_in_every_theme_and_at_a_narrow_width() {
     for (w, h) in [(1280, 720), (800, 480)] {
         let mut s = Screen::sized(w, h);
         let bar = s.ui.global::<Bar>();
-        let action = |label: &str, enabled: bool, cursor: bool| BarAction { label: label.into(), enabled, cursor, icon: 0 };
+        let action = |label: &str, enabled: bool, cursor: bool| BarAction { label: label.into(), enabled, cursor, icon: 0, on: false };
         bar.set_actions(slint::ModelRc::new(slint::VecModel::from(vec![action("Undo Volume of Keys", true, false), action("Redo", false, false), action("Save", true, true)])));
         bar.set_performance("Grand Piano with a rather long name".into());
         bar.set_scene("Chorus".into());
@@ -157,7 +163,9 @@ fn the_bar_draws_in_every_theme_and_at_a_narrow_width() {
         bar.set_recording_time("12:07".into());
         bar.set_recording_behind(true);
         bar.set_pill_cursor(true);
-        bar.set_where("Play".into());
+        bar.set_path(slint::ModelRc::new(slint::VecModel::from(vec![slint::SharedString::from("Grand Piano with a rather long name  ·  Chorus")])));
+        bar.set_title_field(true);
+        bar.set_back(true);
         bar.set_home_button(true);
         s.ui.set_screen(3);
         for t in all_themes() {
@@ -189,7 +197,7 @@ fn a_narrow_bar_folds_its_actions_before_it_cuts_anything() {
             let logical = w as f32 / scale;
             let ui = s.ui.clone_strong();
             let bar = ui.global::<Bar>();
-            let action = |label: &str, enabled: bool, icon: i32| BarAction { label: label.into(), enabled, cursor: false, icon };
+            let action = |label: &str, enabled: bool, icon: i32| BarAction { label: label.into(), enabled, cursor: false, icon, on: false };
             let list = [action("Undo Volume of Keys", true, 1), action("Redo", false, 2), action("Save", true, 0), action("Scene", true, 0), action("Learn", true, 0), action("Edit", true, 0)];
             bar.set_actions(slint::ModelRc::new(slint::VecModel::from(list.to_vec())));
             bar.set_performance("Grand Piano with a rather long name".into());
@@ -202,7 +210,9 @@ fn a_narrow_bar_folds_its_actions_before_it_cuts_anything() {
             bar.set_recording(true);
             bar.set_recording_time("12:07".into());
             bar.set_recording_behind(behind);
-            bar.set_where("Play".into());
+            bar.set_path(slint::ModelRc::new(slint::VecModel::from(vec![slint::SharedString::from("Grand Piano with a rather long name  ·  Chorus")])));
+        bar.set_title_field(true);
+        bar.set_back(true);
             bar.set_home_button(true);
             s.ui.set_screen(3);
             let mut modes = vec![];
@@ -227,7 +237,8 @@ fn a_narrow_bar_folds_its_actions_before_it_cuts_anything() {
             // In the dark theme: what the width gives.
             let (actions, meters) = modes[0];
             match logical {
-                x if x >= 1200. => assert_eq!((actions, meters), (0, 0), "{w}x{h}@{scale}: room for everything"),
+                // Back takes its place on the bar: with a slow disk's words up as well, Undo and Redo are icons at 1280.
+                x if x >= 1200. => assert!(meters == 0 && actions <= if behind { 1 } else { 0 }, "{w}x{h}@{scale}: room for everything, or icons for Undo and Redo with a slow disk's words up: {actions} {meters}"),
                 x if x < 700. => assert_eq!(actions, 2, "{w}x{h}@{scale}: folded into More"),
                 _ => assert!(actions >= 1, "{w}x{h}@{scale}: icons or More"),
             }
@@ -251,8 +262,10 @@ fn more_opens_a_menu_of_the_actions_by_the_dial_and_by_touch() {
     let ui = f.screen.ui.clone_strong();
     assert!(ui.global::<Bar>().get_more(), "folded at 640");
     f.screen.frame();
-    // The stops are the name and More: the third pane enters at the name, the dial goes on to More.
+    // The stops are Back, the name and More: the third pane enters at Back, the dial goes on to More.
     shell::act(Action::Move { pane: Some(2), by: 1 });
+    assert!(ui.global::<Bar>().get_back_cursor());
+    shell::act(Action::Move { pane: None, by: 1 });
     assert!(ui.global::<Bar>().get_pill_cursor());
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(ui.global::<Bar>().get_more_cursor(), "the cursor is on More");

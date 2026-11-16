@@ -1127,15 +1127,15 @@ fn routing(r: &mut Real) {
     let ui = r.screen.ui.clone_strong();
     let rt = ui.global::<crate::RoutingState>();
     let boxes = || ui.global::<crate::RoutingState>().get_boxes().iter().map(|b| b.name.to_string()).collect::<Vec<_>>();
-    eprintln!("   frames {:?}\n   boxes {:?}\n   wires {}\n   tools {:?}", rt.get_frames().iter().map(|b| b.name.to_string()).collect::<Vec<_>>(), boxes(), rt.get_wires().iter().count(), rt.get_tools().iter().map(|t| t.label.to_string()).collect::<Vec<_>>());
+    eprintln!("   frames {:?}\n   boxes {:?}\n   wires {}\n   tools {:?}", rt.get_frames().iter().map(|b| b.name.to_string()).collect::<Vec<_>>(), boxes(), rt.get_wires().iter().count(), ui.global::<crate::Bar>().get_actions().iter().map(|t| t.label.to_string()).collect::<Vec<_>>());
     r.png("A0-routing");
     r.sent("Routing open");
     let panel = |ui: &Shell| ui.global::<crate::RoutingState>().get_panel().iter().map(|p| format!("{}:{} [{}]", p.kind, p.text, p.cells.iter().map(|c| c.label.to_string()).collect::<Vec<_>>().join("|"))).collect::<Vec<_>>();
     // Expand the parts, so their plugins are boxes.
-    let tools: Vec<String> = rt.get_tools().iter().map(|t| t.label.to_string()).collect();
+    let tools: Vec<String> = ui.global::<crate::Bar>().get_actions().iter().map(|t| t.label.to_string()).collect();
     // The choice is kept (routing-view.txt): switched only when the parts are collapsed now.
     if let Some(i) = tools.iter().position(|t| t.contains("collapsed")).filter(|_| !boxes().iter().any(|b| b == "delay")) {
-        rt.invoke_tool(i as i32);
+        ui.global::<crate::Bar>().invoke_action(i as i32); // the top bar's
         r.settle();
         eprintln!("   boxes after expanding {:?}", boxes());
     }
@@ -1177,15 +1177,15 @@ fn routing(r: &mut Real) {
     } else {
         r.note(format!("Routing: no delay box among {:?}", boxes()));
     }
-    let tools: Vec<String> = rt.get_tools().iter().map(|t| t.label.to_string()).collect();
+    let tools: Vec<String> = ui.global::<crate::Bar>().get_actions().iter().map(|t| t.label.to_string()).collect();
     if let Some(i) = tools.iter().position(|t| t.contains("Meters")) {
         r.step("Routing: Meters on");
-        rt.invoke_tool(i as i32);
+        ui.global::<crate::Bar>().invoke_action(i as i32); // the top bar's
         r.run(600);
         let sent = r.since(r.mark);
         r.check(sent.iter().any(|s| s.0 == "wires.meters"), || "Routing Meters: wires.meters never asked".into());
         r.sent("Meters");
-        rt.invoke_tool(i as i32);
+        ui.global::<crate::Bar>().invoke_action(i as i32); // the top bar's
         r.settle();
     }
 }
@@ -1420,7 +1420,7 @@ fn params_page(r: &mut Real, node: u64, name: &str) {
     // Search, where the page has one: the keyboard opens, typed letters narrow the tiles.
     if grid.get_search_shown() {
         r.step(&format!("Parameters of {name}: search"));
-        grid.invoke_search_tap();
+        ui.global::<crate::Bar>().invoke_action(0); // Search, the top bar's first action
         r.settle();
         let keys: Vec<(String, i32)> = ui.global::<crate::KeyboardState>().get_keys().iter().map(|k| (k.label.to_string(), k.index)).collect();
         let word = names.iter().find(|n| n.len() > 3).map(|n| n[..3].to_lowercase()).unwrap_or("a".into());

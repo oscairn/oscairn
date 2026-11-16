@@ -429,8 +429,6 @@ impl Screen {
         update(&self.names, self.buses[send_first.min(self.buses.len())..send_end.min(self.buses.len())].iter().map(|b| SharedString::from(b.1.as_str())).collect());
         let state = ui.global::<MixerState>();
         state.set_buses(self.buses.len() as i32);
-        state.set_more_strips(self.strips.len() > per);
-        state.set_more_sends(self.buses.len() > shown);
         let mut view = format!("Strips {}–{} of {}", self.first + 1, end, self.strips.len());
         if self.strips.is_empty() {
             view = "Master".into();
@@ -635,6 +633,38 @@ impl Screen {
         }
         self.show();
         Outcome::Stay
+    }
+
+    /// The pagers, by what each does: (label, enabled, sends?, by). Only what is out of view has one.
+    fn pagers(&self) -> Vec<(&'static str, bool, bool, i32)> {
+        let mut v = vec![];
+        let per = self.per_view();
+        if self.strips.len() > per {
+            v.push(("‹ Strips", self.first > 0, false, -1));
+            v.push(("Strips ›", self.first + per < self.strips.len(), false, 1));
+        }
+        let shown = self.sends_shown().max(1);
+        if self.buses.len() > shown {
+            v.push(("‹ Sends", self.send_first > 0, true, -1));
+            v.push(("Sends ›", self.send_first + shown < self.buses.len(), true, 1));
+        }
+        v
+    }
+
+    /// The screen's own actions, which the top bar carries: the strips' and the sends' pagers.
+    pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
+        self.pagers().into_iter().map(|(label, enabled, ..)| crate::topbar::Tool { enabled, ..crate::topbar::Tool::new(label) }).collect()
+    }
+
+    /// The pager `i` of the bar.
+    pub fn bar_tool(&mut self, i: usize) {
+        if let Some((_, _, sends, by)) = self.pagers().get(i).copied().filter(|p| p.1) {
+            if sends {
+                self.turn_sends(by);
+            } else {
+                self.turn(by);
+            }
+        }
     }
 
     /// A view of strips towards the start (-1) or the end (1): the cursor, if there is one, on its first strip.

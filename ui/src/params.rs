@@ -62,10 +62,9 @@ enum Strip {
     Tabs,
 }
 
-/// A stop of the cursor above the tiles: the search, or a row of tabs.
+/// A stop of the cursor above the tiles: a row of tabs (the search is the top bar's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Stop {
-    Search,
     Row(Strip),
 }
 
@@ -117,9 +116,8 @@ pub struct Screen {
     scroll: f32,
     list_cursor: usize,
     list_first: usize,
-    /// The search text (a name or module on any page), and whether the cursor is on its field.
+    /// The search text (a name or module on any page); its button is on the top bar.
     search: String,
-    search_cursor: bool,
     /// The parameters whose gestures are open.
     gestures: Vec<u32>,
     /// A view's handle held by touch: the panel and the handle.
@@ -168,7 +166,6 @@ impl Screen {
             list_cursor: 0,
             list_first: 0,
             search: String::new(),
-            search_cursor: false,
             gestures: vec![],
             view_held: None,
             message: String::new(),
@@ -545,7 +542,6 @@ impl Screen {
         g.set_page(if searching { -1 } else { page as i32 });
         g.set_search_shown(self.search_shown());
         g.set_search(self.search.as_str().into());
-        g.set_search_cursor(self.search_cursor);
         g.set_tabs(ModelRc::new(VecModel::from(tabs)));
         g.set_tab(tab as i32);
         let tiles: Vec<GridTile> = (0..self.laid.tiles.len()).map(|k| self.tile_data(k)).collect();
@@ -664,7 +660,6 @@ impl Screen {
         self.entry = to;
         self.scroll = 0.;
         self.cursor = None;
-        self.search_cursor = false;
         self.strip = None;
         self.relayout();
         self.ask_values();
@@ -674,9 +669,6 @@ impl Screen {
     /// The rows above the tiles, top to bottom, as they are drawn: the search, the pages, the tabs.
     fn bars(&self) -> Vec<Stop> {
         let mut out = Vec::new();
-        if self.search_shown() {
-            out.push(Stop::Search);
-        }
         if self.model.pages.len() > 1 {
             out.push(Stop::Row(Strip::Pages));
         }
@@ -704,9 +696,7 @@ impl Screen {
 
     /// Where the cursor is, among the stops above the tiles and the tiles.
     fn at(&self) -> Option<At> {
-        if self.search_cursor {
-            Some(At::Bar(Stop::Search, 0))
-        } else if let Some((row, i)) = self.strip {
+        if let Some((row, i)) = self.strip {
             Some(At::Bar(Stop::Row(row), i))
         } else {
             self.cursor.map(At::Tile)
@@ -715,11 +705,9 @@ impl Screen {
 
     /// Puts the cursor on a stop (one cursor at a time).
     fn go(&mut self, to: At) {
-        self.search_cursor = false;
         self.strip = None;
         self.cursor = None;
         match to {
-            At::Bar(Stop::Search, _) => self.search_cursor = true,
             At::Bar(Stop::Row(row), i) => self.strip = Some((row, i)),
             At::Tile(t) => self.cursor = Some(t),
         }
@@ -728,7 +716,6 @@ impl Screen {
     /// The row's stop on its selected entry.
     fn selected(&self, stop: Stop) -> At {
         match stop {
-            Stop::Search => At::Bar(stop, 0),
             Stop::Row(Strip::Pages) => At::Bar(stop, self.shown_page().unwrap_or(0)),
             Stop::Row(Strip::Tabs) => At::Bar(stop, self.shown_tab()),
         }
@@ -771,7 +758,6 @@ impl Screen {
                 }
                 At::Bar(stop, i) => {
                     let len = match stop {
-                        Stop::Search => 1,
                         Stop::Row(row) => self.row_len(row),
                     };
                     let place = bars.iter().position(|s| *s == stop).unwrap_or(0);
@@ -826,23 +812,12 @@ impl Screen {
                     None if sx < 0 && column && bars.contains(&pages) => self.selected(pages),
                     None => at,
                 },
-                At::Bar(Stop::Search, _) => {
-                    if sy > 0 {
-                        bars.get(1).map_or_else(|| first_tile(at), |&next| self.selected(next))
-                    } else {
-                        at
-                    }
-                }
                 At::Bar(stop @ Stop::Row(Strip::Pages), i) if column => {
                     let len = self.row_len(Strip::Pages);
                     if sy != 0 {
                         let to = i as i32 + sy;
                         if to < 0 {
-                            if bars.contains(&Stop::Search) {
-                                At::Bar(Stop::Search, 0)
-                            } else {
-                                at
-                            }
+                            at
                         } else {
                             At::Bar(stop, (to as usize).min(len - 1))
                         }
@@ -922,8 +897,7 @@ impl Screen {
                 self.end_gestures();
                 self.edit = Edit::None;
             }
-            // A press on the search opens its keyboard; on a page or a tab it opens that one, and the cursor stays on it.
-            (Edit::None, Action::Confirm(_)) if self.search_cursor => return Outcome::Prompt("Search parameters".into(), self.search.clone()),
+            // A press on a page or a tab opens that one, and the cursor stays on it.
             (Edit::None, Action::Confirm(_)) if self.strip.is_some() => {
                 if let Some((row, i)) = self.strip {
                     self.open_entry(row, i);
@@ -990,12 +964,46 @@ impl Screen {
 
     // Touch.
 
-    /// A tap on the search field: the keyboard for its text.
+    /// The plugin's name, for the bar's title.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The screen's own action, which the top bar carries: the search, for a plugin of more than 24 parameters; the
+    /// text searched for while one is on.
+    pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
+        if !self.search_shown() {
+            return vec![];
+        }
+        vec![crate::topbar::Tool::new(if self.search.is_empty() { "Search".to_string() } else { format!("Search: {}", self.search) })]
+    }
+
+    /// The cursor is on the first stop, whichever it is: moving up leaves for the top bar.
+    pub fn at_top(&self) -> bool {
+        match self.at() {
+            Some(At::Bar(Stop::Row(row), _)) => self.bars().first() == Some(&Stop::Row(row)) && self.edit == Edit::None,
+            Some(At::Tile(0)) => self.bars().is_empty() && self.edit == Edit::None,
+            _ => false,
+        }
+    }
+
+    /// Back from anywhere on the screen: a dropdown that is open closes, else the screen goes; a value being
+    /// changed is let go (its gesture ends).
+    pub fn back(&mut self) -> Outcome {
+        self.end_gestures();
+        let open = matches!(self.edit, Edit::List(_));
+        self.edit = Edit::None;
+        self.cursor = None;
+        self.strip = None;
+        self.show();
+        if open { Outcome::Stay } else { Outcome::Back }
+    }
+
+    /// A tap on the search button of the bar: the keyboard for its text.
     pub fn search_tap(&mut self) -> Outcome {
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = None;
-        self.search_cursor = true;
         self.strip = None;
         self.show();
         Outcome::Prompt("Search parameters".into(), self.search.clone())
@@ -1006,7 +1014,6 @@ impl Screen {
         let Some(p) = self.param_of(tile as usize, part as usize) else { return };
         self.end_gestures();
         self.edit = Edit::None;
-        self.search_cursor = false;
         self.strip = None;
         self.cursor = Some(tile as usize);
         self.begin(p.id);
@@ -1036,7 +1043,6 @@ impl Screen {
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = None;
-        self.search_cursor = false;
         self.strip = None;
         if let Some(n) = operator {
             self.operator = n;
@@ -1096,7 +1102,6 @@ impl Screen {
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = Some(k);
-        self.search_cursor = false;
         self.strip = None;
         let p = self.params[t.param].clone();
         if t.control == Control::Buttons && stop >= 0 {

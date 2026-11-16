@@ -316,6 +316,16 @@ impl Screen {
         node != 0 && self.failures.iter().any(|f| f.0 == node)
     }
 
+    /// The part's name, for the bar's title.
+    pub fn part_name(&self) -> String {
+        self.part().and_then(|p| p["name"].as_str()).unwrap_or_default().to_string()
+    }
+
+    /// Back from anywhere on the screen: up a level in the chain, else out of the screen.
+    pub fn back(&mut self) -> Outcome {
+        self.handle(Nav::Back)
+    }
+
     fn part(&self) -> Option<&Value> {
         self.graph["parts"].as_array().and_then(|p| p.iter().find(|p| p["id"].as_u64() == Some(self.id)))
     }

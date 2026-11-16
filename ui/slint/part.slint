@@ -44,7 +44,6 @@ export global PartState {
     callback info-scroll(int); // a view up (-1) or down (1)
     callback tapped(int);
     callback step(int, int); // a row and -1 or 1
-    callback back();
 }
 
 component Row inherits Section {
@@ -131,10 +130,9 @@ component Row inherits Section {
 export component Part inherits Rectangle {
     // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> header: Theme.touch;
     property <length> footer: Theme.touch;
     property <length> list-width: (self.width - 3 * Theme.margin) * 0.58;
-    property <length> list-y: Theme.margin + header + Theme.gap;
+    property <length> list-y: Theme.margin;
     property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
     property <length> line: Theme.body + Theme.margin;
@@ -146,26 +144,6 @@ export component Part inherits Rectangle {
         PartState.info-per-view = info-lines;
     }
 
-    Button {
-        x: Theme.margin;
-        y: Theme.margin;
-        width: Theme.button-width;
-        height: root.header;
-        text: "Back";
-        clicked => { PartState.back(); }
-    }
-    Text {
-        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
-        y: Theme.margin;
-        width: root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
-        height: root.header;
-        text: PartState.title == "" ? PartState.name : PartState.name + " · " + PartState.title;
-        color: Theme.text;
-        font-size: Theme.title;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
     for row[i] in PartState.rows: Row {
         x: Theme.margin;
         y: root.list-y + i * (Theme.touch + root.gap);

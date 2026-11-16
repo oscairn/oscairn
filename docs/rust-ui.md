@@ -326,6 +326,29 @@ Play toggle). Not handed over: the whole screen is Rust.
   (level, mute) and `parts.send` (no level removes it), each then `graph.commit`, and `parts.add`. None
   new. A regular expression in a device rule cannot be tried here: such a part is taken as connected.
 
+## Mixer
+
+`mixer.rs` and `slint/mixer.slint`: the mixer page of the JUCE Edit view (PartsView.cpp, `mixerShown`),
+opened by the Mixer button under the Parts list; Back, Cancel and the bar's Play leave it. The JUCE
+page is strips, so the Mixer is strips: a strip per part, then per bus (a wider gap between), the
+master pinned at the right. A strip: name, fader beside a meter bar per channel of the sound, the level
+in dB, M and S, pan, a send slider per bus (parts only; every strip keeps the rows so faders line up).
+Faders use the JUCE skew (a part's 0 to 1 with -12 dB halfway, the master's 0 to 2); a send taken to
+nothing is removed. How many strips a view holds and how many sends a strip shows is what fills the
+window (`MixerState.strips-per-view`, `sends-per-view`, set by the component), so the window, spacing
+and type scale decide; the header has paging buttons for touch when something is out of view.
+
+- **Without touch:** the cursor is one control of one strip. The dial goes strip by strip, control by
+  control (fader, M, S, pan, sends); the left knob along the strips, the right knob up and down the
+  strip; Page Up and Down turn a view of strips. A press on a fader, pan or send starts a change the dial
+  then makes (a fortieth of the travel a click, held at the ends; a press or Cancel ends it), on M or S
+  toggles. Touch: faders and sliders drag, a double tap centers a pan or removes a send.
+- **Requests:** `graph.get`, `parts.meters` every 50 ms while shown (the JUCE timer), `controls.changed`
+  (levels, mutes, pans, the master); edits `parts.level` (level, mute), `parts.pan`, `parts.solo`,
+  `parts.send`, `master.set`, each then `graph.commit`. None new.
+- The fader, marks and meter are Play's strip widgets drawn again (`Meter` moved to theme.slint for it;
+  Play's own copy in play.slint still stands until that file is next edited).
+
 ## Part
 
 `part.rs` and `slint/part.slint`: the JUCE Part page (PartsView.cpp, PartsModel.cpp's `partFields`)

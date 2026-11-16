@@ -17,6 +17,7 @@ use crate::home::{self, Home};
 use crate::nav::{self, Action};
 use crate::chain;
 use crate::keyboard;
+use crate::mixer;
 use crate::params;
 use crate::part;
 use crate::parts;
@@ -27,7 +28,7 @@ use crate::profile::Profile;
 use crate::scene;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, PartState, PartsState, PianoState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, MixerState, PartState, PartsState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -64,6 +65,7 @@ pub enum Request {
     Play(play::Request),
     Part(part::Request),
     Parts(parts::Request),
+    Mixer(mixer::Request),
     Chain(chain::Request),
     Sounds(sounds::Request),
     Params(params::Request),
@@ -121,6 +123,8 @@ pub enum Screen {
     Scene = 8,
     /// The parts and buses of the Performance (parts.rs), opened from Play's Edit.
     Parts = 9,
+    /// Every part and bus side by side (mixer.rs), opened from the Parts list.
+    Mixer = 10,
 }
 
 pub struct App {
@@ -148,6 +152,7 @@ pub struct App {
     play: play::Screen,
     part: part::Screen,
     parts: parts::Screen,
+    mixer: mixer::Screen,
     chain: chain::Screen,
     sounds: sounds::Screen,
     params: params::Screen,
@@ -200,12 +205,12 @@ fn with_app(f: impl FnOnce(&mut App)) {
 
 /// The Performance app's screens, which carry the top bar's actions (undo, redo, save).
 fn has_actions(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Mixer | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
 }
 
 /// The screens that follow levels and mutes moved live (controls.changed).
 fn live(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part | Screen::Parts)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Mixer)
 }
 
 fn level(m: Meter) -> i32 {
@@ -303,8 +308,19 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     list.on_level(|i, f| with_app(|a| a.on_parts(|p| p.level(i, f))));
     list.on_send(|i, k, f| with_app(|a| a.on_parts(|p| p.send(i, k, f))));
     list.on_held(|i, cell, down| with_app(|a| a.on_parts(|p| p.hold(i, cell, down))));
-    list.on_tool(|i| with_app(|a| a.on_parts(|p| p.tap_tool(i))));
+    list.on_tool(|i| with_app(|a| a.parts_act(|p| p.tap_tool(i))));
     list.on_resized(|| with_app(|a| a.on_parts(parts::Screen::shown)));
+    let mix = ui.global::<MixerState>();
+    mix.on_back(|| with_app(|a| a.go(Screen::Parts)));
+    mix.on_level(|i, f| with_app(|a| a.on_mixer(|m| m.level(i, f))));
+    mix.on_pan(|i, f| with_app(|a| a.on_mixer(|m| m.pan(i, f))));
+    mix.on_send(|i, j, f| with_app(|a| a.on_mixer(|m| m.send(i, j, f))));
+    mix.on_mute(|i| with_app(|a| a.on_mixer(|m| m.tap_mute(i))));
+    mix.on_solo(|i| with_app(|a| a.on_mixer(|m| m.tap_solo(i))));
+    mix.on_held(|i, control, down| with_app(|a| a.on_mixer(|m| m.hold(i, control, down))));
+    mix.on_turn(|by| with_app(|a| a.on_mixer(|m| m.turn(by))));
+    mix.on_turn_sends(|by| with_app(|a| a.on_mixer(|m| m.turn_sends(by))));
+    mix.on_resized(|| with_app(|a| a.on_mixer(mixer::Screen::shown)));
     let grid = ui.global::<GridState>();
     grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
     grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));
@@ -351,6 +367,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             play: play::Screen::new(ui),
             part: part::Screen::new(ui),
             parts: parts::Screen::new(ui),
+            mixer: mixer::Screen::new(ui),
             chain: chain::Screen::new(ui),
             sounds: sounds::Screen::new(ui),
             params: params::Screen::new(ui),
@@ -520,6 +537,7 @@ impl App {
                     self.on_play(|p| p.controls(&params));
                     self.on_part(|p| p.controls(&params));
                     self.on_parts(|p| p.controls(&params));
+                    self.on_mixer(|m| m.controls(&params));
                 }
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
@@ -546,6 +564,7 @@ impl App {
         self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
         self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
         self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
+        self.on_mixer(|m| m.status(status));
         if self.on_piano(|p| !p.status(status)) == Some(true) {
             self.close_piano(); // its input was unplugged
         }
@@ -577,6 +596,13 @@ impl App {
             Request::Part(r) => {
                 if self.on_part(|p| p.reply(r, result)) {
                     self.ask_performance();
+                }
+                return;
+            }
+            Request::Mixer(r) => {
+                if self.on_mixer(|m| m.reply(r, result)) {
+                    self.ask_performance();
+                    self.stale = true;
                 }
                 return;
             }
@@ -656,6 +682,7 @@ impl App {
                 self.on_play(|p| p.graph(&r));
                 self.on_part(|p| p.graph(&r));
                 self.on_parts(|p| p.graph(&r));
+                self.on_mixer(|m| m.graph(&r));
                 self.on_chain(|c| c.graph(&r));
                 self.on_sounds(|c| c.graph(&r));
                 self.on_scene(|c| c.graph(&r));
@@ -676,7 +703,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
         }
     }
 
@@ -816,6 +843,11 @@ impl App {
             }
             (Screen::Part, _) => self.part_act(|p| p.act(action)),
             (Screen::Parts, _) => self.parts_act(|p| p.act(action)),
+            (Screen::Mixer, _) => {
+                if self.on_mixer(|m| m.act(action)) == mixer::Outcome::Back {
+                    self.go(Screen::Parts);
+                }
+            }
             (Screen::Chain, _) => self.chain_act(|c| c.act(action)),
             (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
             (Screen::Scene, _) => self.scene_act(|c| c.act(action)),
@@ -853,7 +885,7 @@ impl App {
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
         let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, self.screen == Screen::Parts, learn)) } else { vec![] };
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer), learn)) } else { vec![] };
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
@@ -973,6 +1005,7 @@ impl App {
             Screen::Play => self.play.at_top(),
             Screen::Part => self.part.at_top(),
             Screen::Parts => self.parts.at_top(),
+            Screen::Mixer => self.mixer.at_top(),
             Screen::Chain => self.chain.at_top(),
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
@@ -1076,12 +1109,23 @@ impl App {
         r
     }
 
+    /// Something for the Mixer, then what it asks the engine sent.
+    fn on_mixer<R>(&mut self, f: impl FnOnce(&mut mixer::Screen) -> R) -> R {
+        let r = f(&mut self.mixer);
+        for (request, method, params) in std::mem::take(&mut self.mixer.out) {
+            self.send(Request::Mixer(request), method, params);
+        }
+        r
+    }
+
     /// A navigation action or tap for the Parts list, and where it takes the shell.
     fn parts_act(&mut self, f: impl FnOnce(&mut parts::Screen) -> parts::Outcome) {
         match self.on_parts(f) {
             parts::Outcome::Back => self.go(Screen::Play),
             parts::Outcome::Open(id) => self.open_part(id),
             parts::Outcome::Routing(_) => {} // the list says Routing is not in this shell yet
+            parts::Outcome::Page(parts::Page::Mixer) => self.go(Screen::Mixer),
+            parts::Outcome::Page(_) => {} // the list says these are not in this shell yet
             parts::Outcome::Stay => {}
         }
     }
@@ -1215,6 +1259,7 @@ impl App {
             Screen::Chain => self.on_chain(chain::Screen::shown),
             Screen::Sounds => self.on_sounds(sounds::Screen::shown),
             Screen::Scene => self.on_scene(scene::Screen::shown),
+            Screen::Mixer => self.on_mixer(mixer::Screen::shown),
             _ => {}
         }
     }
@@ -1224,6 +1269,7 @@ impl App {
         match self.screen {
             Screen::Part => self.go(self.part_from),
             Screen::Parts => self.go(Screen::Play),
+            Screen::Mixer => self.go(Screen::Parts),
             Screen::Chain | Screen::Sounds => self.go(Screen::Part),
             Screen::Scene => self.go(Screen::Play),
             Screen::Params => self.go(Screen::Chain),
@@ -1355,7 +1401,11 @@ impl App {
 
     /// The meters, asked unless the last answer is still out: a slow engine never piles them up.
     fn poll_meters(&mut self) {
-        if self.screen == Screen::Parts {
+        if self.screen == Screen::Mixer {
+            if self.client.waiting(|r| matches!(r, Request::Mixer(mixer::Request::Meters))).is_none() {
+                self.send(Request::Mixer(mixer::Request::Meters), "parts.meters", json!({}));
+            }
+        } else if self.screen == Screen::Parts {
             if self.client.waiting(|r| matches!(r, Request::Parts(parts::Request::Meters))).is_none() {
                 self.send(Request::Parts(parts::Request::Meters), "parts.meters", json!({}));
             }
@@ -1382,11 +1432,14 @@ impl App {
             if self.screen == Screen::Play {
                 self.play.hidden();
             }
-            if matches!(self.screen, Screen::Play | Screen::Parts) {
+            if matches!(self.screen, Screen::Play | Screen::Parts | Screen::Mixer) {
                 self.meters.stop();
             }
             if self.screen == Screen::Parts {
                 self.on_parts(parts::Screen::hidden);
+            }
+            if self.screen == Screen::Mixer {
+                self.on_mixer(mixer::Screen::hidden);
             }
             if self.screen == Screen::Part {
                 self.on_part(part::Screen::hidden);
@@ -1429,6 +1482,7 @@ impl App {
                 Screen::Sounds => "Sound".into(),
                 Screen::Scene => "Scene".into(),
                 Screen::Parts => "Edit".into(),
+                Screen::Mixer => "Mixer".into(),
                 Screen::Params => "Parameters".into(),
                 Screen::Opening => ui.get_opening(),
             });
@@ -1444,13 +1498,17 @@ impl App {
         if screen == Screen::Scene {
             self.on_scene(scene::Screen::shown);
         }
-        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene | Screen::Parts) {
+        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene | Screen::Parts | Screen::Mixer) {
             self.ask_performance();
         }
         if screen == Screen::Parts {
             self.send(Request::Parts(parts::Request::Status), "session.status", json!({}));
             self.on_parts(parts::Screen::shown);
             self.meters.start(slint::TimerMode::Repeated, parts::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+        }
+        if screen == Screen::Mixer {
+            self.on_mixer(mixer::Screen::shown);
+            self.meters.start(slint::TimerMode::Repeated, mixer::METER_INTERVAL, || with_app(|a| a.poll_meters()));
         }
         if screen == Screen::Chain {
             self.on_chain(chain::Screen::shown);

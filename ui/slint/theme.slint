@@ -465,3 +465,35 @@ export component SliderBar inherits Rectangle {
         y: upright ? (1 - v) * root.along - self.height / 2 : (parent.height - self.height) / 2;
     }
 }
+
+// A level meter's bar: `value` is the place along -60..+6 dB, 0 to 1. The green turns yellow at
+// -12 dB and red at -3 dB (the JUCE meters' zones, Icons.h).
+export component Meter inherits Rectangle {
+    in property <float> value;
+    property <float> yellow: 0.7273;
+    property <float> red: 0.8636;
+    background: Theme.track;
+    border-radius: self.width / 2;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * min(root.value, root.yellow);
+        y: parent.height - self.height;
+        background: Theme.positive;
+    }
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * max(0, min(root.value, root.red) - root.yellow);
+        y: parent.height * (1 - min(root.value, root.red));
+        background: Theme.warning;
+    }
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * max(0, root.value - root.red);
+        y: parent.height * (1 - root.value);
+        background: Theme.danger;
+    }
+}

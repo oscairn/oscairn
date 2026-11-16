@@ -1,0 +1,378 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Mixer (src/mixer.rs), the JUCE Edit view's mixer page (hosts/standalone/PartsView.cpp): a strip
+// for every part and bus side by side, the master after them. Top to bottom a strip has its name, a
+// fader beside its meters (a bar per channel of the sound), the fader's level in dB, mute and solo,
+// the pan, and a send to each bus. Every strip keeps the send rows, so faders and buttons line up
+// across them; a bus and the master leave theirs empty. A muted strip, or one another part's solo
+// silences, is faint. A cursor is a focus border round one control; a value being changed takes the
+// accent border. How many strips a view holds, and how many sends a strip shows, is not counted
+// here: the screen reads the sizes below and fills the width and height, so the window, the theme's
+// spacing and the type scale all reflow it.
+
+import { Theme, Section, Button, Cursor, Mark, SliderBar, Meter } from "theme.slint";
+
+export struct MixStrip {
+    name: string,
+    fader: float, // the fader's place, 0..1 (the level through the JUCE faders' skew)
+    db: string,
+    mute: bool,
+    solo: bool,
+    dim: bool, // muted, or silenced by another part's solo
+    bus: bool,
+    master: bool,
+    pan: float, // 0..1 across, the middle 0.5
+    sends: [float], // the sends shown (the window), each 0..1
+    peaks: [float], // a meter bar per channel, each 0..1 along -60..+6 dB
+    cursor: int, // the control the cursor is on: 0 fader, 1 mute, 2 solo, 3 pan, 4 and on the sends shown; -1 none
+    editing: bool, // the dial changes it
+}
+
+export global MixerState {
+    in property <[MixStrip]> strips;
+    in property <MixStrip> master;
+    in property <[string]> send-names; // of the sends shown
+    in property <int> buses; // every bus, shown or not
+    in property <string> view; // "Strips 1–5 of 9", "Sends 1–2 of 5"
+    in property <string> message;
+    in property <bool> more-strips; // some strips are out of this view
+    in property <bool> more-sends;
+    // How many strips a view holds besides the master, and how many sends a strip shows: set by the screen.
+    in-out property <int> strips-per-view: 1;
+    in-out property <int> sends-per-view: 1;
+    callback resized();
+    callback back();
+    callback level(int, float); // a strip (-1 the master) and the fader's new place
+    callback pan(int, float); // a strip (-1 the master) and the slider's new place, 0..1
+    callback send(int, int, float); // a strip, the send's place among those shown, the slider's new place
+    callback mute(int);
+    callback solo(int);
+    callback held(int, int, bool); // a strip (-1 the master), its control, a finger on it or off it
+    callback turn(int); // strips: towards the start (-1) or the end (1)
+    callback turn-sends(int);
+}
+
+// A slider with its name above it, a touch target tall in all: dragged or tapped it says where, a
+// finger on it or off it is told, a double tap puts it back.
+component Named inherits Rectangle {
+    in property <string> label;
+    in property <float> norm;
+    in property <bool> bipolar;
+    in property <bool> cursor;
+    in property <bool> editing;
+    callback moved(float);
+    callback held(bool);
+    callback reset();
+    property <length> label-height: Theme.small + Theme.pad-tight;
+    Text {
+        x: Theme.pad-tight;
+        y: 0px;
+        width: parent.width - 2 * Theme.pad-tight;
+        height: root.label-height;
+        text: root.label;
+        color: Theme.muted;
+        font-size: Theme.small;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    bar := Rectangle {
+        x: Theme.thumb / 2;
+        y: root.label-height;
+        width: parent.width - Theme.thumb;
+        height: parent.height - root.label-height;
+        SliderBar {
+            width: parent.width;
+            height: parent.height;
+            norm: root.norm;
+            bipolar: root.bipolar;
+            lit: root.cursor;
+        }
+    }
+    touch := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) { root.held(true); }
+            if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) { root.held(false); }
+        }
+        moved => { root.moved(max(0, min(1, (touch.mouse-x - Theme.thumb / 2) / (root.width - Theme.thumb)))); }
+        clicked => { root.moved(max(0, min(1, (touch.mouse-x - Theme.thumb / 2) / (root.width - Theme.thumb)))); }
+        double-clicked => { root.reset(); }
+    }
+    Cursor {
+        shown: root.cursor;
+        editing: root.editing;
+        corner: Theme.field-radius(root.height);
+    }
+}
+
+component Strip inherits Section {
+    in property <MixStrip> data;
+    in property <int> sends: 0; // the send rows every strip keeps
+    callback level(float);
+    callback pan(float);
+    callback send(int, float);
+    callback mute();
+    callback solo();
+    callback held(int, bool);
+    property <length> row-h: max(Theme.touch, Theme.small + Theme.pad-tight + Theme.thumb + Theme.pad-tight);
+    property <length> name-height: Theme.body + 2 * Theme.pad-tight;
+    property <length> db-height: Theme.small + 2 * Theme.pad-tight;
+    property <length> sends-height: sends * root.row-h;
+    // From the bottom up: the sends, the pan, the marks, the level in dB; the fader takes what is left.
+    property <length> pan-y: root.height - Theme.pad-tight - sends-height - row-h;
+    property <length> marks-y: pan-y - Theme.pad-tight - Theme.touch;
+    property <length> db-y: marks-y - db-height;
+    property <length> fader-y: name-height;
+    property <length> fader-height: max(Theme.touch, db-y - Theme.pad-tight - fader-y);
+    // The fader beside its meters as a pair, centered: each meter a thin bar.
+    property <length> fader-width: Theme.touch;
+    property <length> meter-width: 7px;
+    property <length> meter-pitch: 10px;
+    property <length> meter-gap: Theme.pad-wide;
+    property <length> meter-inset: Theme.pad-narrow;
+    property <length> meters-width: data.peaks.length == 0 ? 0px : (data.peaks.length - 1) * meter-pitch + meter-width;
+    property <length> pair-width: fader-width + (data.peaks.length == 0 ? 0px : meter-gap + meters-width);
+    Rectangle {
+        opacity: data.dim ? Theme.dim : 1;
+        Text {
+            x: Theme.pad;
+            y: Theme.pad-tight;
+            width: parent.width - 2 * Theme.pad;
+            height: Theme.body + Theme.pad-tight;
+            text: data.name;
+            color: Theme.text;
+            font-size: Theme.body;
+            font-weight: 700;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+        fader := Rectangle {
+            x: (root.width - root.pair-width) / 2;
+            y: root.fader-y;
+            width: root.fader-width;
+            height: root.fader-height;
+            SliderBar {
+                y: Theme.thumb / 2;
+                width: parent.width;
+                height: parent.height - Theme.thumb;
+                norm: data.fader;
+                upright: true;
+                lit: data.cursor == 0;
+            }
+            touch := TouchArea {
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) { root.held(0, true); }
+                    if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) { root.held(0, false); }
+                }
+                moved => { root.level(max(0, min(1, 1 - (touch.mouse-y - Theme.thumb / 2) / (fader.height - Theme.thumb)))); }
+                clicked => { root.level(max(0, min(1, 1 - (touch.mouse-y - Theme.thumb / 2) / (fader.height - Theme.thumb)))); }
+            }
+            Cursor {
+                shown: data.cursor == 0;
+                editing: data.cursor == 0 && data.editing;
+                corner: Theme.field-radius(Theme.touch);
+            }
+        }
+        for peak[i] in data.peaks: Meter {
+            x: fader.x + fader.width + root.meter-gap + i * root.meter-pitch;
+            y: fader.y + root.meter-inset;
+            width: root.meter-width;
+            height: fader.height - 2 * root.meter-inset;
+            value: peak;
+        }
+        Text {
+            y: root.db-y;
+            width: parent.width;
+            height: root.db-height;
+            text: data.db;
+            color: Theme.muted;
+            font-size: Theme.small;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if !data.master: Rectangle {
+            x: root.width / 2 - Theme.touch - Theme.pad-tight;
+            y: root.marks-y;
+            width: Theme.touch;
+            height: Theme.touch;
+            Mark {
+                letter: "M";
+                tint: Theme.danger;
+                on: data.mute;
+                clicked => { root.mute(); }
+            }
+            Cursor {
+                shown: data.cursor == 1;
+                corner: Theme.button-radius(Theme.touch);
+            }
+        }
+        if !data.master: Rectangle {
+            x: root.width / 2 + Theme.pad-tight;
+            y: root.marks-y;
+            width: Theme.touch;
+            height: Theme.touch;
+            Mark {
+                letter: "S";
+                tint: Theme.accent;
+                on: data.solo;
+                clicked => { root.solo(); }
+            }
+            Cursor {
+                shown: data.cursor == 2;
+                corner: Theme.button-radius(Theme.touch);
+            }
+        }
+        Named {
+            x: Theme.pad-tight;
+            y: root.pan-y;
+            width: root.width - 2 * Theme.pad-tight;
+            height: root.row-h;
+            label: "Pan";
+            norm: data.pan;
+            bipolar: true;
+            cursor: data.cursor == 3;
+            editing: data.cursor == 3 && data.editing;
+            moved(f) => { root.pan(f); }
+            held(down) => { root.held(3, down); }
+            reset => { root.pan(0.5); }
+        }
+        if !data.bus && !data.master: Rectangle {
+            y: root.pan-y + root.row-h;
+            height: root.sends-height;
+            for level[j] in data.sends: Named {
+                x: Theme.pad-tight;
+                y: j * root.row-h;
+                width: root.width - 2 * Theme.pad-tight;
+                height: root.row-h;
+                label: "→ " + MixerState.send-names[j];
+                norm: level;
+                cursor: data.cursor == 4 + j;
+                editing: data.cursor == 4 + j && data.editing;
+                moved(f) => { root.send(j, f); }
+                held(down) => { root.held(4 + j, down); }
+                reset => { root.send(j, 0); }
+            }
+        }
+    }
+}
+
+// A paging pair in the header: previous, what it pages, next.
+component Pager inherits HorizontalLayout {
+    in property <string> label;
+    callback turn(int);
+    spacing: Theme.gap;
+    Button {
+        width: Theme.touch;
+        text: "‹";
+        clicked => { root.turn(-1); }
+    }
+    Text {
+        text: root.label;
+        color: Theme.muted;
+        font-size: Theme.small;
+        vertical-alignment: center;
+    }
+    Button {
+        width: Theme.touch;
+        text: "›";
+        clicked => { root.turn(1); }
+    }
+}
+
+export component Mixer inherits Rectangle {
+    // The sections' gap (none in a theme whose sections join).
+    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> header: Theme.touch;
+    property <length> footer: Theme.small + 2 * Theme.pad-tight;
+    property <length> strip-min: Theme.button-width;
+    // The room between the parts and the buses, and before the master.
+    property <length> group-gap: Theme.pad;
+    property <length> strips-y: Theme.margin + header + Theme.gap;
+    property <length> strips-height: self.height - strips-y - Theme.margin - footer - Theme.gap;
+    property <length> strips-width: self.width - 2 * Theme.margin;
+    property <int> across: max(2, floor((strips-width - 2 * group-gap + gap) / (strip-min + gap)));
+    property <length> cell: (strips-width - 2 * group-gap - (across - 1) * gap) / across;
+    // What a strip needs besides its sends and a fader worth pulling (a touch target tall, three times).
+    property <length> row-h: max(Theme.touch, Theme.small + Theme.pad-tight + Theme.thumb + Theme.pad-tight);
+    property <length> fixed: (Theme.body + 2 * Theme.pad-tight) + (Theme.small + 2 * Theme.pad-tight) + Theme.touch + 2 * Theme.pad-tight + row-h + 3 * Theme.touch;
+    property <int> fit-sends: max(1, floor((strips-height - fixed) / row-h));
+    property <int> sends: min(MixerState.buses, MixerState.sends-per-view);
+    changed across => { MixerState.strips-per-view = across - 1; MixerState.resized(); }
+    changed fit-sends => { MixerState.sends-per-view = fit-sends; MixerState.resized(); }
+    init => {
+        MixerState.strips-per-view = across - 1;
+        MixerState.sends-per-view = fit-sends;
+    }
+
+    Button {
+        x: Theme.margin;
+        y: Theme.margin;
+        width: Theme.button-width;
+        height: root.header;
+        text: "Back";
+        clicked => { MixerState.back(); }
+    }
+    // Strips ‹ ›, then Sends ‹ ›, at the header's right end: only when something is out of view.
+    pagers := HorizontalLayout {
+        x: root.width - Theme.margin - self.preferred-width;
+        y: Theme.margin;
+        width: self.preferred-width;
+        height: root.header;
+        spacing: Theme.gap;
+        if MixerState.more-strips: Pager {
+            label: "Strips";
+            turn(by) => { MixerState.turn(by); }
+        }
+        if MixerState.more-sends: Pager {
+            label: "Sends";
+            turn(by) => { MixerState.turn-sends(by); }
+        }
+    }
+    Text {
+        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
+        y: Theme.margin;
+        width: max(0px, pagers.x - self.x - Theme.gap);
+        height: root.header;
+        text: "Mixer";
+        color: Theme.text;
+        font-size: Theme.title;
+        font-weight: 700;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+
+    for strip[i] in MixerState.strips: Strip {
+        x: Theme.margin + i * (root.cell + root.gap) + (strip.bus ? root.group-gap : 0px);
+        y: root.strips-y;
+        width: root.cell;
+        height: root.strips-height;
+        sends: root.sends;
+        data: strip;
+        level(f) => { MixerState.level(i, f); }
+        pan(f) => { MixerState.pan(i, f); }
+        send(j, f) => { MixerState.send(i, j, f); }
+        mute => { MixerState.mute(i); }
+        solo => { MixerState.solo(i); }
+        held(control, down) => { MixerState.held(i, control, down); }
+    }
+    Strip {
+        x: root.width - Theme.margin - root.cell;
+        y: root.strips-y;
+        width: root.cell;
+        height: root.strips-height;
+        sends: root.sends;
+        data: MixerState.master;
+        level(f) => { MixerState.level(-1, f); }
+        pan(f) => { MixerState.pan(-1, f); }
+        held(control, down) => { MixerState.held(-1, control, down); }
+    }
+    Text {
+        x: Theme.margin;
+        y: root.height - Theme.margin - root.footer;
+        width: root.width - 2 * Theme.margin;
+        height: root.footer;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: MixerState.message == "" ? MixerState.view : MixerState.message + "   " + MixerState.view;
+    }
+}

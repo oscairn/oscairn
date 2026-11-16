@@ -54,6 +54,8 @@ pub enum Outcome {
     Open(u32),
     /// Routing, at this node.
     Routing(u64),
+    /// One of the pages the buttons under the list go to.
+    Page(Page),
 }
 
 /// How a plugin of a chain is drawn: by its role, as the JUCE chip's colors say it.
@@ -125,7 +127,7 @@ impl Page {
 
     /// Whether the shell has the screen yet.
     fn built(self) -> bool {
-        false
+        matches!(self, Page::Mixer)
     }
 }
 
@@ -799,19 +801,21 @@ impl Screen {
         self.edit("parts.add", json!({"name": name, "input": input}));
     }
 
-    fn press_tool(&mut self, t: usize) {
+    fn press_tool(&mut self, t: usize) -> Outcome {
         match TOOLS.get(t) {
             Some(Tool::AddPart) => self.add(false),
             Some(Tool::AddBus) => self.add(true),
             Some(Tool::Page(p)) if !p.built() => self.said = format!("{} is not in this shell yet.", p.name()),
+            Some(Tool::Page(p)) => return Outcome::Page(*p),
             _ => {}
         }
+        Outcome::Stay
     }
 
     /// What a press on `stop` does.
     fn press(&mut self, stop: Stop) -> Outcome {
         match stop {
-            Stop::Tool(t) => self.press_tool(t),
+            Stop::Tool(t) => return self.press_tool(t),
             Stop::Cell(at, cell) => match (&self.entries[at], cell) {
                 (Entry::Shared(s), _) => {
                     if Page::Routing.built() {
@@ -954,12 +958,13 @@ impl Screen {
     }
 
     /// A tap on one of the buttons under the list.
-    pub fn tap_tool(&mut self, i: i32) {
+    pub fn tap_tool(&mut self, i: i32) -> Outcome {
         self.stop = None;
         self.editing = false;
         self.said.clear();
-        self.press_tool(i.max(0) as usize);
+        let outcome = self.press_tool(i.max(0) as usize);
         self.show();
+        outcome
     }
 
     /// The level slider of the view's row `row` moved to `place` of its length.

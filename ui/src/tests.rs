@@ -1075,6 +1075,7 @@ mod search;
 mod shots;
 mod views;
 mod parts;
+mod mixer;
 mod layout;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the

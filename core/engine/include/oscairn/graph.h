@@ -381,6 +381,7 @@ namespace oscairn
         };
         /// Control-thread copy of staged topology; audio changes only at commit().
         Description describe() const;
+        std::vector<Mapping> mappings() const; // describe().mappings alone, without the rest of the description
 
         /// Compiles the current nodes and connections and hands them to the audio thread.
         /// Throws std::runtime_error if the connections form a cycle (nothing changes then).

@@ -285,9 +285,12 @@ namespace oscairn
     // process and an answer, waking its control thread): a node's service() inside it returns at once.
     // 0, the default, services at every call. A device's engine sets 20 ms (AudioEngine); the
     // engine's main thread otherwise asks every worker 200 times a second. OSCAIRN_WORKER_SERVICE_MS, a
-    // whole number of milliseconds, replaces what is set. Main thread.
+    // whole number of milliseconds, replaces what is set. A worker that answered nothing 25 times in a row is asked
+    // every fifth interval, until it says something or is asked anything that changes it. Main thread.
     void setWorkerServiceInterval(std::chrono::milliseconds) noexcept;
     std::chrono::milliseconds workerServiceInterval() noexcept;
+    // The requests made to workers since the engine started, a service's among them (any thread).
+    uint64_t workerRequests() noexcept;
     // RFC 0045, Linux only, false elsewhere: while the engine's audio device runs, a PM QoS request
     // for no CPU wake-up latency: `device` held open with a 32-bit 0 written, so idle cores stay out
     // of deep idle states (the FANTOM-07's cpu-sleep lists a 1.5 ms exit) and a thread woken for a

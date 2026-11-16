@@ -382,6 +382,8 @@ add_test(NAME control-chain-placement COMMAND oscairn-chain-placement-test $<TAR
 set_tests_properties(control-chain-placement PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=chain")
 add_test(NAME control-chain-placement-plugin COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(control-chain-placement-plugin PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=plugin")
+add_executable(oscairn-service-cost tests/service_cost.cpp)
+target_link_libraries(oscairn-service-cost PRIVATE oscairn_control)
 # RFC 0045: a plugin's cost recorded per sound, whether its part shared the instance; admission's verdict whatever played before.
 add_executable(oscairn-shared-costs-test tests/shared_costs.cpp)
 target_link_libraries(oscairn-shared-costs-test PRIVATE oscairn_control)

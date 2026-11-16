@@ -35,6 +35,11 @@ namespace oscairn
             uint32_t channels = 0, buses = 0; // bit masks: a channel, an output port index, taken
             std::shared_ptr<char> group = std::make_shared<char>(); // the graph's effect group: one engine
             std::string build; // the plugin build it was loaded from (the Session's bundle digest), for a later change to claim it
+            // Control thread: when its worker was last serviced for its contexts (service), what it told of its sounds,
+            // and how many times it was read.
+            std::chrono::steady_clock::time_point serviced{};
+            std::vector<oscairn_sound_context_info_t> contexts;
+            uint64_t read = 0;
         };
         /// The parameter choosing a sound's output bus, or CLAP_INVALID_ID where the plugin cannot
         /// share: native sound contexts, a snapshot of them, notes in, no notes out, no audio in,
@@ -142,7 +147,7 @@ namespace oscairn
         bool later_ = false; // selected only by select()
         std::set<uint32_t> mine_; // soundContexts()
         std::atomic<uint32_t> sound_{0};
-        std::chrono::steady_clock::time_point serviced_{}; // the last service (workerServiceInterval)
+        uint64_t seen_ = 0; // the engine's read of its sounds this context has taken
         void showValues(uint32_t sound); // the sound's own values, where the plugin gives them
         std::vector<kick::clap::Port> port_, none_;
         std::map<clap_id, double> values_;

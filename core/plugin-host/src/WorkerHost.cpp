@@ -46,6 +46,8 @@ namespace oscairn
     {
         using namespace worker;
 
+        std::atomic<uint64_t> requests{0}; // the requests made to any worker (workerRequests)
+
         // OSCAIRN_WORKER_REST (realtime.h's workerRest), read as the engine starts: 0 calls every worker every block, as
         // before resting; which of the others may rest, the graph says (Graph's rest call).
         const bool workerRest = worker::workerRest() != WorkerRest::never;
@@ -305,6 +307,7 @@ namespace oscairn
             // One request and its reply, answering the worker's asset and memory requests in between. Under control.
             Reader exchange(const std::string& message)
             {
+                requests.fetch_add(1, std::memory_order_relaxed);
                 send(socket, message);
                 for(;;)
                 {
@@ -644,15 +647,21 @@ namespace oscairn
             {
                 if(const auto interval = workerServiceInterval(); interval.count())
                 {
+                    // A worker that has had nothing to say for a while (quietServices answers, 0.5 s at the usual 20 ms) is asked
+                    // every quietFactor intervals, until it says something or is asked anything else: each is a request, an
+                    // answer and two switches of the control thread, which 22 workers at rest spent most of a core on (RFC 0045).
                     const auto now = std::chrono::steady_clock::now();
-                    if(now - serviced_ < interval) return;
+                    if(now - serviced_ < (quiet_.load(std::memory_order_relaxed) >= quietServices ? quietFactor * interval : interval)) return;
                     serviced_ = now;
                 }
                 Reader r;
                 try { r = request(Op::Service); } catch(const std::exception&) { return; }
                 pending_.clear(); next_ = 0;
                 for(auto n = r.u32(); n--;) { kick::clap::Event e; r.bytes(e.bytes.data(), e.bytes.size()); pending_.push_back(e); }
-                if(!r.u8()) return;
+                const bool rescanned = r.u8();
+                if(pending_.empty() && !rescanned) { if(quiet_.load(std::memory_order_relaxed) < quietServices) quiet_.fetch_add(1, std::memory_order_relaxed); }
+                else quiet_.store(0, std::memory_order_relaxed);
+                if(!rescanned) return;
                 // An info rescan (names, flags, hints) keeps the parameters and their order, which the
                 // shared block's values and index_ rely on. Under control: a restart reads the flags.
                 // shortcut: other changes are ignored until the plugin is loaded again; a restarted worker's own info shows only after its next rescan.
@@ -1145,7 +1154,13 @@ namespace oscairn
                 if(process()->failed.load()) throw std::runtime_error(process()->failure());
                 return lock;
             }
-            Writer header(Op op) const { return Writer().u8(uint8_t(op)).u32(node_); }
+            // Anything asked of the worker that changes it, not its service nor a plain question, ends the quiet that spaces the
+            // services out (service).
+            Writer header(Op op) const
+            {
+                if(op != Op::Service && op != Op::SoundContexts && op != Op::ParameterText && op != Op::SoundValues) quiet_.store(0, std::memory_order_relaxed);
+                return Writer().u8(uint8_t(op)).u32(node_);
+            }
             Reader request(Op op, const Writer& args = {})
             {
                 auto lock = controlFor();
@@ -1880,6 +1895,8 @@ namespace oscairn
             std::atomic<uint32_t> idCount_{0}, idVersion_{0};
             size_t next_ = 0;
             std::chrono::steady_clock::time_point serviced_{}; // main thread: the last service asked of the worker (workerServiceInterval)
+            static constexpr uint32_t quietServices = 25, quietFactor = 5; // see service
+            mutable std::atomic<uint32_t> quiet_{0}; // the services in a row it answered with nothing, to quietServices
         };
 
         // RFC 0025: when every node's plugin declares its memory (oscairn.memory), the worker's limit
@@ -2249,6 +2266,7 @@ namespace oscairn
     }
 
     namespace { std::atomic<int64_t> serviceInterval{0}; }
+    uint64_t workerRequests() noexcept { return requests.load(std::memory_order_relaxed); }
     void setWorkerServiceInterval(std::chrono::milliseconds interval) noexcept { serviceInterval.store(interval.count(), std::memory_order_relaxed); }
     std::chrono::milliseconds workerServiceInterval() noexcept
     {

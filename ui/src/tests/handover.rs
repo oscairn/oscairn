@@ -59,7 +59,7 @@ fn close_overlays(f: &mut Fixture) {
     }
 }
 
-/// One step from Play to a screen: the stop `k` of the screen pressed, or the bar's action `i`.
+/// One step from the app's first screen to another: the stop `k` of the screen pressed, or the bar's action `i`.
 #[derive(Clone, Copy, Debug)]
 enum Step {
     Stop(i32),
@@ -78,8 +78,8 @@ fn press_stop(f: &mut Fixture, k: i32) {
     settle(f);
 }
 
-/// To the place `path` names from wherever the walk is: back to Home, the Performance tile, then each step done.
-fn enter(f: &mut Fixture, path: &[Step]) {
+/// To the place `path` names from wherever the walk is: back to Home, the app's tile (`tile`), then each step done.
+fn enter(f: &mut Fixture, tile: i32, path: &[Step]) {
     let ui = f.screen.ui.clone_strong();
     for _ in 0..8 {
         close_overlays(f);
@@ -89,7 +89,7 @@ fn enter(f: &mut Fixture, path: &[Step]) {
         shell::act(Action::Cancel(None));
         settle(f);
     }
-    ui.global::<HomeState>().invoke_tapped(0);
+    ui.global::<HomeState>().invoke_tapped(tile);
     settle(f);
     for step in path {
         match *step {
@@ -104,9 +104,9 @@ fn enter(f: &mut Fixture, path: &[Step]) {
 }
 
 /// Presses every stop of the screen the path reaches and every action of its bar, checks each, and walks into what opened.
-fn walk(f: &mut Fixture, depth: usize, seen: &mut HashSet<String>, pressed: &mut usize, path: &mut Vec<Step>) {
+fn walk(f: &mut Fixture, tile: i32, depth: usize, seen: &mut HashSet<String>, pressed: &mut usize, path: &mut Vec<Step>) {
     let ui = f.screen.ui.clone_strong();
-    enter(f, path);
+    enter(f, tile, path);
     let at = here(&ui);
     if depth == 0 || !seen.insert(at.clone()) {
         return;
@@ -115,7 +115,7 @@ fn walk(f: &mut Fixture, depth: usize, seen: &mut HashSet<String>, pressed: &mut
     let mut last = None;
     for k in 0..30 {
         if here(&ui) != at {
-            enter(f, path);
+            enter(f, tile, path);
             if here(&ui) != at {
                 return; // the path no longer leads here
             }
@@ -141,19 +141,19 @@ fn walk(f: &mut Fixture, depth: usize, seen: &mut HashSet<String>, pressed: &mut
         if opened && here(&ui).split(':').next() != Some("0") {
             eprintln!("stop {k} of {at} opened {} via {path:?}", here(&ui));
             path.push(Step::Stop(k));
-            walk(f, depth - 1, seen, pressed, path);
+            walk(f, tile, depth - 1, seen, pressed, path);
             path.pop();
         }
     }
     // The bar's actions, each done.
-    enter(f, path);
+    enter(f, tile, path);
     let n = ui.global::<Bar>().get_actions().row_count();
     let more = ui.global::<Bar>().get_more();
     for i in 0..n {
         if more {
             break; // the same actions are in More's menu
         }
-        enter(f, path);
+        enter(f, tile, path);
         ui.global::<Bar>().invoke_action(i as i32);
         settle(f);
         *pressed += 1;
@@ -161,7 +161,7 @@ fn walk(f: &mut Fixture, depth: usize, seen: &mut HashSet<String>, pressed: &mut
         close_overlays(f);
         if here(&ui) != at && ui.get_screen() != 0 {
             path.push(Step::Bar(i));
-            walk(f, depth - 1, seen, pressed, path);
+            walk(f, tile, depth - 1, seen, pressed, path);
             path.pop();
         }
     }
@@ -178,7 +178,7 @@ fn nothing_in_the_performance_app_hands_the_display_over() {
     assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play in this shell");
     no_handover(&ui, "the Performance tile");
     let (mut seen, mut pressed) = (HashSet::new(), 0);
-    walk(&mut f, 7, &mut seen, &mut pressed, &mut vec![]);
+    walk(&mut f, 0, 7, &mut seen, &mut pressed, &mut vec![]);
     let mut screens: Vec<&String> = seen.iter().collect();
     screens.sort();
     eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());
@@ -215,4 +215,27 @@ fn the_home_tiles_that_still_hand_over_are_the_unported_apps() {
     eprintln!("tiles that hand over: {handing:?} of {names:?}");
     assert!(!handing.iter().any(|n| n == "Performance" || n == "Setlist"), "{handing:?}");
     assert!(!handing.is_empty(), "the other apps are still the JUCE app's");
+}
+
+// The same walk from Home's Library tile: every stop and every bar action of the Library app, the catalog and the file chooser
+// and the questions it opens included, asks for no handover.
+#[test]
+fn nothing_in_the_library_app_hands_the_display_over() {
+    let mut f = Fixture::new("handover-library");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    shell::library_in_rust(true);
+    ui.global::<HomeState>().invoke_tapped(1); // the Library tile
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 13, "the Library tile opens the Rust Library");
+    no_handover(&ui, "the Library tile");
+    let (mut seen, mut pressed) = (HashSet::new(), 0);
+    walk(&mut f, 1, 7, &mut seen, &mut pressed, &mut vec![]);
+    let mut screens: Vec<&String> = seen.iter().collect();
+    screens.sort();
+    eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());
+    assert!(seen.iter().any(|s| s.starts_with("13:Library")), "the Library's list was walked: {screens:?}");
+    assert!(seen.len() >= 3, "the walk went into what opens (filters, menus, the catalog): {screens:?}");
+    assert!(pressed > 40, "the walk pressed {pressed}");
 }

@@ -6,6 +6,32 @@ shell, so nothing in it hands the display to JUCE. This file is the checklist; a
 `PartsView.cpp`, `PartsModel.cpp`, `ParameterGrid.cpp`, and what they use from `Engine.cpp`,
 `Theme`, `Profile`, the knob and controller code, Learn.
 
+## State (2026-11-15, branch rust-app-finish)
+
+Of the 95 rows, 93 are ticked, 2 are n/a (B7, C17: the JUCE app has neither), none is open. A ticked row is built in
+the Rust shell and tested against a fake engine; some carry a recorded difference or a part left out, named in the
+row: F9 (a plugin's own view is a disabled entry: the one item allowed to stay unported), C16 (the JUCE Performance
+app has no "replace instrument": it is the Plugins app's PluginBrowser; its preset half is E6), F6 (the screen
+knobs' page is done and tested; the `row:N` half belongs to the JUCE Panel's desktop layouts, see below), D9 (the
+lane's keys are two rows, not the draggable keyboard strip), E1 (no tag colors, hiding a tag, compact or pill views,
+Options or install: Library app items), D6 (the In and Out ends are named, not drawn with the part's devices and
+sends). **Items without a request** (engine requests the Rust app still lacks, none added here; the section below
+has the reasons): the resolved slots of a device's knobs (`controllers.resolved`, A9: the shell ports the rules),
+the selected line of tiles for knobs bound `row:N` (F6: a `controllers.view` `row`), the declared pages, tabs and
+value icons in `params.list` (`uiTabs`, `uiTab`, `valueIcons`, provisional), the plugin's own view surface (F9), and
+what are not engine calls at all: the plugin scanner and the on-screen keyboards.
+
+**Never run against the real engine or on a device, so far: everything in this list.** Every test drives the fake
+engine (the test against the real engine, `ui-rust` in CMake, was written before these screens and has not been run for them), and the request
+shapes of the splits, lanes, presets and library filters are read from docs/control-protocol.md and
+`RemoteControl`, not seen answered. Nothing has run on the keyboard's screen (KMS), under a touch panel, with its
+knobs and dial, or on a desktop window other than the headless renderer. Not started: the text keyboard as an
+overlay on the lower half of a hardware screen (owner requirement below). This is not a finished app. Before the
+JUCE app can hand over: run it against the real engine and on the device, with every row above by touch and by the
+knobs, and the unit's own timing (the screens' redraw cost, the meters' poll); build the text keyboard overlay; decide
+the owner's open questions (C20, the part's key, is an addition the JUCE page does not have; the `row:N` request;
+plugin views); and only then remove the JUCE Performance screens.
+
 How to read a row: **Request** is the control request(s) (docs/control-protocol.md) the JUCE
 code sends for it (through `Engine::edit` and `RemoteControl`, which sends exactly these when the
 app is connected to an engine, as it is on the keyboard). **In-proc** says whether the JUCE code

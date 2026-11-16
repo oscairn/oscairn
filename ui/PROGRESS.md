@@ -363,3 +363,15 @@ appended entries kept; after the join 221 tests passed and `cargo clippy --all-t
   (tests/row.rs). Pictures: ui/target/theme-shots/tabs-*, tabrows-* (enlarged), play-tabs-*.
 - Not done or not verified: not run on a unit; no device profile has a page key, so on a unit stepping tabs is the dial (back, along, press); a view whose
   parameters a plugin spreads over tabs is drawn from the tab shown, not once on the first (ui.h); a long name's tab is capped at four and a half touch targets (measured in pixels, tests/tabs.rs), the shrink to 70% and the cut are FitText's and looked at in the pictures (tabs-long-*), not measured.
+
+Branch `rust-app-finish` (from `rust-app` 84fe9e23): the inventory rows still open, D6 to D9, F6, E1, E6. Baseline: 234 of 235 passed (the
+Routing test `routing_opens_from_the_parts_list_and_its_actions_reach_the_engine` failed once in the full run and passed alone and in the
+runs after), clippy clean. Now 254 passed, `cargo clippy --offline --all-targets` clean (`sh ui/target/test.sh ... --offline`; target/test.sh
+is written again as this file says: the data and config folders in ui/target/home, wiped each run).
+- D6 (fae4b0f4): role words and color classes, off, failed marks and the message line on the chain; the shared rows' text and the panel's
+  lines shrink to 70% before they are cut. D7 to D9 (e436ee3b): splits, lanes, lane settings and crossovers on the chain screen, no
+  confirmation on any removal (the reference has none; Undo covers them: every edit is followed by `graph.commit`). F6 (ed86ba75): the screen
+  page tested, `row:N` written down as not this shell's. E1 (22a5a73e): the sound chooser's Filters, tags, libraries, favorites, row details and
+  color. E6 (2fe24a21): Presets... on a plugin's actions. Pictures in ui/target/screens: chain-marks-*, chain-split-*, chain-lane-*,
+  chain-lane-settings-*, chain-presets-*, sounds-list-*, sounds-filters-* in the dark, odd and odd-joined themes at 1280x720, 1280x720@1.55, 800x480.
+- State and what has never been run against the real engine or on a device: the top of ui/PERFORMANCE-APP.md.

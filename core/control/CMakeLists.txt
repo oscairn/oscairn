@@ -380,6 +380,9 @@ add_executable(oscairn-shared-costs-test tests/shared_costs.cpp)
 target_link_libraries(oscairn-shared-costs-test PRIVATE oscairn_control)
 add_test(NAME control-shared-costs COMMAND oscairn-shared-costs-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-shared-costs PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+if(UNIX) # In a worker, as the engine runs plugins: a block's cost is the worker thread's CPU time. In the test's own process it is wall time, and a busy machine doubled one of the two figures compared.
+    set_tests_properties(control-shared-costs PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+endif()
 # RFC 0025: a recorded cost is the plugin's own CPU time per block, alone, with the extra block and on a busy machine.
 add_executable(oscairn-measured-costs-test tests/measured_costs.cpp)
 target_link_libraries(oscairn-measured-costs-test PRIVATE oscairn_control)

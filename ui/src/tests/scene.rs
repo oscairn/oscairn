@@ -23,6 +23,27 @@ fn done() -> serde_json::Value {
     json!({"result": {"accepted": true}})
 }
 
+/// The next request `method`, the reads before it answered from `g`, and `g` changed as the real
+/// engine changes its graph for it: no scenes.* request commits, so the shell reads the graph again
+/// after each, and a fake that kept the old graph would hide that the screen showed what it sent.
+fn scene_edit(f: &mut Fixture, g: &mut serde_json::Value, method: &str) -> serde_json::Value {
+    let r = request_in(f, method, &json!({"undo": "", "redo": ""}), g);
+    let p = &r["params"];
+    if let Some(s) = g["scenes"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == p["scene"]) {
+        match method {
+            "scenes.name" => s["name"] = p["name"].clone(),
+            "scenes.scope" => s["scope"] = p["scope"].clone(),
+            "scenes.transition" => {
+                for k in ["glide", "curve", "launch"] {
+                    s[k] = p[k].clone();
+                }
+            }
+            _ => {}
+        }
+    }
+    r
+}
+
 #[test]
 fn a_scene_is_added_from_the_tile_after_the_last() {
     let mut f = play_on_the_shell("scene-add", json!({"id": "p1", "name": "Grand", "unsaved": false}), graph());
@@ -64,8 +85,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let mut f = play_on_the_shell("scene-setup", json!({"id": "p1", "name": "Grand", "unsaved": false}), graph());
     let ui = f.screen.ui.clone_strong();
     let none = json!({"undo": "", "redo": ""});
-    let g = graph();
-    let want = |f: &mut Fixture, method: &str| request_in(f, method, &none, &g);
+    let mut g = graph();
     ui.global::<crate::Bar>().invoke_action(3); // Scene
     assert_eq!((ui.get_screen(), ui.global::<crate::Bar>().get_where().as_str()), (8, "Scene"));
     for _ in 0..4 {
@@ -88,7 +108,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     // Store, then Rename on the keyboard (the name starts as the scene's).
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None));
-    let r = want(&mut f, "scenes.store");
+    let r = scene_edit(&mut f, &mut g, "scenes.store");
     assert_eq!(r["params"], json!({"scene": 2}));
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: 1 });
@@ -96,19 +116,23 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     assert!(ui.global::<crate::KeyboardState>().get_open());
     shell::act(Action::End(1));
     shell::act(Action::Confirm(None)); // Done
-    let r = want(&mut f, "scenes.name");
+    let r = scene_edit(&mut f, &mut g, "scenes.name");
     assert_eq!(r["params"], json!({"scene": 2, "name": "Chorus"}));
     f.reply(&r, done());
     // The scope: a press on a kind flips it, in the engine's order.
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None));
-    let r = want(&mut f, "scenes.scope");
+    let r = scene_edit(&mut f, &mut g, "scenes.scope");
     assert_eq!(r["params"], json!({"scene": 2, "scope": ["enabled", "mutes", "mix"]}));
     f.reply(&r, done());
+    // Accepted: the graph is read again (a read sent before the edit may still bring the old scope).
+    let again = request_in(&mut f, "graph.get", &none, &g);
+    f.reply(&again, json!({"result": g.clone()}));
+    assert_eq!(rows(&f)[2].1, "On", "Plugins and wires on, as the engine now has it");
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None)); // Mutes and solos: off
-    let r = want(&mut f, "scenes.scope");
-    assert_eq!(r["params"], json!({"scene": 2, "scope": ["mix"]}));
+    let r = scene_edit(&mut f, &mut g, "scenes.scope");
+    assert_eq!(r["params"], json!({"scene": 2, "scope": ["enabled", "mix"]}), "the first press kept: the screen read the scope again");
     f.reply(&r, done());
     // The curve needs a glide time: said, nothing to change.
     shell::act(Action::End(1));
@@ -119,15 +143,15 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     shell::act(Action::Move { pane: None, by: -1 });
     shell::act(Action::Confirm(None));
     shell::act(Action::Move { pane: None, by: 1 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"], json!({"scene": 2, "glide": 100, "curve": "linear", "launch": "now"}));
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: 1 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["glide"], 250);
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: -3 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["glide"], 100, "steps of the menu's times, one a click");
     f.reply(&r, done());
     shell::act(Action::Cancel(None)); // ends the change, the cursor stays
@@ -136,35 +160,35 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None));
     shell::act(Action::Move { pane: None, by: 5 }); // however fast it turns: one choice a click
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"], json!({"scene": 2, "glide": 100, "curve": "ease", "launch": "now"}));
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: 1 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"], json!({"scene": 2, "glide": 100, "curve": "equal-power", "launch": "now"}));
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: 1 }); // the last choice: no more
     shell::act(Action::Move { pane: None, by: -1 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["curve"], "ease", "the end held, so this was the step back");
     f.reply(&r, done());
     shell::act(Action::Move { pane: None, by: 1 });
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"]["curve"], "equal-power");
     f.reply(&r, done());
     shell::act(Action::Cancel(None));
     ui.global::<crate::PartState>().invoke_step(10, 1); // the launch's +
-    let r = want(&mut f, "scenes.transition");
+    let r = scene_edit(&mut f, &mut g, "scenes.transition");
     assert_eq!(r["params"], json!({"scene": 2, "glide": 100, "curve": "equal-power", "launch": "beat"}));
     f.reply(&r, done());
     assert_eq!(rows(&f)[10].1, "On the next beat");
     // A refusal is said; Cancel drops the cursor, then goes back to Play.
     shell::act(Action::Move { pane: None, by: 0 });
     ui.global::<crate::PartState>().invoke_tapped(0); // Store, by touch
-    let r = want(&mut f, "scenes.store");
+    let r = scene_edit(&mut f, &mut g, "scenes.store");
     f.reply(&r, json!({"error": {"code": -32602, "message": "no such scene"}}));
     assert!(ui.global::<crate::PartState>().get_message().contains("no such scene"));
-    let _ = want(&mut f, "graph.get"); // the page set right
+    let _ = request_in(&mut f, "graph.get", &none, &g); // the page set right
     shell::act(Action::Cancel(None));
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 3);

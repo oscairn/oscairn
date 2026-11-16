@@ -99,12 +99,15 @@ pub struct Screen {
     id: u64,
     scene: Option<Scene>,
     asking: bool,
+    /// Edits sent and not yet answered: a graph read meanwhile may be from before them, so the scene
+    /// keeps what it shows (what was sent) until the read after the last answer.
+    unanswered: usize,
     pub out: Vec<Out>,
 }
 
 impl Screen {
     pub fn new(ui: &Shell) -> Screen {
-        Screen { b: Browser::new(ui), id: 0, scene: None, asking: false, out: vec![] }
+        Screen { b: Browser::new(ui), id: 0, scene: None, asking: false, unanswered: 0, out: vec![] }
     }
 
     pub fn at_top(&self) -> bool {
@@ -116,11 +119,15 @@ impl Screen {
         self.id = id;
         self.scene = None;
         self.asking = false;
+        self.unanswered = 0;
         self.b.reset();
         self.b.say("");
     }
 
     pub fn graph(&mut self, graph: &Value) {
+        if self.unanswered > 0 && self.scene.is_some() {
+            return;
+        }
         self.scene = graph["scenes"].as_array().and_then(|s| s.iter().find(|s| s["id"].as_u64() == Some(self.id))).map(read);
         self.show();
     }
@@ -164,18 +171,23 @@ impl Screen {
     }
 
     /// Whether an edit was refused (said).
+    /// What the engine answered; true when the graph should be read again: after a refusal, and after
+    /// every accepted edit, as no scenes.* request commits and so no graph.changed follows one.
     pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
+        self.unanswered = self.unanswered.saturating_sub(1);
         match (request, result) {
             (Request::Edit, Err(e)) if e.code != 0 => {
                 self.b.say(&format!("The engine refused: {}", e.message));
                 self.show();
                 true
             }
+            (Request::Edit, Ok(_)) => true,
             _ => false,
         }
     }
 
     fn edit(&mut self, method: &'static str, params: Value) {
+        self.unanswered += 1;
         self.out.push((Request::Edit, method, params));
     }
 
@@ -229,6 +241,9 @@ impl Screen {
                 let mut scope: Vec<&str> = KINDS.iter().map(|(n, _)| *n).filter(|n| (s.scope.iter().any(|x| x == n)) != (*n == kind)).collect();
                 scope.sort_by_key(|n| KINDS.iter().position(|(k, _)| k == n));
                 self.edit("scenes.scope", json!({"scene": self.id, "scope": scope}));
+                if let Some(s) = self.scene.as_mut() {
+                    s.scope = scope.iter().map(|k| k.to_string()).collect(); // shown now; graph.get confirms
+                }
             }
             Row::Curve if s.glide == 0 => self.b.say("The curve applies when there is a glide time"),
             Row::Glide | Row::Curve | Row::Launch => self.b.editing = true,
@@ -240,6 +255,9 @@ impl Screen {
     pub fn entered(&mut self, text: &str) {
         if std::mem::take(&mut self.asking) && !text.trim().is_empty() {
             self.edit("scenes.name", json!({"scene": self.id, "name": text.trim()}));
+            if let Some(s) = self.scene.as_mut() {
+                s.name = text.trim().to_string(); // shown now; graph.get confirms
+            }
         }
         self.show();
     }

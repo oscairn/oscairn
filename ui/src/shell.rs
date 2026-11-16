@@ -618,10 +618,15 @@ impl App {
         }
     }
 
+    /// The Performance read again; on a screen with the top bar's actions, what Undo and Redo name
+    /// too, as an edit with no graph.changed (scenes.*, a live level) changed them as well.
     fn ask_performance(&mut self) {
         self.stale = false;
         self.ask(Request::Info, "performance.info");
         self.ask(Request::Graph, "graph.get");
+        if has_actions(self.screen) {
+            self.ask(Request::History, "edit.history");
+        }
     }
 
     /// The meters, at most every METER_INTERVAL: the CPU from this status, RAM and the tempo asked.

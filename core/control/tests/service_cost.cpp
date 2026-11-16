@@ -4,7 +4,7 @@
 // of an instrument, one instance, and four effects each), every tick of the engine's main thread (Session::service,
 // every 5 ms) measured in thread CPU time, as the unit's "Sick tines" held it at 73 to 89 percent of a core. Run with
 // OSCAIRN_PLUGIN_WORKER, OSCAIRN_PLUGIN_SCAN and OSCAIRN_WORKER_SERVICE_MS=20 as a device sets them; STUCK=1 leaves
-// a value pending that a shared node refuses for good; TICKS the number of ticks (400).
+// a value pending that a shared node refuses for good; TICKS the number of ticks (400); BUDGET=1 measures under a budget.
 //   oscairn-service-cost INSTRUMENT.clap EFFECT.clap
 #include "oscairn/session.h"
 #include "oscairn/plugin_host.h"
@@ -31,6 +31,7 @@ int main(int argc, char** argv)
     state_files::TemporaryDirectory home;
     ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1);
     Session s(48000, 128);
+    if(std::getenv("BUDGET")) s.setBudget({.9, 0}); // a device's: the budget's measuring runs every tick too
     size_t parameters = 0;
     NodeId first = 0;
     std::vector<NodeId> nodes;

@@ -46,8 +46,9 @@ namespace oscairn
         /// more than one output port, and one sound saved on its own and its values read
         /// (sound-snapshots draft 4).
         static clap_id busParameter(const PluginHost& host);
-        /// How many more contexts the engine takes: its free channels and buses, and its free sounds.
-        static uint32_t room(const Engine& engine);
+        /// How many more contexts the engine takes: its free channels and buses, and its free sounds
+        /// (`sounds` held, else its worker is asked).
+        static uint32_t room(const Engine& engine, std::optional<size_t> sounds = {});
         /// An engine around a plain instance that can share, has not failed and plays one sound on
         /// every MIDI channel (so its node on one channel sounds as it did); else none.
         static std::shared_ptr<Engine> lead(const std::shared_ptr<PluginHost>& host);

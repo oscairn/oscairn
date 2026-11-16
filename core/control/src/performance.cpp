@@ -326,6 +326,16 @@ bool sameTree(const fs::path& a,const fs::path& b){
     for(const auto& [name,size]:files)if(state_files::read(a/name,size)!=state_files::read(b/name,size))return false;
     return true;
 }
+// RFC 0045's plugin groups: the group each node of a document is placed in, decided from its audio wires before any
+// plugin loads (a part's instrument alone, its inserts together, each bus and the master their own); each load of a
+// document its own groups. Every path that loads a document's plugins loads each under its PlacementScope.
+std::map<std::string,PlacementGroup> documentPlacement(const std::vector<V>& nodes,const std::vector<V>& wires){
+    static std::atomic<uint64_t> loads{0};
+    std::vector<std::string> keys;std::vector<std::pair<std::string,std::string>> audio;
+    for(auto node:nodes)keys.push_back(text(field(node,"key")));
+    for(auto w:wires)if(text(field(w,"kind"))=="audio")audio.emplace_back(text(field(w,"from")),text(field(w,"to")));
+    return placementGroups(keys,audio,"load-"+std::to_string(++loads)+"/");
+}
 // A saved node's plugin: the build at its saved path, else the store's, else the one bundled with
 // the app (in folder bundled), of the saved version; else its stand-in. load adds a build, version
 // reads it, unload removes a mismatched one.
@@ -1104,6 +1114,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if(text(field(w,"kind"))!="audio")continue;const auto from=text(field(w,"from"));const auto port=integer(field(w,"fromPort"));
         if(!definitions.contains(from))continue;
         for(auto p:array(field(definitions.at(from),"outputs"),Graph::maxAudioChannels))if(integer(field(p,"id"))==port && !(integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN))offMain.insert(from);}
+    auto placed=documentPlacement(nodes,array(field(d,"wires"),Graph::maxAudioConnections)); // the groups the plugins load in (compute.workers)
     auto kind=[&](V plugin){return text(field(plugin,"id"))+'\n'+text(field(plugin,"version"))+'\n'+text(field(plugin,"pathHint"));};
     auto formable=[&](V node,const std::string& key){return SoundContext::sharesOnItsOwn() && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
     std::map<std::string,size_t> kinds;for(auto node:nodes)if(formable(node,text(field(node,"key"))))++kinds[kind(field(node,"plugin"))];
@@ -1170,6 +1181,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         const auto plugin=field(node,"plugin");fields(plugin,{"format","id","version","pathHint"});const auto format=text(field(plugin,"format")),id=text(field(plugin,"id")),path=text(field(plugin,"pathHint"));
         if((format!="clap" && format!="lv2") || id.empty() || path.empty() || (lv2Path(path)!=(format=="lv2")))bad("invalid plugin identity or format");
         const auto name=text(field(node,"name"));
+        const PlacementScope placement(placed[key]);
         try {
             NodeId runtime;bool restored=false,fresh=false; // a taken-over instance gets its state its own way; a fresh one is this load's alone
             // RFC 0025: each plugin may declare what the memory budget leaves beside those loaded
@@ -1618,17 +1630,9 @@ std::map<std::string,NodeId> Session::addNodes(const json_value_s* document,cons
             std::none_of(outs.begin(),outs.end(),[&](V p){return integer(field(p,"id"))==integer(field(w,"fromPort")) && (integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN);}))return true;
         return false;};
     auto unique=[&](const std::string& name){return name.empty()?name:nextFree(name,[&](const std::string& n){return std::any_of(nodes_.begin(),nodes_.end(),[&](const auto& x){return x.second==n;});});};
-    // RFC 0045's plugin groups: each plugin placed with those its audio would be rendered with, decided from the document
-    // before any loads (a part's instrument alone, its inserts together, each bus and the master their own), so a
-    // policy grouping them (compute.workers) puts them in one process; each load of a document its own groups.
-    std::map<std::string,PlacementGroup> placed;
-    {
-        static std::atomic<uint64_t> loads{0};
-        std::vector<std::string> keys;std::vector<std::pair<std::string,std::string>> audio;
-        for(auto node:nodes)keys.push_back(text(field(node,"key")));
-        for(auto w:wireList)if(text(field(w,"kind"))=="audio")audio.emplace_back(text(field(w,"from")),text(field(w,"to")));
-        placed=placementGroups(keys,audio,"load-"+std::to_string(++loads)+"/");
-    }
+    // RFC 0045's plugin groups: each plugin placed with those its audio would be rendered with, so a policy grouping
+    // them (compute.workers) puts them in one process.
+    auto placed=documentPlacement(nodes,wireList);
     try{
         for(bool siblings:{false,true})for(auto node:nodes){
             if(!wanted(node))continue;

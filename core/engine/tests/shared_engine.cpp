@@ -13,7 +13,9 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 #include <string>
 #include <vector>
 using namespace oscairn;
@@ -25,15 +27,15 @@ constexpr uint32_t frames=64;
 // The plugin as it is, but keeping the voice limits the graph gives it.
 struct Recording final : PluginHost
 {
-    std::shared_ptr<PluginHost> p;std::vector<oscairn_voice_budget_context_t> last;uint32_t calls=0;
+    std::shared_ptr<PluginHost> p;std::vector<oscairn_voice_budget_context_t> last;uint32_t calls=0;mutable uint32_t serviced=0,listed=0;
     explicit Recording(std::shared_ptr<PluginHost> plugin):p(std::move(plugin)){last.reserve(OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS);}
     void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {last.assign(contexts,contexts+count);++calls;p->setVoiceLimits(limit,contexts,count);}
-    void service() override {p->service();}
+    void service() override {++serviced;p->service();}
     void saveSnapshot(const std::string& d) override {p->saveSnapshot(d);}
     void loadSnapshot(const std::string& d) override {p->loadSnapshot(d);}
     const char* soundContextMode() const noexcept override {return p->soundContextMode();}
     uint32_t soundContextCapacity() const noexcept override {return p->soundContextCapacity();}
-    std::vector<oscairn_sound_context_info_t> soundContexts() const override {return p->soundContexts();}
+    std::vector<oscairn_sound_context_info_t> soundContexts() const override {++listed;return p->soundContexts();}
     uint32_t prepareSound(const std::string& n,const std::vector<oscairn_sound_parameter_t>& v,const std::string& s,const std::string& r,const std::string& z,const std::string& l,const std::string& d) override {return p->prepareSound(n,v,s,r,z,l,d);}
     bool selectSound(uint32_t id,int16_t c) override {return p->selectSound(id,c);}
     bool discardSound(uint32_t id,bool cut) override {return p->discardSound(id,cut);}
@@ -142,6 +144,20 @@ int main(int argc,char** argv){try{
         check(onlyFirst,"selected on its channel only");
         for(int i=0;i<2;++i)g.process(out,frames,nullptr);
         check(plugin->last.size()==2 && plugin->last[0].context==next,"the budget names the sound its channel now selects");
+    }
+    {
+        // The engine's worker is serviced once an interval for all its contexts (the workers' service interval, RFC 0045):
+        // not once for each of five parts, each a request and an answer, and one more to read the sounds the channels select.
+        setWorkerServiceInterval(std::chrono::milliseconds(20));
+        auto plugin=std::make_shared<Recording>(loadPlugin(argv[1],"",48000,frames));
+        auto engine=std::make_shared<SoundContext::Engine>();engine->host=plugin;engine->busParameter=SoundContext::busParameter(*plugin);
+        plugin->p->setActiveOutputs(0b111111);
+        std::vector<std::shared_ptr<SoundContext>> contexts;
+        for(uint16_t c=0;c<5;++c)contexts.push_back(std::make_shared<SoundContext>(engine,c,uint32_t(c+1),plugin->prepareSound("Part "+std::to_string(c),first,{},{},{},{},{})));
+        plugin->serviced=plugin->listed=0;
+        for(int pass=0;pass<3;++pass){for(auto& c:contexts)c->service();std::this_thread::sleep_for(std::chrono::milliseconds(25));}
+        setWorkerServiceInterval(std::chrono::milliseconds(0));
+        check(plugin->serviced==3 && plugin->listed==3,"five contexts of one engine ask its worker once a pass, not once each: "+std::to_string(plugin->serviced)+" services and "+std::to_string(plugin->listed)+" listings in 3 passes");
     }
     check(separate.size()==shared.size(),"same length");
     double worst=0;bool sounded=false;

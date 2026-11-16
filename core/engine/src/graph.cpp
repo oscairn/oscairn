@@ -650,8 +650,15 @@ namespace oscairn
         result.audioLayout=audioLayout_;
         for(const auto& [edge,state]:noteEdges_)result.notes.push_back(edge);
         result.noteZones=noteZones_;result.draining=draining_;
+        result.mappings = mappings();
+        return result;
+    }
+
+    std::vector<Graph::Mapping> Graph::mappings() const
+    {
+        std::vector<Mapping> result;
         for( const auto& [from,to] : paramTargets_ )
-            result.mappings.push_back({from.first,from.second,to.first,to.second});
+            result.push_back({from.first,from.second,to.first,to.second});
         return result;
     }
 

@@ -93,20 +93,23 @@ namespace oscairn
 
     void SoundContext::service()
     {
-        // As often as a worker is serviced (workerServiceInterval): each call below asks the instance's worker.
-        if(const auto interval = workerServiceInterval(); interval.count())
+        // As often as a worker is serviced (workerServiceInterval), the engine's worker once for all its contexts: each
+        // request below asks it (and a worker's answer costs the control thread a wake-up and a switch), so the
+        // first context of a pass asks and the others read what it was told. Control thread.
+        auto& engine = *engine_;
+        const auto now = std::chrono::steady_clock::now();
+        if(const auto interval = workerServiceInterval(); !interval.count() || now - engine.serviced >= interval)
         {
-            const auto now = std::chrono::steady_clock::now();
-            if(now - serviced_ < interval) return;
-            serviced_ = now;
+            engine.serviced = now;
+            engine.host->service();
+            // Never throws, as the host's service(): a worker that failed is the supervisor's to restart,
+            // and an exception here would end the control thread's servicing (and the engine) for it.
+            try { engine.contexts = engine.host->soundContexts(); } catch(const std::exception&) { return; }
+            ++engine.read;
         }
-        engine_->host->service();
-        if(later_) return; // its channel selects another node's sound, or a retired one, until select()
-        // Never throws, as the host's service(): a worker that failed is the supervisor's to restart,
-        // and an exception here would end the control thread's servicing (and the engine) for it.
-        std::vector<oscairn_sound_context_info_t> contexts;
-        try { contexts = engine_->host->soundContexts(); } catch(const std::exception&) { return; }
-        for(const auto& c : contexts) if(c.selected_channels >> channel_ & 1) { sound_.store(c.id, std::memory_order_relaxed); own_ = c.id; }
+        if(later_ || seen_ == engine.read) return; // its channel selects another node's sound, or a retired one, until select()
+        seen_ = engine.read;
+        for(const auto& c : engine.contexts) if(c.selected_channels >> channel_ & 1) { sound_.store(c.id, std::memory_order_relaxed); own_ = c.id; }
     }
 
     void SoundContext::setValues(const std::map<clap_id, double>& values)

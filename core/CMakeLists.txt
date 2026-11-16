@@ -659,6 +659,12 @@ foreach(rest IN ITEMS disabled all 0)
     set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
 endforeach()
 
+# RFC 0045: a worker that answered nothing for a while is serviced less often.
+add_executable(oscairn-worker-service-test engine/tests/worker_service.cpp)
+target_link_libraries(oscairn-worker-service-test PRIVATE oscairn_engine)
+add_test(NAME worker-service COMMAND oscairn-worker-service-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(worker-service PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+
 add_executable(oscairn-plugin-hosts-test engine/tests/plugin_hosts.cpp)
 target_link_libraries(oscairn-plugin-hosts-test PRIVATE oscairn_engine)
 add_test(NAME plugin-hosts COMMAND oscairn-plugin-hosts-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

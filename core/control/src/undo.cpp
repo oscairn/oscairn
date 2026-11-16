@@ -112,7 +112,7 @@ namespace oscairn
 
     Session::Model Session::model() const
     {
-        Model m{parts_, wires_, scenes_, untouched_, macros_, padMap_, assignments_, graph_.describe().mappings, {}, disabled_, key_, {masterLevel_, masterPan_}, roles_};
+        Model m{parts_, wires_, scenes_, untouched_, macros_, padMap_, assignments_, graph_.mappings(), {}, disabled_, key_, {masterLevel_, masterPan_}, roles_};
         for(const auto& [id, name] : nodes_) m.nodes.emplace(id, std::pair{name, graph_.node(id)});
         return m;
     }

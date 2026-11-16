@@ -87,7 +87,7 @@ is a literal.
   the widgets and the screen's cursor read the model only. A parameter on a page that has tabs but on no tab is
   drawn above the tabs, whichever tab is open (the header's rule).
 - The search is a button at the end of the header row (Back, the title, Search) for a plugin of more than 24
-  parameters; while a search is on it shows the text, lit. It no longer costs a column.
+  parameters; while a search is on it reads "Search: " and the text (not lit: the cursor's ring would vanish on the accent). It no longer costs a column.
 
 ### The arrangement for the keyboard's screen
 

@@ -630,14 +630,13 @@ export component Grid inherits Rectangle {
         overflow: elide;
         vertical-alignment: center;
     }
-    // The search: a button in the header row, the text searched for on it while one is on; a press opens the keyboard.
+    // The search: a button in the header row, the text searched for after it while one is on (not lit: the cursor's ring would vanish on the accent); a press opens the keyboard.
     if GridState.search-shown: Button {
         x: root.width - Theme.margin - root.search-width;
         y: Theme.margin;
         width: root.search-width;
         height: root.header;
-        text: GridState.search == "" ? "Search" : GridState.search;
-        on: GridState.search != "";
+        text: GridState.search == "" ? "Search" : "Search: " + GridState.search;
         clicked => { GridState.search-tap(); }
         Cursor {
             shown: GridState.search-cursor;

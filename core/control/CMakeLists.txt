@@ -363,6 +363,15 @@ target_compile_options(oscairn-performance-switch-stress-test PRIVATE -Wall -Wex
 add_test(NAME control-performance-switch-stress COMMAND oscairn-performance-switch-stress-test
     $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(control-performance-switch-stress PROPERTIES TIMEOUT ${switch_timeout})
+# The budget's measuring goes on past a shared instance's worker that stopped answering (the switch-stress test's "connection lost").
+if(UNIX)
+    add_executable(oscairn-measure-lost-worker-test tests/measure_lost_worker.cpp)
+    target_link_libraries(oscairn-measure-lost-worker-test PRIVATE oscairn_control)
+    target_compile_options(oscairn-measure-lost-worker-test PRIVATE -Wall -Wextra)
+    add_test(NAME control-measure-lost-worker COMMAND oscairn-measure-lost-worker-test $<TARGET_FILE:oscairn_basic_synth>)
+    set_tests_properties(control-measure-lost-worker PROPERTIES TIMEOUT 60
+        ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+endif()
 
 add_executable(oscairn-hostile-notes-test tests/hostile_notes.cpp)
 target_link_libraries(oscairn-hostile-notes-test PRIVATE oscairn_control)

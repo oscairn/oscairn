@@ -38,6 +38,10 @@ namespace oscairn
         void set(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports);
         // Each control with a function and the function's name ("modulation"), from the groups as set.
         std::map<std::string, std::string> functions() const;
+        // The extra inputs the Performance has unlinked from the controls they follow by default (Session::link).
+        void setUnlinked(std::set<std::string> unlinked);
+        // The Session's assignments changed: the snapshot the controls resolve from is compiled again at the next service().
+        void invalidate() { std::lock_guard lock(lock_); dirty_ = true; }
         void view(const Control::ControlView& view);
         Control::ControllerState state() const;
         void setWake(std::function<void()> wake) { std::lock_guard lock(lock_); wake_ = std::move(wake); }
@@ -55,6 +59,8 @@ namespace oscairn
         // A device panel's own control, by identity, from its reader's thread (a device's, devices/): as
         // midi(), without MIDI. False when it played nothing.
         bool control(const std::string& control, ControlInput input) noexcept;
+        // Where the control's own input is first conditioned and, for an extra input that follows a logical control, taken over by it (see control()).
+        bool played(const std::string& control, ControlInput input, const std::string& physical) noexcept;
         // The same for a control with a navigation (see Session::controllerControl).
         bool control(const std::string& control, ControlInput input, const Navigation& navigation) noexcept;
 
@@ -108,6 +114,13 @@ namespace oscairn
         std::map<uint8_t, float> gains_;        // each live gain written since then
         uint64_t moves_ = 0;                    // counted, so the control thread knows whether more came
         std::string touched_;
+        // Extra inputs and the controls they follow (RFC 0024, `follows` and `rest`): each control's rest position (NaN: unsprung) and what it follows,
+        // the unlinked ones, and for each logical control that has followers its value and the input holding it.
+        struct Link { std::string follows; double rest = std::numeric_limits<double>::quiet_NaN(); };
+        std::map<std::string, Link> links_;
+        std::set<std::string> unlinked_;
+        struct Holding { double value = std::numeric_limits<double>::quiet_NaN(); std::string holder; };
+        std::map<std::string, Holding> holding_;
         bool lists_ = false;
         std::map<std::string, int64_t> navigation_;
         uint64_t touches_ = 0;

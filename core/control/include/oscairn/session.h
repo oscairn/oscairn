@@ -332,6 +332,9 @@ namespace oscairn
         void setControllerWake( std::function<void()> wake );
         void serviceControllers(); // the control thread, woken: the moves to the model and the parameters to their plugins, and no more of service()
         void assign( const std::string& control, const Assignment& target, uint32_t part = 0, bool passes = false ) override;
+        std::vector<std::string> unlinked() const override { return unlinked_; }
+        void link( const std::string& control, bool linked ) override;
+        void syncUnlinked(); // the controllers' copy of unlinked_
 
         struct MidiClockEvent
         {
@@ -526,6 +529,7 @@ namespace oscairn
             MusicalKey key;
             std::pair<double, double> master{1, 0};
             std::map<NodeId, std::string> roles;
+            std::vector<std::string> unlinked;
         };
         struct ParameterChange { NodeId node; uint32_t param; double from, to; };
         struct Step
@@ -713,6 +717,7 @@ namespace oscairn
         void tailNotice(const std::string& notice); // a notice in session.status and the log
         void openPerformance(const std::string& directory); // loadPerformance's work: a failure is counted there
         std::vector<AssignmentOverride> assignments_; // physical controls' overrides (physical_controls.cpp)
+        std::vector<std::string> unlinked_;           // extra inputs the Performance has unlinked from the controls they follow, sorted (physical_controls.cpp)
         uint32_t nextMacro_ = 1;
         bool staged_ = false;
         bool rampGains_ = false; // the next commit is played (a control moved): its gains ramp
@@ -814,6 +819,7 @@ namespace oscairn
             std::vector<std::unique_ptr<Beside>> beside; // its nodes whose sounds were prepared in a playing instance
             Claimed claimed;                      // its nodes on the playing Performance's shared engines
             Timing::Open stats;                   // engine.timing's open: its counts and the read's times
+            std::vector<std::string> unlinked;    // the extra inputs it unlinks
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.

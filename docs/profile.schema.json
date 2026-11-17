@@ -251,7 +251,10 @@
               "touchstrip",
               "wheels",
               "aftertouch",
-              "breath"
+              "breath",
+              "lever",
+              "joystick",
+              "ribbon"
             ]
           },
           "count": {
@@ -330,6 +333,18 @@
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          "follows": {
+            "type": "array",
+            "maxItems": 64,
+            "description": "An assign group: per control, the logical control it drives by default (wheel:1 pitch, wheel:2 modulation), as an extra input does: a lever's axis, a joystick's, a ribbon. The one holding the value is the latest to move, except that a sprung input (see rest) takes over only when it reaches or crosses the value. A Performance can unlink it (assignments.link), when it is a control of its own. A device with only the two wheels needs none",
+            "items": { "type": "string", "pattern": "^[a-z]+:[1-9][0-9]{0,2}$" }
+          },
+          "rest": {
+            "type": "array",
+            "maxItems": 64,
+            "description": "An assign group: per control, its rest position, 0 to 1, when it is sprung (a lever's side to side: 0.5; its push: 0); null or left out: it stays where it is left. A sprung input has a dead zone of 1% of its throw about its rest, so what the spring returns to is exactly the rest",
+            "items": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
           },
           "target": {
             "enum": [

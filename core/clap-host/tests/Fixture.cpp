@@ -279,8 +279,10 @@ struct Plugin {
             [](const clap_plugin_t* p, uint32_t i, bool input, clap_note_port_info_t* out) {
                 if (i || !input) return false;
                 *out = {}; out->id = 0;
-                out->supported_dialects = get(p).kind == 2 ? CLAP_NOTE_DIALECT_MIDI : CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
-                out->preferred_dialect = get(p).kind == 2 ? CLAP_NOTE_DIALECT_MIDI : CLAP_NOTE_DIALECT_CLAP;
+                // KICK_FIXTURE_PREFER_CLAP: the MIDI instrument declares both dialects and prefers CLAP, as the first-party engines do.
+                const bool midiOnly = get(p).kind == 2 && !std::getenv("KICK_FIXTURE_PREFER_CLAP");
+                out->supported_dialects = midiOnly ? CLAP_NOTE_DIALECT_MIDI : CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
+                out->preferred_dialect = midiOnly ? CLAP_NOTE_DIALECT_MIDI : CLAP_NOTE_DIALECT_CLAP;
                 return true;
             }};
         static const clap_plugin_params_t params{

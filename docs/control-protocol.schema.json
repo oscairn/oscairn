@@ -6408,6 +6408,44 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "assignments.link"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "control": {
+                  "type": "string",
+                  "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath|lever|joystick|ribbon):[1-9][0-9]{0,2}$"
+                },
+                "linked": {
+                  "type": "boolean",
+                  "description": "false: the extra input stops driving the logical control it follows by default and is a control of its own; true: linked again"
+                }
+              },
+              "required": [
+                "control",
+                "linked"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "assignments.set"
             },
             "params": {
@@ -6415,7 +6453,7 @@
               "properties": {
                 "control": {
                   "type": "string",
-                  "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath):[1-9][0-9]{0,2}$"
+                  "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath|lever|joystick|ribbon):[1-9][0-9]{0,2}$"
                 },
                 "kind": {
                   "enum": [

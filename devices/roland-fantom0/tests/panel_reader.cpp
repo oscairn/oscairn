@@ -98,7 +98,7 @@ namespace
         auto analog = [&](uint32_t id, int value) { return decode(fantom, {0x84, uint8_t(id & 0x7F), uint8_t((value >> 7) << 2 | id >> 7), uint8_t(value & 0x7F)}); };
         check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
               "slider 8 (analog 16) and knob 1 on 0 to 127");
-        check(near(analog(7, 1023).input.value, 1) && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:3", "the lever and WHEEL1 on 0 to 1023");
+        check(near(analog(7, 1023).input.value, 1) && analog(7, 1023).control == "lever:1" && analog(8, 5).control == "lever:2" && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:1" && analog(6, 5).control == "wheel:2", "WHEEL1, WHEEL2 and the lever's two axes on 0 to 1023");
         check(analog(2, 127).control == "footswitch:1" && near(analog(2, 127).input.value, 1) && near(analog(2, 64).input.value, 64 / 127.), "the HOLD jack (analog 2) is footswitch:1, a position on 0 to 127");
         check(analog(0, 1023).control == "knob:9" && near(analog(0, 1023).input.value, 1) && near(analog(1, 512).input.value, 512 / 1023.), "CUTOFF and RESONANCE on 0 to 1023");
         // The pads as the owner pressed them on November 12: from the bottom left, left to right,
@@ -514,14 +514,16 @@ namespace
         std::error_code e; std::filesystem::remove_all(home, e);
     }
 
-    // The pitch/mod lever as the unit sends it (analog 7 and 8, 0 to 1023, 512 at rest): the shipped FANTOM-07 map through a
-    // reader into a Session whose wheel groups are the profile's (pitchBend, modulation, two plain). The MIDI fixture
-    // (KICK_FIXTURE_WHEELS) plays the bend it hears on its left channel and CC 1 on its right, so each part is heard alone
-    // (the others at level 0). The lever's ends are 0 and 16383, its rest exactly 8192, and it returns there; CC 1 follows
-    // the mod axis. A part with a Sound's own assignment of the control (part A) is driven by it and its instruments get
-    // no CC 1; a part without one (B) gets it; one whose assignment passes (C) gets both. A part's receive setting and
-    // a raw CC 1 follow the same filter. A wheel the Performance assigned plays that and does not also bend. Moves are
-    // counted for learn. Flags and receive settings are undone, saved and read back.
+    // The pitch and mod wheels and the lever as the unit sends them (analog 5 and 6: WHEEL1, WHEEL2; 7 and 8: the lever's side to side and push;
+    // 0 to 1023, 512 at rest): the shipped FANTOM-07 map through a reader into a Session whose wheel and lever groups are the profile's
+    // (WHEEL1 pitchBend sprung to the middle, WHEEL2 modulation unsprung, the lever's axes following them, sprung to the middle and to 0).
+    // The MIDI fixture (KICK_FIXTURE_WHEELS) plays the bend it hears on its left channel and CC 1 on its right, so each part is heard alone
+    // (the others at level 0). The ends are 0 and 16383, the rest exactly 8192, and the spring returns there. Two inputs on one control: a
+    // sprung one takes over only when it reaches or crosses the value, an unsprung one at once, and a released one returns the control to its
+    // rest. A part with a Sound's own assignment of the control is driven by either input and its instruments get no CC 1; a part without
+    // one gets it; one whose assignment passes gets both. A part's receive setting and a raw CC 1 follow the same filter. A wheel the
+    // Performance assigned plays that and does not also bend. A Performance can unlink the lever, which is then assignable on its own.
+    // Moves are counted by the input's own identity. Settings are undone, saved and read back, and kept on a device without the controls.
     void lever(const char* fixture, const char* shipped)
     {
         char home[] = "/tmp/oscairn-lever-XXXXXX";
@@ -543,8 +545,9 @@ namespace
         s.insertIntoPart(pa, 0, a); s.insertIntoPart(pb, 0, b); s.insertIntoPart(pc, 0, c); s.commit();
         std::array<uint32_t, 3> parts{pa, pb, pc};
         auto solo = [&](size_t which) { for(size_t i = 0; i < 3; ++i) s.setPartLevel(parts[i], i == which ? 1 : 0, false); s.service(); render(); render(); };
-        auto wheels = [](uint32_t count, std::vector<std::string> functions) { ControlGroup g; g.role = ControlGroup::Role::Assign; g.kind = "wheels"; g.count = count; g.functions = std::move(functions); return g; };
-        s.setControllers({wheels(1, {"pitchBend"}), wheels(1, {"modulation"}), wheels(2, {})}, {}); s.service();
+        auto wheels = [](std::vector<std::string> functions, std::vector<double> rest) { ControlGroup g; g.role = ControlGroup::Role::Assign; g.kind = "wheels"; g.count = 1; g.functions = std::move(functions); g.rest = std::move(rest); return g; };
+        ControlGroup lever; lever.role = ControlGroup::Role::Assign; lever.kind = "lever"; lever.count = 2; lever.follows = {"wheel:1", "wheel:2"}; lever.rest = {.5, 0};
+        s.setControllers({wheels({"pitchBend"}, {.5}), wheels({"modulation"}, {}), lever}, {}); s.service();
         std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
         int fds[2]; check(::pipe(fds) == 0, "a pipe");
         Heard heard;
@@ -559,82 +562,132 @@ namespace
                 check(heard.wait(++sent), "the move heard"); s.service(); solo(who);
             };
             const float center = 8192 / 16383.f;
+            auto cc = [&] { return int(std::lround(heard2[1] * 127)); };
+            auto bend = [&] { return int(std::lround(heard2[0] * 16383)); };
             solo(0);
-            check(near(heard2[0], center), "no bend heard before the lever moves");
-            move(7, 512);
-            check(near(heard2[0], center), "the lever at rest (512 of 1023) is a bend of exactly 8192: " + std::to_string(heard2[0] * 16383));
-            move(7, 0);
-            check(near(heard2[0], 0), "the lever left is a bend of 0: " + std::to_string(heard2[0] * 16383));
-            move(7, 512);
-            check(near(heard2[0], center), "and it springs back to exactly 8192");
+            check(near(heard2[0], center), "no bend heard before anything moves");
+            // Pitch: the wheel, then the lever.
+            for(const int id : {5, 7})
+            {
+                const std::string name = id == 5 ? "WHEEL1" : "the lever";
+                move(id, 512);
+                check(bend() == 8192, name + " at rest (512 of 1023) is a bend of exactly 8192: " + std::to_string(bend()));
+                move(id, 0);
+                check(bend() == 0, name + " left is a bend of 0: " + std::to_string(bend()));
+                move(id, 512);
+                check(bend() == 8192, name + " springs back to exactly 8192: " + std::to_string(bend()));
+                move(id, 1023);
+                check(bend() == 16383, name + " right is a bend of 16383: " + std::to_string(bend()));
+                move(id, 509);
+                check(bend() == 8192, name + " rests a few steps off the middle at 8192: " + std::to_string(bend()));
+                move(id, 512);
+                move(id, 800);
+                check(bend() > 8192 && bend() < 16383, name + " between rest and the end bends partway");
+                move(id, 512);
+                check(bend() == 8192, "and back");
+            }
+            // Two sprung inputs on pitch: the wheel is left bent, the lever does not drag it back until it passes it, and released it returns to the middle.
+            move(5, 800); const int held = bend();
+            check(held > 8192 && held < 16383, "the wheel left bent");
+            move(7, 600);
+            check(bend() == held, "the lever moved short of the wheel's bend changes nothing: " + std::to_string(bend()));
             move(7, 1023);
-            check(near(heard2[0], 1), "the lever right is a bend of 16383: " + std::to_string(heard2[0] * 16383));
-            move(7, 509);
-            check(near(heard2[0], center), "a rest a few steps off the middle is still 8192");
+            check(bend() == 16383, "past it, the lever takes over");
             move(7, 512);
-            move(7, 800);
-            check(heard2[0] > center && heard2[0] < 1, "between rest and the end it bends partway");
-            move(7, 512);
-            check(near(heard2[1], 0), "the mod axis is still at 0");
-            move(8, 1023);
-            check(near(heard2[1], 1) && near(heard2[0], center), "pushed away, the lever is CC 1 at 127 and no bend");
+            check(bend() == 8192, "released, it returns the bend to the middle, though the wheel is where it was left");
+            move(5, 790);
+            check(bend() > 8192 && bend() < 16383, "and the wheel moved takes over again, at the middle");
+            move(5, 512);
+            check(bend() == 8192, "and the wheel springs back");
+            // Modulation: the owner's example, step by step.
+            check(cc() == 0, "no mod wheel yet");
+            move(6, 512);
+            check(cc() == 64, "WHEEL2 at 512 sets CC 1 halfway: " + std::to_string(cc()));
+            move(8, 307);
+            check(cc() == 64, "the lever pushed to 0.3 changes nothing: " + std::to_string(cc()));
+            move(8, 512);
+            move(8, 800);
+            check(std::abs(cc() - 99) <= 1, "pushed past the wheel's value it takes over and follows: " + std::to_string(cc()));
             move(8, 0);
-            check(near(heard2[1], 0), "and CC 1 back to 0");
+            check(cc() == 0, "released to 0, the value is 0 though the wheel is still at 0.5: " + std::to_string(cc()));
+            move(6, 530);
+            check(cc() == 66, "the wheel nudged takes over at once: " + std::to_string(cc()));
+            move(6, 0);
+            move(8, 1023);
+            check(cc() == 127 && s.controllerState().touched == "lever:2", "the lever alone reaches CC 1 at 127, and controllers.get names it by its own id: " + s.controllerState().touched);
+            move(8, 0);
+            check(cc() == 0, "and back to 0");
+            check(bend() == 8192, "while pitch is untouched");
             const auto touches = s.controllerState().touches;
-            check(s.controllerState().touched == "wheel:2" && touches >= 10, "lever moves are counted, the control moved last kept for learn: " + std::to_string(touches));
+            check(touches >= 20, "moves are counted: " + std::to_string(touches));
 
-            // A Sound's own assignment of the mod axis replaces CC 1 for its part unless it passes.
+            // A Sound's own assignment of the mod wheel replaces CC 1 for its part unless it passes, whichever input drives it.
             s.setParameter(a, 7, 0); s.setParameter(c, 7, 0);
             Assignment ga; ga.kind = Assignment::Kind::Parameter; ga.node = a; ga.param = 7;
             Assignment gc = ga; gc.node = c;
             s.assign("wheel:2", ga, pa); s.assign("wheel:2", gc, pc, true); s.commit(); s.service();
-            move(8, 5); // picked up: the lever near the values
+            move(8, 5); // picked up: near the values
             move(8, 1023);
-            check(s.parameter(a, 7) > .9 && s.parameter(c, 7) > .9, "a part's own assignment of the mod axis moves its target");
-            solo(0); check(near(heard2[1], 0), "and that part's instruments get no CC 1: " + std::to_string(heard2[1] * 127));
-            solo(1); check(near(heard2[1], 1), "a part without one still gets it");
-            solo(2); check(near(heard2[1], 1), "a part whose assignment passes gets both");
-            solo(0); check(near(heard2[0], center), "pitch bend is not touched by it");
+            check(s.parameter(a, 7) > .9 && s.parameter(c, 7) > .9, "a part's own assignment of the mod wheel is driven by the lever too");
+            solo(0); check(cc() == 0, "and that part's instruments get no CC 1: " + std::to_string(cc()));
+            solo(1); check(cc() == 127, "a part without one still gets it");
+            solo(2); check(cc() == 127, "a part whose assignment passes gets both");
+            solo(0); check(bend() == 8192, "pitch bend is not touched by it");
             move(8, 5);
             check(s.assignments().size() == 2 && s.assignments()[1].passes && !s.assignments()[0].passes, "the flag is reported with the assignments");
 
             // A part's receive setting, and the same filter for a raw CC 1 and a bend through notes.controller.
             auto input = s.parts()[1].input; input.functions = withFunctionReceive(0, Function::Modulation, PedalReceive::None); s.setPartInput(pb, input); s.commit(); s.service();
             s.controller(1, 100); solo(1);
-            check(heard2[1] * 127 < 50, "a part that does not receive the mod wheel gets no CC 1, whatever sent it: " + std::to_string(heard2[1] * 127));
+            check(cc() < 50, "a part that does not receive the mod wheel gets no CC 1, whatever sent it: " + std::to_string(cc()));
             input.functions = withFunctionReceive(0, Function::PitchBend, PedalReceive::None); s.setPartInput(pb, input); s.commit(); s.service();
             s.controller(1, 100); solo(1);
-            check(near(heard2[1], 100 / 127.), "and a part that does not receive pitch bend still gets CC 1");
+            check(cc() == 100, "and a part that does not receive pitch bend still gets CC 1");
             s.pitchBend(0); solo(1);
-            check(near(heard2[0], center), "but not the bend");
-            solo(2); check(near(heard2[0], 0), "while a part that receives it gets it");
+            check(bend() == 8192, "but not the bend");
+            solo(2); check(bend() == 0, "while a part that receives it gets it");
             input.functions = 0; s.setPartInput(pb, input); s.commit();
             s.pitchBend(8192);
 
-            // A wheel the Performance assigned plays that and does not also bend.
+            // A wheel the Performance assigned plays that and does not also bend; the lever that follows it plays that too.
             Assignment level; level.kind = Assignment::Kind::PartLevel; level.id = pd;
             s.setPartLevel(pd, .5, false);
             s.assign("wheel:1", level); s.commit(); s.service();
-            move(7, 515); // picked up
-            move(7, 0);
-            check(near(heard2[0], center) && s.controllerState().touched == "wheel:1" && s.parts()[3].level < .1, "(" + std::to_string(heard2[0] * 16383) + " " + s.controllerState().touched + ") a wheel assigned to something else plays that and does not also bend");
+            move(5, 515); // picked up
+            move(5, 0);
+            check(bend() == 8192 && s.controllerState().touched == "wheel:1" && s.parts()[3].level < .1, "a wheel assigned to something else plays that and does not also bend");
+            s.assign("wheel:1", {}); s.commit();
 
-            // Undone, saved, read back.
-            s.undo(); s.undo(); // the receive settings
-            s.assign("wheel:2", gc, pc, false); s.commit();
-            check(!s.assignments()[1].passes, "the flag taken off");
-            check(s.undo() && s.assignments()[1].passes, "undone");
+            // Unlinked, the lever's push is a control of its own: it no longer drives the mod wheel's, and can be assigned.
+            s.setParameter(a, 7, 0);
+            s.link("lever:2", false); s.commit(); s.service();
+            check(s.unlinked() == std::vector<std::string>{"lever:2"}, "unlinked is reported");
+            move(8, 5); move(8, 1023);
+            check(s.parameter(a, 7) < .1 && cc() == 0 && s.controllerState().touched == "lever:2", "an unlinked lever axis does not drive the mod wheel's control or its CC 1: " + std::to_string(s.parameter(a, 7)));
+            move(8, 0);
+            Assignment own = ga; own.param = 7;
+            s.assign("lever:2", own); s.commit(); s.service();
+            move(8, 5); move(8, 1023);
+            check(s.parameter(a, 7) > .9 && cc() == 0, "and plays what it is assigned on its own, the mod wheel unmoved: " + std::to_string(s.parameter(a, 7)) + " " + std::to_string(cc()));
+            move(8, 0);
+            s.assign("lever:2", {}); s.commit();
+            s.link("lever:2", true); s.commit();
+            check(s.unlinked().empty(), "linked again");
+            check(s.undo() && s.unlinked() == std::vector<std::string>{"lever:2"}, "undone: unlinked again");
+            check(s.redo() && s.unlinked().empty(), "and redone");
+            check(s.undo() && s.unlinked().size() == 1, "undone once more for the saving");
+            s.assign("lever:2", own); s.commit();
             const auto saved = std::filesystem::path(home) / "saved";
             s.savePerformance(saved.string());
-            s.assign("wheel:2", gc, pc, false); s.commit();
+            s.link("lever:2", true); s.commit();
             s.loadPerformance(saved.string()); s.service();
-            for(size_t i = 0; i < 3; ++i) parts[i] = s.parts()[i].id;
-            bool flagged = false, plain = false;
-            for(const auto& o : s.assignments()) { if(o.part == s.parts()[2].id) flagged = o.passes; if(o.part == s.parts()[0].id) plain = !o.passes; }
-            check(flagged && plain, "the flag is saved with the Performance and read back");
-            size_t withheld = 0; for(const auto& w : s.graphState().wires) if(w.kind == WireKind::Notes && !w.zones.empty() && w.zones[0].functions != 0) ++withheld;
-            check(withheld == 1, "and a Performance opened again still replaces CC 1 on its one part: " + std::to_string(withheld));
-
+            check(s.unlinked() == std::vector<std::string>{"lever:2"}, "the unlink is saved with the Performance and read back");
+            {
+                Session t(48000, frames); // a device with no lever
+                t.loadPerformance(saved.string()); t.service();
+                bool kept = false; for(const auto& o : t.assignments()) kept = kept || o.control == "lever:2";
+                check(t.unlinked() == std::vector<std::string>{"lever:2"} && kept, "opened on a device without the lever the unlink and its assignment are kept");
+            }
         }
         ::close(fds[1]); ::close(fds[0]);
         ::unsetenv("KICK_FIXTURE_WHEELS");

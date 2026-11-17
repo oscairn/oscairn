@@ -271,6 +271,12 @@ add_executable(oscairn-controller-input-test tests/controller_input.cpp)
 target_include_directories(oscairn-controller-input-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-controller-input-test PRIVATE oscairn_control_socket)
 add_test(NAME control-controller-input COMMAND oscairn-controller-input-test $<TARGET_FILE:kick-clap-fixture-normal>)
+add_test(NAME control-wheels COMMAND oscairn-controller-input-test $<TARGET_FILE:kick-clap-fixture-normal> --wheels)
+add_test(NAME control-wheels-workers COMMAND oscairn-controller-input-test $<TARGET_FILE:kick-clap-fixture-normal> --wheels)
+add_test(NAME control-wheels-clap COMMAND oscairn-controller-input-test $<TARGET_FILE:kick-clap-fixture-normal> --wheels-clap) # a plugin that declares both dialects and prefers CLAP
+add_test(NAME control-wheels-clap-workers COMMAND oscairn-controller-input-test $<TARGET_FILE:kick-clap-fixture-normal> --wheels-clap)
+set_tests_properties(control-wheels control-wheels-workers control-wheels-clap control-wheels-clap-workers PROPERTIES TIMEOUT 60)
+set_tests_properties(control-wheels-workers control-wheels-clap-workers PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000") # the device runs every plugin in a worker
 set_tests_properties(control-controller-input PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE) # measures latency: alone, and judged on the best of three runs (see the test)
 
 add_executable(oscairn-physical-controls-test tests/physical_controls.cpp)

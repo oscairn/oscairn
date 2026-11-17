@@ -73,6 +73,9 @@ namespace oscairn::standalone
         {
             std::string kind; int count = 0; std::string sensing, role;
             std::vector<Row> rows; std::string paging; std::vector<std::string> modes, functions;
+            // Per control: the logical control it follows by default (an extra input such as a lever's axis: "wheel:1"), and its rest position, 0 to 1
+            // when it is sprung (NaN: it stays where it is left). Either may be left out or shorter than the count.
+            std::vector<std::string> follows; std::vector<double> rest;
             std::string target; ControlMidi midi;
         };
         std::vector<Control> controls;

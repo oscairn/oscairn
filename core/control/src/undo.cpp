@@ -8,6 +8,7 @@
 // steps, so it comes back with its state and prepared sounds. Parameter values set through the
 // control interface are steps of their own.
 #include "oscairn/session.h"
+#include "oscairn/controller_input.h"
 
 #include <algorithm>
 #include <set>
@@ -112,7 +113,7 @@ namespace oscairn
 
     Session::Model Session::model() const
     {
-        Model m{parts_, wires_, scenes_, untouched_, macros_, padMap_, assignments_, graph_.mappings(), {}, disabled_, key_, {masterLevel_, masterPan_}, roles_};
+        Model m{parts_, wires_, scenes_, untouched_, macros_, padMap_, assignments_, graph_.mappings(), {}, disabled_, key_, {masterLevel_, masterPan_}, roles_, unlinked_};
         for(const auto& [id, name] : nodes_) m.nodes.emplace(id, std::pair{name, graph_.node(id)});
         return m;
     }
@@ -126,7 +127,7 @@ namespace oscairn
         const auto& b = *baseline_;
         const bool same = b.parts == now->parts && userWires(b.wires) == userWires(now->wires) && partWires(b.wires) == partWires(now->wires) &&
                           b.scenes == now->scenes && b.untouched == now->untouched && sameMacros(b.macros, now->macros) &&
-                          b.pads == now->pads && b.assignments == now->assignments && sameMappings(b.mappings, now->mappings) && sameNodes(b.nodes, now->nodes) && b.disabled == now->disabled && b.key == now->key && b.master == now->master && b.roles == now->roles;
+                          b.pads == now->pads && b.assignments == now->assignments && b.unlinked == now->unlinked && sameMappings(b.mappings, now->mappings) && sameNodes(b.nodes, now->nodes) && b.disabled == now->disabled && b.key == now->key && b.master == now->master && b.roles == now->roles;
         if(!same)
         {
             Step step;
@@ -402,6 +403,7 @@ namespace oscairn
             if(from.master != to.master) std::tie(masterLevel_, masterPan_) = to.master;
             if(from.roles != to.roles) { roles_.clear(); for(const auto& [n, r] : to.roles) if(nodes_.count(n)) roles_[n] = r; }
             if(from.assignments != to.assignments) assignments_ = to.assignments;
+            if(from.unlinked != to.unlinked) { unlinked_ = to.unlinked; controllers_->setUnlinked({unlinked_.begin(), unlinked_.end()}); }
             if(!sameMappings(from.mappings, to.mappings))
             {
                 for(const auto& m : graph_.describe().mappings) graph_.unmapParamTarget(m.source, m.lane);
@@ -522,7 +524,7 @@ namespace oscairn
             if(!(a.key == b.key)) return {"Key", ""};
             if(a.master != b.master) return {"Master", "master"};
             if(a.roles != b.roles) return {"Node role", ""};
-            if(a.assignments != b.assignments) return {"Physical controls", ""};
+            if(a.assignments != b.assignments || a.unlinked != b.unlinked) return {"Physical controls", ""};
             return {"Parameter mapping", ""};
         }
     }

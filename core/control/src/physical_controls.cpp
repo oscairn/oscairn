@@ -19,7 +19,7 @@ namespace oscairn
         const auto colon = control.find(':');
         if(colon == std::string::npos) return false;
         const auto kind = control.substr(0, colon), number = control.substr(colon + 1);
-        static const std::set<std::string> kinds{"knob", "fader", "button", "wheel", "strip", "jog", "pedal", "footswitch", "aftertouch", "breath"};
+        static const std::set<std::string> kinds{"knob", "fader", "button", "wheel", "strip", "jog", "pedal", "footswitch", "aftertouch", "breath", "lever", "joystick", "ribbon"};
         if(!kinds.count(kind)) return false;
         return !number.empty() && number.size() <= 3 && number[0] != '0' && std::all_of(number.begin(), number.end(), [](char c) { return c >= '0' && c <= '9'; });
     }
@@ -143,7 +143,7 @@ namespace oscairn
         {
             static const std::map<std::string, std::string> names{{"knobs", "knob"}, {"encoders", "knob"}, {"faders", "fader"}, {"buttons", "button"}, {"wheels", "wheel"},
                                                                  {"touchstrip", "strip"}, {"jog", "jog"}, {"pedal", "pedal"}, {"expression", "pedal"}, {"footswitches", "footswitch"},
-                                                                 {"aftertouch", "aftertouch"}, {"breath", "breath"}};
+                                                                 {"aftertouch", "aftertouch"}, {"breath", "breath"}, {"lever", "lever"}, {"joystick", "joystick"}, {"ribbon", "ribbon"}};
             const auto it = names.find(kind);
             return it == names.end() ? std::string() : it->second;
         }
@@ -281,6 +281,8 @@ namespace oscairn
                 ResolvedControl r; r.control = name + ":" + std::to_string(convention ? firstConventionButton - 1 + ++numbers["button>"] : ++numbers[name]);
                 r.target = b.slots[i]; r.label = b.labels[i]; r.bank = b.name; r.group = g; r.index = i;
                 if(i < group.functions.size()) r.label = r.function = group.functions[i];
+                if(i < group.follows.size()) r.follows = group.follows[i];
+                if(i < group.rest.size()) r.rest = group.rest[i];
                 if(r.target.kind != Assignment::Kind::None) r.layer = b.layer;
                 if(!screen) overridden(r); // screen knobs play what the screen shows
                 out.push_back(std::move(r));
@@ -354,6 +356,18 @@ namespace oscairn
 
     std::vector<AssignmentOverride> Session::assignments() const { return assignments_; }
 
+    void Session::link(const std::string& control, bool linked)
+    {
+        if(!validPhysicalControl(control)) throw std::invalid_argument("a physical control is knob:N, fader:N, button:N, wheel:N, strip:N, jog:N, pedal:N, footswitch:N, aftertouch:N, breath:N, lever:N, joystick:N or ribbon:N");
+        const auto at = std::find(unlinked_.begin(), unlinked_.end(), control);
+        if(linked && at != unlinked_.end()) unlinked_.erase(at);
+        else if(!linked && at == unlinked_.end()) { unlinked_.push_back(control); std::sort(unlinked_.begin(), unlinked_.end()); }
+        else return;
+        syncUnlinked();
+    }
+
+    void Session::syncUnlinked() { controllers_->setUnlinked({unlinked_.begin(), unlinked_.end()}); }
+
     PartInput Session::inputFor(const Part& part, const std::vector<AssignmentOverride>& assignments) const
     {
         auto in = part.input;
@@ -404,6 +418,7 @@ namespace oscairn
         const auto before = part ? inputFor(findPart(part), assignments_) : PartInput{};
         std::erase_if(assignments_, [&](const AssignmentOverride& o) { return o.control == control && o.part == part; });
         if(target.kind != Assignment::Kind::None) assignments_.push_back({control, target, part, passes});
+        controllers_->invalidate();
         if(part && !(inputFor(findPart(part), assignments_) == before)) { buildParts(); syncWires(); } // the part's zones follow which controllers a Sound's assignment replaces
     }
 }

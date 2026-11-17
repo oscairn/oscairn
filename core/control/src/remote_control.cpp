@@ -1026,6 +1026,8 @@ namespace oscairn
         return out;
     } }
     std::vector<AssignmentOverride> RemoteControl::assignments() const {auto doc=impl_->call("assignments.get");return assignmentsFrom(field(doc.get(),"result"));}
+    std::vector<std::string> RemoteControl::unlinked() const {auto doc=impl_->call("assignments.get");std::vector<std::string> out;for(auto a:array(field(field(doc.get(),"result"),"unlinked")))out.push_back(string(a));return out;}
+    void RemoteControl::link(const std::string& control,bool linked){impl_->call("assignments.link","{\"control\":"+quote(control)+",\"linked\":"+(linked?"true":"false")+'}');impl_->refresh();}
     void RemoteControl::assign(const std::string& control,const Assignment& t,uint32_t part,bool passes)
     {
         impl_->call("assignments.set","{\"control\":"+quote(control)+",\"kind\":\""+assignmentKinds[size_t(t.kind)]+"\",\"node\":"+std::to_string(t.node)+",\"param\":"+std::to_string(t.param)+",\"id\":"+std::to_string(t.id)+",\"part\":"+std::to_string(part)+(passes?",\"passes\":true":"")+'}');impl_->refresh();

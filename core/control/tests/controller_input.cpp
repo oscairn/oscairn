@@ -325,6 +325,42 @@ namespace
         check(near(render(s), 0), "a jack reassigned to a scene does not also sustain: " + std::to_string(render(s)));
     }
 
+    // A device with only a pitch wheel and a mod wheel (no rest, no lever) plays them as it always did: the position is the value, no dead zone,
+    // the middle is a bend of 8192 and the ends 0 and 16383; CC 1 follows the other.
+    void loneWheels(const char* fixture, bool preferClap)
+    {
+        if(preferClap) ::setenv("KICK_FIXTURE_PREFER_CLAP", "1", 1); // the plugin declares both dialects and prefers CLAP, as the first-party engines do: bend and CC 1 are still MIDI events
+        else ::unsetenv("KICK_FIXTURE_PREFER_CLAP");
+        char home[] = "/tmp/oscairn-lone-wheels-XXXXXX";
+        if(!::mkdtemp(home)) { check(false, "a data folder for the test"); return; }
+        const char* kept = std::getenv("OSCAIRN_DATA_HOME"); const std::string was = kept ? kept : "";
+        ::setenv("OSCAIRN_DATA_HOME", home, 1); ::setenv("KICK_FIXTURE_WHEELS", "1", 1);
+        {
+            Session s(48000, frames);
+            const auto synth = s.add("synth", fixture, "org.kick.test.midi");
+            const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();
+            ControlGroup pitch{Role::Assign, "wheels", 1}; pitch.functions = {"pitchBend"};
+            ControlGroup mod{Role::Assign, "wheels", 1}; mod.functions = {"modulation"};
+            s.setControllers({pitch, mod}, {}); s.service();
+            using Kind = ControlInput::Kind;
+            auto heard = [&] { std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; s.process(nullptr, 0, out, 2, frames); s.process(nullptr, 0, out, 2, frames); return std::pair{int(std::lround(l[frames - 1] * 16383)), int(std::lround(r[frames - 1] * 127))}; };
+            s.controllerControl("wheel:1", {Kind::Absolute, 0}); check(heard().first == 0, "a lone pitch wheel at 0 is a bend of 0");
+            { // the status lists a worker once its first blocks have run
+                bool worker = false;
+                for(int i = 0; i < (std::getenv("OSCAIRN_PLUGIN_WORKER") ? 400 : 3) && !worker; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); s.service(); heard(); worker = !s.sessionStatus().workers.empty(); }
+                check(worker == (std::getenv("OSCAIRN_PLUGIN_WORKER") != nullptr), "the plugin plays in a worker exactly when the environment says so");
+            }
+
+            s.controllerControl("wheel:1", {Kind::Absolute, .5}); check(heard().first == 8192, "at 0.5 8192");
+            s.controllerControl("wheel:1", {Kind::Absolute, .5025}); check(heard().first == 8232, "with no rest there is no dead zone: " + std::to_string(heard().first));
+            s.controllerControl("wheel:1", {Kind::Absolute, 1}); check(heard().first == 16383, "at 1 16383");
+            s.controllerControl("wheel:2", {Kind::Absolute, .5}); check(heard().second == 64, "a lone mod wheel is CC 1: " + std::to_string(heard().second));
+            check(s.controllerState().touched == "wheel:2", "the control moved last is wheel:2");
+        }
+        ::unsetenv("KICK_FIXTURE_WHEELS"); ::unsetenv("KICK_FIXTURE_PREFER_CLAP"); ::setenv("OSCAIRN_DATA_HOME", was.c_str(), 1);
+        std::error_code e; std::filesystem::remove_all(home, e);
+    }
+
     // A device's list navigation (its panel map's `navigate`): a control with one that plays nothing is counted
     // for the apps, a move by its steps; one that plays what it is assigned plays it, unless the screen shows
     // lists, when it navigates and plays nothing; the totals are what the engine tells a client.
@@ -759,7 +795,14 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 2) { std::fprintf(stderr, "usage: %s FIXTURE\n", argv[0]); return 2; }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    if(argc > 2 && (std::string(argv[2]) == "--wheels" || std::string(argv[2]) == "--wheels-clap")) // only the built-in wheels' messages, in this process or in a worker (the environment decides); a process of its own for each dialect, for the worker's sake
+    {
+        try { loneWheels(argv[1], std::string(argv[2]) == "--wheels-clap"); }
+        catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
+        if(!failures) std::puts("ok: the built-in wheels reach a plugin as MIDI events whatever dialect it prefers");
+        return failures ? 1 : 0;
+    }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); loneWheels(argv[1], false); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

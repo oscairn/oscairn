@@ -237,6 +237,8 @@ namespace oscairn
         bool pad(uint32_t pad,bool on,double velocity,int channel=0) override;
         bool padPressure(uint32_t pad,double pressure) override;
         std::vector<AssignmentOverride> assignments() const override;
+        std::vector<std::string> unlinked() const override;
+        void link(const std::string& control,bool linked) override;
         void assign(const std::string& control,const Assignment& target,uint32_t part=0,bool passes=false) override;
         uint32_t recordStart(const std::vector<RecordTap>& taps={},const std::string& name={},const RecordWhen& when={}) override;
         void recordStop(uint32_t take) override;

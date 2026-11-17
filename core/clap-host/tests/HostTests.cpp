@@ -21,6 +21,9 @@
 #include <dlfcn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #endif
 using namespace kick::clap;
 #include "AllocationGuard.h"
@@ -85,6 +88,11 @@ int main(int argc, char** argv) {
         std::filesystem::remove_all(directory); std::filesystem::create_directories(directory);
         const auto log = (directory / "asked").string();
         setenv("KICK_FIXTURE_PRESETS_HANG", "1", 1); setenv("KICK_FIXTURE_PRESETS_LOG", log.c_str(), 1);
+#ifdef __linux__
+        // The orphaned helper comes to this process, which reaps it: an ended helper is a zombie until its new parent
+        // reaps it, and PID 1 of a container without an init process never does, so kill(pid, 0) would see it alive.
+        check(prctl(PR_SET_CHILD_SUBREAPER, 1) == 0, "become the orphaned helper's reaper");
+#endif
         const auto launcher = fork(); // a child as the engine-to-be; SIGKILL leaves it no cleanup
         check(launcher >= 0, "fork a launcher for the hanging preset listing");
         if (launcher == 0) { ScanResult listed; std::string why; indexPresetsWithHelper(argv[2], argv[1], 30000, listed, why); _exit(0); }
@@ -95,9 +103,17 @@ int main(int argc, char** argv) {
         }
         check(helper != 0, "the hung listing reached the fixture's provider");
         kill(launcher, SIGKILL); int status = 0; waitpid(launcher, &status, 0);
-        bool gone = false; // kill(pid, 0): the orphaned helper answers until it is gone and reaped
-        for (int i = 0; i < 50 && !(gone = kill(helper, 0) != 0); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#ifdef __linux__
+        const auto ended = [&] { return waitpid(helper, &status, WNOHANG) == helper; }; // reaped here, it has exited
+#else
+        const auto ended = [&] { return kill(helper, 0) != 0; }; // launchd reaps the orphan: it answers until it is gone
+#endif
+        bool gone = false;
+        for (int i = 0; i < 50 && !(gone = ended()); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         check(gone, "the helper ends itself once its launcher is killed");
+#ifdef __linux__
+        prctl(PR_SET_CHILD_SUBREAPER, 0);
+#endif
         unsetenv("KICK_FIXTURE_PRESETS_HANG"); unsetenv("KICK_FIXTURE_PRESETS_LOG");
         std::filesystem::remove_all(directory);
     }
@@ -334,8 +350,11 @@ int main(int argc, char** argv) {
         // Each thread has done one pass before the first save, so all three overlap in every iteration. A save waits up
         // to 100 ms for the commands the waker keeps queuing, so the iteration count sets the duration: 100 took 17 s
         // under GCC's ThreadSanitizer here (5.6 s for the whole test before it) and ran past the 30 s limit on CI.
-        std::thread audio([&] { do { render(h, out, 128); h.restful(); audioRan.store(true); } while (going.load()); });
-        std::thread waker([&] { do { h.enqueue(note); wakerRan.store(true); } while (going.load()); });
+        // The audio thread pauses between blocks as a real one does: rendering back to back it held the gate nearly
+        // always, so the main thread's load, which waits for the gate, starved on a machine of few cores (75 s of
+        // this loop on two cores under ThreadSanitizer, the whole test past 30 s on CI; 2 s with the pause).
+        std::thread audio([&] { do { render(h, out, 128); h.restful(); audioRan.store(true); std::this_thread::sleep_for(std::chrono::microseconds(50)); } while (going.load()); });
+        std::thread waker([&] { do { h.enqueue(note); wakerRan.store(true); std::this_thread::yield(); } while (going.load()); });
         while (!audioRan.load() || !wakerRan.load()) std::this_thread::yield();
         for (int i = 0; i < 20; ++i) {
             h.mirrorWake(&word);

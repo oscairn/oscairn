@@ -46,6 +46,10 @@ export global PartState {
     in property <[InfoLine]> info;
     in property <string> view;
     in property <string> message;
+    // The list's size and the first row shown, for its scroll bar (0: no bar); a drag or a tap on the bar asks for a row.
+    in property <int> total;
+    in property <int> first;
+    callback scrolled(int);
     // How many rows the screen holds: set by the screen.
     in-out property <int> rows-per-view: 1;
     // How many lines of the read-only panel fit, and whether more are out of view: set by the screen.
@@ -95,10 +99,6 @@ component Row inherits Section {
         bold: c == 2;
         align: TextHorizontalAlignment.left;
     }
-    if !root.in-columns: FitText {
-        x: Theme.pad + root.label-room;
-        width: root.name-room;
-        height: parent.height;
     // A fluid row: the name keeps what it needs (at its least, 70% of the type) before the value does, the value its natural
     // width before the detail gets any, and the detail what is left, if that is worth drawing.
     property <length> room: root.width - 2 * Theme.pad - root.label-room - root.value-room - root.buttons;
@@ -118,13 +118,13 @@ component Row inherits Section {
         font-weight: 700;
         text: root.data.value;
     }
+    if !root.in-columns: FitText {
+        x: Theme.pad + root.label-room;
+        width: root.name-room;
+        height: parent.height;
         text: data.label;
         align: TextHorizontalAlignment.left;
     }
-    if !root.in-columns: FitText {
-        x: root.data.fluid ? parent.width - Theme.pad - root.value-room - root.buttons - root.value-room-fluid : parent.width * 0.4 + Theme.pad;
-        width: root.data.fluid ? root.value-room-fluid : parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
-        height: parent.height;
     if !root.in-columns && root.data.fluid && root.data.detail != "" && root.detail-room >= 6 * Theme.small: Text {
         x: Theme.pad + root.label-room + root.name-room + Theme.pad;
         width: root.detail-room;
@@ -135,6 +135,10 @@ component Row inherits Section {
         color: Theme.muted;
         text: root.data.detail;
     }
+    if !root.in-columns: FitText {
+        x: root.data.fluid ? parent.width - Theme.pad - root.value-room - root.buttons - root.value-room-fluid : parent.width * 0.4 + Theme.pad;
+        width: root.data.fluid ? root.value-room-fluid : parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
+        height: parent.height;
         text: data.value;
         ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;
         bold: true;
@@ -193,8 +197,21 @@ export component Part inherits Rectangle {
     property <length> footer: Theme.touch;
     property <length> list-width: (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;
-    property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
+    out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
+    // The scroll bar, when the list is longer than the view: its own lane at the list's right edge, the rows narrower by it.
+    property <bool> long: PartState.total > root.per-view;
+    property <length> lane: root.long ? Theme.scroll-lane : 0px;
+    out property <length> thumb-h: min(root.list-height, max(Theme.scroll-thumb-min, root.list-height * root.per-view / max(1, PartState.total)));
+    out property <length> thumb-y: (root.list-height - root.thumb-h) * min(1.0, PartState.first / max(1, PartState.total - root.per-view));
+    out property <length> lane-x: root.list-width - root.lane + Theme.margin;
+    function seek(y: length) {
+        let f = min(1.0, max(0.0, (y - root.thumb-h / 2) / max(1px, root.list-height - root.thumb-h)));
+        let page = floor(round(f * (PartState.total - root.per-view)) / root.per-view) * root.per-view;
+        if (page != PartState.first) {
+            PartState.scrolled(page);
+        }
+    }
     property <length> line: Theme.body + Theme.margin;
     // A lane's key range as the strip over the keyboard, over the panel's lines.
     property <length> strip-height: StripState.shown ? Theme.body + Theme.pad-narrow + Theme.touch + Theme.pad : 0px;
@@ -209,11 +226,41 @@ export component Part inherits Rectangle {
     for row[i] in PartState.rows: Row {
         x: Theme.margin;
         y: root.list-y + i * (Theme.touch + root.gap);
-        width: root.list-width;
+        width: root.list-width - root.lane;
         height: Theme.touch;
         data: row;
         tapped => { PartState.tapped(i); }
         step(by) => { PartState.step(i, by); }
+    }
+    if root.long: Rectangle {
+        x: root.lane-x + (Theme.scroll-lane - Theme.scroll-bar) / 2;
+        y: root.list-y;
+        width: Theme.scroll-bar;
+        height: root.list-height;
+        border-radius: self.width / 2;
+        background: Theme.track;
+        Rectangle {
+            y: root.thumb-y;
+            height: root.thumb-h;
+            border-radius: parent.border-radius;
+            background: Theme.muted;
+        }
+    }
+    if root.long: TouchArea {
+        x: root.lane-x;
+        y: root.list-y;
+        width: Theme.scroll-lane;
+        height: root.list-height;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.seek(self.mouse-y);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.seek(self.mouse-y);
+            }
+        }
     }
     Section {
         x: 2 * Theme.margin + root.list-width;

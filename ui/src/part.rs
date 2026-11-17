@@ -647,6 +647,7 @@ impl Screen {
             Some((Menu::MidiOut, _)) => "Outputs",
             None => "Settings",
         };
+        state.set_total(0); // this list has no scroll bar
         state.set_view(if cursor.count == 0 { String::new() } else { format!("{what} {}–{} of {}", cursor.first + 1, end, cursor.count) }.into());
     }
 

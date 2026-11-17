@@ -3,6 +3,7 @@
 //! Library as the owner's screenshot shows it (Performances, 1280x720 at 1.55, dark); with OWNER_SHOTS=dir the pictures
 //! are written to dir as owner-N-before/after.png.
 
+use super::library::rows;
 use super::library_fake::stored;
 use super::library_shell::Shelf;
 use super::*;
@@ -110,4 +111,89 @@ fn the_rail_holds_its_longest_label_on_one_line() {
         assert!(need > 0. && rail + 0.01 >= need + across, "the rail {rail} holds the label {need} and the padding {across}");
         assert_eq!(fit, 1.0, "the label at the full small type");
     }
+}
+
+// A long list drawn scrolled to the middle (the picture alone).
+#[test]
+fn a_picture_of_a_long_list() {
+    let mut s = scene("owner-long", 300);
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Move { pane: None, by: 150 });
+    s.serve();
+    s.f.screen.frame();
+    s.f.screen.frame();
+    owner_png(&s, "owner-4");
+}
+
+/// A press, a drag in `steps` moves and a release, on the Library's scroll bar from `from` to `to` (fractions of its track).
+fn drag_bar(s: &mut Shelf, from: f32, to: f32, steps: usize) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let ui = s.ui();
+    let t = ui.global::<crate::Theme>();
+    // The list sits at the rail's right edge (the content's x less a margin), just under the bar.
+    let x = ui.get_library_rail() + ui.get_lane_x() + t.get_scroll_lane() / 2.;
+    let (top, track) = (t.get_bar_height() + t.get_margin(), ui.get_track_h());
+    let at = |f: f32| slint::LogicalPosition::new(x, top + f * track);
+    ui.window().dispatch_event(WindowEvent::PointerPressed { position: at(from), button: PointerEventButton::Left });
+    for i in 1..=steps {
+        ui.window().dispatch_event(WindowEvent::PointerMoved { position: at(from + (to - from) * i as f32 / steps as f32) });
+    }
+    ui.window().dispatch_event(WindowEvent::PointerReleased { position: at(to), button: PointerEventButton::Left });
+    s.serve();
+    s.f.screen.frame();
+}
+
+// The bar's thumb shows the view's place and share of the list: a view of 6 in 11 rows (the Filters row and ten Performances)
+// is more than half of the track; in 301 rows it is the least length, a touch target, and it moves down the track with the
+// view. The rows keep clear of the bar's lane.
+#[test]
+fn the_scroll_bar_shows_where_the_view_is_in_the_list() {
+    for (n, long) in [(10usize, true), (300, true)] {
+        let mut s = scene("owner-thumb", n);
+        let ui = s.ui();
+        let (touch, track) = (ui.global::<crate::Theme>().get_touch(), ui.get_track_h());
+        let (y, h) = (ui.get_thumb_y(), ui.get_thumb_h());
+        let per = ui.global::<crate::PartState>().get_rows_per_view() as f32;
+        assert!(long && h >= touch - 0.01 && y.abs() < 0.01, "{n}: thumb {y} {h}");
+        let want = (track * per / (n as f32 + 1.)).max(touch).min(track);
+        assert!((h - want).abs() < 0.01, "{n}: the thumb is {h}, the view's share {want} of {track}");
+        if n == 10 {
+            assert!(h > track / 2., "6 of 11 is over half");
+        } else {
+            assert_eq!(h, touch, "300 rows: the least length");
+        }
+        // The last view: the thumb at the foot of the track.
+        shell::act(Action::Move { pane: None, by: 1 });
+        shell::act(Action::Move { pane: None, by: 100_000 });
+        s.f.screen.frame();
+        assert!((ui.get_thumb_y() + ui.get_thumb_h() - track).abs() < 0.01, "{n}: at the foot {} {}", ui.get_thumb_y(), ui.get_thumb_h());
+    }
+}
+
+// A tap on the track jumps there; a drag across 300 rows follows the finger, the footer ("Performances 151-156 of 300")
+// follows the view, and the drag asks the engine for nothing (the list is held whole: 0 requests, at most 0 allowed).
+#[test]
+fn the_scroll_bar_is_tapped_and_dragged() {
+    let mut s = scene("owner-drag", 300);
+    let ui = s.ui();
+    let first_shown = |s: &Shelf| -> usize {
+        let text = super::library::footer(&s.ui()).1;
+        text.split_whitespace().nth(1).and_then(|r| r.split('–').next()).and_then(|n| n.parse().ok()).unwrap_or_else(|| panic!("a footer with a range: {text:?}"))
+    };
+    assert_eq!(first_shown(&s), 1);
+    s.e.calls.clear();
+    // A tap at the middle of the track.
+    drag_bar(&mut s, 0.5, 0.5, 0);
+    let mid = first_shown(&s);
+    assert!((100..=200).contains(&mid), "a tap in the middle of 300 rows jumps to about row 150, not a page: {mid}");
+    assert!(rows(&ui).iter().all(|r| !r.cursor), "scrolling selects nothing");
+    // A drag from the top to the foot, in a hundred moves.
+    drag_bar(&mut s, 0.02, 0.98, 100);
+    let last = first_shown(&s);
+    assert!(last > 280, "the foot of the list: {last}");
+    assert!((ui.get_thumb_y() + ui.get_thumb_h() - ui.get_track_h()).abs() < 1., "the thumb is at the foot");
+    assert!(s.e.calls.is_empty(), "a drag asks the engine for nothing: {:?}", s.e.methods());
+    // And back to the top, the footer in step.
+    drag_bar(&mut s, 0.98, 0.0, 20);
+    assert_eq!(first_shown(&s), 1);
 }

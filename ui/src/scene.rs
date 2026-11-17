@@ -312,6 +312,11 @@ impl Screen {
         self.show();
     }
 
+    pub fn scroll_to(&mut self, first: i32) {
+        self.b.scroll_to(first.max(0) as usize);
+        self.show();
+    }
+
     pub fn scroll_info(&mut self, by: i32) {
         self.b.scroll_info(by as i64);
         self.show();

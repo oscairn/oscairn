@@ -774,3 +774,59 @@ fn auto_is_the_placement_with_the_larger_tile_area() {
         }
     }
 }
+
+// A one-word label too wide for the rail never breaks in the middle of the word: it is drawn on one line and cut
+// with an ellipsis (no smaller label size than the small type exists for rails), where a label of several words
+// still breaks between the words. Read in the rendered pixels of the keyboard's screen (1280x720 at 1.55) at
+// spacing 1 and 0.7 (ui/TABS.md "Rails"): the first page's label ("Performances", too wide for the rail even at
+// 70% of the type) covers the height of one line of the small type, not two.
+#[test]
+fn a_one_word_rail_label_never_breaks_in_the_middle_of_a_word() {
+    let t = &all_themes()[0];
+    for spacing in [1.0f32, 0.7] {
+        fit_to_window();
+        let mut s = Screen::sized(1280, 720);
+        s.set_scale(1.55);
+        theme::apply(&s.ui, t);
+        s.ui.global::<Theme>().set_spacing(spacing);
+        s.ui.global::<Theme>().set_tab_placement(Side);
+        let list = named(&["Performances", "Filter"]);
+        let mut screen = open_with(&mut s, list.clone(), &values_of(&list), &percent);
+        s.frame();
+        screen.shown();
+        s.frame();
+        let (th, g) = (s.ui.global::<Theme>(), s.ui.global::<GridState>());
+        let (on, on_ink, off, off_ink) = (th.get_tab_on(), th.get_tab_on_ink(), th.get_tab_off(), th.get_tab_off_ink());
+        let d = |a: slint::Color, b: (u8, u8, u8)| (i32::from(a.red()) - i32::from(b.0)).abs() + (i32::from(a.green()) - i32::from(b.1)).abs() + (i32::from(a.blue()) - i32::from(b.2)).abs();
+        let to = |v: f32| (v * 1.55).round() as usize;
+        let (rail, top) = (to(g.get_rail()), to(th.get_bar_height()));
+        let item = (s.h - top) / 2; // the first tab of the two pages, the whole height shared alike
+        // A text pixel is nearer one of the two inks than the fill under it, and well over half way to it. The rows of
+        // the first tab that hold one, inside the label's box (the tab's inset and the padding each side of the
+        // text).
+        let (x0, x1) = (to(2. * (th.get_tab_pad() + th.get_pad_tight())), rail - to(2. * (th.get_tab_pad() + th.get_pad_tight())));
+        // The label is vertically centered in the tab; its soft shadow darkens the track at the tab's top and
+        // bottom edges only. The rows within a line and a half of the tab's middle, where all of a one-line label
+        // and most of a two-line one lie.
+        let mid = top + item / 2;
+        let band = (th.get_small() * 2. * 1.55).round() as usize; // two lines of the small type
+        let is_text = |y: usize, x: usize| { let p = s.pixels[y * s.w + x]; 2 * d(on_ink, (p.r, p.g, p.b)) < d(on, (p.r, p.g, p.b)) || 2 * d(off_ink, (p.r, p.g, p.b)) < d(off, (p.r, p.g, p.b)) };
+        let rows: Vec<usize> = (mid - band / 2..mid + band / 2).filter(|&y| (x0..x1).any(|x| is_text(y, x))).collect();
+        // Lines: runs of ink rows a gap of three rows or more apart (the leading between two lines of the small
+        // type at this scale is five or more).
+        let mut lines: Vec<(usize, usize)> = vec![];
+        for y in rows {
+            match lines.last_mut() {
+                Some(last) if y - last.1 <= 3 => last.1 = y,
+                _ => lines.push((y, y)),
+            }
+        }
+        let line = (th.get_small() * 1.3 * 1.55).round() as usize; // one line of the small type, ascender to descender
+        println!("spacing {spacing}: the label's ink is {} line(s) {lines:?} (one line is up to {line} rows)", lines.len());
+        assert!(!lines.is_empty(), "spacing {spacing}: the label is drawn at all");
+        assert_eq!(lines.len(), 1, "spacing {spacing}: Performances on one line of the small type, not broken mid-word: {lines:?}");
+        let (top, bottom) = lines[0];
+        assert!(bottom - top < line, "spacing {spacing}: one line of the small type is up to {line} rows, the label is {}", bottom - top + 1);
+        shot(&s, &format!("rail-one-word-spacing-{spacing}-{}", t.id));
+    }
+}

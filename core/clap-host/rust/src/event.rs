@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! kick::clap::Event: an owning 64-byte CLAP event, and the host's checks of one (Host.cpp's validEvent).
+//! kick::clap::Event: an owning 64-byte CLAP event, the host's checks of one, and a block's SysEx bytes (SysexPool); the
+//! engine and the worker, in C++, reach them through Host.h's inline calls of the exports at the end.
 use clap_sys::events::*;
 use oscairn_clap_sys::oscairn_chord_type::OSCAIRN_CHORD_MINOR9;
 use oscairn_clap_sys::oscairn_param_target_mode::{OSCAIRN_PARAM_TARGET_MODULATE, OSCAIRN_PARAM_TARGET_SET};
@@ -46,7 +47,38 @@ impl Event {
         let mut e = Event::default();
         // SAFETY: T fits.
         unsafe { e.bytes.as_mut_ptr().cast::<T>().write_unaligned(*source) };
+        e.clear_padding();
         e
+    }
+    /// Zeroes the padding between the fields of a note, note expression, parameter or MIDI event: a struct copied in
+    /// leaves its padding indeterminate, and the same event must be the same 64 bytes everywhere (a recording of it, a
+    /// worker's copy, a plugin hashing it).
+    pub fn clear_padding(&mut self) {
+        use std::mem::offset_of;
+        let h = *self.header();
+        if h.space_id != CLAP_CORE_EVENT_SPACE_ID {
+            return;
+        }
+        let size = h.size as usize;
+        let mut zero = |from: usize, to: usize| self.bytes[from..to].fill(0);
+        match h.type_ {
+            CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF | CLAP_EVENT_NOTE_CHOKE | CLAP_EVENT_NOTE_END if size == size_of::<clap_event_note>() => {
+                zero(offset_of!(clap_event_note, key) + 2, offset_of!(clap_event_note, velocity))
+            }
+            CLAP_EVENT_NOTE_EXPRESSION if size == size_of::<clap_event_note_expression>() => {
+                zero(offset_of!(clap_event_note_expression, key) + 2, offset_of!(clap_event_note_expression, value))
+            }
+            CLAP_EVENT_PARAM_VALUE if size == size_of::<clap_event_param_value>() => {
+                zero(offset_of!(clap_event_param_value, param_id) + 4, offset_of!(clap_event_param_value, cookie));
+                zero(offset_of!(clap_event_param_value, key) + 2, offset_of!(clap_event_param_value, value));
+            }
+            CLAP_EVENT_PARAM_MOD if size == size_of::<clap_event_param_mod>() => {
+                zero(offset_of!(clap_event_param_mod, param_id) + 4, offset_of!(clap_event_param_mod, cookie));
+                zero(offset_of!(clap_event_param_mod, key) + 2, offset_of!(clap_event_param_mod, amount));
+            }
+            CLAP_EVENT_MIDI if size == size_of::<clap_event_midi>() => zero(offset_of!(clap_event_midi, data) + 3, size),
+            _ => {}
+        }
     }
     /// Copies an event a plugin gave (its header's size, at most 64).
     ///
@@ -196,4 +228,69 @@ pub unsafe fn valid(h: *const clap_event_header) -> bool {
         _ => {}
     }
     true
+}
+
+/// The bytes of one block's SysEx events (RFC 0032), kick::clap::SysexPool (Host.h, the same layout): preallocated,
+/// emptied each block, never grown, so an event's pointer stays valid until the block's consumers have run. A message
+/// over MAX_SYSEX, or one past the block's room, is dropped, never truncated.
+#[repr(C, align(8))]
+pub struct SysexPool {
+    pub used: u32,
+    _align: u32, // bytes start 8-aligned, as alignas(8) puts them in C++
+    pub bytes: [u8; SYSEX_BLOCK],
+}
+pub const SYSEX_BLOCK: usize = 256 * 1024;
+const _: () = assert!(std::mem::offset_of!(SysexPool, bytes) == 8 && size_of::<SysexPool>() == 8 + SYSEX_BLOCK);
+impl SysexPool {
+    /// Copies a SysEx event's bytes in and points the event at the copy; false when they do not fit, and for any other
+    /// event. Audio thread: no allocation.
+    pub fn hold(&mut self, e: &mut Event) -> bool {
+        let h = *e.header();
+        if h.space_id != CLAP_CORE_EVENT_SPACE_ID || h.type_ != CLAP_EVENT_MIDI_SYSEX || h.size as usize != size_of::<clap_event_midi_sysex>() {
+            return false;
+        }
+        let mut x: clap_event_midi_sysex = e.get();
+        let (size, used) = (x.size as usize, self.used as usize);
+        if x.buffer.is_null() || x.size > MAX_SYSEX || size > SYSEX_BLOCK - used {
+            return false;
+        }
+        // SAFETY: the event's buffer holds its size (its sender's word); the copy fits the pool.
+        unsafe { std::ptr::copy_nonoverlapping(x.buffer, self.bytes.as_mut_ptr().add(used), size) };
+        x.buffer = self.bytes[used..].as_ptr();
+        self.used += x.size;
+        *e = Event::from(&x);
+        true
+    }
+}
+
+// For the engine and the worker in C++: Host.h's Event, SysexPool and TransportWatch call these.
+/// # Safety
+/// As `valid`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_clap_event_valid(h: *const clap_event_header) -> bool {
+    // SAFETY: the caller's.
+    unsafe { valid(h) }
+}
+#[no_mangle]
+pub extern "C" fn rust_clap_event_clear_padding(e: &mut Event) {
+    e.clear_padding();
+}
+#[no_mangle]
+pub extern "C" fn rust_clap_event_midi(e: &mut Event, status: u8, a: u8, b: u8, frame: u32, port: u16) {
+    *e = Event::midi(status, a, b, frame, port);
+}
+#[no_mangle]
+pub extern "C" fn rust_clap_event_note(e: &mut Event, on: bool, key: i32, velocity: f64, frame: u32, channel: i32, port: i32, note_id: i32) {
+    *e = Event::note(on, key, velocity, frame, channel, port, note_id);
+}
+#[no_mangle]
+pub extern "C" fn rust_clap_sysex_hold(pool: &mut SysexPool, e: &mut Event) -> bool {
+    pool.hold(e)
+}
+/// # Safety
+/// `current` null or a transport.
+#[no_mangle]
+pub unsafe extern "C" fn rust_clap_transport_changed(watch: &mut crate::host::TransportWatch, current: *const clap_event_transport, frames: u32, rate: f64) -> bool {
+    // SAFETY: the caller's.
+    watch.changed(unsafe { current.as_ref() }, frames, rate)
 }

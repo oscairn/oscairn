@@ -52,7 +52,7 @@ pub const MAX_AUDIO_CHANNELS: u32 = 64;
 pub const MAX_BLOCK_EVENTS: usize = 512;
 pub const MAX_PROCESS_EVENTS: usize = 2 * MAX_BLOCK_EVENTS + 1 + 32;
 const RENDER_EVENTS: usize = 2 * MAX_BLOCK_EVENTS + MAX_PROCESS_EVENTS;
-const SYSEX_BLOCK: u32 = 256 * 1024; // SysexPool::maxBlock
+const SYSEX_BLOCK: u32 = event::SYSEX_BLOCK as u32;
 /// The CLAP version Oscairn's vendored headers are (clap-sys 0.5.0 says 1.2.2); what the host tells plugins it speaks.
 pub const CLAP_VERSION: clap_version = clap_version { major: 1, minor: 2, revision: 10 };
 
@@ -115,18 +115,29 @@ struct Fd {
     flags: u32,
 }
 
-/// TransportWatch (Host.h): whether a transport moved other than by playing on.
-#[derive(Default)]
+/// Whether a transport moved other than by playing on since the last call: its flags, tempo or time signature changed,
+/// it jumped, its loop or bar moved, or it came or went; the first call counts as moved. What wakes a plugin asleep, here
+/// and in the engine's graph, which holds one as kick::clap::TransportWatch (Host.h, the same layout: asserted there).
+#[repr(C)]
 pub struct TransportWatch {
     observed: bool,
     had: bool,
-    previous: Option<clap_event_transport>,
+    has_previous: bool,
     previous_frames: u32,
+    previous: clap_event_transport,
+}
+const _: () = assert!(size_of::<TransportWatch>() == 8 + size_of::<clap_event_transport>() && align_of::<TransportWatch>() == 8);
+impl Default for TransportWatch {
+    fn default() -> Self {
+        // SAFETY: plain old data, all zeros valid.
+        unsafe { std::mem::zeroed() }
+    }
 }
 impl TransportWatch {
     pub fn changed(&mut self, current: Option<&clap_event_transport>, frames: u32, rate: f64) -> bool {
         let mut changed = !self.observed || self.had != current.is_some();
-        if let (Some(c), true, true, Some(old)) = (current, self.had, self.observed, self.previous.as_ref()) {
+        if let (Some(c), true, true, true) = (current, self.had, self.observed, self.has_previous) {
+            let old = &self.previous;
             changed |= c.flags != old.flags;
             if c.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 {
                 changed |= c.tempo != old.tempo || c.tempo_inc != old.tempo_inc;
@@ -151,7 +162,7 @@ impl TransportWatch {
             }
         }
         if let Some(c) = current {
-            self.previous = Some(*c);
+            (self.previous, self.has_previous) = (*c, true);
         }
         self.had = current.is_some();
         self.observed = true;

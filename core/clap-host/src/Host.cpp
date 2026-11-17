@@ -37,52 +37,6 @@
 #endif
 
 namespace kick::clap {
-void Event::clearPadding() noexcept {
-    const auto* h = header();
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
-    auto zero = [&](size_t from, size_t to) { std::memset(bytes.data() + from, 0, to - from); };
-    switch (h->type) {
-    case CLAP_EVENT_NOTE_ON: case CLAP_EVENT_NOTE_OFF: case CLAP_EVENT_NOTE_CHOKE: case CLAP_EVENT_NOTE_END:
-        if (h->size == sizeof(clap_event_note_t)) zero(offsetof(clap_event_note_t, key) + sizeof(int16_t), offsetof(clap_event_note_t, velocity));
-        break;
-    case CLAP_EVENT_NOTE_EXPRESSION:
-        if (h->size == sizeof(clap_event_note_expression_t)) zero(offsetof(clap_event_note_expression_t, key) + sizeof(int16_t), offsetof(clap_event_note_expression_t, value));
-        break;
-    case CLAP_EVENT_PARAM_VALUE:
-        if (h->size == sizeof(clap_event_param_value_t)) {
-            zero(offsetof(clap_event_param_value_t, param_id) + sizeof(clap_id), offsetof(clap_event_param_value_t, cookie));
-            zero(offsetof(clap_event_param_value_t, key) + sizeof(int16_t), offsetof(clap_event_param_value_t, value));
-        }
-        break;
-    case CLAP_EVENT_PARAM_MOD:
-        if (h->size == sizeof(clap_event_param_mod_t)) {
-            zero(offsetof(clap_event_param_mod_t, param_id) + sizeof(clap_id), offsetof(clap_event_param_mod_t, cookie));
-            zero(offsetof(clap_event_param_mod_t, key) + sizeof(int16_t), offsetof(clap_event_param_mod_t, amount));
-        }
-        break;
-    case CLAP_EVENT_MIDI:
-        if (h->size == sizeof(clap_event_midi_t)) zero(offsetof(clap_event_midi_t, data) + sizeof(clap_event_midi_t::data), sizeof(clap_event_midi_t));
-        break;
-    default: break;
-    }
-}
-Event Event::midi(uint8_t status, uint8_t a, uint8_t b, uint32_t frame, uint16_t port) noexcept {
-    clap_event_midi_t e{};
-    e.header = {sizeof(e), frame, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0};
-    e.port_index = port;
-    e.data[0] = status; e.data[1] = a; e.data[2] = b;
-    return from(e);
-}
-Event Event::note(bool on, int key, double velocity, uint32_t frame, int channel, int port, int noteId) noexcept {
-    clap_event_note_t e{};
-    e.header = {sizeof(e), frame, CLAP_CORE_EVENT_SPACE_ID,
-                static_cast<uint16_t>(on ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF), 0};
-    e.note_id = noteId; e.port_index = static_cast<int16_t>(port);
-    e.channel = static_cast<int16_t>(channel); e.key = static_cast<int16_t>(key);
-    e.velocity = velocity;
-    return from(e);
-}
-
 namespace {
 thread_local const void* audioScope = nullptr;
 Host::ActivationObserver activationObserver = nullptr; // observeActivations: set once, before any plugin loads
@@ -121,74 +75,8 @@ struct Stream {
         return static_cast<int64_t>(count);
     }
 };
-bool validEvent(const clap_event_header_t* h) noexcept {
-    if (h && h->space_id == Host::paramTargetSpace) {
-        const auto* t = reinterpret_cast<const oscairn_event_param_target_t*>(h);
-        return h->type == OSCAIRN_EVENT_PARAM_TARGET && h->size == sizeof(oscairn_event_param_target_t) &&
-               (t->mode == OSCAIRN_PARAM_TARGET_SET || t->mode == OSCAIRN_PARAM_TARGET_MODULATE) && std::isfinite(t->value);
-    }
-    if (h && h->space_id == Host::beatSpace) {
-        const auto* b = reinterpret_cast<const oscairn_event_beat_t*>(h);
-        return h->type == OSCAIRN_EVENT_BEAT && h->size == sizeof(oscairn_event_beat_t) && std::isfinite(b->tempo) && b->tempo > 0;
-    }
-    if (h && h->space_id == Host::harmonySpace) {
-        const auto& x = reinterpret_cast<const oscairn_event_harmony_t*>(h)->harmony;
-        return h->type == OSCAIRN_EVENT_HARMONY && h->size == sizeof(oscairn_event_harmony_t) && x.key_root < 12 && x.chord_root < 12 &&
-               x.chord_bass < 12 && x.chord_type <= OSCAIRN_CHORD_MINOR9 && x.scale < 4096 && (x.scale & 1) && !x.reserved;
-    }
-    if (!h || h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->size > Event::capacity) return false;
-    uint32_t size = 0;
-    switch (h->type) {
-        case CLAP_EVENT_NOTE_ON: case CLAP_EVENT_NOTE_OFF: case CLAP_EVENT_NOTE_CHOKE:
-        case CLAP_EVENT_NOTE_END: size = sizeof(clap_event_note_t); break;
-        case CLAP_EVENT_NOTE_EXPRESSION: size = sizeof(clap_event_note_expression_t); break;
-        case CLAP_EVENT_PARAM_VALUE: size = sizeof(clap_event_param_value_t); break;
-        case CLAP_EVENT_PARAM_MOD: size = sizeof(clap_event_param_mod_t); break;
-        case CLAP_EVENT_PARAM_GESTURE_BEGIN: case CLAP_EVENT_PARAM_GESTURE_END:
-            size = sizeof(clap_event_param_gesture_t); break;
-        case CLAP_EVENT_MIDI: size = sizeof(clap_event_midi_t); break;
-        case CLAP_EVENT_MIDI2: size = sizeof(clap_event_midi2_t); break;
-        case CLAP_EVENT_MIDI_SYSEX: size = sizeof(clap_event_midi_sysex_t); break;
-        default: return false;
-    }
-    if (h->size != size) return false;
-    if (h->type == CLAP_EVENT_NOTE_ON || h->type == CLAP_EVENT_NOTE_OFF || h->type == CLAP_EVENT_NOTE_CHOKE || h->type == CLAP_EVENT_NOTE_END) {
-        const auto& n = *reinterpret_cast<const clap_event_note_t*>(h);
-        if (!std::isfinite(n.velocity) || n.velocity < 0 || n.velocity > 1 || n.note_id < -1 ||
-            n.channel < -1 || n.channel > 15 || n.key < -1 || n.key > 127 || n.port_index < -1) return false;
-        if (h->type == CLAP_EVENT_NOTE_ON && (n.channel < 0 || n.key < 0 || n.port_index < 0)) return false;
-    }
-    auto address=[](const auto& e){return e.note_id>=-1 && e.port_index>=-1 && e.channel>=-1 && e.channel<=15 && e.key>=-1 && e.key<=127;};
-    if(h->type==CLAP_EVENT_PARAM_VALUE && !address(*reinterpret_cast<const clap_event_param_value_t*>(h)))return false;
-    if(h->type==CLAP_EVENT_PARAM_MOD && !address(*reinterpret_cast<const clap_event_param_mod_t*>(h)))return false;
-    if(h->type==CLAP_EVENT_NOTE_EXPRESSION && !address(*reinterpret_cast<const clap_event_note_expression_t*>(h)))return false;
-    if (h->type == CLAP_EVENT_PARAM_VALUE && !std::isfinite(reinterpret_cast<const clap_event_param_value_t*>(h)->value)) return false;
-    if (h->type == CLAP_EVENT_PARAM_MOD && !std::isfinite(reinterpret_cast<const clap_event_param_mod_t*>(h)->amount)) return false;
-    if (h->type == CLAP_EVENT_NOTE_EXPRESSION && !std::isfinite(reinterpret_cast<const clap_event_note_expression_t*>(h)->value)) return false;
-    if (h->type == CLAP_EVENT_MIDI) {
-        const auto& m = *reinterpret_cast<const clap_event_midi_t*>(h);
-        if (m.data[0] < 0x80 || m.data[0] == 0xf0 || m.data[0] == 0xf7 || m.data[1] > 127 || m.data[2] > 127) return false;
-    }
-    if (h->type == CLAP_EVENT_MIDI_SYSEX) { // one whole message, F0 to F7; its data bytes are checked where a plugin sends it
-        const auto& x = *reinterpret_cast<const clap_event_midi_sysex_t*>(h);
-        if (!x.buffer || x.size < 2 || x.size > SysexPool::maxMessage || x.buffer[0] != 0xf0 || x.buffer[x.size - 1] != 0xf7) return false;
-    }
-    return true;
+bool validEvent(const clap_event_header_t* h) noexcept { return rust_clap_event_valid(h); } // the Rust host's check (event.rs)
 }
-}
-
-bool SysexPool::hold(Event& event) noexcept {
-    auto* h = reinterpret_cast<clap_event_header_t*>(event.bytes.data());
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_MIDI_SYSEX || h->size != sizeof(clap_event_midi_sysex_t)) return false;
-    auto& x = *reinterpret_cast<clap_event_midi_sysex_t*>(h);
-    if (!x.buffer || x.size > maxMessage || x.size > maxBlock - used) return false;
-    std::memcpy(bytes + used, x.buffer, x.size);
-    x.buffer = bytes + used;
-    used += x.size;
-    return true;
-}
-
-bool Event::valid() const noexcept { return validEvent(header()); }
 
 struct Host::Impl {
     std::thread::id mainThread{};
@@ -1353,33 +1241,6 @@ bool Host::stateDirty() const noexcept { return impl->dirty.load(); }
 uint64_t Host::parameterReports() const noexcept { return impl->parameterReports.load(std::memory_order_acquire); }
 uint64_t Host::valueRescans() const noexcept { return impl->valueRescans.load(std::memory_order_acquire); }
 uint32_t Host::latency() const noexcept { return impl->latencyFrames.load(); }
-bool TransportWatch::changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept {
-    bool changed = !observed || had != (current != nullptr);
-    if (current && had && observed) {
-        const auto& old = previous;
-        changed |= current->flags != old.flags;
-        if (current->flags & CLAP_TRANSPORT_HAS_TEMPO)
-            changed |= current->tempo != old.tempo || current->tempo_inc != old.tempo_inc;
-        if (current->flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE)
-            changed |= current->tsig_num != old.tsig_num || current->tsig_denom != old.tsig_denom;
-        const auto elapsed = (old.flags & CLAP_TRANSPORT_IS_PLAYING) ? previousFrames / sampleRate : 0.;
-        if (current->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            const auto expected = static_cast<long double>(old.song_pos_beats) +
-                elapsed * old.tempo / 60. * CLAP_BEATTIME_FACTOR;
-            changed |= std::abs(static_cast<long double>(current->song_pos_beats) - expected) > 2.;
-            changed |= current->loop_start_beats != old.loop_start_beats || current->loop_end_beats != old.loop_end_beats ||
-                       current->bar_start != old.bar_start || current->bar_number != old.bar_number;
-        }
-        if (current->flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
-            const auto expected = static_cast<long double>(old.song_pos_seconds) + elapsed * CLAP_SECTIME_FACTOR;
-            changed |= std::abs(static_cast<long double>(current->song_pos_seconds) - expected) > 2.;
-            changed |= current->loop_start_seconds != old.loop_start_seconds || current->loop_end_seconds != old.loop_end_seconds;
-        }
-    }
-    if (current) previous = *current;
-    had = current != nullptr; observed = true; previousFrames = frames;
-    return changed;
-}
 bool Host::asleep() const noexcept { return impl->sleeping; }
 bool Host::restful() const noexcept {
     const auto& s = *impl;

@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering::*;
 use std::time::{Duration, Instant};
 
 pub const MAX_STATE_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_PATCH_BYTES: usize = 1024 * 1024;
+pub const MAX_PATCH_BYTES: usize = 1024 * 1024;
 const MAX_PRESET_LOCATION: usize = 4096; // kick::clap::maxPresetLocationBytes
 
 /// Host.cpp's Stream: a state written into bytes (bounded) or read from them.

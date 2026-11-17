@@ -409,6 +409,35 @@ mod tests {
             "core/clap-ext/include/oscairn-clap changed: re-vendor oscairn-clap-sys (vendor/README.md) and update this hash"
         );
     }
+    /// The host's limits and event spaces are this crate's; Host.h, where the engine and the worker read them in C++,
+    /// must say the same.
+    #[test]
+    fn host_h_limits_are_the_hosts() {
+        let h = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../include/kick_clap/Host.h")).unwrap();
+        let value = |name: &str| {
+            let line = h.lines().find(|l| l.contains(&format!(" {name} = "))).unwrap_or_else(|| panic!("Host.h has no {name}"));
+            line.split(" = ").nth(1).unwrap().split(';').next().unwrap().trim().to_owned()
+        };
+        use crate::{event::*, host::*};
+        let ours = [
+            ("maxEvents", MAX_EVENTS.to_string()),
+            ("maxAudioChannels", MAX_AUDIO_CHANNELS.to_string()),
+            ("maxBlockEvents", MAX_BLOCK_EVENTS.to_string()),
+            ("maxProcessEvents", "2 * maxBlockEvents + 1 + 32".to_owned()),
+            ("paramTargetSpace", PARAM_TARGET_SPACE.to_string()),
+            ("beatSpace", BEAT_SPACE.to_string()),
+            ("harmonySpace", HARMONY_SPACE.to_string()),
+            ("maxStateBytes", "64 * 1024 * 1024".to_owned()),
+            ("maxPatchBytes", "1024 * 1024".to_owned()),
+            ("maxMessage", "64 * 1024".to_owned()),
+            ("maxBlock", "256 * 1024".to_owned()),
+        ];
+        for (name, expected) in ours {
+            assert_eq!(value(name), expected, "Host.h's {name}");
+        }
+        assert_eq!(MAX_PROCESS_EVENTS, 2 * MAX_BLOCK_EVENTS + 1 + 32);
+        assert_eq!((crate::more::MAX_STATE_BYTES, crate::more::MAX_PATCH_BYTES, MAX_SYSEX, SYSEX_BLOCK), (64 << 20, 1 << 20, 64 << 10, 256 << 10));
+    }
     /// The CLAP version the host announces is the vendored headers' (clap-sys 0.5.0's own is older).
     #[test]
     fn clap_version_is_the_headers() {

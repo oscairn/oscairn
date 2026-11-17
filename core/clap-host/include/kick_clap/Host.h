@@ -9,6 +9,7 @@
 #include <oscairn-clap/voice-budget.h>
 #include <oscairn-clap/hardware.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -59,6 +60,19 @@ struct Port {
     uint32_t channels = 0, flags = 0;
 };
 
+struct Event;
+struct SysexPool;
+class TransportWatch;
+// The Rust host's (core/clap-host/rust/src/event.rs), which the inline functions below call.
+extern "C" {
+bool rust_clap_event_valid(const clap_event_header_t* header);
+void rust_clap_event_clear_padding(Event* event);
+void rust_clap_event_midi(Event* event, uint8_t status, uint8_t a, uint8_t b, uint32_t frame, uint16_t port);
+void rust_clap_event_note(Event* event, bool on, int32_t key, double velocity, uint32_t frame, int32_t channel, int32_t port, int32_t noteId);
+bool rust_clap_sysex_hold(SysexPool* pool, Event* event);
+bool rust_clap_transport_changed(TransportWatch* watch, const clap_event_transport_t* current, uint32_t frames, double sampleRate);
+}
+
 // Owning, fixed-capacity event. A SysEx event (CLAP_EVENT_MIDI_SYSEX) points at bytes held
 // in a block's SysexPool, valid until that block's consumers have run; the command queue
 // refuses SysEx, whose bytes could not outlive the caller there.
@@ -70,7 +84,7 @@ struct Event {
     const clap_event_header_t* header() const noexcept {
         return reinterpret_cast<const clap_event_header_t*>(bytes.data());
     }
-    bool valid() const noexcept;
+    bool valid() const noexcept { return rust_clap_event_valid(header()); }
     template<class T> static Event from(const T& source) noexcept {
         static_assert(sizeof(T) <= capacity, "event too large");
         Event result;
@@ -81,24 +95,28 @@ struct Event {
     // Zeroes the padding between the fields of a note, note expression, parameter or MIDI event: a struct copied here
     // leaves its own padding indeterminate (stack bytes under SRA), and the same event must be the same 64 bytes in
     // every host and on every platform (a recording of it, a Rust host's copy of it, a plugin hashing it).
-    void clearPadding() noexcept;
-    static Event midi(uint8_t status, uint8_t a, uint8_t b, uint32_t frame = 0,
-                      uint16_t port = 0) noexcept;
-    static Event note(bool on, int key, double velocity, uint32_t frame = 0,
-                      int channel = 0, int port = 0, int noteId = -1) noexcept;
+    void clearPadding() noexcept { rust_clap_event_clear_padding(this); }
+    static Event midi(uint8_t status, uint8_t a, uint8_t b, uint32_t frame = 0, uint16_t port = 0) noexcept {
+        Event e; rust_clap_event_midi(&e, status, a, b, frame, port); return e;
+    }
+    static Event note(bool on, int key, double velocity, uint32_t frame = 0, int channel = 0, int port = 0, int noteId = -1) noexcept {
+        Event e; rust_clap_event_note(&e, on, key, velocity, frame, channel, port, noteId); return e;
+    }
 };
 
 // The bytes of one block's SysEx events (RFC 0032): preallocated, emptied each block, never
 // grown, so an event's pointer stays valid until the block's consumers have run. A message
 // over maxMessage, or one that would take the block past maxBlock, is dropped, never truncated.
 struct SysexPool {
-    static constexpr uint32_t maxMessage = 64 * 1024, maxBlock = 256 * 1024;
+    static constexpr uint32_t maxMessage = 64 * 1024;
+    static constexpr uint32_t maxBlock = 256 * 1024;
     uint32_t used = 0;
     alignas(8) uint8_t bytes[maxBlock];
     // Copies a SysEx event's bytes in and points the event at the copy. False when they do
     // not fit, and for any other event. Audio thread: no allocation.
-    bool hold(Event& event) noexcept;
+    bool hold(Event& event) noexcept { return rust_clap_sysex_hold(this, &event); }
 };
+static_assert(offsetof(SysexPool, bytes) == 8 && sizeof(SysexPool) == 8 + SysexPool::maxBlock, "the Rust host's SysexPool");
 
 // A sound asset reference (RFC 0009): library ID, library-relative path, SHA-256 hex or empty.
 struct AssetReference { std::string library, path, sha256; bool optional = false; }; // optional: the plugin does without it (oscairn.asset-dependencies draft 2)
@@ -125,15 +143,19 @@ struct AssetResolver {
 // Whether a transport moved other than by playing on since the last call: its flags, tempo or time
 // signature changed, it jumped, its loop or bar moved, or it came or went; the first call counts as moved.
 // What wakes a plugin asleep (CLAP_PROCESS_SLEEP), here and in a graph that leaves one asleep uncalled.
+// The Rust host's (host.rs TransportWatch), its fields in the same order.
 class TransportWatch {
 public:
-    bool changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept;
+    bool changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept {
+        return rust_clap_transport_changed(this, current, frames, sampleRate);
+    }
     void reset() noexcept { observed = false; }
 private:
-    bool observed = false, had = false;
-    clap_event_transport_t previous{};
+    bool observed = false, had = false, hasPrevious = false;
     uint32_t previousFrames = 0;
+    clap_event_transport_t previous{};
 };
+static_assert(sizeof(TransportWatch) == 8 + sizeof(clap_event_transport_t) && alignof(TransportWatch) == 8, "the Rust host's TransportWatch");
 
 struct Statistics {
     uint64_t blocks = 0, droppedEvents = 0, processErrors = 0;

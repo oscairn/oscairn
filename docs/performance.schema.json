@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Oscairn Performance version 13",
+  "title": "Oscairn Performance version 14",
   "description": "performance.json inside a Performance folder. See performance-format.md for binary state, asset limits, plugin validation and transactional loading. Runtime node/context IDs and live voices are not persisted. Wires and parts (RFC 0011) define the graph's audio routes and note connections.",
   "type": "object",
   "properties": {
@@ -8,7 +8,7 @@
       "const": "oscairn.performance"
     },
     "version": {
-      "const": 13
+      "const": 14
     },
     "info": {
       "type": "object",
@@ -433,7 +433,7 @@
     "PluginRepositories": {
       "type": "array",
       "maxItems": 4096,
-      "description": "Specified for Performance version 14 and Sound version 9, and the library archive's manifest (RFC 0031, the repository hint); not built: no reader takes it yet, and the version 13 reader refuses it, so it is not among the properties. For each plugin the nodes use, the package repository it is published in. At most one entry per format and id, which the reader checks",
+      "description": "Specified for a Performance version after 14 and a Sound version after 9, and the library archive's manifest (RFC 0031, the repository hint); not built: no reader takes it yet, and the version 14 reader refuses it, so it is not among the properties. For each plugin the nodes use, the package repository it is published in. At most one entry per format and id, which the reader checks",
       "items": {
         "type": "object",
         "properties": {
@@ -558,6 +558,12 @@
               "maxLength": 4096,
               "pattern": "^[^\\u0000]*$",
               "minLength": 1
+            },
+            "stateSavedBy": {
+              "type": "string",
+              "maxLength": 4096,
+              "pattern": "^[^\\u0000]*$",
+              "description": "RFC 0043: the version whose state the node's snapshot holds, when a move to a newer version left it as it was; saving from the plugin drops it"
             }
           },
           "required": [

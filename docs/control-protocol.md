@@ -1077,7 +1077,7 @@ a Sound saves its sound on its own, and `parts.saveSound` no longer refuses one 
 
 `performance.save` and `performance.load` take `{"directory":"/path/to/performance"}`;
 returns are `{"saved":true}` and `{"loaded":true}`. Both are advertised by `session.hello`.
-Files use the [Performance version 13 format/schema](performance-format.md). Saving refuses
+Files use the [Performance version 14 format/schema](performance-format.md). Saving refuses
 existing directories and staged graph edits. Loading validates a complete replacement;
 a load failure leaves the playing graph intact. Successful publication emits a graph resync (a
 `graph.changed` to its subscribers, a `session.resync` to the `params.changed` ones),
@@ -1642,3 +1642,55 @@ The typed methods are `Control::performanceInfo`, `setPerformanceInfo`, `library
 `performanceContents`, `importPerformance`, `exportPerformance`, `archiveContents`,
 `installArchive`, `libraries`, `uninstallLibrary` and `deleteLibraryItem`. Errors use
 `-32005`; malformed arguments `-32602`.
+
+### Moving to a newer plugin version
+
+A saved Sound or Performance opens only with the plugin version it was saved with, else as a
+stand-in. The user may move library items to an installed newer version
+([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md)); nothing moves on its own, on
+install, update or open. A newer version is offered with the publisher's claim
+([library archive](library-archive.md#the-publishers-claim)) when its `opensStateFrom` is not
+newer than the saved version and the saved version's build here is signed by the claim's key;
+without it an item is `noClaim` and moves only alone, after a warning. A client learns what can
+move from `plugins.list` (each version's `opensStateFrom` and `usedBy`) and asks with a plan.
+Permission `library`; no method takes a file path.
+
+- `versions.plan` takes `plugin` `{format,id,version}` (the version the items were saved with),
+  `to` (an installed newer version) and `scope`: `{items:[ids]}`, `{library:id}` (the user's own
+  items copied from that library), `{setlist:id}` (the Performances it names) or `{all:true}`
+  (every Sound and Performance; those not using the plugin at that version are listed `refused`).
+  Returns `{job}`. Refused (`-32602`): an older version, one not installed, a scope of none or
+  over 10,000 items; (`-32005`) `busy: ...` while a plan or move runs: one at a time. The job
+  opens each item's nodes of the plugin with `to`, as opening restores them, in a graph that
+  never plays, one item per control tick, in a worker where workers are used; with the old version
+  installed too, it opens them with that and compares each parameter.
+- `versions.job` takes `job` and returns `{state,error,move,items,claim}`: `state` `running`,
+  `done` or `failed`; `move` the kept move's ID once a move wrote something, else null; `claim`
+  `{opensStateFrom,soundChanges,key,checked}` when honored, else null (`checked`: false until the
+  repository's state check exists). Each item `{id,name,kind,status,locked,library,nodes,changes,reason}`:
+  `nodes` the node keys of the plugin; `status` `movable`, `changed` (settings read differently:
+  `changes`, each `{node,param,name,before,after}`, `before` null for a parameter new in `to`,
+  `after` null for one gone), `locked` (an installed library's item: its publisher moves it, in a
+  new version of the library; `library` names it), `noClaim`, `refused` (`reason`: not in the
+  library, does not use it, read-only, or why it did not open: its state refused, other ports, not
+  that version) or `moved`. `reason` on a `movable` item says when settings were not compared (the
+  old version not here).
+- `versions.move` takes what `versions.plan` does, `items` (the IDs to move, from the plan) and
+  optional `withoutClaim` (with `scope` naming one item): each item is opened again as the plan
+  does and moved only if it opens; one that does not is `refused` and the rest still move. A move
+  writes, per node of the plugin, the new `version`, the store's build as `pathHint` and
+  `stateSavedBy` (the version whose state the snapshot holds), and the lock's entries for the new
+  version's builds in place of the old one's; the node's files under `nodes/` are left as they
+  were. The item gets a new revision. The documents as they were are kept in the data folder
+  under `Moves/<move>/`.
+- `versions.moves` (`{}`) returns `{moves}`: each kept move `{move,date,plugin,to,items,undoable}`,
+  newest first.
+- `versions.undo` takes `move` and returns `{items}`, each `{id,result}`: `putBack` (the document
+  as it was before the move, byte for byte) or `savedSince` (saved after the move, so left; open it
+  to move it back by hand). A move is undone once.
+- `versions.forget` takes `move` and drops it: `{"accepted":true}`. Nothing forgets a move on its
+  own.
+
+Not yet (RFC 0043): the open Performance's parts (`parts.useVersion`), Compare, refusing a move
+while the transport runs at the `instrument` reliability level (the levels are not built), a claim
+honored for a saved version that is not installed (by a repository's index), and cleanup.

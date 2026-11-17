@@ -424,7 +424,7 @@ namespace
         }
         const auto broken = home / "Broken";
         fs::copy( saved, broken, fs::copy_options::recursive );
-        edit( broken / "performance.json", "\"version\":13", "\"version\":99" );
+        edit( broken / "performance.json", "\"version\":14", "\"version\":99" );
         write( last, "{\"performance\":\"" + broken.string() + "\"}\n" );
         {
             oscairn::Session session( rate, block );

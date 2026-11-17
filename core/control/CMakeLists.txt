@@ -1,4 +1,4 @@
-add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
+add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/versions.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
 set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
 # The library's index (RFC 0023 step 5): no extensions loaded, double-quoted strings refused.
 set_source_files_properties(third_party/sqlite/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DQS=0")
@@ -482,3 +482,20 @@ target_link_libraries(oscairn-recording-test PRIVATE oscairn_control_json)
 target_compile_options(oscairn-recording-test PRIVATE -Wall -Wextra)
 add_test(NAME control-recording COMMAND oscairn-recording-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-recording PROPERTIES TIMEOUT 60)
+
+# RFC 0043: one plugin in several versions, and library items moved to a newer one.
+foreach(variant 1 2 2-strict 2-mono)
+    add_library(oscairn-versioned-${variant} MODULE tests/versioned_fixture.cpp)
+    target_link_libraries(oscairn-versioned-${variant} PRIVATE oscairn_clap_headers)
+    set_target_properties(oscairn-versioned-${variant} PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endforeach()
+target_compile_definitions(oscairn-versioned-2 PRIVATE FIXTURE_VERSION="2.0.0")
+target_compile_definitions(oscairn-versioned-2-strict PRIVATE FIXTURE_VERSION="2.0.0" FIXTURE_STRICT=1)
+target_compile_definitions(oscairn-versioned-2-mono PRIVATE FIXTURE_VERSION="2.0.0" FIXTURE_MONO=1)
+add_executable(oscairn-version-moves-test tests/version_moves.cpp)
+target_link_libraries(oscairn-version-moves-test PRIVATE oscairn_control)
+set(version_moves $<TARGET_FILE:oscairn-version-moves-test> $<TARGET_FILE:oscairn-versioned-1> $<TARGET_FILE:oscairn-versioned-2> $<TARGET_FILE:oscairn-versioned-2-strict> $<TARGET_FILE:oscairn-versioned-2-mono> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-version-moves COMMAND ${version_moves})
+set_tests_properties(control-version-moves PROPERTIES TIMEOUT 120)
+add_test(NAME control-version-moves-workers COMMAND ${version_moves})
+set_tests_properties(control-version-moves-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")

@@ -384,9 +384,8 @@ A converter writing libraries that use published, signed packages:
 - Copy `key` from the repository's own `repository.json` (`rootKey`) after checking it against the
   key the repository's owner publishes, or from `packages.repositories` on a device that uses it.
 - Do **not** write it in `performance.json` or `sound.json` yet. Those readers refuse a field they
-  do not know (`fields()` in `core/control/src/performance.cpp`), so a version 13 Performance or
-  version 8 Sound carrying it does not open. It goes there from Performance version 14 and Sound
-  version 9, when built.
+  do not know (`fields()` in `core/control/src/performance.cpp`), so a version 14 Performance or
+  version 9 Sound carrying it does not open. It goes there in the versions after those, when built.
 - Do not write an `http://` address, a folder path, a mirror or blob base instead of the
   repository's address, a `/` at the end, a fingerprint instead of the key, a name, a package ID
   or a version.

@@ -560,6 +560,7 @@ namespace oscairn
                 {"library.query",Library},{"library.favorite",Library},{"library.tag",Library},{"library.edit",Library},{"library.copy",Library},{"library.export",Library},{"library.exportLibrary",Library},{"setlists.get",Library},{"library.types",Library},{"library.folders",Library},{"library.addFolder",Library},{"library.removeFolder",Library},{"setlists.save",Library},
                 {"library.rescan",Library},{"library.contents",Library},{"library.install",Library},{"library.libraries",Library},{"library.uninstall",Library},
                 {"library.delete",Library},{"library.save",Library},{"library.load",Library},
+                {"versions.plan",Library},{"versions.move",Library},{"versions.job",Library},{"versions.moves",Library},{"versions.undo",Library},{"versions.forget",Library},
                 {"performance.save",Library},{"performance.load",Library},{"performance.prepare",Library},{"performance.export",Library},{"performance.info",Library},
                 {"performance.setInfo",Library},{"performance.contents",Library},{"performance.import",Library},{"budget.estimate",Library},
                 {"audition.start",Library},{"audition.stop",Library},{"audition.get",Library},
@@ -620,7 +621,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","versions.plan","versions.move","versions.job","versions.moves","versions.undo","versions.forget","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -1003,6 +1004,60 @@ namespace oscairn
                                   ",\"opensStateFrom\":"+orNull(x.opensStateFrom)+",\"soundChanges\":"+orNull(x.soundChanges)+",\"claimKey\":"+orNull(x.claimKey)+'}');
                 }
                 return "{\"plugins\":"+join(out)+'}';
+            }
+            // Moving library items to a newer plugin version (RFC 0043).
+            if(method=="versions.plan" || method=="versions.move") {
+                const bool move=method=="versions.move";
+                if(move)fields(p,{"plugin","to","scope","items","withoutClaim"});else fields(p,{"plugin","to","scope"});
+                const auto plugin=member(p,"plugin");fields(plugin,{"format","id","version"});
+                const auto scope=member(p,"scope");fields(scope,{"items","library","setlist","all"});
+                Control::VersionScope s;
+                if(const auto items=member(scope,"items"))for(auto i:array(items,10000))s.items.emplace_back(string(i));
+                if(const auto l=member(scope,"library"))s.library=string(l);
+                if(const auto l=member(scope,"setlist"))s.setlist=string(l);
+                if(const auto a=member(scope,"all"))s.all=boolean(a);
+                std::vector<std::string> items;
+                if(move && member(p,"items"))for(auto i:array(member(p,"items"),10000,0))items.emplace_back(string(i));
+                const Control::PluginRef ref{std::string(string(member(plugin,"format"))),std::string(string(member(plugin,"id"))),std::string(string(member(plugin,"version")))};
+                const std::string to(string(member(p,"to")));
+                try{return "{\"job\":"+std::to_string(move?c.versionsMove(ref,to,s,items,member(p,"withoutClaim") && boolean(member(p,"withoutClaim"))):c.versionsPlan(ref,to,s))+'}';}
+                catch(const std::invalid_argument& e){throw Failure{std::string(e.what()).rfind("busy",0)==0?-32005:-32602,e.what()};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+            }
+            if(method=="versions.job") {
+                fields(p,{"job"});
+                Control::VersionJob j;
+                try{j=c.versionsJob(integer(member(p,"job")));}catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                auto value=[](const std::optional<double>& v){return v?encode(*v):std::string("null");};
+                std::vector<std::string> items;
+                for(const auto& i:j.items){
+                    std::vector<std::string> nodes,changes;
+                    for(const auto& n:i.nodes)nodes.push_back(quote(n));
+                    for(const auto& x:i.changes)changes.push_back("{\"node\":"+quote(x.node)+",\"param\":"+std::to_string(x.param)+",\"name\":"+quote(x.name)+",\"before\":"+value(x.before)+",\"after\":"+value(x.after)+'}');
+                    items.push_back("{\"id\":"+quote(i.id)+",\"name\":"+quote(i.name)+",\"kind\":"+quote(i.kind)+",\"status\":"+quote(i.status)+",\"locked\":"+(i.locked?"true":"false")+
+                                    ",\"library\":"+orNull(i.library)+",\"nodes\":"+join(nodes)+",\"changes\":"+join(changes)+",\"reason\":"+quote(i.reason)+'}');
+                }
+                const auto claim=j.claim?"{\"opensStateFrom\":"+quote(j.claim->opensStateFrom)+",\"soundChanges\":"+orNull(j.claim->soundChanges)+",\"key\":"+quote(j.claim->key)+",\"checked\":"+(j.claim->checked?"true":"false")+'}':std::string("null");
+                return "{\"state\":"+quote(j.state)+",\"error\":"+quote(j.error)+",\"move\":"+orNull(j.move)+",\"items\":"+join(items)+",\"claim\":"+claim+'}';
+            }
+            if(method=="versions.moves") {
+                fields(p,{});std::vector<std::string> out;
+                for(const auto& m:c.versionMoves()){
+                    std::vector<std::string> items;for(const auto& i:m.items)items.push_back(quote(i));
+                    out.push_back("{\"move\":"+quote(m.move)+",\"date\":"+quote(m.date)+",\"plugin\":{\"format\":"+quote(m.plugin.format)+",\"id\":"+quote(m.plugin.id)+",\"version\":"+quote(m.plugin.version)+
+                                  "},\"to\":"+quote(m.to)+",\"items\":"+join(items)+",\"undoable\":"+(m.undoable?"true":"false")+'}');
+                }
+                return "{\"moves\":"+join(out)+'}';
+            }
+            if(method=="versions.undo" || method=="versions.forget") {
+                fields(p,{"move"});const std::string move(string(member(p,"move")));
+                try{
+                    if(method=="versions.forget"){c.versionsForget(move);return R"({"accepted":true})";}
+                    std::vector<std::string> out;
+                    for(const auto& [id,result]:c.versionsUndo(move))out.push_back("{\"id\":"+quote(id)+",\"result\":"+quote(result)+'}');
+                    return "{\"items\":"+join(out)+'}';
+                }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
             }
             if(method=="plugins.remove" || method=="plugins.addBuild") {
                 const bool add=method=="plugins.addBuild";

@@ -733,6 +733,7 @@ namespace oscairn
         meter();
         recorder_.service();
         advancePreinstall(); // RFC 0031: the packages that come with the release, one job at a time
+        advanceVersions(); // RFC 0043: a plan or move of library items to a newer plugin version, an item at a time
         // Each live take's taps follow the wires: a fader moved, a plugin replaced, a Performance
         // changed. A take that no longer feeds rings of its own is dropped from the list.
         if( ( !recordTaps_.empty() || !retroTaps_.empty() ) && ( revision_ != recordRevision_ || wires_ != recordWires_ ) )

@@ -1,6 +1,6 @@
 # RFC 0043: Moving sounds to newer plugin versions, and removing unused ones
 
-Status: in progress (step 1 built 2026-11-16); proposed 2026-11-11, from the owner's request of that day.
+Status: in progress (steps 1 and 2 built 2026-11-16); proposed 2026-11-11, from the owner's request of that day.
 Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
 sound assets' retention roots ([RFC 0009](0009-sound-assets-and-dependencies.md)), plugin workers
 ([RFC 0010](0010-plugin-worker-isolation.md)), the library and audition
@@ -34,8 +34,19 @@ Checked when built and tested; the sections below say how.
       are optional, as `dependencies.packages` was. Not yet: `checked` (step 5); `packages.lookup`
       reading the index's claim is RFC 0031's step 11; the live repository takes the template's
       builder, [packages repository changes](../packages-repository-changes.md))
-- [ ] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
+- [x] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
       `stateSavedBy`
+      (built 2026-11-16, with `versions.moves` and `versions.forget`; Performance version 14 and
+      Sound version 9 carry `stateSavedBy`, so `pluginRepositories` moves to the versions after;
+      `control-version-moves` and `-workers`, on the versioned fixture at 1.0.0 and 2.0.0. Built
+      differently: the job runs on the control thread, an item per `service()`, as every plugin
+      load does (CLAP's main thread), opening the nodes in a graph that never plays, each in a
+      worker of the placement policy's where workers are used, under the memory budget's room;
+      the request returns at once. Settings are compared only when the old version is installed
+      too (a document holds no parameter values for a plugin with state). Not built: the
+      `playing` refusal, as no reliability levels exist yet (RFC 0027 step 1); honoring a claim for
+      a saved version not installed by a repository's index (RFC 0031 step 9's device side), so
+      such an item moves only alone, `withoutClaim`; `checked` is false until step 5)
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line
 - [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import

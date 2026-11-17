@@ -482,6 +482,36 @@ namespace oscairn
         // exports carry it, replacing that platform's build in the store. It cannot be loaded here
         // to check: the device it is for checks its ID and version when it loads it.
         virtual void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) = 0;
+        // Moving library items to a newer installed version of a plugin (RFC 0043), only when asked.
+        // A plan names the plugin at the version items were saved with, an installed newer version
+        // and a scope: items by ID, the user's own items copied from a library (origin), the
+        // Performances a Setlist names, or every item using it. Its job opens each item's nodes
+        // of the plugin with the new version, as opening does but in a graph that never plays,
+        // one item at a time on the control thread (service()). Per item: status "movable",
+        // "changed" (settings read differently: changes, each node key, parameter, name, the old
+        // version's value and the new one's, either absent when it has none), "locked", "noClaim"
+        // (the new version does not claim to open this version's state, or its claim is not this
+        // version's publisher's), "refused" (reason) or "moved". claim: the new version's claim,
+        // when honored. A move writes the version, the build's path, the lock and stateSavedBy into
+        // each item's document, its node state left byte for byte, keeping the documents as they
+        // were under Moves/ in the data folder. One job at a time.
+        struct PluginRef { std::string format, id, version; };
+        struct VersionScope { std::vector<std::string> items; std::string library, setlist; bool all = false; };
+        struct VersionChange { std::string node, name; uint32_t param = 0; std::optional<double> before, after; };
+        struct VersionItem { std::string id, name, kind, status, reason, library; bool locked = false; std::vector<std::string> nodes; std::vector<VersionChange> changes; };
+        struct VersionClaim { std::string opensStateFrom, soundChanges, key; bool checked = false; };
+        struct VersionJob { uint64_t id = 0; std::string state, error, move; std::vector<VersionItem> items; std::optional<VersionClaim> claim; };
+        struct VersionMove { std::string move, date; PluginRef plugin; std::string to; std::vector<std::string> items; bool undoable = false; };
+        // Returns the job. A move takes the IDs to move (from the plan); withoutClaim moves an item
+        // the new version does not claim to open, one item only.
+        virtual uint64_t versionsPlan(const PluginRef& plugin, const std::string& to, const VersionScope& scope) = 0;
+        virtual uint64_t versionsMove(const PluginRef& plugin, const std::string& to, const VersionScope& scope, const std::vector<std::string>& items, bool withoutClaim = false) = 0;
+        virtual VersionJob versionsJob(uint64_t job) = 0;
+        // Kept moves, newest first; undo puts back each item still at the revision the move wrote
+        // (by ID: "putBack"), leaving one saved since ("savedSince"); forget drops a kept move.
+        virtual std::vector<VersionMove> versionMoves() = 0;
+        virtual std::vector<std::pair<std::string, std::string>> versionsUndo(const std::string& move) = 0;
+        virtual void versionsForget(const std::string& move) = 0;
         // The trust store (RFC 0006), trust.json in the data folder: the keys whose signatures this
         // device trusts, each by its public key (64 hex digits) and ID (its fingerprint), with a
         // name, what it is trusted for (scope: any of "plugins", "apps" and "content") and whether

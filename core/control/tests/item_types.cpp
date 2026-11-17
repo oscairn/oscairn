@@ -41,9 +41,9 @@ int main()
         // Step 1: the built-in types, as manifests.
         const auto performance = itemType("oscairn.performance"), sound = itemType("sound"), sample = itemType("oscairn.sample");
         check(performance && performance->kind() == "performance" && performance->folder == "Performances" && performance->suffix == ".oscairn" &&
-              performance->document == "performance.json" && performance->format == "oscairn.performance" && performance->version == 13 && performance->indexed(),
+              performance->document == "performance.json" && performance->format == "oscairn.performance" && performance->version == 14 && performance->indexed(),
               "the Performance type, by ID");
-        check(sound && sound->id == "oscairn.sound" && sound->folder == "Sounds" && sound->suffix == ".osound" && sound->document == "sound.json" && sound->version == 8,
+        check(sound && sound->id == "oscairn.sound" && sound->folder == "Sounds" && sound->suffix == ".osound" && sound->document == "sound.json" && sound->version == 9,
               "the Sound type, by kind");
         const auto setlist = itemType("oscairn.setlist");
         check(setlist && setlist->kind() == "setlist" && setlist->folder == "Setlists" && setlist->suffix == ".osetlist" && setlist->document == "setlist.json" && setlist->version == 2 && setlist->indexed(),

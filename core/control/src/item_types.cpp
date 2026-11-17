@@ -46,10 +46,10 @@ namespace oscairn
         // Oscairn's own types (RFC 0023 step 1), as manifests like any other.
         const char* const builtIn[] = {
             R"({"format":"oscairn.type","version":1,"id":"oscairn.performance","name":"Performance","plural":"Performances",
-                "recognize":{"folder":".oscairn","document":"performance.json","format":"oscairn.performance","version":13},
+                "recognize":{"folder":".oscairn","document":"performance.json","format":"oscairn.performance","version":14},
                 "storage":"managed","folder":"Performances","identity":"id","fields":[]})",
             R"({"format":"oscairn.type","version":1,"id":"oscairn.sound","name":"Sound","plural":"Sounds",
-                "recognize":{"folder":".osound","document":"sound.json","format":"oscairn.sound","version":8},
+                "recognize":{"folder":".osound","document":"sound.json","format":"oscairn.sound","version":9},
                 "storage":"managed","folder":"Sounds","identity":"id","fields":[]})",
             R"({"format":"oscairn.type","version":1,"id":"oscairn.setlist","name":"Setlist","plural":"Setlists",
                 "recognize":{"folder":".osetlist","document":"setlist.json","format":"oscairn.setlist","version":2},

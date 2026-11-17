@@ -100,6 +100,12 @@ namespace oscairn
         void uninstallLibrary(const std::string& library) override;
         void deleteLibraryItem(const std::string& item) override;
         std::vector<InstalledPlugin> installedPlugins() override;
+        uint64_t versionsPlan(const PluginRef& plugin, const std::string& to, const VersionScope& scope) override;
+        uint64_t versionsMove(const PluginRef& plugin, const std::string& to, const VersionScope& scope, const std::vector<std::string>& items, bool withoutClaim = false) override;
+        VersionJob versionsJob(uint64_t job) override;
+        std::vector<VersionMove> versionMoves() override;
+        std::vector<std::pair<std::string, std::string>> versionsUndo(const std::string& move) override;
+        void versionsForget(const std::string& move) override;
         void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) override;
         void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) override;
         uint64_t listRepository(const std::string& source) override;
@@ -870,6 +876,17 @@ namespace oscairn
         std::filesystem::path preinstallFolder_; // the app's repository snapshot; control thread only
         Preinstall preinstall_;                  // how it goes; control thread only
         void advancePreinstall();                // service() and preinstalled(): its next step
+        // RFC 0043 (versions.cpp): the plan or move job, one at a time, an item each service().
+        struct VersionWork;
+        std::shared_ptr<VersionWork> versionWork_;
+        uint64_t versionJobs_ = 0;
+        void advanceVersions();
+        uint64_t startVersions(const PluginRef& plugin, const std::string& to, const VersionScope& scope, const std::vector<std::string>& items, bool withoutClaim, bool move);
+        // The nodes of a plugin at a version in a saved document (performance.json or sound.json in
+        // root) opened with `build` instead, in a graph that never plays, as opening restores them
+        // (performance.cpp): by node key, each parameter's ID, name and value once restored. Throws
+        // why one does not open: not this version, its state refused, other ports.
+        std::map<std::string, std::vector<std::tuple<uint32_t, std::string, double>>> openNodes(const std::filesystem::path& root, const std::string& document, const PluginRef& plugin, const std::string& build, const std::string& version);
         std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
         void markWithdrawn(std::vector<InstalledPackage>& packages); // each one's withdrawal, by the revocation lists last read (packages.cpp)
         std::string revokedFile(const Package& package); // an archive from a file against those lists of the repositories on: the refusal, or empty (packages.cpp)

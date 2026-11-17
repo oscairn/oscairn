@@ -102,7 +102,7 @@ int main(int argc, char** argv)
         const std::string json(text.begin(), text.end());
         check(json.find("Drums") == std::string::npos && json.find("\"seat\"") == std::string::npos && json.find("\"level\":0.7") == std::string::npos,
               "nothing of the other part, and not the part's fader");
-        check(json.find("\"version\":8") != std::string::npos && json.find("\"assignments\":[{\"control\":\"wheel:2\",\"kind\":\"parameter\"") != std::string::npos,
+        check(json.find("\"version\":9") != std::string::npos && json.find("\"assignments\":[{\"control\":\"wheel:2\",\"kind\":\"parameter\"") != std::string::npos,
               "its mod wheel assignment is saved with it");
         check(json.find("\"Verb\"") != std::string::npos && json.find("sendLevel") == std::string::npos, "its control on its send is saved without that target");
 

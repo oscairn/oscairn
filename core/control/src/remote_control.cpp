@@ -667,6 +667,46 @@ namespace oscairn
                            orEmpty(field(x,"opensStateFrom")),orEmpty(field(x,"soundChanges")),orEmpty(field(x,"claimKey"))});
         return out;
     }
+    namespace {
+        std::string versionsRequest(const Control::PluginRef& p,const std::string& to,const Control::VersionScope& s) {
+            std::string items;for(const auto& i:s.items)items+=(items.empty()?"":",")+quote(i);
+            std::string scope="{\"items\":["+items+"]";
+            if(s.items.empty())scope=!s.library.empty()?"{\"library\":"+quote(s.library):!s.setlist.empty()?"{\"setlist\":"+quote(s.setlist):std::string("{\"all\":")+(s.all?"true":"false");
+            return "{\"plugin\":{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+"},\"to\":"+quote(to)+",\"scope\":"+scope+"}";
+        }
+        std::optional<double> orNone(V v){if(!v || v->type==json_type_null)return std::nullopt;return number(v);}
+    }
+    uint64_t RemoteControl::versionsPlan(const PluginRef& p,const std::string& to,const VersionScope& s) {
+        auto d=impl_->call("versions.plan",versionsRequest(p,to,s));return uint64_t(integer(field(field(d.get(),"result"),"job")));
+    }
+    uint64_t RemoteControl::versionsMove(const PluginRef& p,const std::string& to,const VersionScope& s,const std::vector<std::string>& items,bool withoutClaim) {
+        auto request=versionsRequest(p,to,s);request.pop_back();
+        std::string list;for(const auto& i:items)list+=(list.empty()?"":",")+quote(i);
+        auto d=impl_->call("versions.move",request+",\"items\":["+list+"],\"withoutClaim\":"+(withoutClaim?"true":"false")+'}');return uint64_t(integer(field(field(d.get(),"result"),"job")));
+    }
+    Control::VersionJob RemoteControl::versionsJob(uint64_t id) {
+        auto d=impl_->call("versions.job","{\"job\":"+std::to_string(id)+'}');auto r=field(d.get(),"result");
+        VersionJob j;j.id=id;j.state=string(field(r,"state"));j.error=string(field(r,"error"));j.move=orEmpty(field(r,"move"));
+        for(auto x:array(field(r,"items"))){
+            VersionItem i{string(field(x,"id")),string(field(x,"name")),string(field(x,"kind")),string(field(x,"status")),string(field(x,"reason")),orEmpty(field(x,"library")),boolean(field(x,"locked")),strings(field(x,"nodes")),{}};
+            for(auto c:array(field(x,"changes")))i.changes.push_back({string(field(c,"node")),string(field(c,"name")),uint32_t(integer(field(c,"param"))),orNone(field(c,"before")),orNone(field(c,"after"))});
+            j.items.push_back(std::move(i));
+        }
+        if(const auto c=field(r,"claim");c->type!=json_type_null)j.claim=VersionClaim{string(field(c,"opensStateFrom")),orEmpty(field(c,"soundChanges")),string(field(c,"key")),boolean(field(c,"checked"))};
+        return j;
+    }
+    std::vector<Control::VersionMove> RemoteControl::versionMoves() {
+        auto d=impl_->call("versions.moves","{}");std::vector<VersionMove> out;
+        for(auto x:array(field(field(d.get(),"result"),"moves"))){const auto p=field(x,"plugin");
+            out.push_back({string(field(x,"move")),string(field(x,"date")),{string(field(p,"format")),string(field(p,"id")),string(field(p,"version"))},string(field(x,"to")),strings(field(x,"items")),boolean(field(x,"undoable"))});}
+        return out;
+    }
+    std::vector<std::pair<std::string,std::string>> RemoteControl::versionsUndo(const std::string& move) {
+        auto d=impl_->call("versions.undo","{\"move\":"+quote(move)+'}');std::vector<std::pair<std::string,std::string>> out;
+        for(auto x:array(field(field(d.get(),"result"),"items")))out.push_back({string(field(x,"id")),string(field(x,"result"))});
+        return out;
+    }
+    void RemoteControl::versionsForget(const std::string& move) { impl_->call("versions.forget","{\"move\":"+quote(move)+'}'); }
     void RemoteControl::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& platform) {
         impl_->call("plugins.remove","{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+",\"platform\":"+quote(platform)+'}',30000);
     }

@@ -126,7 +126,7 @@ static void native(const char* synth,const char* delay,const char* seq,const fs:
         const auto relocked=opens(root/"other-build","another build of the locked version loads, as from the store");
         check(relocked.find(other)==std::string::npos && relocked.find(bundleDigest(bundled/fs::path(synth).filename()))!=std::string::npos,"the lock then names the build that played");}
     for(int which=0;which<5;++which){if(which==1)continue;const auto bad=root/("bad"+std::to_string(which));fs::copy(file,bad,fs::copy_options::recursive);
-        if(which==0)replaceText(bad/"performance.json","\"version\":13","\"version\":999");
+        if(which==0)replaceText(bad/"performance.json","\"version\":14","\"version\":999");
         if(which==2)fs::remove(bad/"nodes/node-1/state/state.clap");
         if(which==3)replaceText(bad/"performance.json","\"engine\":\"node-1\"","\"engine\":\"node-4\"");
         if(which==4)fs::create_symlink(file/"performance.json",bad/"link");

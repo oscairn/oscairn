@@ -227,7 +227,7 @@ int main(int argc, char** argv)
         quiet(s);
         s.savePerformance(shared.string());
         const auto document = slurp(shared / "performance.json");
-        check(document.find("\"version\":13") != std::string::npos, "version 13");
+        check(document.find("\"version\":14") != std::string::npos, "version 14");
         check(count(document, "\"engine\":\"node-1\"") == 3 && count(document, "\"sound\":{\"channel\":") == 3, "saved shared: three nodes, one engine, each its sound");
         check(fs::exists(shared / "nodes" / "node-1" / "engine" / "snapshot") && !fs::exists(shared / "nodes" / "node-2" / "engine"), "the engine's state with its first node");
     }

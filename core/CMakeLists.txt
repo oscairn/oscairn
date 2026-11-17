@@ -376,10 +376,27 @@ set_tests_properties(note-routing PROPERTIES TIMEOUT 30)
 if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set_tests_properties(note-routing PROPERTIES TIMEOUT 120) # its work is CPU, which a sanitizer multiplies (26 of 30 s under ThreadSanitizer on CI); the limit is for a hang
 endif()
-# The engine core: the Rust implementation bit for bit against its C++ reference; and the crate's own tests.
-add_executable(oscairn-core-diff-test engine/tests/core_diff.cpp)
-target_link_libraries(oscairn-core-diff-test PRIVATE oscairn_engine)
-add_test(NAME engine-core-diff COMMAND oscairn-core-diff-test)
+# The engine core: the Rust implementation bit for bit against its C++ reference, live (engine-*-diff) and against the
+# reference's outputs recorded in engine/tests/vectors (engine-*-replay, vectors.h); and the crate's own tests. The tests
+# and vectors_math.c (the cores' exp, log1p and pow there, so the vectors hold no libm's rounding) are built -ffp-contract=off.
+# engine-core-diff: the notes core; engine-audio-diff: a plan's audio (buffers, mixing, output guard, meters; `bench cpp|rust`
+# times each); engine-run-diff: a plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls).
+set(engine_diff_size_core)
+set(engine_diff_size_audio) # under a sanitizer the same 200 plans for 700 blocks, not 2000: the whole took 280 of its 300 s under ThreadSanitizer on CI
+set(engine_diff_size_run) # under a sanitizer its 150 plans of 1500 blocks take longer than the limit; the same plans, a third of the blocks (the rest of the matrix runs in the builds without one)
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(engine_diff_size_audio 200 700)
+    set(engine_diff_size_run 150 500)
+endif()
+foreach(diff IN ITEMS core audio run)
+    add_executable(oscairn-${diff}-diff-test engine/tests/${diff}_diff.cpp engine/tests/vectors_math.c)
+    target_link_libraries(oscairn-${diff}-diff-test PRIVATE oscairn_engine)
+    target_compile_options(oscairn-${diff}-diff-test PRIVATE -ffp-contract=off)
+    target_compile_definitions(oscairn-${diff}-diff-test PRIVATE OSCAIRN_VECTORS_BUILD="${CMAKE_BUILD_TYPE}")
+    add_test(NAME engine-${diff}-diff COMMAND oscairn-${diff}-diff-test ${engine_diff_size_${diff}})
+    add_test(NAME engine-${diff}-replay COMMAND oscairn-${diff}-diff-test replay "${CMAKE_CURRENT_SOURCE_DIR}/engine/tests/vectors/engine-${diff}.vec" ${engine_diff_size_${diff}})
+    set_tests_properties(engine-${diff}-diff engine-${diff}-replay PROPERTIES TIMEOUT 300)
+endforeach()
 if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
     add_executable(oscairn-core-recovery-test engine/tests/core_recovery.cpp)
     target_link_libraries(oscairn-core-recovery-test PRIVATE oscairn_engine)
@@ -388,26 +405,6 @@ if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
     target_link_libraries(oscairn-core-pool-test PRIVATE oscairn_engine)
     add_test(NAME engine-core-pool COMMAND oscairn-core-pool-test)
 endif()
-set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
-# The plan's audio (buffers, mixing, output guard, meters) the same way; `bench cpp|rust` times each.
-add_executable(oscairn-audio-diff-test engine/tests/audio_diff.cpp)
-target_link_libraries(oscairn-audio-diff-test PRIVATE oscairn_engine)
-set(audio_diff_size) # under a sanitizer the same 200 plans for 700 blocks, not 2000: the whole took 280 of its 300 s under ThreadSanitizer on CI
-if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
-    set(audio_diff_size 200 700)
-endif()
-add_test(NAME engine-audio-diff COMMAND oscairn-audio-diff-test ${audio_diff_size})
-set_tests_properties(engine-audio-diff PROPERTIES TIMEOUT 300)
-# A plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls) the same way.
-add_executable(oscairn-run-diff-test engine/tests/run_diff.cpp)
-target_link_libraries(oscairn-run-diff-test PRIVATE oscairn_engine)
-# Under a sanitizer its 150 plans of 1500 blocks take longer than the limit; the same plans, a third of the blocks (the rest of the matrix runs in the builds without one).
-set(run_diff_size)
-if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
-    set(run_diff_size 150 500)
-endif()
-add_test(NAME engine-run-diff COMMAND oscairn-run-diff-test ${run_diff_size})
-set_tests_properties(engine-run-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --workspace --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)

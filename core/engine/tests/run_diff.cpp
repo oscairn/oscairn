@@ -4,14 +4,18 @@
 // driven by the same random plans and the same modeled plugins, and compared after every block: every
 // call either makes on the plugins (in order, with what it hands them: the merged events, voice
 // limits, listener events, deadlines), the graph's audio out, MIDI out, event drops, note IDs, every
-// route's state, every activity and the parts' harmonies. Plans are replaced under it (retired
+// route's state, every activity and the parts' harmonies (vectors.h: live, or against the reference's
+// recorded outputs). Plans are replaced under it (retired
 // connections, stranded plugins, taps gone, gains carried). The plugins are modeled, the same for both:
 // what each sends is a function of what it was handed (notes on and off as an arpeggiator's, NOTE_ENDs,
 // parameter-target lane events, MIDI), blocks lost, late, reset, a clock that advances with each call.
 // The Rust core's guard rules the reference lacks get no input (as engine-core-diff): no missed blocks,
 // no audio links, the callback's slack never low.
-//   oscairn-run-diff-test [plans] [blocks]
+//   oscairn-run-diff-test [plans] [blocks]                    live: the C++ reference's run, then the Rust's against it
+//   oscairn-run-diff-test record FILE COMMIT [plans] [blocks]  the C++ reference's outputs to FILE (COMMIT: its source's)
+//   oscairn-run-diff-test replay FILE [plans] [blocks]         the Rust core against FILE
 #include "../src/engine_core.h"
+#include "vectors.h"
 #include "oscairn/graph.h"
 #include <oscairn-clap/harmony.h>
 #include <oscairn-clap/param-target.h>
@@ -165,8 +169,6 @@ struct Side
     struct Built { oscairn_notes* notes=nullptr; oscairn_audio* audio=nullptr; oscairn_run* run=nullptr; };
     Built now, was;
     std::vector<uint64_t> log; // every call on the plugins, hashed with what it carried
-    std::vector<uint64_t> trace; // each call's kind and step, to say where two logs part
-    std::vector<std::vector<Event>> handed; // each call's events, for the report
     int64_t clock=1'000'000'000;
     uint64_t drops=0; uint32_t nextId=0, midiCount=0; std::array<oscairn_midi,1024> midi{};
     std::vector<std::vector<Event>> sent; // per step, what its plugin sent this block
@@ -210,11 +212,12 @@ struct Side
     }
 };
 
-// The plugins: what a step's plugin does with the events it is handed, a function of them and the block alone.
+// The plugins: what a step's plugin does with the events it is handed, a function of them and the block alone. Every
+// draw is its own statement (as core_diff.cpp's events: argument and operand order is unspecified).
 struct Model
 {
     static Side& side(void* c) { return *static_cast<Side*>(c); }
-    static void log(void* c,uint64_t what,uint32_t s,const void* p=nullptr,size_t n=0) { auto& x=side(c);x.log.push_back(hash(p,n,hash(&s,4,what)));x.trace.push_back(what<<32|s);x.handed.emplace_back();if(what==1 || what==18 || what==19)x.handed.back().assign(static_cast<const Event*>(p),static_cast<const Event*>(p)+n/sizeof(Event));x.clock+=1000+int64_t((x.log.size()*7919)%50000)+(x.log.size()%97?0:3'000'000); }
+    static void log(void* c,uint64_t what,uint32_t s,const void* p=nullptr,size_t n=0) { auto& x=side(c);x.log.push_back(hash(p,n,hash(&s,4,what)));x.clock+=1000+int64_t((x.log.size()*7919)%50000)+(x.log.size()%97?0:3'000'000); }
     static Rng rng(void* c,uint32_t s,uint32_t salt) { auto& x=side(c);return Rng{(uint64_t(x.block)*0x9E3779B97F4A7C15ull)^(uint64_t(x.hostOf[s])<<20)^salt^0x5555};}
     static bool play(void* c,uint32_t s,const Event* e,uint32_t n)
     {
@@ -228,11 +231,16 @@ struct Model
             if(k.header.type==CLAP_EVENT_NOTE_ON && out.size()<40){out.push_back(note(CLAP_EVENT_NOTE_ON,k.header.time,k.channel,int16_t(std::min(127,k.key+12)),k.velocity));out.push_back(note(CLAP_EVENT_NOTE_OFF,std::min(frames-1,k.header.time+30),k.channel,int16_t(std::min(127,k.key+12)),0));}
             if((k.header.type==CLAP_EVENT_NOTE_OFF || k.header.type==CLAP_EVENT_NOTE_CHOKE) && k.note_id>=0 && r.below(3)){auto end=note(CLAP_EVENT_NOTE_END,0,k.channel,k.key,0,k.note_id);out.push_back(end);}
         }
-        for(uint32_t i=0,m=r.below(40)?r.below(4):600;i<m;++i)out.push_back(lane(r.below(frames),r.below(3),r.below(2),r.unit()*(r.below(4)?2:6)-(r.below(4)?1:3),r.below(4)?-1:int32_t(r.below(30)),int16_t(r.below(4)),int16_t(r.below(4)?-1:60)));
-        if(!r.below(5))out.push_back(midi(r.below(frames),uint8_t(0xB0|r.below(16)),uint8_t(r.below(128)),uint8_t(r.below(128))));
-        if(!r.below(7))out.push_back(note(CLAP_EVENT_NOTE_ON,r.below(frames),int16_t(r.below(16)),int16_t(36+r.below(40)),r.unit()));
+        for(uint32_t i=0,m=r.below(40)?r.below(4):600;i<m;++i)
+        {
+            const uint32_t time=r.below(frames),which=r.below(3);const bool set=r.below(2);const double u=r.unit(),scale=r.below(4)?2:6,v=u*scale-(r.below(4)?1:3);
+            const int32_t id=r.below(4)?-1:int32_t(r.below(30));const int16_t ch=int16_t(r.below(4)),key=int16_t(r.below(4)?-1:60);
+            out.push_back(lane(time,which,set,v,id,ch,key));
+        }
+        if(!r.below(5)){const uint32_t time=r.below(frames);const uint8_t status=uint8_t(0xB0|r.below(16)),a=uint8_t(r.below(128)),b=uint8_t(r.below(128));out.push_back(midi(time,status,a,b));}
+        if(!r.below(7)){const uint32_t time=r.below(frames);const int16_t ch=int16_t(r.below(16)),key=int16_t(36+r.below(40));const double v=r.unit();out.push_back(note(CLAP_EVENT_NOTE_ON,time,ch,key,v));}
         auto* o=x.api.buffers(x.plan==nullptr?nullptr:x.now.audio,int32_t(s),true);
-        for(uint32_t ch=0;ch<2;++ch)for(uint32_t f=0;f<frames;++f)o[ch][f]=float(r.unit()-.5)*(r.below(9)?1.f:0.f);
+        for(uint32_t ch=0;ch<2;++ch)for(uint32_t f=0;f<frames;++f){const float sample=float(r.unit()-.5);o[ch][f]=sample*(r.below(9)?1.f:0.f);}
         return !side(c).plan->lossy || r.below(10);
     }
 };
@@ -257,7 +265,7 @@ const oscairn_plugins plugins{nullptr,
         *cost=10+r.below(40);*notes=list;*n=r.below(5);return r.below(20);},
     [](void* c,uint32_t s,uint32_t limit,const oscairn_voice_budget_context_t* p,uint32_t n){Model::log(c,15,s,p,n*sizeof *p);Model::log(c,15,s,&limit,4);},
     [](void* c,uint32_t s,uint32_t k){Model::log(c,16,s,&k,4);return 7+k;},
-    [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){Model::log(c,17,s,&k,4);auto r=Model::rng(c,s,17+k);for(uint32_t i=0,m=r.below(3);i<m;++i){const auto p=param(0,r.below(5),r.unit());emit(e,&p);}},
+    [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){Model::log(c,17,s,&k,4);auto r=Model::rng(c,s,17+k);for(uint32_t i=0,m=r.below(3);i<m;++i){const uint32_t id=r.below(5);const double v=r.unit();const auto p=param(0,id,v);emit(e,&p);}},
     [](void* c,uint32_t node,const Event* e,uint32_t n,bool sent){Model::log(c,18+sent,node,e,n*sizeof(Event));},
     [](void* c){return Model::side(c).clock;},
     [](void* c,int64_t at,bool only){Model::log(c,20+only,0,&at,8);},
@@ -275,7 +283,7 @@ void input(Rng& rng,std::vector<Event>& out,std::vector<uint8_t>& tags)
         const int16_t c=int16_t(rng.below(3)),k=int16_t(36+rng.below(30));
         switch(rng.below(8))
         {
-            case 0: case 1: case 2: out.push_back(note(CLAP_EVENT_NOTE_ON,t,c,k,rng.unit(),rng.below(3)?-1:int32_t(rng.below(20))));break;
+            case 0: case 1: case 2: {const double v=rng.unit();const int32_t id=rng.below(3)?-1:int32_t(rng.below(20));out.push_back(note(CLAP_EVENT_NOTE_ON,t,c,k,v,id));}break;
             case 3: case 4: out.push_back(note(CLAP_EVENT_NOTE_OFF,t,c,k,0));break;
             case 5: out.push_back(midi(t,uint8_t(0xB0|c),64,uint8_t(rng.below(2)?0:127)));break;
             case 6: out.push_back(midi(t,uint8_t(0xD0|c),uint8_t(rng.below(128)),0));break;
@@ -285,20 +293,16 @@ void input(Rng& rng,std::vector<Event>& out,std::vector<uint8_t>& tags)
     }
 }
 
-[[noreturn]] void fail(const char* what,uint64_t seed,uint32_t block,size_t at=0)
-{
-    std::printf("MISMATCH rust_core_ against cpp_core_: %s, plan %llu, block %u (%zu)\n",what,(unsigned long long)seed,block,at);std::exit(1);
-}
-
 struct Totals { uint64_t plans=0,blocks=0,replaced=0,calls=0,midi=0; } totals;
 
-void run(uint64_t seed,uint32_t blocks)
+void run(const Api& api,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
 {
+    tape.plan(seed,blocks);
     Rng rng{seed*0x9E3779B97F4A7C15ull+7};
     uint32_t routes=0;
     std::vector<std::unique_ptr<Plan>> plans;plans.push_back(std::make_unique<Plan>(randomPlan(rng,routes)));
-    std::unique_ptr<Side> sides[2]{std::make_unique<Side>(apis[0]),std::make_unique<Side>(apis[1])};
-    for(auto& s:sides)s->build(*plans.back(),false);
+    auto side=std::make_unique<Side>(api);
+    side->build(*plans.back(),false);
     std::vector<Event> events;std::vector<uint8_t> tags;
     std::array<float,256> live;live.fill(1.f);
     for(uint32_t b=0;b<blocks;++b)
@@ -307,20 +311,20 @@ void run(uint64_t seed,uint32_t blocks)
         {
             const bool played=rng.below(3)!=0;
             plans.push_back(std::make_unique<Plan>(played?change(rng,*plans.back(),routes):randomPlan(rng,routes)));
-            for(auto& s:sides)s->build(*plans.back(),true);
+            side->build(*plans.back(),true);
             ++totals.replaced;
         }
         input(rng,events,tags);
         Event beat{};beat.bytes[0]=40;
         std::array<oscairn_param,3> params{};uint32_t paramCount=rng.below(4);
-        for(uint32_t i=0;i<paramCount;++i){const auto& st=plans.back()->steps[rng.below(uint32_t(plans.back()->steps.size()))];params[i]={rng.below(3)?100+st.host:1000+st.host*3+rng.below(2),param(0,rng.below(4),rng.unit())};}
+        for(uint32_t i=0;i<paramCount;++i){const auto& st=plans.back()->steps[rng.below(uint32_t(plans.back()->steps.size()))];const uint32_t node=rng.below(3)?100+st.host:1000+st.host*3+rng.below(2),id=rng.below(4);const double v=rng.unit();params[i]={node,param(0,id,v)};}
         for(uint32_t slot=1;slot<4;++slot)if(!rng.below(5))live[slot]=float(rng.unit());
         const auto& p=*plans.back();
         const bool panicInput=!rng.below(150),panicNotes=!rng.below(300),listening=rng.below(2),parallel=rng.below(4)!=0,hasDeadline=rng.below(2),deadlines=rng.below(2),transportWake=!rng.below(8);
         const float worth=rng.below(2)?0.f:30.f;
         const oscairn_block timing{p.budget,2666.67f,2266.67f,rng.below(2)?1333.33f:1000.f,1+float(rng.below(3)),uint64_t(rng.below(3)?96000:256),0};
-        for(auto& s:sides)
         {
+            auto& s=side;
             s->block=b;
             float* outs[2]{s->out[0].data(),s->out[1].data()};
             // The callback's deadline a second away: its slack never runs low (the Rust core alone acts on that).
@@ -329,39 +333,40 @@ void run(uint64_t seed,uint32_t blocks)
             oscairn_plugins calls=plugins;calls.context=s.get();
             s->log.push_back(s->api.block(s->now.run,&run,&calls));
         }
-        auto& x=*sides[0];auto& y=*sides[1];
-        if(x.log.size()!=y.log.size() || x.log!=y.log)
-        {
-            size_t at=0;while(at<x.log.size() && at<y.log.size() && x.log[at]==y.log[at])++at;
-            for(size_t i=at>3?at-3:0;i<at+3 && i<x.trace.size() && i<y.trace.size();++i)std::printf("  call %zu: cpp %llu/%llu rust %llu/%llu\n",i,(unsigned long long)(x.trace[i]>>32),(unsigned long long)(x.trace[i]&0xffffffff),(unsigned long long)(y.trace[i]>>32),(unsigned long long)(y.trace[i]&0xffffffff));
-            for(int k=0;k<2;++k){auto& z=k?y:x;std::printf(" %s:",k?"rust":"cpp");for(auto& e:z.handed[at]){clap_event_header_t h;std::memcpy(&h,e.bytes,sizeof h);std::printf(" [%u %u t%u",h.space_id,h.type,h.time);if(h.space_id==0 && h.type<=3){clap_event_note_t n;std::memcpy(&n,e.bytes,sizeof n);std::printf(" id%d c%d k%d",n.note_id,n.channel,n.key);}if(h.type==5||h.type==6){clap_event_param_value_t q;std::memcpy(&q,e.bytes,sizeof q);std::printf(" p%u c%d v%g",q.param_id,q.channel,q.value);}std::printf("]");}std::printf("\n");}
-            std::printf(" budget %g lossy %d steps %zu\n",double(p.budget),int(p.lossy),p.steps.size());fail("calls on the plugins",seed,b,at);
-        }
-        totals.calls+=x.log.size();x.log.clear();y.log.clear();x.trace.clear();y.trace.clear();x.handed.clear();y.handed.clear();
-        if(x.out!=y.out)fail("audio out",seed,b);
-        if(x.midiCount!=y.midiCount || std::memcmp(x.midi.data(),y.midi.data(),x.midiCount*sizeof(oscairn_midi)))fail("MIDI out",seed,b);
-        totals.midi+=x.midiCount;x.midiCount=y.midiCount=0;
-        if(x.drops!=y.drops)fail("event drops",seed,b);
-        if(x.nextId!=y.nextId)fail("note IDs",seed,b);
-        if(std::memcmp(x.harmonies.data(),y.harmonies.data(),sizeof x.harmonies))fail("harmonies",seed,b);
-        for(size_t i=0;i<x.activities.size();++i)if(std::memcmp(x.activities[i].bytes,y.activities[i].bytes,sizeof(Activity)))fail("activity",seed,b,i);
+        auto& x=*side;
+        for(size_t i=0;i<x.log.size();++i)tape.see("calls on the plugins",int(i),x.log[i]); // a live mismatch names the call
+        totals.calls+=x.log.size();x.log.clear();
+        for(const auto& o:x.out)tape.see("audio out",-1,o.data(),o.size()*sizeof(float));
+        tape.see("MIDI out",-1,x.midiCount);tape.see("MIDI out",-1,x.midi.data(),x.midiCount*sizeof(oscairn_midi));
+        totals.midi+=x.midiCount;x.midiCount=0;
+        tape.see("event drops",-1,x.drops);
+        tape.see("note IDs",-1,x.nextId);
+        tape.see("harmonies",-1,x.harmonies);
+        for(size_t i=0;i<x.activities.size();++i)tape.see("activity",int(i),x.activities[i].bytes);
         for(size_t r=0;r<x.routes.size();++r)
         {
-            uint8_t pa[256],pb[256];uint64_t ha[2],hb[2];
-            x.api.routePedals(x.routes[r],pa);y.api.routePedals(y.routes[r],pb);x.api.heldKeys(x.routes[r],ha);y.api.heldKeys(y.routes[r],hb);
-            if(x.api.routeLive(x.routes[r])!=y.api.routeLive(y.routes[r]) || std::memcmp(pa,pb,256) || std::memcmp(ha,hb,16))fail("route state",seed,b,r);
+            uint8_t pedals[256];uint64_t held[2];
+            x.api.routePedals(x.routes[r],pedals);x.api.heldKeys(x.routes[r],held);
+            tape.see("route state",int(r),x.api.routeLive(x.routes[r]));tape.see("route state",int(r),pedals);tape.see("route state",int(r),held);
         }
+        tape.block();
         ++totals.blocks;
     }
+    tape.endPlan();
     ++totals.plans;
 }
 }
 
 int main(int argc,char** argv)
 {
-    const uint32_t plans=argc>1?uint32_t(std::atoi(argv[1])):150,blocks=argc>2?uint32_t(std::atoi(argv[2])):1500;
-    for(uint32_t p=0;p<plans;++p)run(p,blocks);
-    std::printf("engine run differential: %llu plans (%llu replaced), %llu blocks, %llu plugin calls, %llu MIDI messages: rust_core_ and cpp_core_ identical\n",
-                (unsigned long long)totals.plans,(unsigned long long)totals.replaced,(unsigned long long)totals.blocks,(unsigned long long)totals.calls,(unsigned long long)totals.midi);
+    vectors::Args args(argc,argv,150,1500,"engine-run-diff","core/engine/tests/run_diff.cpp (oscairn-run-diff-test record)","cpp_core_ (core/engine/src/run_cpp.cpp, core_cpp.cpp, audio_cpp.cpp)");
+    for(uint32_t p=0;p<args.plans;++p)
+    {
+        if(args.live()){const Totals t=totals;args.tape.mode=vectors::Tape::LiveRecord;run(apis[0],p,args.blocks,args.tape);totals=t;args.tape.mode=vectors::Tape::LiveCheck;}
+        run(apis[args.recording?0:1],p,args.blocks,args.tape);
+    }
+    const char* outcome=args.done(7); // a curve's shapes: exp, log1p, pow
+    std::printf("engine run differential: %llu plans (%llu replaced), %llu blocks, %llu plugin calls, %llu MIDI messages: %s\n",
+                (unsigned long long)totals.plans,(unsigned long long)totals.replaced,(unsigned long long)totals.blocks,(unsigned long long)totals.calls,(unsigned long long)totals.midi,outcome);
     return 0;
 }

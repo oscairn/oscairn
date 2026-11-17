@@ -284,6 +284,9 @@ namespace oscairn
         Recorder& recorder() noexcept { return recorder_; } // its ring length, disk reserve and test hooks
         bool note( bool on, int key, double velocity, int channel = 0, const std::string& input = {} ) override;
         bool controller( int controller, int value, int channel = 0, const std::string& input = {} ) override;
+        // A panel control's pitch bend (0..16383, 8192 centered) and channel pressure (0..127), from the built-in source as a MIDI keyboard's reach the parts.
+        bool pitchBend( int value, int channel = 0 );
+        bool channelPressure( int value, int channel = 0 );
         void allNotesOff() override { allOff_.store( true, std::memory_order_relaxed ); panic_.store( true, std::memory_order_release ); endRinging_.store( true, std::memory_order_release ); } // the queue overflow's emergency release, every plugin taking notes reset; ringOut ends the last Performance's
         void ignoreMidiInputs( const std::vector<std::string>& names ) override;
         std::vector<MidiPort> midiPorts() override;
@@ -328,7 +331,7 @@ namespace oscairn
         bool controllerControl( const std::string& control, ControlInput input, const Navigation& navigation ) noexcept;
         void setControllerWake( std::function<void()> wake );
         void serviceControllers(); // the control thread, woken: the moves to the model and the parameters to their plugins, and no more of service()
-        void assign( const std::string& control, const Assignment& target, uint32_t part = 0 ) override;
+        void assign( const std::string& control, const Assignment& target, uint32_t part = 0, bool passes = false ) override;
 
         struct MidiClockEvent
         {
@@ -434,6 +437,9 @@ namespace oscairn
         template<class Edit> void editWires(Edit&& edit);
         void buildPart(const Part& part);
         void buildParts();
+        // A part's input as its instruments hear it: its own receive settings, and the controllers (pedals, pitch bend, CC 1...)
+        // a Sound's own assignment of a control with that function replaces for it (physical_controls.cpp).
+        PartInput inputFor( const Part& part, const std::vector<AssignmentOverride>& assignments ) const;
         struct BusEntry { NodeId node = 0; uint32_t port = 0; double level = 1, pan = 0; bool mute = false; uint32_t split = 0, lane = 0; bool fader = false; std::vector<WireVia> via{}; double fixed = 1; bool fixedMute = false; std::vector<uint32_t> faders{}; }; // fader: passes an empty bus's fader; via: the empty buses on the way; fixed, fixedMute, faders: as Wire's
         std::vector<BusEntry> busEntries(uint32_t bus);
         bool splitNode(NodeId node, bool modes = false) const; // a split's Split or Join node, or a ports split's plugin; modes: only those its kind sets the modes of

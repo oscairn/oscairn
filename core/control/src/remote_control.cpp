@@ -271,7 +271,7 @@ namespace oscairn
                 Part part;part.id=static_cast<uint32_t>(integer(field(p,"id")));part.name=string(field(p,"name"));
                 auto input=field(p,"input");const auto kind=string(field(input,"kind"));
                 part.input.kind=kind=="notes"?PartInput::Kind::Notes:kind=="audio"?PartInput::Kind::Audio:kind=="bus"?PartInput::Kind::Bus:PartInput::Kind::None;
-                part.input.port=static_cast<uint32_t>(integer(field(input,"port")));part.input.zones=zones(field(input,"zones"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes")));part.input.reserve=uint16_t(integer(field(input,"reserve")));part.input.priority=uint8_t(integer(field(input,"priority")));{std::vector<std::pair<std::string,std::string>> classes;const auto r=field(input,"receive");if(r->type!=json_type_object)throw std::runtime_error("Invalid part receive");for(auto* e=static_cast<const json_object_s*>(r->payload)->start;e;e=e->next)classes.emplace_back(std::string(e->name->string,e->name->string_size),string(e->value));part.input.pedals=pedalsFrom(classes);}
+                part.input.port=static_cast<uint32_t>(integer(field(input,"port")));part.input.zones=zones(field(input,"zones"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes")));part.input.reserve=uint16_t(integer(field(input,"reserve")));part.input.priority=uint8_t(integer(field(input,"priority")));{std::vector<std::pair<std::string,std::string>> classes;const auto r=field(input,"receive");if(r->type!=json_type_object)throw std::runtime_error("Invalid part receive");for(auto* e=static_cast<const json_object_s*>(r->payload)->start;e;e=e->next)classes.emplace_back(std::string(e->name->string,e->name->string_size),string(e->value));part.input.pedals=pedalsFrom(classes);part.input.functions=functionsFrom(classes);}
                 for(auto r:array(field(input,"devices")))part.input.devices.push_back({DeviceRule::Kind(named(deviceRuleKinds,string(field(r,"kind")))),
                     DeviceRule::Match(named(deviceMatches,string(field(r,"match")))),static_cast<uint32_t>(integer(field(r,"port"))),string(field(r,"pattern"))});
                 part.output=static_cast<uint32_t>(integer(field(p,"output")));
@@ -1021,14 +1021,14 @@ namespace oscairn
         for(auto a:array(field(r,"assignments"))){
             AssignmentOverride o;o.control=string(field(a,"control"));const auto kind=string(field(a,"kind"));
             for(size_t k=0;k<assignmentKinds.size();++k)if(kind==assignmentKinds[k])o.target.kind=Assignment::Kind(k);
-            o.target.node=static_cast<NodeId>(integer(field(a,"node")));o.target.param=static_cast<uint32_t>(integer(field(a,"param")));o.target.id=static_cast<uint32_t>(integer(field(a,"id")));o.part=static_cast<uint32_t>(integer(field(a,"part")));
+            o.target.node=static_cast<NodeId>(integer(field(a,"node")));o.target.param=static_cast<uint32_t>(integer(field(a,"param")));o.target.id=static_cast<uint32_t>(integer(field(a,"id")));o.part=static_cast<uint32_t>(integer(field(a,"part")));if(const auto p=detail::member(a,"passes"))o.passes=p->type==json_type_true;
             out.push_back(std::move(o));}
         return out;
     } }
     std::vector<AssignmentOverride> RemoteControl::assignments() const {auto doc=impl_->call("assignments.get");return assignmentsFrom(field(doc.get(),"result"));}
-    void RemoteControl::assign(const std::string& control,const Assignment& t,uint32_t part)
+    void RemoteControl::assign(const std::string& control,const Assignment& t,uint32_t part,bool passes)
     {
-        impl_->call("assignments.set","{\"control\":"+quote(control)+",\"kind\":\""+assignmentKinds[size_t(t.kind)]+"\",\"node\":"+std::to_string(t.node)+",\"param\":"+std::to_string(t.param)+",\"id\":"+std::to_string(t.id)+",\"part\":"+std::to_string(part)+'}');impl_->refresh();
+        impl_->call("assignments.set","{\"control\":"+quote(control)+",\"kind\":\""+assignmentKinds[size_t(t.kind)]+"\",\"node\":"+std::to_string(t.node)+",\"param\":"+std::to_string(t.param)+",\"id\":"+std::to_string(t.id)+",\"part\":"+std::to_string(part)+(passes?",\"passes\":true":"")+'}');impl_->refresh();
     }
     namespace { PadMap padMapFrom(V root)
     {
@@ -1101,7 +1101,7 @@ namespace oscairn
         std::string inputText(const PartInput& input)
         {
             const char* kind=input.kind==PartInput::Kind::Notes?"notes":input.kind==PartInput::Kind::Audio?"audio":input.kind==PartInput::Kind::Bus?"bus":"none";
-            return "{\"kind\":\""+std::string(kind)+"\",\"port\":"+std::to_string(input.port)+",\"zones\":"+zonesText(input.zones)+",\"devices\":"+devicesText(input.devices)+",\"maxNotes\":"+std::to_string(input.maxNotes)+",\"reserve\":"+std::to_string(input.reserve)+",\"priority\":"+std::to_string(input.priority)+",\"receive\":"+pedalsJson(input.pedals)+"}";
+            return "{\"kind\":\""+std::string(kind)+"\",\"port\":"+std::to_string(input.port)+",\"zones\":"+zonesText(input.zones)+",\"devices\":"+devicesText(input.devices)+",\"maxNotes\":"+std::to_string(input.maxNotes)+",\"reserve\":"+std::to_string(input.reserve)+",\"priority\":"+std::to_string(input.priority)+",\"receive\":"+pedalsJson(input.pedals,input.functions)+"}";
         }
     }
     uint32_t RemoteControl::addPart(const std::string& name,PartInput input,std::optional<uint32_t> output)

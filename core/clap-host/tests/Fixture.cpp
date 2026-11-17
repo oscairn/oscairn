@@ -80,6 +80,7 @@ struct Plugin {
     // Atomic: CLAP lets the main thread (state save, get_value) read these while
     // the audio thread writes them in process().
     std::atomic<double> gain{.5}, toggle{0}, mode{0};
+    int bend = 8192, wheel = 0; // audio thread: the last pitch bend and CC 1 heard (KICK_FIXTURE_WHEELS plays them: the MIDI instrument's left channel is bend/16383, its right wheel/127)
     double modulation = 0; // audio thread: the gain's CLAP modulation, added to it in the output
     double shownMode = 0; // main thread: the mode the parameters' info last described
     clap_id timerId = CLAP_INVALID_ID;
@@ -174,6 +175,8 @@ struct Plugin {
             if (m->data[1] > 127 || m->data[2] > 127) ++threadErrors;
             if (std::getenv("KICK_FIXTURE_STUCK")) return; // deaf to MIDI's releases too: a key-up, a pedal-up, all notes off
             if (kind==0x80 || (kind==0x90 && !m->data[2])) {held=false;if(!sustain)gate=false;}
+            if (kind==0xe0) bend = m->data[1] | m->data[2] << 7;
+            if (kind==0xb0 && m->data[1]==1) wheel = m->data[2];
             if (kind==0xb0 && m->data[1]==64) {sustain=m->data[2]>=64;if(!sustain && !held)gate=false;}
             if (kind==0xb0 && m->data[1]==120) gate=held=false;
             if (kind==0xb0 && m->data[1]==123) {held=false;if(!sustain)gate=false;}
@@ -221,6 +224,7 @@ struct Plugin {
         if (!s.active || !s.processing || !b->frames_count || b->frames_count > s.maxFrames) ++threadErrors;
         if (s.kind == 4) return CLAP_PROCESS_ERROR;
         if (s.kind == 11) s.gate = b->transport && (b->transport->flags & CLAP_TRANSPORT_IS_PLAYING);
+        const bool wheels = std::getenv("KICK_FIXTURE_WHEELS") != nullptr;
         uint32_t event = 0;
         const auto count = b->in_events->size(b->in_events);
         for (uint32_t i = 0; i < b->frames_count; ++i) {
@@ -240,6 +244,7 @@ struct Plugin {
             }
             for (uint32_t c = 0; c < b->audio_outputs[0].channel_count; ++c) {
                 float value = s.gate || s.down>0 ? static_cast<float>(s.gain + s.modulation) : static_cast<float>(s.gain + s.modulation)*s.tailFrames/1024.f;
+                if (s.kind == 2 && wheels) value = c == 0 ? s.bend / 16383.f : s.wheel / 127.f;
                 if (s.kind == 1) value = b->audio_inputs[0].data32[c][i] * static_cast<float>(s.gain);
                 if (s.kind == 3) value = std::numeric_limits<float>::quiet_NaN();
                 b->audio_outputs[0].data32[c][i] = value;

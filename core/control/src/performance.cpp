@@ -43,6 +43,7 @@ std::string numeric(double value){if(!std::isfinite(value))bad("nonfinite value"
 std::string join(const std::vector<std::string>& values){std::string out="[";for(const auto& v:values){if(out.size()>1)out+=',';out+=v;}return out+']';}
 // A part input's pedals by device (PartInput::pedals); absent: every device's.
 uint8_t pedalsIn(V input){const V v=member(input,"receive");if(!v)return 0;if(v->type!=json_type_object)bad("a part's receive is an object");std::vector<std::pair<std::string,std::string>> classes;for(auto* e=static_cast<const json_object_s*>(v->payload)->start;e;e=e->next)classes.emplace_back(std::string(e->name->string,e->name->string_size),text(e->value));try{return pedalsFrom(classes);}catch(const std::invalid_argument& e){bad(e.what());}}
+uint16_t functionsIn(V input){const V v=member(input,"receive");if(!v)return 0;if(v->type!=json_type_object)bad("a part's receive is an object");std::vector<std::pair<std::string,std::string>> classes;for(auto* e=static_cast<const json_object_s*>(v->payload)->start;e;e=e->next)classes.emplace_back(std::string(e->name->string,e->name->string_size),text(e->value));try{return functionsFrom(classes);}catch(const std::invalid_argument& e){bad(e.what());}}
 // A lane's port: a ports split's lanes, and only they, each name a different audio output port of its plugin.
 uint32_t lanePort(V l,Split::Kind kind){const V p=member(l,"port");if(!p!=(kind!=Split::Kind::Ports))bad("a ports split's lanes, and only they, name a port");return p?integer(p):0;}
 void checkPorts(const Split& split,const std::vector<kick::clap::Port>& outputs){
@@ -666,7 +667,7 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
     if(!sound)for(const auto& p:parts_){
         const char* kind=p.input.kind==PartInput::Kind::Notes?"notes":p.input.kind==PartInput::Kind::Audio?"audio":p.input.kind==PartInput::Kind::Bus?"bus":"none";
         std::vector<std::string> sends;for(const auto& s:p.sends)sends.push_back("{\"bus\":"+std::to_string(s.bus)+",\"level\":"+numeric(s.level)+'}');
-        parts.push_back("{\"id\":"+std::to_string(p.id)+",\"name\":"+quote(p.name)+",\"input\":{\"kind\":\""+kind+"\",\"port\":"+std::to_string(p.input.port)+",\"zones\":"+zonesText(p.input.zones)+",\"devices\":"+devicesText(p.input.devices)+",\"maxNotes\":"+std::to_string(p.input.maxNotes)+",\"reserve\":"+std::to_string(p.input.reserve)+",\"priority\":"+std::to_string(p.input.priority)+",\"receive\":"+pedalsJson(p.input.pedals)+"},\"chain\":"+chainText(p.chain)+",\"splits\":"+splitsText(p)+",\"output\":"+std::to_string(p.output)+",\"level\":"+numeric(p.level)+",\"pan\":"+numeric(p.pan)+",\"mute\":"+(p.mute?"true":"false")+",\"solo\":"+(p.solo?"true":"false")+",\"bus\":"+std::to_string(p.bus)+",\"sends\":"+join(sends)+",\"midiOut\":"+midiOutText(p.midiOut)+",\"key\":"+(p.key?keyText(*p.key):std::string("null"))
+        parts.push_back("{\"id\":"+std::to_string(p.id)+",\"name\":"+quote(p.name)+",\"input\":{\"kind\":\""+kind+"\",\"port\":"+std::to_string(p.input.port)+",\"zones\":"+zonesText(p.input.zones)+",\"devices\":"+devicesText(p.input.devices)+",\"maxNotes\":"+std::to_string(p.input.maxNotes)+",\"reserve\":"+std::to_string(p.input.reserve)+",\"priority\":"+std::to_string(p.input.priority)+",\"receive\":"+pedalsJson(p.input.pedals,p.input.functions)+"},\"chain\":"+chainText(p.chain)+",\"splits\":"+splitsText(p)+",\"output\":"+std::to_string(p.output)+",\"level\":"+numeric(p.level)+",\"pan\":"+numeric(p.pan)+",\"mute\":"+(p.mute?"true":"false")+",\"solo\":"+(p.solo?"true":"false")+",\"bus\":"+std::to_string(p.bus)+",\"sends\":"+join(sends)+",\"midiOut\":"+midiOutText(p.midiOut)+",\"key\":"+(p.key?keyText(*p.key):std::string("null"))
             +",\"from\":"+(p.from.sound.empty()?std::string("null"):"{\"sound\":"+quote(p.from.sound)+",\"revision\":"+quote(p.from.revision)+",\"name\":"+quote(p.from.name)+",\"modified\":"+(p.from.modified?"true":"false")+'}')+'}');
     }
     for(const auto& m:graph.mappings)if(kept(m.source) && kept(m.target))mappings.push_back("{\"from\":"+quote(keys.at(m.source))+",\"lane\":"+std::to_string(m.lane)+",\"to\":"+quote(keys.at(m.target))+",\"param\":"+std::to_string(m.param)+'}');
@@ -707,8 +708,8 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
     // A Sound's own physical-control assignments (RFC 0011): its plugins' parameters and its controls.
     std::vector<std::string> own;
     if(sound)for(const auto& o:assignments_)if(o.part==sound->id){const auto& t=o.target;
-        if(t.kind==Assignment::Kind::Parameter && keys.count(t.node))own.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"parameter\",\"node\":"+quote(keys.at(t.node))+",\"param\":"+std::to_string(t.param)+'}');
-        else if(t.kind==Assignment::Kind::Control && std::any_of(macros_.begin(),macros_.end(),[&](const Macro& m){return m.id==t.id && m.part==sound->id;}))own.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"control\",\"id\":"+std::to_string(t.id)+'}');}
+        if(t.kind==Assignment::Kind::Parameter && keys.count(t.node))own.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"parameter\",\"node\":"+quote(keys.at(t.node))+",\"param\":"+std::to_string(t.param)+(o.passes?",\"passes\":true":"")+'}');
+        else if(t.kind==Assignment::Kind::Control && std::any_of(macros_.begin(),macros_.end(),[&](const Macro& m){return m.id==t.id && m.part==sound->id;}))own.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"control\",\"id\":"+std::to_string(t.id)+(o.passes?",\"passes\":true":"")+'}');}
     if(sound){head="{\"format\":\"oscairn.sound\",\"version\":8,\"info\":";tail=",\"libraries\":"+join(named)+",\"nodes\":"+join(nodes)+",\"wires\":"+join(wires)+",\"part\":{\"chain\":"+chainText(sound->chain)+",\"splits\":"+splitsText(*sound)+"},\"mappings\":"+join(mappings)+",\"controls\":"+join(controls)+",\"assignments\":"+join(own)+",\"lock\":"+lockText+"}\n";}
     else{
         // Scenes: all each holds (parts.h), its scope; the parameters scenes leave alone; and the scene last selected.
@@ -736,12 +737,12 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
         for(const auto& o:assignments_){const auto& t=o.target;
             if(o.part && std::none_of(parts_.begin(),parts_.end(),[&](const Part& p){return p.id==o.part;}))continue;
             const auto part=",\"part\":"+std::to_string(o.part);
-            if(t.kind==Assignment::Kind::Parameter){if(keys.count(t.node))assigned.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"parameter\",\"node\":"+quote(keys.at(t.node))+",\"param\":"+std::to_string(t.param)+part+'}');continue;}
+            if(t.kind==Assignment::Kind::Parameter){if(keys.count(t.node))assigned.push_back("{\"control\":"+quote(o.control)+",\"kind\":\"parameter\",\"node\":"+quote(keys.at(t.node))+",\"param\":"+std::to_string(t.param)+part+(o.passes?",\"passes\":true":"")+'}');continue;}
             const bool here=t.kind==Assignment::Kind::Control?std::any_of(macros_.begin(),macros_.end(),[&](const Macro& m){return m.id==t.id;})
                            :t.kind==Assignment::Kind::Scene?std::any_of(scenes_.begin(),scenes_.end(),[&](const Scene& x){return x.id==t.id;})
                            :t.kind==Assignment::Kind::Panic?true
                            :std::any_of(parts_.begin(),parts_.end(),[&](const Part& p){return p.id==t.id;});
-            if(here)assigned.push_back("{\"control\":"+quote(o.control)+",\"kind\":"+quote(assignmentKinds[size_t(t.kind)])+",\"id\":"+std::to_string(t.id)+part+'}');}
+            if(here)assigned.push_back("{\"control\":"+quote(o.control)+",\"kind\":"+quote(assignmentKinds[size_t(t.kind)])+",\"id\":"+std::to_string(t.id)+part+(o.passes?",\"passes\":true":"")+'}');}
         for(const auto& at:untouched_)if(keys.count(at.node))parameters.push_back("{\"node\":"+quote(keys.at(at.node))+",\"param\":"+std::to_string(at.param)+'}');
         head="{\"format\":\"oscairn.performance\",\"version\":13,\"info\":";tail=",\"libraries\":"+join(named)+",\"transport\":{\"tempo\":"+numeric(tempo_.load())+",\"clockSource\":"+quote(clockSource_.load()==Transport::ClockSource::Internal?"internal":"midi")+"},\"audioInputs\":"+ports(graph.audioLayout.inputs)+",\"audioOutputs\":"+ports(graph.audioLayout.outputs)+",\"nodes\":"+join(nodes)+",\"wires\":"+join(wires)+",\"parts\":"+join(parts)+",\"mappings\":"+join(mappings)+",\"pads\":"+padsText(padMap_)+",\"key\":"+keyText(key_)+",\"master\":"+masterText(masterLevel_,masterPan_)+",\"scenes\":"+join(scenes)+",\"sceneUntouched\":"+join(parameters)+",\"scene\":"+std::to_string(scene_)+",\"controls\":"+join(controls)+",\"assignments\":"+join(assigned)+",\"lock\":"+lockText+"}\n";
     }
@@ -1308,7 +1309,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             if(!part.id || !partIds.insert(part.id).second)bad("invalid or duplicate part");
             const auto input=field(p,"input");fields(input,{"kind","port","zones","devices","maxNotes","reserve","priority","receive"});const auto kind=text(field(input,"kind"));
             part.input.kind=kind=="notes"?PartInput::Kind::Notes:kind=="audio"?PartInput::Kind::Audio:kind=="none"?PartInput::Kind::None:kind=="bus"?PartInput::Kind::Bus:(bad("invalid part input"),PartInput::Kind::None);
-            part.input.port=integer(field(input,"port"));part.input.zones=zonesFrom(field(input,"zones"));part.input.devices=devicesFrom(field(input,"devices"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes"),128));part.input.reserve=uint16_t(integer(field(input,"reserve"),128));part.input.priority=uint8_t(integer(field(input,"priority"),10));part.input.pedals=pedalsIn(input);part.output=integer(field(p,"output"));part.midiOut=midiOutFrom(field(p,"midiOut"));if(const V k=field(p,"key");k->type!=json_type_null)part.key=keyFrom(k);
+            part.input.port=integer(field(input,"port"));part.input.zones=zonesFrom(field(input,"zones"));part.input.devices=devicesFrom(field(input,"devices"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes"),128));part.input.reserve=uint16_t(integer(field(input,"reserve"),128));part.input.priority=uint8_t(integer(field(input,"priority"),10));part.input.pedals=pedalsIn(input);part.input.functions=functionsIn(input);part.output=integer(field(p,"output"));part.midiOut=midiOutFrom(field(p,"midiOut"));if(const V k=field(p,"key");k->type!=json_type_null)part.key=keyFrom(k);
             // Chains hold node keys and split entries; every node and split appears once in the part, and each split is reached from the part's own chain.
             std::set<NodeId> seen;
             auto chain=[&](V list){std::vector<NodeId> out;for(auto n:array(list,256)){
@@ -1455,13 +1456,13 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // Physical controls' overrides (RFC 0011), by the control's logical identity.
     std::vector<AssignmentOverride> assignments;
     for(auto a:array(field(d,"assignments"),4096)){
-        AssignmentOverride o;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));o.part=integer(field(a,"part"));
+        AssignmentOverride o;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));o.part=integer(field(a,"part"));if(const V f=member(a,"passes")){o.passes=boolean(f);if(o.passes && !o.part)bad("only a part's own assignment passes the control's function on");}
         if(!validPhysicalControl(o.control) || std::any_of(assignments.begin(),assignments.end(),[&](const AssignmentOverride& x){return x.control==o.control && x.part==o.part;}))bad("invalid or duplicate physical control");
         if(o.part && (std::none_of(parts.begin(),parts.end(),[&](const Part& p){return p.id==o.part;}) || (kind!="parameter" && kind!="control")))bad("a part's assignment plays its own plugins and controls");
-        if(kind=="parameter"){fields(a,{"control","kind","node","param","part"});o.target.kind=Assignment::Kind::Parameter;o.target.node=node(field(a,"node"));o.target.param=integer(field(a,"param"));
+        if(kind=="parameter"){fields(a,{"control","kind","node","param","part","passes"});o.target.kind=Assignment::Kind::Parameter;o.target.node=node(field(a,"node"));o.target.param=integer(field(a,"param"));
             if(o.target.node==graphInput || o.target.node==graphOutput)bad("invalid assignment");const auto& all=next->host(o.target.node).parameters();
             if(std::none_of(all.begin(),all.end(),[&](const auto& p){return p.id==o.target.param;}))bad("unknown assigned parameter");}
-        else{fields(a,{"control","kind","id","part"});o.target.id=integer(field(a,"id"));
+        else{fields(a,{"control","kind","id","part","passes"});o.target.id=integer(field(a,"id"));
             if(kind=="control"){o.target.kind=Assignment::Kind::Control;if(std::none_of(macros.begin(),macros.end(),[&](const Macro& m){return m.id==o.target.id;}))bad("an assignment to an unknown control");}
             else if(kind=="partLevel" || kind=="partMute"){o.target.kind=kind=="partLevel"?Assignment::Kind::PartLevel:Assignment::Kind::PartMute;if(std::none_of(parts.begin(),parts.end(),[&](const Part& p){return p.id==o.target.id;}))bad("an assignment to an unknown part");}
             else if(kind=="scene"){o.target.kind=Assignment::Kind::Scene;if(!sceneIds.count(o.target.id))bad("an assignment to an unknown scene");}
@@ -1514,10 +1515,10 @@ void Session::open(Prepared& p,bool seamless,bool fades) {
     std::vector<const PluginHost*> reused(p.warm.begin(),p.warm.end());for(const auto n:p.taken)reused.push_back(graph_.node(n).host.get());
     // A part's input wires hear the devices its selector chooses here (RFC 0012); files keep selectors, not sources.
     for(auto& w:wires)if(w.owner==WireOwner::Part && w.kind==WireKind::Notes && w.from==graphInput)
-        for(const auto& part:p.parts)if(part.id==w.part && (!part.input.devices.empty() || part.input.maxNotes || part.input.reserve || part.input.priority || part.input.pedals)){
+        for(const auto& own:p.parts)if(own.id==w.part){const auto part=[&]{auto q=own;q.input=inputFor(own,p.assignments);return q;}();if(!part.input.devices.empty() || part.input.maxNotes || part.input.reserve || part.input.priority || part.input.pedals || part.input.functions){
             // The file's zones (a lane's included) with this machine's sources and the part's note limit, one count across its lanes, reserve and priority.
             if(w.zones.empty())w.zones.emplace_back();
-            const auto mask=resolveDevices(part.input.devices,hostStatus_.midiInputs);for(auto& z:w.zones){z.sources=mask;z.maxNotes=part.input.maxNotes;z.part=part.id;z.reserve=part.input.reserve;z.priority=part.input.priority;z.pedals=part.input.pedals;}}
+            const auto mask=resolveDevices(part.input.devices,hostStatus_.midiInputs);for(auto& z:w.zones){z.sources=mask;z.maxNotes=part.input.maxNotes;z.part=part.id;z.reserve=part.input.reserve;z.priority=part.input.priority;z.pedals=part.input.pedals;z.functions=part.input.functions;}}}
     // Seamless (RFC 0021): this Performance's plugins, and any still ringing out from the one
     // before, come along retiring: held notes play on until released and tails ring out, while
     // new notes go to the new Performance.
@@ -1807,11 +1808,11 @@ std::vector<std::string> Session::loadSoundInto(uint32_t partId,const fs::path& 
         }
         std::vector<AssignmentOverride> owned; // its own physical-control assignments, for this part
         for(auto a:array(field(d,"assignments"),4096)){
-            AssignmentOverride o;o.part=partId;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));
+            AssignmentOverride o;o.part=partId;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));if(const V f=member(a,"passes"))o.passes=boolean(f);
             if(!validPhysicalControl(o.control) || std::any_of(owned.begin(),owned.end(),[&](const AssignmentOverride& x){return x.control==o.control;}))bad("invalid or duplicate physical control");
-            if(kind=="parameter"){fields(a,{"control","kind","node","param"});o.target.kind=Assignment::Kind::Parameter;o.target.node=node(field(a,"node"));o.target.param=integer(field(a,"param"));
+            if(kind=="parameter"){fields(a,{"control","kind","node","param","passes"});o.target.kind=Assignment::Kind::Parameter;o.target.node=node(field(a,"node"));o.target.param=integer(field(a,"param"));
                 const auto& all=graph_.host(o.target.node).parameters();if(std::none_of(all.begin(),all.end(),[&](const auto& q){return q.id==o.target.param;}))bad("unknown assigned parameter");}
-            else if(kind=="control"){fields(a,{"control","kind","id"});o.target.kind=Assignment::Kind::Control;const auto it=controlIds.find(integer(field(a,"id")));if(it==controlIds.end())bad("an assignment to an unknown control");o.target.id=it->second;}
+            else if(kind=="control"){fields(a,{"control","kind","id","passes"});o.target.kind=Assignment::Kind::Control;const auto it=controlIds.find(integer(field(a,"id")));if(it==controlIds.end())bad("an assignment to an unknown control");o.target.id=it->second;}
             else bad("a Sound's assignment plays its own plugins and controls");
             owned.push_back(std::move(o));}
         std::vector<Graph::Mapping> mappings;
@@ -2016,7 +2017,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
             Part part;part.id=partIds.at(fileId);part.name=text(field(p,"name"));
             const auto input=field(p,"input");fields(input,{"kind","port","zones","devices","maxNotes","reserve","priority","receive"});const auto kind=text(field(input,"kind"));
             part.input.kind=kind=="notes"?PartInput::Kind::Notes:kind=="audio"?PartInput::Kind::Audio:kind=="none"?PartInput::Kind::None:kind=="bus"?PartInput::Kind::Bus:(bad("invalid part input"),PartInput::Kind::None);
-            part.input.port=integer(field(input,"port"));part.input.zones=zonesFrom(field(input,"zones"));part.input.devices=devicesFrom(field(input,"devices"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes"),128));part.input.reserve=uint16_t(integer(field(input,"reserve"),128));part.input.priority=uint8_t(integer(field(input,"priority"),10));part.input.pedals=pedalsIn(input);part.midiOut=midiOutFrom(field(p,"midiOut"));if(const V k=field(p,"key");k->type!=json_type_null)part.key=keyFrom(k);
+            part.input.port=integer(field(input,"port"));part.input.zones=zonesFrom(field(input,"zones"));part.input.devices=devicesFrom(field(input,"devices"));part.input.maxNotes=uint16_t(integer(field(input,"maxNotes"),128));part.input.reserve=uint16_t(integer(field(input,"reserve"),128));part.input.priority=uint8_t(integer(field(input,"priority"),10));part.input.pedals=pedalsIn(input);part.input.functions=functionsIn(input);part.midiOut=midiOutFrom(field(p,"midiOut"));if(const V k=field(p,"key");k->type!=json_type_null)part.key=keyFrom(k);
             if(part.input.kind==PartInput::Kind::Audio && !onPort(layout.inputs,part.input.port)){
                 if(layout.inputs.empty())bad(part.name+" listens to an audio input this device does not have");
                 part.input.port=layout.inputs.front().id;notes.push_back(part.name+" listens to the first audio input: this device has no input "+std::to_string(integer(field(input,"port"))));}

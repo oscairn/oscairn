@@ -321,7 +321,7 @@ namespace oscairn
                 std::vector<std::pair<std::string,std::string>> classes;
                 for( auto* e = static_cast<const json_object_s*>( receive->payload )->start; e; e = e->next )
                     classes.emplace_back( std::string( e->name->string, e->name->string_size ), std::string( string( e->value ) ) );
-                input.pedals = pedalsFrom( classes );
+                input.pedals = pedalsFrom( classes ); input.functions = functionsFrom( classes );
             }
             return input;
         }
@@ -521,7 +521,7 @@ namespace oscairn
         {
             const auto chain = chainJson(p.chain);
             return "{\"id\":" + std::to_string(p.id) + ",\"name\":" + quote(p.name) + ",\"input\":{\"kind\":\"" + inputKind(p.input.kind) +
-                "\",\"port\":" + std::to_string(p.input.port) + ",\"zones\":" + zonesJson(p.input.zones) + ",\"devices\":" + devicesJson(p.input.devices) + ",\"maxNotes\":" + std::to_string(p.input.maxNotes) + ",\"reserve\":" + std::to_string(p.input.reserve) + ",\"priority\":" + std::to_string(p.input.priority) + ",\"receive\":" + pedalsJson(p.input.pedals) + "},\"chain\":" + chain + ",\"splits\":" + splitsJson(p.splits) + ",\"output\":" + std::to_string(p.output) +
+                "\",\"port\":" + std::to_string(p.input.port) + ",\"zones\":" + zonesJson(p.input.zones) + ",\"devices\":" + devicesJson(p.input.devices) + ",\"maxNotes\":" + std::to_string(p.input.maxNotes) + ",\"reserve\":" + std::to_string(p.input.reserve) + ",\"priority\":" + std::to_string(p.input.priority) + ",\"receive\":" + pedalsJson(p.input.pedals,p.input.functions) + "},\"chain\":" + chain + ",\"splits\":" + splitsJson(p.splits) + ",\"output\":" + std::to_string(p.output) +
                 ",\"level\":" + encode(p.level) + ",\"pan\":" + encode(p.pan) + ",\"mute\":" + (p.mute ? "true" : "false") + ",\"solo\":" + (p.solo ? "true" : "false") + ",\"bus\":" + std::to_string(p.bus) + ",\"sends\":" + [&]{ std::vector<std::string> v; for( const auto& s : p.sends ) v.push_back("{\"bus\":" + std::to_string(s.bus) + ",\"level\":" + encode(s.level) + '}'); return join(v); }()
                 + ",\"midiOut\":{\"devices\":" + devicesJson(p.midiOut.devices) + ",\"channel\":" + std::to_string(p.midiOut.channel) + '}'
                 + ",\"key\":" + (p.key ? keyJson(*p.key) : std::string("null"))
@@ -1492,12 +1492,12 @@ namespace oscairn
                 std::vector<std::string> out;
                 for( const auto& o : c.assignments() )
                     out.push_back("{\"control\":" + quote(o.control) + ",\"kind\":\"" + assignmentKinds[size_t(o.target.kind)] + "\",\"node\":" + std::to_string(o.target.node) +
-                                  ",\"param\":" + std::to_string(o.target.param) + ",\"id\":" + std::to_string(o.target.id) + ",\"part\":" + std::to_string(o.part) + '}');
+                                  ",\"param\":" + std::to_string(o.target.param) + ",\"id\":" + std::to_string(o.target.id) + ",\"part\":" + std::to_string(o.part) + ( o.passes ? ",\"passes\":true" : "" ) + '}');
                 return "{\"assignments\":" + join(out) + '}';
             }
             if( method == "assignments.set" )
             {
-                fields(p,{"control","kind","node","param","id","part"});
+                fields(p,{"control","kind","node","param","id","part","passes"});
                 Assignment t;
                 const auto kind = string(member(p,"kind"));
                 const auto at = std::find_if(assignmentKinds.begin(), assignmentKinds.end(), [&](const char* k) { return kind == k; });
@@ -1505,7 +1505,7 @@ namespace oscairn
                 t.kind = Assignment::Kind(at - assignmentKinds.begin());
                 if( t.kind == Assignment::Kind::Parameter ) { t.node = node(c,member(p,"node")); t.param = integer(member(p,"param")); }
                 else if( t.kind != Assignment::Kind::None && t.kind != Assignment::Kind::Panic ) t.id = integer(member(p,"id"));
-                try { c.assign(std::string(string(member(p,"control"))),t,member(p,"part") ? integer(member(p,"part")) : 0); }
+                try { c.assign(std::string(string(member(p,"control"))),t,member(p,"part") ? integer(member(p,"part")) : 0,member(p,"passes") ? boolean(member(p,"passes")) : false); }
                 catch( const std::invalid_argument& e ) { throw Failure{-32003,e.what()}; }
                 return R"({"accepted":true})";
             }

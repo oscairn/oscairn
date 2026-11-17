@@ -316,6 +316,13 @@ namespace
         render(s);
         check(near(render(s), 0), "the pedal up lets the key go: " + std::to_string(render(s)));
         check(!s.controllerControl("pedal:1", {Kind::Absolute, 1}), "a CTRL jack with no function plays nothing until assigned");
+        // Reassigned by the Performance (a scene change), the jack is no longer the sustain pedal; a pedal moved is counted.
+        check(s.controllerState().touched == "footswitch:1", "the pedal moved last is the control moved last, for learn");
+        const auto scene = s.addScene("Verse");
+        { Assignment to; to.kind = Assignment::Kind::Scene; to.id = scene; s.assign("footswitch:1", to); } s.commit(); s.service();
+        s.controllerControl("footswitch:1", {Kind::Absolute, 1});
+        s.note(true, 60, 1); render(s); s.note(false, 60, 0); render(s); render(s);
+        check(near(render(s), 0), "a jack reassigned to a scene does not also sustain: " + std::to_string(render(s)));
     }
 
     // A device's list navigation (its panel map's `navigate`): a control with one that plays nothing is counted

@@ -5344,10 +5344,17 @@
                       "properties": {
                         "sustain": { "enum": ["all", "none", "own"] },
                         "sostenuto": { "enum": ["all", "none", "own"] },
-                        "soft": { "enum": ["all", "none", "own"] }
+                        "soft": { "enum": ["all", "none", "own"] },
+                        "pitchBend": { "enum": ["all", "none", "own"] },
+                        "modulation": { "enum": ["all", "none", "own"] },
+                        "breath": { "enum": ["all", "none", "own"] },
+                        "foot": { "enum": ["all", "none", "own"] },
+                        "expression": { "enum": ["all", "none", "own"] },
+                        "portamento": { "enum": ["all", "none", "own"] },
+                        "aftertouch": { "enum": ["all", "none", "own"] }
                       },
                       "additionalProperties": false,
-                      "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
+                      "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67; pitchBend, modulation CC 1, breath CC 2, foot CC 4, expression CC 11, portamento CC 65, aftertouch: channel pressure): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
                     }
                   },
                   "required": [
@@ -6148,10 +6155,17 @@
                       "properties": {
                         "sustain": { "enum": ["all", "none", "own"] },
                         "sostenuto": { "enum": ["all", "none", "own"] },
-                        "soft": { "enum": ["all", "none", "own"] }
+                        "soft": { "enum": ["all", "none", "own"] },
+                        "pitchBend": { "enum": ["all", "none", "own"] },
+                        "modulation": { "enum": ["all", "none", "own"] },
+                        "breath": { "enum": ["all", "none", "own"] },
+                        "foot": { "enum": ["all", "none", "own"] },
+                        "expression": { "enum": ["all", "none", "own"] },
+                        "portamento": { "enum": ["all", "none", "own"] },
+                        "aftertouch": { "enum": ["all", "none", "own"] }
                       },
                       "additionalProperties": false,
-                      "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
+                      "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67; pitchBend, modulation CC 1, breath CC 2, foot CC 4, expression CC 11, portamento CC 65, aftertouch: channel pressure): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
                     }
                   },
                   "required": [
@@ -6432,6 +6446,10 @@
                   "type": "integer",
                   "minimum": 0,
                   "description": "0 or absent: the Performance's override; else that part's Sound's own assignment"
+                },
+                "passes": {
+                  "type": "boolean",
+                  "description": "A part's own assignment only: the control's own function (pitch bend, CC 1...) also reaches that part's instruments; absent or false: this assignment replaces it for the part"
                 }
               },
               "required": [
@@ -9570,10 +9588,17 @@
               "properties": {
                 "sustain": { "enum": ["all", "none", "own"] },
                 "sostenuto": { "enum": ["all", "none", "own"] },
-                "soft": { "enum": ["all", "none", "own"] }
+                "soft": { "enum": ["all", "none", "own"] },
+                "pitchBend": { "enum": ["all", "none", "own"] },
+                "modulation": { "enum": ["all", "none", "own"] },
+                "breath": { "enum": ["all", "none", "own"] },
+                "foot": { "enum": ["all", "none", "own"] },
+                "expression": { "enum": ["all", "none", "own"] },
+                "portamento": { "enum": ["all", "none", "own"] },
+                "aftertouch": { "enum": ["all", "none", "own"] }
               },
               "additionalProperties": false,
-              "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
+              "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67; pitchBend, modulation CC 1, breath CC 2, foot CC 4, expression CC 11, portamento CC 65, aftertouch: channel pressure): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
             }
           },
           "required": [

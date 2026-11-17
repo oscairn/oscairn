@@ -126,36 +126,55 @@ namespace oscairn
     {
         constexpr const char* pedalNames[pedalClasses]{"sustain", "sostenuto", "soft"};
         constexpr const char* receiveNames[]{"all", "none", "own"};
+        constexpr const char* functionNames[functionClasses]{"pitchBend", "modulation", "breath", "foot", "expression", "portamento", "aftertouch"};
+        bool isFunctionName(const std::string& name) { return std::find(std::begin(functionNames), std::end(functionNames), name) != std::end(functionNames); }
     }
     uint8_t pedalsFrom(const std::vector<std::pair<std::string, std::string>>& classes)
     {
         uint8_t pedals = 0;
         for(const auto& [name, value] : classes)
         {
+            if(isFunctionName(name)) continue;
             const auto p = std::find(std::begin(pedalNames), std::end(pedalNames), name);
             const auto r = std::find(std::begin(receiveNames), std::end(receiveNames), value);
-            if(p == std::end(pedalNames)) throw std::invalid_argument("a part receives sustain, sostenuto or soft, not \"" + name + "\"");
+            if(p == std::end(pedalNames)) throw std::invalid_argument("a part receives sustain, sostenuto, soft, pitchBend, modulation, breath, foot, expression, portamento or aftertouch, not \"" + name + "\"");
             if(r == std::end(receiveNames)) throw std::invalid_argument("a part receives a pedal from all devices, none or its own, not \"" + value + "\"");
             pedals = withPedalReceive(pedals, Pedal(p - std::begin(pedalNames)), PedalReceive(r - std::begin(receiveNames)));
         }
         return pedals;
     }
-    std::string pedalsJson(uint8_t pedals)
+    uint16_t functionsFrom(const std::vector<std::pair<std::string, std::string>>& classes)
+    {
+        uint16_t functions = 0;
+        for(const auto& [name, value] : classes)
+        {
+            const auto f = std::find(std::begin(functionNames), std::end(functionNames), name);
+            if(f == std::end(functionNames)) continue; // a pedal's (pedalsFrom refuses names that are neither)
+            const auto r = std::find(std::begin(receiveNames), std::end(receiveNames), value);
+            if(r == std::end(receiveNames)) throw std::invalid_argument("a part receives a controller from all devices, none or its own, not \"" + value + "\"");
+            functions = withFunctionReceive(functions, Function(f - std::begin(functionNames)), PedalReceive(r - std::begin(receiveNames)));
+        }
+        return functions;
+    }
+    std::string pedalsJson(uint8_t pedals, uint16_t functions)
     {
         std::string out = "{";
         for(size_t p = 0; p < pedalClasses; ++p)
             if(const auto r = pedalReceive(pedals, Pedal(p)); r != PedalReceive::All)
                 out += std::string(out.size() > 1 ? "," : "") + '"' + pedalNames[p] + "\":\"" + receiveNames[int(r)] + '"';
+        for(size_t f = 0; f < functionClasses; ++f)
+            if(const auto r = functionReceive(functions, Function(f)); r != PedalReceive::All)
+                out += std::string(out.size() > 1 ? "," : "") + '"' + functionNames[f] + "\":\"" + receiveNames[int(r)] + '"';
         return out + '}';
     }
 
     std::vector<NoteZone> inputZones(const PartInput& input, const std::vector<MidiEndpoint>& endpoints, uint32_t part)
     {
         auto zones = input.zones;
-        if(input.devices.empty() && !input.maxNotes && !input.reserve && !input.priority && !input.pedals) return zones;
+        if(input.devices.empty() && !input.maxNotes && !input.reserve && !input.priority && !input.pedals && !input.functions) return zones;
         if(zones.empty()) zones.emplace_back(); // a zone passing every note, to carry the devices, limit, reserve, priority and pedals
         const auto mask = resolveDevices(input.devices, endpoints);
-        for(auto& z : zones) { z.sources = mask; z.maxNotes = input.maxNotes; z.part = part; z.reserve = input.reserve; z.priority = input.priority; z.pedals = input.pedals; }
+        for(auto& z : zones) { z.sources = mask; z.maxNotes = input.maxNotes; z.part = part; z.reserve = input.reserve; z.priority = input.priority; z.pedals = input.pedals; z.functions = input.functions; }
         return zones;
     }
 
@@ -442,7 +461,7 @@ namespace oscairn
         {
             const auto k = part.key.value_or(key);
             Graph::Harmony h{part.id, {}, part.input.kind == PartInput::Kind::Notes, {}, k.root, k.scale};
-            if(h.input) h.zones = inputZones(part.input, hostStatus_.midiInputs);
+            if(h.input) h.zones = inputZones(inputFor(part, assignments_), hostStatus_.midiInputs);
             auto add = [&](const std::vector<NodeId>& chain) { for(const auto n : chain) if(!isSplit(n)) h.nodes.push_back(n); };
             add(part.chain);
             for(const auto& s : part.splits) { if(s.kind == Split::Kind::Ports) add({s.splitter}); for(const auto& l : s.lanes) add(l.chain); }
@@ -490,7 +509,7 @@ namespace oscairn
             if(taps.size() > first) continue;
             const auto last = std::find_if(part.chain.rbegin(), part.chain.rend(), [&](NodeId n) { return !isSplit(n) && n != graphInput && sendsNotes(g, n); });
             if(last != part.chain.rend()) add(*last, {});
-            else if(part.input.kind == PartInput::Kind::Notes) add(graphInput, inputZones(part.input, hostStatus_.midiInputs));
+            else if(part.input.kind == PartInput::Kind::Notes) add(graphInput, inputZones(inputFor(part, assignments_), hostStatus_.midiInputs));
         }
         return taps;
     }
@@ -807,7 +826,7 @@ namespace oscairn
             return ends;
         };
         End input; input.audio = part.input.kind == PartInput::Kind::Audio; input.notes = part.input.kind == PartInput::Kind::Notes; input.zoned = true;
-        input.port = part.input.port; input.zones = inputZones(part.input, hostStatus_.midiInputs, part.id);
+        input.port = part.input.port; input.zones = inputZones(inputFor(part, assignments_), hostStatus_.midiInputs, part.id);
         // A wire into a bus's lane also takes that lane's Mix.
         // pan: the part's, which its fader wires carry, for the empty buses' meters on the way.
         // fixed: its level apart from the faders (a send's own level), for the live gains.

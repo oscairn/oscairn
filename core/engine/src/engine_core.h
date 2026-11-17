@@ -43,6 +43,7 @@ typedef struct
     uint32_t part;
     uint16_t reserve;
     uint8_t priority, pedals;
+    uint16_t functions;
 } oscairn_zone;
 typedef struct { oscairn_zone zones[8]; size_t count; } oscairn_zones;
 

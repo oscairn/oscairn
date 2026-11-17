@@ -98,6 +98,7 @@ pub struct Zone {
     pub reserve: u16,
     pub priority: u8,
     pedals: u8, // whose pedals the part takes: two bits per class, PedalReceive (All 0, None 1, Own 2)
+    functions: u16, // the same for pitch bend, CC 1, 2, 4, 11, 65 and channel pressure (note_zone.h Function)
 }
 
 impl Zone {
@@ -147,6 +148,16 @@ impl Zones {
     /// Whether the receive for pedal class `class` takes each source's (its table slot, the last for untagged).
     fn pedal_from(&self, class: usize, slot: usize) -> bool {
         self.takes_pedal(class, u8::try_from(slot).unwrap_or(UNTAGGED))
+    }
+    /// NoteZones::takesFunction: the first zone's receive for the controller `function` (note_zone.h Function), or all when -1.
+    fn takes_function(&self, function: i32, source: u8) -> bool {
+        let Ok(function) = u32::try_from(function) else { return true };
+        let Some(z) = self.first() else { return true };
+        match z.functions >> (2 * function) & 3 {
+            1 => false,
+            2 => self.all().iter().any(|z| z.hears(source)),
+            _ => true,
+        }
     }
     fn takes_channel(&self, channel: u8) -> bool {
         self.all().iter().any(|z| u32::from(z.channels) & (1 << channel) != 0)
@@ -486,6 +497,20 @@ pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mu
             return emit(&e);
         }
         let (kind, channel, time) = (d[0] & 0xf0, d[0] & 15, e.time());
+        // A controller this part's receive setting does not take (note_zone.h Function).
+        let function = match (kind, d[1]) {
+            (0xe0, _) => 0,
+            (0xd0, _) => 6,
+            (0xb0, 1) => 1,
+            (0xb0, 2) => 2,
+            (0xb0, 4) => 3,
+            (0xb0, 11) => 4,
+            (0xb0, 65) => 5,
+            _ => -1,
+        };
+        if function >= 0 && cx.zones.filter(|z| z.count != 0).is_some_and(|z| !z.takes_function(function, cx.source)) {
+            return true; // not taken by this part's receive setting
+        }
         // Releases, chokes and a pedal-up pass any zone: they end only notes this route played.
         let release = kind == 0x80 || (kind == 0x90 && d[2] == 0) || (kind == 0xb0 && (d[1] == 120 || d[1] == 123 || (d[1] == 64 && d[2] < 64)));
         let pedal = match (kind, d[1]) {

@@ -1401,10 +1401,17 @@ namespace
         check(!z.takesPedal(64, 3) && z.takesPedal(66, 7) && z.takesPedal(67, 3) && !z.takesPedal(67, 7) && z.takesPedal(1, 7),
               "sustain from none, sostenuto from every device, soft from its own devices only; other controllers are not pedals");
         check(pedalsJson(input.pedals) == R"({"sustain":"none","soft":"own"})" && pedalsFrom({{"soft", "own"}, {"sustain", "none"}, {"sostenuto", "all"}}) == input.pedals, "named as files and the protocol write them");
-        for(const auto& bad : std::vector<std::pair<std::string, std::string>>{{"pitchBend", "none"}, {"sustain", "some"}})
+        for(const auto& bad : std::vector<std::pair<std::string, std::string>>{{"volume", "none"}, {"sustain", "some"}, {"pitchBend", "some"}})
         {
-            bool refused = false; try { pedalsFrom({bad}); } catch(const std::invalid_argument&) { refused = true; }
-            check(refused, "a class not built yet, or a value that is not all, none or own, is refused: " + bad.first + " " + bad.second);
+            bool refused = false; try { pedalsFrom({bad}); functionsFrom({bad}); } catch(const std::invalid_argument&) { refused = true; }
+            check(refused, "a class that is none of the pedals or controllers, or a value that is not all, none or own, is refused: " + bad.first + " " + bad.second);
+        }
+        check(functionsFrom({{"pitchBend", "none"}, {"modulation", "own"}, {"sustain", "none"}}) == withFunctionReceive(withFunctionReceive(0, Function::PitchBend, PedalReceive::None), Function::Modulation, PedalReceive::Own) &&
+              pedalsFrom({{"pitchBend", "none"}}) == 0 && pedalsJson(0, functionsFrom({{"modulation", "none"}})) == R"({"modulation":"none"})", "the same object names pitch bend and the mod wheel, and the other controllers");
+        {
+            NoteZones z; z.count = 1; z.zones[0].functions = functionsFrom({{"pitchBend", "none"}, {"modulation", "own"}}); z.zones[0].sources = 1ull << 3;
+            check(!z.takesFunction(functionOf(0xE0, 0), 3) && z.takesFunction(functionOf(0xB0, 1), 3) && !z.takesFunction(functionOf(0xB0, 1), 7) && z.takesFunction(functionOf(0xB0, 7), 7) && z.takesFunction(functionOf(0xD0, 0), 7),
+                  "pitch bend from none, CC 1 from its own devices only, other controllers and channel pressure from every device");
         }
         const auto saved = root / "pedals";
         s.savePerformance(saved.string());

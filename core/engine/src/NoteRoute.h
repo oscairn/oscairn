@@ -157,6 +157,7 @@ struct NoteRoute
             auto m=*reinterpret_cast<const clap_event_midi_t*>(h);
             if(m.port_index>=ports || m.port_index>=16)return emit(e);
             const auto kind=m.data[0]&0xf0,channel=m.data[0]&15;
+            if(const int f=functionOf(uint8_t(kind),m.data[1]);f>=0 && zones && zones->count && !zones->takesFunction(f,source))return true; // a controller this part's receive setting does not take
             // Releases, chokes and a sustain pedal-up pass any zone: they end only notes this
             // route played, which zones since changed may no longer pass; one for a note never
             // played here matches nothing. A pedal-down still reaches only the zones' channels.

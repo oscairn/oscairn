@@ -14,6 +14,16 @@ namespace oscairn
     namespace
     {
         constexpr int sendKey = 100; // a send's level among the values, beside the assignments' kinds: {sendKey, 0, bus, part}
+
+        // A lever's 0..1 as a 14-bit bend, 8192 at rest: linear, with a dead zone of 1% of the throw about
+        // the middle (a panel's lever reads 512 of 1023 at rest, and its spring never lands on 511.5), the rest
+        // scaled to reach both ends.
+        int bendOf(double v)
+        {
+            constexpr double zone = .01;
+            const double d = (std::clamp(v, 0.0, 1.0) - .5) * 2, a = std::max(0.0, std::abs(d) - zone) / (1 - zone);
+            return std::clamp(8192 + int(std::lround(std::copysign(a, d) * 8192)), 0, 16383);
+        }
     }
 
     void ControllerInput::set(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports)
@@ -23,6 +33,14 @@ namespace oscairn
         positions_.assign(groups_.size(), 0);
         mapping_ = {};
         dirty_ = true;
+    }
+
+    std::map<std::string, std::string> ControllerInput::functions() const
+    {
+        std::lock_guard lock(lock_);
+        std::map<std::string, std::string> out;
+        for(const auto& r : resolveControls(AssignmentSource{}, groups_, 0)) if(!r.function.empty()) out[r.control] = r.function;
+        return out;
     }
 
     void ControllerInput::view(const Control::ControlView& view)
@@ -68,31 +86,52 @@ namespace oscairn
         std::function<void()> wake;
         bool played = false;
         int controller = -1;
+        std::string function;
+        bool mapped = false; // an assignment played it (and counted it)
         try
         {
             std::lock_guard lock(lock_);
             const auto moves = moves_;
             for(const auto& action : mapping_.handle(source_, groups_, part_, positions_, control, input, [this](const Assignment& a) { return value(a); }))
-                { play(action); played = true; }
+                { play(action); played = mapped = true; }
             if(moves_ != moves) wake = wake_;
-            // A panel's pedal or footswitch with a standard controller's function and nothing
-            // assigned (a FANTOM's HOLD jack: sustain) sends that controller to the parts, from the
-            // built-in source, as a MIDI controller's own message reaches them.
-            if(!played && (control.starts_with("pedal:") || control.starts_with("footswitch:")))
+            // A panel control (a pedal, footswitch, wheel, strip...) with a standard controller's function (a
+            // FANTOM's HOLD jack: sustain; its lever: pitchBend, modulation) sends that controller to the parts,
+            // from the built-in source, as a MIDI controller's own message reaches them, unless the Performance
+            // (or a learn) has reassigned the control itself. A Sound's own assignment of the control (its
+            // `parts`: the mod wheel to a filter) drives its target as well, as on a hardware instrument.
             {
                 static const std::map<std::string, int> numbers{{"modulation", 1}, {"breath", 2}, {"foot", 4}, {"expression", 11}, {"sustain", 64}, {"portamento", 65}, {"sostenuto", 66}, {"soft", 67}};
                 for(const auto& r : resolveControls(source_, groups_, part_, positions_))
-                    if(r.control == control && r.target.kind == Assignment::Kind::None && r.parts.empty())
-                        if(const auto n = numbers.find(r.function); n != numbers.end()) controller = n->second;
+                    if(r.control == control && r.target.kind == Assignment::Kind::None)
+                        {
+                            if(const auto n = numbers.find(r.function); n != numbers.end()) controller = n->second;
+                            else if(r.function == "pitchBend" || r.function == "aftertouch") function = r.function;
+                        }
             }
         }
         catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
         if(wake) wake();
+        if(!function.empty())
+        {
+            try
+            {
+                const double v = std::clamp(input.value, 0.0, 1.0);
+                played = function == "pitchBend" ? session_.pitchBend(bendOf(v)) : session_.channelPressure(int(std::lround(v * 127)));
+            }
+            catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        }
         if(controller >= 0)
         {
             const double v = input.kind == ControlInput::Kind::Switch ? (input.value >= .5 ? 1 : 0) : std::clamp(input.value, 0.0, 1.0);
             try { played = session_.controller(controller, int(std::lround(v * 127))); }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        }
+        if(played && !mapped && (controller >= 0 || !function.empty()))
+        {
+            // Counted as any played control is: the control moved last, for learn, and the moves so far.
+            std::lock_guard lock(lock_);
+            touched_ = control; ++touches_;
         }
         return played;
     }

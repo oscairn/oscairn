@@ -34,7 +34,6 @@ namespace
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
     constexpr double rate = 48000; constexpr uint32_t frames = 128;
     constexpr uint64_t mib = 1ull << 20, decoded = 12 * mib; // what one sampler instance holds
-    constexpr uint64_t slack = 2 * mib; // a worker's memory moves by a few pages between the figure the estimate keeps and the one read after
     const char* const holderId = "org.oscairn.test.pack-holder";
     std::string megabytes(uint64_t bytes) { return std::to_string(bytes / mib) + " MiB"; }
 }
@@ -59,6 +58,9 @@ int main(int argc, char** argv)
         auto play = [&](Session& s) {
             float l[frames]{}, r[frames]{}; float* out[]{l, r};
             for(int i = 0; i < 600; ++i) { s.service(); s.process(out, frames); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+            // Then at rest for 200 ticks, as many as the control thread takes between two readings of the workers' memory, so the
+            // figure the estimate keeps and what the workers hold, read after, are of the same state: no block played in between.
+            for(int i = 0; i < 200; ++i) { s.service(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
         };
         // Four sampler parts (two insertion effects each), the organ's fifth (one), a synth part (three): twelve effects.
         // One sampler alone (two effects) when `samplers` is 1.
@@ -127,7 +129,7 @@ int main(int argc, char** argv)
         std::printf("shared: estimate %s, its five samplers %s, one alone %s; the workers hold %s\n", megabytes(e.memory).c_str(), megabytes(samplers).c_str(), megabytes(alone).c_str(), megabytes(held).c_str());
         check(samplers >= alone, "the shared instance counts in full: " + megabytes(samplers) + " against " + megabytes(alone));
         check(samplers < 5 * alone, "five parts sharing one instance count less than five instances: " + megabytes(samplers) + " against " + megabytes(5 * alone));
-        check(e.memory + slack >= held, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(held));
+        check(e.memory >= held, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(held));
         // The estimate is what decides: an allowance under it refuses the Performance, one above it opens it.
         const auto refused = open(shared, e.memory / 2);
         check(refused.find("of memory") != std::string::npos, "an allowance of half the estimate refuses it, saying so: " + refused);
@@ -154,7 +156,7 @@ int main(int argc, char** argv)
         const auto f = estimate(apart, samplersApart);
         std::printf("apart: estimate %s, its five samplers %s; the workers hold %s\n", megabytes(f.memory).c_str(), megabytes(samplersApart).c_str(), megabytes(heldApart).c_str());
         check(samplersApart >= 5 * decoded, "five private copies count five: " + megabytes(samplersApart) + " against " + megabytes(5 * decoded));
-        check(f.memory + slack >= heldApart, "the estimate is not below what the workers hold: " + megabytes(f.memory) + " against " + megabytes(heldApart));
+        check(f.memory >= heldApart, "the estimate is not below what the workers hold: " + megabytes(f.memory) + " against " + megabytes(heldApart));
         check(f.memory > e.memory, "private copies cost more than a shared instance");
         check(open(apart, f.memory + 128 * mib).empty(), "and opens within its estimate");
 
@@ -191,12 +193,12 @@ int main(int argc, char** argv)
             uint64_t ignored = 0;
             const auto learned = estimate(under / "performance", ignored, mib);
             std::printf("under-declared, %s a context: estimate %s, measured; the workers hold %s\n", megabytes(perContext).c_str(), megabytes(learned.memory).c_str(), megabytes(heldUnder).c_str());
-            check(learned.memory + slack >= heldUnder, "measured, the estimate is not below what the workers hold: " + megabytes(learned.memory) + " against " + megabytes(heldUnder));
+            check(learned.memory >= heldUnder, "measured, the estimate is not below what the workers hold: " + megabytes(learned.memory) + " against " + megabytes(heldUnder));
             if(perContext > 2 * mib) continue;
             { std::ofstream out(file); out << std::regex_replace(text, std::regex("\"perContext\":[0-9]+"), "\"perContext\":0"); } // as before any was measured
             const auto unlearned = estimate(under / "performance", ignored, mib);
             std::printf("under-declared, %s a context: estimate %s, not measured\n", megabytes(perContext).c_str(), megabytes(unlearned.memory).c_str());
-            check(unlearned.memory + slack >= heldUnder, "not measured, the estimate is not below what the workers hold: " + megabytes(unlearned.memory) + " against " + megabytes(heldUnder));
+            check(unlearned.memory >= heldUnder, "not measured, the estimate is not below what the workers hold: " + megabytes(unlearned.memory) + " against " + megabytes(heldUnder));
         }
 
         // The sampler never played alone: its five parts only ever loaded together, in one instance (a stage Performance on the
@@ -229,7 +231,7 @@ int main(int argc, char** argv)
             constexpr uint64_t margin = 4 * mib;
             std::printf("together: estimate %s, %d of %d sampler parts measured; the workers hold %s\n", megabytes(e.memory).c_str(), measured, parts, megabytes(heldTogether).c_str());
             check(parts == 5 && measured == 5, "the sampler's parts measured: " + std::to_string(measured) + " of " + std::to_string(parts));
-            check(e.memory + slack >= heldTogether, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
+            check(e.memory >= heldTogether, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
             check(e.memory <= heldTogether + margin, "nor more than " + megabytes(margin) + " above it: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
 
             // The same Performance open, as budget.estimate without a folder, a plugin added and a load beside it count it. The unit's
@@ -260,7 +262,7 @@ int main(int argc, char** argv)
                     if(c.plugin == holderId) { if(c.memory > instance) instance = c.memory; further += c.memory == 0; guessed += !c.measured || c.memory == 9912720; }
                 std::printf("together, open (pass %d): estimate %s, the instance %s, %d further parts at nothing, %d at a guess; the workers hold %s\n", pass, megabytes(open.memory).c_str(), megabytes(instance).c_str(), further, guessed, megabytes(heldOpen).c_str());
                 check(further == 4 && guessed == 0, "open, the instance counts once and its four further parts nothing: " + std::to_string(further) + " at nothing, " + std::to_string(guessed) + " at a guess");
-                check(open.memory + slack >= heldOpen, "open, the estimate is not below what the workers hold: " + megabytes(open.memory) + " against " + megabytes(heldOpen));
+                check(open.memory >= heldOpen, "open, the estimate is not below what the workers hold: " + megabytes(open.memory) + " against " + megabytes(heldOpen));
                 check(open.memory <= heldOpen + margin, "open, nor more than " + megabytes(margin) + " above it: " + megabytes(open.memory) + " against " + megabytes(heldOpen));
                 t.saveMeasurementsNow();
             }

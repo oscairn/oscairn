@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #ifdef __linux__
 #include <cerrno>
 #include <cstring>
@@ -571,6 +572,10 @@ namespace oscairn
         // RFC 0018's shared budget steals notes within the same CPU budget, from these measurements.
         graph_.setVoiceBudget(budget_.cpu * blockMicroseconds);
         const bool memoryNow = ++measureTicks_ % 200 == 0;
+        // The plugins whose memory this tick has read. Every instance of a plugin is counted at its one figure (estimate), so
+        // the figure is the most any of its instances holds now, never the last one read: one copy smaller than the others
+        // priced them all low (five sampler copies at the organ's, 18.5 MB held each at 17.7).
+        std::set<std::string> memoryRead;
         const auto quietFrames = uint64_t(quietSeconds * sampleRate_);
         auto sample = [&](NodeId node) {
             auto& host = graph_.host(node);
@@ -659,7 +664,9 @@ namespace oscairn
                     auto learn = [&](uint64_t more, uint32_t of, uint64_t fewer, uint32_t than) {
                         if(const auto each = std::max<uint64_t>(1, more > fewer ? (more - fewer) / (of - than) : 0); each > m.perContext) { m.perContext = each; measurementsChanged_ = true; }
                     };
-                    if(const auto bytes = host.residentBytes(); bytes && (!m.memory || holds <= m.sounds))
+                    auto bytes = host.residentBytes();
+                    if(bytes && !memoryRead.insert(pluginKey(node)).second && holds == m.sounds) bytes = std::max(bytes, m.memory); // another instance's, this tick
+                    if(bytes && (!m.memory || holds <= m.sounds))
                     {
                         if(m.memory && holds < m.sounds) learn(m.memory, m.sounds, bytes, holds); // what the figure it replaces says
                         if(bytes != m.memory || holds != m.sounds) { m.memory = bytes; m.sounds = holds; measurementsChanged_ = true; }
@@ -671,6 +678,7 @@ namespace oscairn
             {
                 auto bytes = host.residentBytes();
                 if(!bytes) if(const auto it = loadedBytes_.find(node); it != loadedBytes_.end()) bytes = it->second;
+                if(bytes && !memoryRead.insert(pluginKey(node)).second && m.sounds == 1) bytes = std::max(bytes, m.memory); // another instance's, this tick
                 if(bytes && (bytes != m.memory || m.sounds != 1)) { m.memory = bytes; m.sounds = 1; measurementsChanged_ = true; }
             }
             if(std::abs(m.cpu - was) > 1e-4) measurementsChanged_ = true;

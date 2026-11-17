@@ -46,13 +46,15 @@
 // restored(), forget any pins the instrument holds itself, such as a ringing tail's. A refused
 // load changes nothing and doesn't call restored(), so do not forget them in snapshotLoading(true).
 //
-// oscairn.voice-budget (voice-budget.h, RFC 0018): building an oscairn_plugin_voice_budget_t
-// {Engine::honorsVolume, Engine::setLimits, Engine::activeVoices, Engine::voiceNotes} and returning
-// it from get_extension, the instrument keeps within the voices the host gives it and each
+// oscairn.voice-budget (voice-budget.h, RFC 0018, RFC 0046): building an oscairn_plugin_voice_budget_t
+// {Engine::honorsVolume, Engine::setLimits, Engine::activeVoices, Engine::voiceNotes, Engine::importance}
+// and returning it from get_extension for OSCAIRN_EXT_VOICE_BUDGET (draft 2; and for _DRAFT_1 too, for an
+// older host), the instrument keeps within the voices the host gives it and each
 // context's limit, reserve, priority and mode, giving voices up in that header's order (from
 // voice-budget-plugin.hpp): a voice past a limit fades out over the choke time; one is cut only when
 // the pool has no free slot, a voice already fading first. It may provide
-//   double loudness(const Voice&)  the voice's level now, linear (default: velocity, volume and choke fade)
+//   double loudness(const Voice&)  the voice's level now at the plugin's output, linear, the sound's own
+//                                  output level included (default: velocity, volume and choke fade)
 //   bool mono(const Context&)      the sound plays one note at a time (default: false)
 //   double voiceCost()             microseconds a voice costs a block (default: 0, no estimate)
 //   static constexpr bool volumeExpressions = true;   when render multiplies by amplitude()
@@ -100,6 +102,8 @@ namespace oscairn::contexts
         double   modWheel = 0.0; // the channel's mod wheel (CC 1), 0..1, smoothed
         uint32_t chokeLeft = 0, chokeLength = 0; // a choked voice fades out over chokeLength frames
         uint64_t started = 0;
+        bool     pedaled = false;  // its key up, a pedal holding it
+        int64_t  startedAt = -1;   // the steady time of its note-on, -1 unknown
     };
 
     template<class Derived, class Voice, class Patch, uint32_t ContextCapacity = 8, size_t VoiceCount = 128>
@@ -136,12 +140,16 @@ namespace oscairn::contexts
         uint32_t nextContext = 1; // main thread, never reuse IDs
         uint32_t chokeFrames = 144; // 3 ms at 48 kHz; setSampleRate keeps it 3 ms
         oscairn::voices::Limits voiceLimits; // audio thread: oscairn.voice-budget's, as set_limits gave them
+        oscairn::voices::Importance<> importanceReport; // audio thread: draft 2's, built after each block
+        double voiceRate = 48000; // for the voices' ages
+        int64_t steadyTime = -1; // audio thread: this process()'s first frame, -1 unknown
         double controlGlide = 1.0 - std::exp(-1.0 / 240.0); // per sample: a 5 ms time constant at 48 kHz
 
         // From activate: a choke fades a voice out over 3 ms instead of cutting it (RFC 0018).
         void setSampleRate(double rate)
         {
             chokeFrames = rate > 0 ? std::max<uint32_t>(1, uint32_t(rate * .003 + .5)) : 144;
+            if(rate > 0) voiceRate = rate;
             controlGlide = rate > 0 ? 1.0 - std::exp(-1.0 / (rate * .005)) : 1.0 - std::exp(-1.0 / 240.0);
         }
         // Once per sample per voice: moves its bend and mod wheel toward its channel's, so a
@@ -216,6 +224,7 @@ namespace oscairn::contexts
             *voice = Voice{};
             voice->active = voice->held = true; voice->key = note.key; voice->channel = note.channel; voice->noteId = note.note_id;
             voice->context = slot; voice->velocity = note.velocity; voice->started = ++notesStarted;
+            voice->startedAt = steadyTime < 0 ? -1 : steadyTime + eventTime;
             voice->bend = channelBend[note.channel]; voice->modWheel = channelModWheel[note.channel]; // no glide at the start
             c.users.fetch_add(1, std::memory_order_relaxed); c.voices.fetch_add(1, std::memory_order_relaxed);
             derived().start(*voice, c);
@@ -228,13 +237,18 @@ namespace oscairn::contexts
         int voiceVictim(uint32_t incoming, uint32_t only = oscairn::voices::none)
         {
             std::array<oscairn::voices::Candidate, VoiceCount> candidates{};
-            for(size_t i = 0; i < VoiceCount; ++i) if(const auto& v = voices[i]; v.active)
-            {
-                const auto& c = contexts[v.context];
-                candidates[i] = {c.id, c.selected.load(std::memory_order_relaxed) != 0, v.held, v.chokeLength != 0, derived().mono(c), derived().loudness(v), v.started};
-            }
+            for(size_t i = 0; i < VoiceCount; ++i) if(voices[i].active) candidates[i] = candidate(voices[i]);
             return oscairn::voices::victim(VoiceCount, [&](size_t i) { return voices[i].active ? &candidates[i] : nullptr; }, voiceLimits, incoming, only);
         }
+        // A voice as the order sees it, now.
+        oscairn::voices::Candidate candidate(const Voice& v)
+        {
+            const auto& c = contexts[v.context];
+            const double ageMs = steadyTime < 0 || v.startedAt < 0 ? -1.0 : double(steadyTime + eventTime - v.startedAt) * 1000.0 / voiceRate;
+            return {c.id, c.selected.load(std::memory_order_relaxed) != 0, v.held, v.chokeLength != 0, derived().mono(c), derived().loudness(v), v.started, v.pedaled, ageMs};
+        }
+        // Enters the release stage: no longer held by a pedal.
+        void releaseVoice(Voice& v) { v.pedaled = false; derived().release(v); }
         void fadeOut(int i)
         {
             if(i < 0) return;
@@ -265,6 +279,15 @@ namespace oscairn::contexts
             auto& s = self(p); if(cost) *cost = s.derived().voiceCost();
             uint32_t n = 0; for(const auto& v : s.voices) n += v.active; return n;
         }
+        // Draft 2: each context's least important voices, as the last block left them.
+        static uint32_t importance(const clap_plugin_t* p, oscairn_voice_budget_importance_t* lists, uint32_t capacity)
+        {
+            auto& s = self(p);
+            std::array<oscairn::voices::Candidate, VoiceCount> candidates{};
+            for(size_t i = 0; i < VoiceCount; ++i) if(s.voices[i].active) candidates[i] = s.candidate(s.voices[i]);
+            s.importanceReport.list(VoiceCount, [&](size_t i) { return s.voices[i].active ? &candidates[i] : nullptr; }, s.voiceLimits);
+            return s.importanceReport.write(lists, capacity);
+        }
         static uint32_t voiceNotes(const clap_plugin_t* p, oscairn_voice_budget_note_t* notes, uint32_t capacity)
         {
             auto& s = self(p); oscairn::voices::Report<VoiceCount> report;
@@ -284,11 +307,12 @@ namespace oscairn::contexts
                 if(fifo) { if(!oldest || v.started < oldest->started) oldest = &v; continue; }
                 v.held = false;
                 if(choke) { if(!v.chokeLength) v.chokeLength = v.chokeLeft = chokeFrames; } // fades, then ends
-                else if(note.key < 0 || !sustainDown[v.channel]) derived().release(v);
+                else if(note.key < 0 || !sustainDown[v.channel]) releaseVoice(v);
+                else v.pedaled = true;
             }
-            if(oldest) { oldest->held = false; if(!sustainDown[oldest->channel]) derived().release(*oldest); }
+            if(oldest) { oldest->held = false; if(!sustainDown[oldest->channel]) releaseVoice(*oldest); else oldest->pedaled = true; }
             // An emergency wildcard release must also release already pedal-held voices.
-            if(note.key < 0) for(auto& v : voices) if(matches(v, note.note_id, note.key, note.channel)) derived().release(v);
+            if(note.key < 0) for(auto& v : voices) if(matches(v, note.note_id, note.key, note.channel)) releaseVoice(v);
         }
         void applyExpression(const clap_event_note_expression_t& e)
         {
@@ -337,7 +361,7 @@ namespace oscairn::contexts
             else if(e.data[1] == 64)
             {
                 sustainDown[channel] = e.data[2] >= 64;
-                if(!sustainDown[channel]) for(auto& v : voices) if(v.active && v.channel == channel && !v.held) derived().release(v);
+                if(!sustainDown[channel]) for(auto& v : voices) if(v.active && v.channel == channel && !v.held) releaseVoice(v);
             }
             else if(e.data[1] == 120 || e.data[1] == 123)
             {
@@ -378,7 +402,7 @@ namespace oscairn::contexts
             auto& s = self(p);
             if(process->audio_outputs_count < 1 || process->audio_outputs[0].channel_count < 2)
                 return CLAP_PROCESS_ERROR;
-            s.output = process->out_events; s.eventTime = 0;
+            s.output = process->out_events; s.eventTime = 0; s.steadyTime = process->steady_time;
             struct ClearOutput { Engine& s; ~ClearOutput() { s.output = nullptr; s.ringOut = nullptr; } } clearOutput{s}; // ring_out gives one process() its buffer
             s.applySelections(process->out_events);
             s.keepWithinLimits();

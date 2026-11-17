@@ -20,6 +20,10 @@
 // OSCAIRN_FIXTURE_REPORT_US: the cost per voice it reports (default its real one), as a plugin's figure from another load.
 // OSCAIRN_FIXTURE_SUSTAIN=1: it takes the sustain pedal (MIDI controller 64, any channel): a note let go with the pedal
 // down sounds on, at its cost, until the pedal comes up, as a piano's.
+// With OSCAIRN_FIXTURE_VOICE_BUDGET it offers draft 2, reporting each block its least important voices through the
+// SDK's Importance (RFC 0046), unless OSCAIRN_FIXTURE_DRAFT_1=1: then draft 1 alone, as a plugin without the report.
+// OSCAIRN_FIXTURE_DECAY_S: a held or pedaled voice's level falls by 60 dB over this many seconds, as a piano's (default:
+// none); OSCAIRN_FIXTURE_LEVEL: its sounds' output level, linear (default 1).
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -34,7 +38,7 @@
 namespace {
 const char* features[]{CLAP_PLUGIN_FEATURE_INSTRUMENT,nullptr};
 const clap_plugin_descriptor_t descriptor{CLAP_VERSION,"org.oscairn.test.voices","Costly voices","Oscairn","","","","1","",features};
-struct Voice { bool active=false,held=false,sustained=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0; };
+struct Voice { bool active=false,held=false,sustained=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0,startedAt=0; };
 struct Plugin {
     clap_plugin_t api{};const clap_host_t* host;
     double rate=48000,microseconds=0,blockMicroseconds=0,reportedMicroseconds=-1;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
@@ -46,13 +50,22 @@ struct Plugin {
     bool takesSustain=false,pedal=false; // OSCAIRN_FIXTURE_SUSTAIN; the pedal down
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
-    double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
+    oscairn::voices::Importance<1> importance; // draft 2's report, audio thread
+    bool draft1=false; // OSCAIRN_FIXTURE_DRAFT_1
+    double decay=0,outputLevel=1; // OSCAIRN_FIXTURE_DECAY_S, OSCAIRN_FIXTURE_LEVEL
+    uint64_t framesDone=0; // its steady time, for the voices' ages
+    double loudness(const Voice& v) const {return outputLevel*v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
+    // A voice as the order sees it: a pedaled one is the pedal's, not the key's.
+    oscairn::voices::Candidate candidate(const Voice& v) const
+    {return {0,true,v.held && !v.sustained,v.choking,false,loudness(v),v.started,v.sustained,double(framesDone-v.startedAt)*1000.0/rate};}
+    // Its limit: the instance's, or its one context's own where lower.
+    uint32_t limit() const {const uint32_t own=limits.of(0,true).limit;return own && (!limits.limit || own<limits.limit)?own:limits.limit;}
     uint32_t sounding() const {uint32_t n=0;for(const auto& v:voices)n+=v.active && !v.choking;return n;}
     // The voice to give up by the extension's order (one context, 0, which a channel selects), or -1.
     int victim(uint32_t incoming)
     {
         std::array<oscairn::voices::Candidate,128> candidates{};
-        for(size_t i=0;i<voices.size();++i)if(voices[i].active)candidates[i]={0,true,voices[i].held,voices[i].choking,false,loudness(voices[i]),voices[i].started};
+        for(size_t i=0;i<voices.size();++i)if(voices[i].active)candidates[i]=candidate(voices[i]);
         return oscairn::voices::victim(voices.size(),[&](size_t i){return voices[i].active?&candidates[i]:nullptr;},limits,incoming);
     }
     void fadeOut(int i){if(i<0)return;auto& v=voices[size_t(i)];v.held=false;if(!v.choking){v.choking=true;v.chokeLeft=chokeFrames;}}
@@ -93,11 +106,11 @@ struct Plugin {
             {
                 for(uint32_t l=0;l<layers;++l)
                 {
-                    if(limits.limit && sounding()>=limits.limit)fadeOut(victim(0)); // within the host's limit
+                    if(limit() && sounding()>=limit())fadeOut(victim(0)); // within the host's limit
                     Voice* free=nullptr;for(auto& v:voices)if(!v.active){free=&v;break;}
                     if(!free){if(!l){Voice none;none.id=n.note_id;none.channel=n.channel;none.key=n.key;end(none,at,out);}return;}
                     *free=Voice{};free->active=free->held=true;free->id=n.note_id;free->channel=n.channel;free->key=n.key;free->velocity=n.velocity;
-                    free->layer=std::ldexp(1.0,-int(l));free->started=++started;
+                    free->layer=std::ldexp(1.0,-int(l));free->started=++started;free->startedAt=framesDone+at;
                 }
                 return;
             }
@@ -116,7 +129,7 @@ struct Plugin {
     }
     void render(float* left,float* right,uint32_t from,uint32_t to,const clap_output_events_t* out)
     {
-        const double release=std::exp(std::log(1e-4)/(rate*1.0));
+        const double release=std::exp(std::log(1e-4)/(rate*1.0)),sustain=decay>0?std::exp(std::log(1e-3)/(rate*decay)):1.0;
         for(auto& v:voices)if(v.active)
         {
             const double step=440*std::pow(2,(v.key-69)/12.0)/rate;
@@ -125,6 +138,7 @@ struct Plugin {
                 double gain=v.velocity*v.volume*v.level*v.layer*.1;
                 if(v.choking){if(!v.chokeLeft){end(v,i,out);break;}gain*=double(v.chokeLeft--)/chokeFrames;}
                 else if(!v.held && (v.level*=release)<1e-4){end(v,i,out);break;}
+                else if(v.held)v.level*=sustain;
                 const float s=float(std::sin(v.phase*2*M_PI)*gain);v.phase+=step;v.phase-=std::floor(v.phase);
                 left[i]+=s;right[i]+=s;
             }
@@ -140,6 +154,9 @@ struct Plugin {
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_REPORT_US"))reportedMicroseconds=std::atof(us);
         ignoreLimit=reportZero || std::getenv("OSCAIRN_FIXTURE_IGNORE_LIMIT")!=nullptr;
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
+        draft1=std::getenv("OSCAIRN_FIXTURE_DRAFT_1")!=nullptr;
+        if(const char* d=std::getenv("OSCAIRN_FIXTURE_DECAY_S"))decay=std::atof(d);
+        if(const char* l=std::getenv("OSCAIRN_FIXTURE_LEVEL"))outputLevel=std::atof(l);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
             char word[32]{};long at=0,calls=1;
@@ -158,7 +175,7 @@ struct Plugin {
             auto& s=*static_cast<Plugin*>(p->plugin_data);
             float* left=b->audio_outputs[0].data32[0];float* right=b->audio_outputs[0].data32[1];
             s.frames=b->frames_count;
-            while(s.limits.limit && s.sounding()>s.limits.limit){const int i=s.victim(oscairn::voices::none);if(i<0)break;s.fadeOut(i);}
+            while(s.limit() && s.sounding()>s.limit()){const int i=s.victim(oscairn::voices::none);if(i<0)break;s.fadeOut(i);}
             std::fill_n(left,b->frames_count,0.f);std::fill_n(right,b->frames_count,0.f);
             uint32_t sounding=0;for(const auto& v:s.voices)sounding+=v.active;
             const auto began=std::chrono::steady_clock::now();
@@ -178,6 +195,7 @@ struct Plugin {
             const auto spend=std::chrono::duration<double,std::micro>((s.microseconds*sounding+s.blockMicroseconds)*b->frames_count/128.0+extra);
             if(s.cpuClock)while(cpuNow()-cpuBegan<spend){}
             else while(std::chrono::steady_clock::now()-began<spend){}
+            s.framesDone+=b->frames_count;
             return CLAP_PROCESS_CONTINUE;
         };
         api.get_extension=[](const clap_plugin_t*,const char* id)->const void*{
@@ -198,9 +216,15 @@ struct Plugin {
                 [](const clap_plugin_t* p,oscairn_voice_budget_note_t* out,uint32_t capacity)->uint32_t{
                     auto& s=self(p);oscairn::voices::Report<128> report;if(s.reportZero)return 0;
                     for(const auto& v:s.voices)if(v.active)report.add(v.id,0,v.channel,v.key,s.loudness(v));
-                    return report.write(out,capacity);}};
+                    return report.write(out,capacity);},
+                [](const clap_plugin_t* p,oscairn_voice_budget_importance_t* out,uint32_t capacity)->uint32_t{
+                    auto& s=self(p);if(s.reportZero)return 0;
+                    std::array<oscairn::voices::Candidate,128> candidates{};
+                    for(size_t i=0;i<s.voices.size();++i)if(s.voices[i].active)candidates[i]=s.candidate(s.voices[i]);
+                    s.importance.list(s.voices.size(),[&](size_t i){return s.voices[i].active?&candidates[i]:nullptr;},s.limits);
+                    return s.importance.write(out,capacity);}};
             if(!std::strcmp(id,CLAP_EXT_NOTE_PORTS))return &notes;
-            if(!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1) && std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET"))return &budget;
+            if(std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET") && (!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1) || (!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET) && !std::getenv("OSCAIRN_FIXTURE_DRAFT_1"))))return &budget;
             return nullptr;
         };
     }

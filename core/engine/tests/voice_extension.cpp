@@ -77,6 +77,7 @@ int main(int argc,char** argv){try{
         auto play=[&](bool on,int key,double velocity=1){const auto e=Event::note(on,key,velocity);block({&e,1});};
         // The outgoing sound (the default, 0): a soft held mono key and three loud released notes ringing.
         play(true,36,.1);for(const int k:{60,62,64}){play(true,k);play(false,k);}
+        for(int i=0;i<40;++i)block(); // 53 ms: none of them just struck (RFC 0046 protects a voice's first 50 ms)
         // The incoming sound, selected on every channel: the default one retires.
         const auto next=synth.prepareSound("Next",{});check(synth.selectSound(next,-1),"the incoming sound selected");block();
         // Six voices for the instance; the outgoing sound plays mono, the incoming one is the part's.

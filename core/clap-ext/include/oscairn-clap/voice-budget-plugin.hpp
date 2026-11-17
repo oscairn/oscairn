@@ -2,9 +2,10 @@
 //
 // Part of the Oscairn plugin SDK (MIT, like the extension headers beside it).
 //
-// oscairn.voice-budget (draft 1, voice-budget.h) for a plugin's own pool of voices: the settings
-// the host gives (Limits), the order to give voices up in (victim), and the report of each note's
-// loudness (Report). Header-only, no allocation; everything here runs on the audio thread.
+// oscairn.voice-budget (draft 2, voice-budget.h) for a plugin's own pool of voices: the settings
+// the host gives (Limits), the order to give voices up in (victim), the report of each note's
+// loudness (Report) and of each context's least important voices (Importance). Header-only, no
+// allocation; everything here runs on the audio thread.
 //
 // An instrument built on sound-contexts-plugin.hpp gets all of it from its Engine (see there).
 // Any other engine, such as one playing several regions or elements per note, uses it so:
@@ -14,7 +15,13 @@
 //     fade the voice it names out (2 to 5 ms) rather than cutting it, unless the pool has no
 //     free slot at all;
 //   - for active_voices, count the voices sounding; for notes, add each voice to a Report and
-//     write it out.
+//     write it out;
+//   - after each block, Importance::list() over the same Candidates victim() sees, and write it
+//     out from importance(). Fill each Candidate's pedaled and ageMs (since its note-on, from the
+//     plugin's own frame count) as well as held and loudness (its gain at the plugin's output,
+//     the sound's output level included), so the host ranks it on the same scale as every other
+//     plugin's (RFC 0046). The report and victim() share one order, so a context the host lowers by
+//     n gives up the n voices it listed first.
 // victim() gives up voices one at a time, so a layered note loses its quietest layer before
 // another note loses its only one when the layer is the quieter: keep a note's every voice a
 // Candidate with its own loudness.
@@ -24,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -55,17 +63,73 @@ namespace oscairn::voices
         }
     };
 
+    // RFC 0046's scale, the same in every plugin: a voice's tier, then its audibility.
+    constexpr double struckMs = 50;        // a voice struck this recently is not judged by its level yet
+    constexpr double inaudibleDb = -60;    // below this at the plugin's output a voice counts as released
+    constexpr double agedDbPerSecond = 1;  // a voice counts this much quieter for each second of its age,
+    constexpr double agedSecondsMost = 10; // up to this many
+    enum Tier : uint8_t { released = 0, pedaled = 1, keyHeld = 2, struck = 3 };
+
+    inline float levelDb(double gain) noexcept
+    { return gain > 1e-6 ? float(std::clamp(20 * std::log10(gain), -120.0, 24.0)) : -120.f; }
+
     // A voice as the order sees it. ending: already fading out (a choke or a steal), so giving it
-    // up frees nothing new; mono: the plugin's own sound plays mono, whatever the host says.
+    // up frees nothing new; mono: the plugin's own sound plays mono, whatever the host says. held:
+    // its key is down; pedaled: its key is up and a pedal holds it. loudness: its gain now at the
+    // plugin's output, linear. ageMs: since its note-on, below 0 when the plugin does not keep time.
     struct Candidate
     {
         uint32_t context = 0;
         bool selected = false, held = false, ending = false, mono = false;
         double loudness = 0;
         uint64_t age = 0; // larger: newer
+        bool pedaled = false;
+        double ageMs = -1;
+
+        uint8_t tier() const noexcept
+        {
+            if(ageMs >= 0 && ageMs < struckMs) return struck;
+            if(levelDb(loudness) < inaudibleDb) return released;
+            return held ? keyHeld : pedaled ? Tier::pedaled : released;
+        }
+        // Its level less its age's share: the larger, the more it is heard.
+        double audibility() const noexcept
+        { return levelDb(loudness) - (ageMs > 0 ? std::min(ageMs / 1000 * agedDbPerSecond, agedSecondsMost * agedDbPerSecond) : 0); }
     };
 
     constexpr uint32_t none = OSCAIRN_VOICE_BUDGET_SELECTED; // victim()'s `incoming` when no new voice waits
+
+    // Whether a goes before b within one context: the lower tier, the less audible, the older.
+    inline bool before(const Candidate& a, const Candidate& b) noexcept
+    {
+        const auto ta = a.tier(), tb = b.tier();
+        if(ta != tb) return ta < tb;
+        const double xa = a.audibility(), xb = b.audibility();
+        return xa != xb ? xa < xb : a.age < b.age;
+    }
+
+    // Each context's held voices, for its reserve.
+    struct HeldCount
+    {
+        struct Held { uint32_t context = 0, count = 0; };
+        std::array<Held, 64> held{}; size_t contexts = 0;
+        uint32_t& of(uint32_t context) noexcept
+        {
+            for(size_t i = 0; i < contexts; ++i) if(held[i].context == context) return held[i].count;
+            if(contexts == held.size()) return held[held.size() - 1].count; // shortcut: past 64 contexts the last slot is shared; no Oscairn plugin has that many
+            held[contexts].context = context; return held[contexts++].count;
+        }
+        template<class Get> HeldCount(size_t count, Get&& get)
+        { for(size_t i = 0; i < count; ++i) if(const Candidate* c = get(i); c && c->held && !c->ending) ++of(c->context); }
+    };
+
+    // Rule 1: a voice the order never gives up for a new voice in `incoming` (or none).
+    inline bool kept(const Candidate& c, const Limits& limits, HeldCount& held, uint32_t incoming) noexcept
+    {
+        const auto settings = limits.of(c.context, c.selected);
+        if(c.held && (c.mono || (settings.flags & (OSCAIRN_VOICE_BUDGET_MONO | OSCAIRN_VOICE_BUDGET_LEGATO)))) return true; // never a held mono key
+        return c.held && c.context != incoming && held.of(c.context) <= settings.reserve; // its reserve
+    }
 
     // The voice to give up, by voice-budget.h's order, among `count` voices that get(i) describes
     // (a Candidate, or nullptr for a free slot): for a new voice in context `incoming` (or `none`),
@@ -74,30 +138,89 @@ namespace oscairn::voices
     template<class Get>
     int victim(size_t count, Get&& get, const Limits& limits, uint32_t incoming, uint32_t only = none)
     {
-        // Each context's held voices, for its reserve.
-        struct Held { uint32_t context = 0, count = 0; };
-        std::array<Held, 64> held{}; size_t contexts = 0;
-        auto heldOf = [&](uint32_t context) -> uint32_t& {
-            for(size_t i = 0; i < contexts; ++i) if(held[i].context == context) return held[i].count;
-            if(contexts == held.size()) return held[held.size() - 1].count; // shortcut: past 64 contexts the last slot is shared; no Oscairn plugin has that many
-            held[contexts].context = context; return held[contexts++].count;
-        };
-        for(size_t i = 0; i < count; ++i) if(const Candidate* c = get(i); c && c->held && !c->ending) ++heldOf(c->context);
-        int best = -1; const Candidate* chosen = nullptr; int bestRank = 0, bestOther = 0; uint8_t bestPriority = 0;
+        HeldCount held(count, get);
+        int best = -1; const Candidate* chosen = nullptr; int bestOther = 0; uint8_t bestPriority = 0;
         for(size_t i = 0; i < count; ++i)
         {
             const Candidate* c = get(i);
-            if(!c || c->ending || (only != none && c->context != only)) continue;
+            if(!c || c->ending || (only != none && c->context != only) || kept(*c, limits, held, incoming)) continue;
             const auto settings = limits.of(c->context, c->selected);
-            if(c->held && (c->mono || (settings.flags & (OSCAIRN_VOICE_BUDGET_MONO | OSCAIRN_VOICE_BUDGET_LEGATO)))) continue; // never a held mono key
-            if(c->held && c->context != incoming && heldOf(c->context) <= settings.reserve) continue; // its reserve
-            const int rank = c->held ? 1 : 0, other = incoming != none && c->context != incoming ? 1 : 0;
-            const bool better = !chosen || (rank != bestRank ? rank < bestRank : other != bestOther ? other < bestOther :
-                settings.priority != bestPriority ? settings.priority < bestPriority : c->loudness != chosen->loudness ? c->loudness < chosen->loudness : c->age < chosen->age);
-            if(better) { best = int(i); chosen = c; bestRank = rank; bestOther = other; bestPriority = settings.priority; }
+            const int other = incoming != none && c->context != incoming ? 1 : 0;
+            const auto tier = c->tier(), bestTier = chosen ? chosen->tier() : uint8_t(0);
+            const bool better = !chosen || (tier != bestTier ? tier < bestTier : other != bestOther ? other < bestOther :
+                settings.priority != bestPriority ? settings.priority < bestPriority : before(*c, *chosen));
+            if(better) { best = int(i); chosen = c; bestOther = other; bestPriority = settings.priority; }
         }
         return best;
     }
+
+    // draft 2's importance report: each context's least important voices in victim()'s order with no
+    // voice incoming, so a context lowered by n gives up the n it listed first. Build it after each
+    // block with list(), then write it out from importance().
+    template<size_t Contexts = OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS>
+    struct Importance
+    {
+        struct List { oscairn_voice_budget_importance_t out{}; std::array<Candidate, OSCAIRN_VOICE_BUDGET_LEAST> least{}; };
+        std::array<List, Contexts> lists{};
+        uint32_t count = 0;
+
+        template<class Get>
+        void list(size_t voices, Get&& get, const Limits& limits)
+        {
+            count = 0;
+            HeldCount held(voices, get);
+            for(size_t i = 0; i < voices; ++i)
+            {
+                const Candidate* c = get(i);
+                if(!c || c->ending) continue;
+                List* l = find(c->context);
+                if(!l) continue;
+                ++l->out.voices;
+                if(kept(*c, limits, held, none)) continue;
+                insert(*l, *c);
+            }
+            // Past its reserve a context lists only the held voices beyond it: the least important of them.
+            for(uint32_t k = 0; k < count; ++k)
+            {
+                auto& l = lists[k];
+                const auto settings = limits.of(l.out.context, l.least[0].selected);
+                const uint32_t spare = held.of(l.out.context) > settings.reserve ? held.of(l.out.context) - settings.reserve : 0;
+                uint32_t n = 0, heldListed = 0;
+                for(uint32_t i = 0; i < l.out.count; ++i)
+                    if(!l.least[i].held || heldListed++ < spare) l.least[n++] = l.least[i];
+                l.out.count = uint16_t(n);
+                for(uint32_t i = 0; i < n; ++i)
+                {
+                    const auto& c = l.least[i];
+                    l.out.least[i] = {c.tier(), 0, uint16_t(std::clamp(c.ageMs, 0.0, 65535.0)), levelDb(c.loudness)};
+                }
+            }
+        }
+        uint32_t write(oscairn_voice_budget_importance_t* out, uint32_t capacity) const noexcept
+        {
+            const uint32_t n = out ? std::min(count, capacity) : 0;
+            for(uint32_t i = 0; i < n; ++i) out[i] = lists[i].out;
+            return n;
+        }
+
+    private:
+        List* find(uint32_t context) noexcept
+        {
+            for(uint32_t i = 0; i < count; ++i) if(lists[i].out.context == context) return &lists[i];
+            if(count == Contexts) return nullptr;
+            auto& l = lists[count++]; l.out = {}; l.out.context = context;
+            return &l;
+        }
+        static void insert(List& l, const Candidate& c) noexcept
+        {
+            uint32_t n = l.out.count;
+            if(n == OSCAIRN_VOICE_BUDGET_LEAST && !before(c, l.least[n - 1])) return;
+            uint32_t at = n < OSCAIRN_VOICE_BUDGET_LEAST ? n : n - 1;
+            while(at > 0 && before(c, l.least[at - 1])) { l.least[at] = l.least[at - 1]; --at; }
+            l.least[at] = c;
+            if(n < OSCAIRN_VOICE_BUDGET_LEAST) l.out.count = uint16_t(n + 1);
+        }
+    };
 
     // Each note's voices and loudness, for notes(): add every sounding voice, then write.
     template<size_t Capacity>

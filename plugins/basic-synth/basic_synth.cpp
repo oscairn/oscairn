@@ -48,7 +48,7 @@ namespace
         "https://github.com/oscairn/oscairn",
         "",
         "",
-        "0.2.0",
+        "0.3.0",
         "A small polyphonic subtractive synth for tests and demos",
         features,
     };
@@ -434,7 +434,7 @@ namespace
     const clap_plugin_state_t snapshot{Synth::saveSnapshot,Synth::loadSnapshot};
     const oscairn_plugin_sound_contexts_t soundContexts{Synth::capacity,Synth::get,Synth::prepare,Synth::select,Synth::discard,&snapshot,Synth::preparePreset};
     const oscairn_plugin_sound_snapshots_t soundSnapshots{Synth::prepareSnapshot,Synth::setRingOut,Synth::chokeRetiring,Synth::saveSound,Synth::soundValues};
-    const oscairn_plugin_voice_budget_t voiceBudget{Synth::honorsVolume,Synth::setLimits,Synth::activeVoices,Synth::voiceNotes};
+    const oscairn_plugin_voice_budget_t voiceBudget{Synth::honorsVolume,Synth::setLimits,Synth::activeVoices,Synth::voiceNotes,Synth::importance};
 
     const clap_plugin_t* create()
     {
@@ -458,7 +458,7 @@ namespace
         s->plugin.get_extension    = []( const clap_plugin_t*, const char* id ) -> const void* {
             if(std::strcmp(id,OSCAIRN_EXT_SOUND_CONTEXTS)==0)return &soundContexts;
             if(std::strcmp(id,OSCAIRN_EXT_SOUND_SNAPSHOTS)==0)return &soundSnapshots;
-            if(std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1)==0)return &voiceBudget;
+            if(std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET)==0 || std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1)==0)return &voiceBudget;
             if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS ) == 0 )
                 return &audioPorts;
             if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS_ACTIVATION ) == 0 )

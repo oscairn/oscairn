@@ -18,9 +18,14 @@ Checked when built and tested; the sections below say how.
       note report ([the report](#a-what-an-engine-reports)); both CLAP hosts ask for draft 2, then
       draft 1; the worker bounds the lists and names their contexts by the engine's IDs; tested by
       `clap-host-rust` (both hosts' reports alike) and `voice-extension-hostile` (bounded)
-- [ ] 2. The shared helper in oscairn-clap: one key function used both for the report and for
-      `victim()`, so an engine gives up exactly what it reported; a validator check
-      ([the scale](#b-one-scale-for-every-engine))
+- [x] 2. The shared helper in oscairn-clap: one order used both for the report and for
+      `victim()`, so an engine gives up exactly what it reported
+      ([the scale](#b-one-scale-for-every-engine)): `oscairn::voices::Importance`, `Candidate`'s
+      `pedaled` and `ageMs`; the sound-contexts Engine's `importance`, its voices' ages and pedal;
+      the Basic Synth (0.3.0) and the voice fixture on draft 2; tested by `voice-importance` and
+      `voice-importance-workers` (the list's order, a held key above louder pedaled ones, a key just
+      struck above both, and a context lowered by two giving up the two it listed first). The
+      host's check that the plugin kept to it is step 3's
 - [ ] 3. The host's decision in `budget.rs`: one importance order for reported voices and host
       notes; the lane, total, loss and deadline rules take the least important voices from the
       resources each rule constrains; per-context limits from the decision; engine-core-diff and
@@ -216,8 +221,9 @@ no engine measures them and the host could not check them.
 The order must mean the same in the Sampler, VA, FM and a third-party plugin. It is a key in
 three parts, compared in order, which the host packs into one float:
 
-1. **Tier.** 0: released (key up, no pedal holding it), or inaudible (its level after the part's
-   gain below -60 dBFS: in a stage mix it is not heard); 1: held only by the sustain or sostenuto
+1. **Tier.** 0: released (key up, no pedal holding it), or inaudible (its level at the plugin's
+   output below -60 dBFS: in a stage mix it is not heard; judged there, not after the part's gain,
+   so the plugin's own order and the host's agree); 1: held only by the sustain or sostenuto
    pedal; 2: key held; 3: just struck (younger than 50 ms, whatever its state: an attack is quiet
    at first and must not be judged by its level). A held voice of a mono or legato line and held
    voices within the part's reserve are not candidates at all.
@@ -240,7 +246,7 @@ for losses). `G_part` (dB) is that largest path gain for the context's output, c
 plan is compiled, and added by the host to every level of that context. Whether the part's level
 fader reaches the core as a connection gain or as a mixer parameter is to be confirmed in step 3;
 if a parameter, the control side passes the level with the part's zone, as it passes reserve and
-priority. A part at mute counts `G_part` of -120 dB: its voices are tier 0.
+priority. A part at mute counts `G_part` of -120 dB: its voices rank lowest within their tier.
 
 **What changes in `victim()`.** Its order is right in substance and stays the same rule; three
 refinements: the pedal tier between released and held; the just-struck tier; the inaudible floor.

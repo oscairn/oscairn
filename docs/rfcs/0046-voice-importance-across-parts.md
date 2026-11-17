@@ -26,7 +26,8 @@ Checked when built and tested; the sections below say how.
       `voice-importance-workers` (the list's order, a held key above louder pedaled ones, a key just
       struck above both, and a context lowered by two giving up the two it listed first). The
       host's check that the plugin kept to it is step 3's
-- [ ] 3. The host's decision in `budget.rs`: one importance order for reported voices and host
+- [ ] 3. (Started, not working: branch `rfc-voice-importance-step3-wip`, commit 5d789d2e, says
+      what fails.) The host's decision in `budget.rs`: one importance order for reported voices and host
       notes; the lane, total, loss and deadline rules take the least important voices from the
       resources each rule constrains; per-context limits from the decision; engine-core-diff and
       engine-run-diff vectors recorded again ([the decision](#c-the-hosts-decision))
@@ -352,6 +353,52 @@ process means loading a new instance there: seconds of loading, its memory twice
 a cold first block; that is placement at Performance load (pool mode does it by measured cost,
 WorkerHost.cpp:2244-2267), and splitting a shared instance under load is RFC 0045's step 9, not
 built. **Recommendation: no live moves.** Placement stays a load-time decision.
+
+#### The owner's rule and his answers (2026-11-17)
+
+His rule, verbatim: "because the rule should be similar in all 3 cases, if a voice is expensive and
+important, less important voices need to be stolen only in ways that would help the expensive voice.
+so steal less important voices on the same core." The decision has exactly three cases and no
+other: (a) voices that run in the same thread as the lane that is short always qualify (its own
+engine's, and in a pool worker or a shared instance its neighbors'); (b) voices in other threads
+qualify only when the device is out of core time as a whole, and only as many as free what is
+missing; (c) never a voice whose removal frees nothing that is short. For plugins without the
+report the host knows only cost and its own note state, and ranks released, then pedaled, then
+held, oldest first. In plain words: since the workers are not pinned, there is no fixed core. "The
+same core" means the same thread, or the shared pool of cores when that pool is what ran out.
+
+His answers: a held key always outranks a pedaled note (yes); the "protect" control is the existing
+part Priority, no new switch; 50 ms protection for a just-struck note (one named constant); the
+lead may not take an extra block of latency before shedding its own voices.
+
+#### Balancing across cores
+
+(i) Who balances: only the Linux scheduler. Every audio thread is SCHED_FIFO (engine 80, workers
+and helpers 70, realtime.h:18-23). A thread is pinned only when a core list is set
+(Worker.cpp:160-170), and the FANTOM-07 profile sets none. Nothing in the host places or pins a
+thread by load.
+
+(ii) What moves, in each mode, is one audio thread with everything that renders in it:
+- plugin mode: each plugin's worker thread;
+- chain mode: a whole chain's thread. A chain's plugins run in order in one thread and cannot be
+  split across cores;
+- pool mode: a pool worker's thread with every plugin in it.
+
+The kernel moves each such thread to a free core at every wake. It never splits one thread's
+work.
+
+(iii) Moving a plugin or part between pool workers: only at load. Pool::pick puts each instance
+in the worker with the least measured cost, then the fewest nodes (WorkerHost.cpp:2244-2267). The
+placement is decided from the Performance document before anything loads, with the group as the
+unit (learning 2026-11-15). Nothing rebalances pools by measured cost while playing or at a
+Performance switch, except that instances kept warm stay where they are. A chain is one group
+because of its routing order.
+
+(iv) Recommendation: yes, but later. Add cost-aware placement at load: never two heavy instruments
+in one thread, the two heaviest parts in different pool workers. What decides it is the keyboard's
+per-worker run time against the allowance with Sick tines and TSO Carol Bells under `pool`: if one
+worker's run passes its allowance while another worker sits under half of its own, placement is
+the fault. Live moves: no. A move is a reload with cold caches.
 
 #### Placement modes
 

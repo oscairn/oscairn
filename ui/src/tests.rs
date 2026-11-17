@@ -408,6 +408,31 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
     assert_eq!(r["method"], "memory.state");
 }
 
+// Home at rest costs nothing: shown, nothing changing, ticks of the event loop ask the engine nothing and draw no
+// frame (docs/rust-ui.md: idle means zero requests and zero redraws).
+#[test]
+fn home_idle_costs_no_request_and_no_frame() {
+    let mut f = Fixture::new("home-idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.serve(11, &json!({})); // the connection's setup, answered as a quiet engine would
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
+    f.pump();
+    f.answer("record.get", json!({"takes": []})); // a first status asks for the takes and the meters
+    f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
+    f.answer("transport.get", json!({"tempo": 120, "playing": false}));
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "at rest");
+    // Twenty ticks with nothing changing: no request, no frame.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        slint::platform::update_timers_and_animations();
+        assert_eq!(f.screen.frame(), None, "a tick drew a frame");
+    }
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "a tick asked the engine something");
+}
+
 // A take recording is said in the top bar (every screen, once: Play adds no mark of its own), with the time it has run,
 // as the JUCE record buttons say it: record.takes read with the first status of a connection (a take may be
 // running already), then each `record` notification (a take's state or time changed: the engine sends them at most

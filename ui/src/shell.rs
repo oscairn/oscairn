@@ -714,6 +714,13 @@ impl App {
                         self.ask(Request::History, "edit.history"); // an edit: what undo names changed
                     }
                 }
+                "session.resync" if self.screen == Screen::Params => {
+                    // The engine's parameter-change history wrapped or a pending command was dropped
+                    // (docs/control-protocol.md, "session.resync"): the values a parameter page shows may
+                    // be stale, so it reads them again, as an Undo does. No page shown, the arm does not
+                    // match and nothing is asked.
+                    self.on_params(|p| p.values_again());
+                }
                 "params.changed" => {
                     self.on_params(|p| p.changed(&params));
                     self.on_play(|p| p.params_changed(&params)); // the knob row's values

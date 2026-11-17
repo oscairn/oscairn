@@ -231,3 +231,74 @@ fn at_rest_it_costs_no_request_and_no_frame() {
     assert!(s.f.engine.try_request(Duration::from_millis(500)).is_none(), "nothing is asked at rest");
     assert!(!rows(&s.ui()).is_empty());
 }
+
+// Every Settings page is reached from Home by the panel's move controls alone: the dial (pane none) walks the
+// tiles, a press opens the app, up from the list's first row reaches the page rail (not the top bar), the dial
+// walks it, a press shows the page, down past the last tab returns to the list, and EXIT (cancel) returns.
+#[test]
+fn every_page_is_reached_by_moves_alone() {
+    let mut s = Shelf::new("settings-pages-moves");
+    let ui = s.ui();
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    let open_settings = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64)| {
+        let ui = s.ui();
+        // The first read is a baseline; five moves put the cursor on the Settings tile.
+        nav(s, "move", 0);
+        for _ in 0..5 {
+            nav(s, "move", 1);
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+        assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+        assert_eq!(title(&ui), "Settings › Appearance");
+    };
+    // To the page rail from the list the app opens on: up shows the cursor on the list's first row, a
+    // second up reaches the rail, not the top bar.
+    let to_rail = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64)| {
+        let ui = s.ui();
+        nav(s, "move", -1);
+        assert!(ui.global::<crate::SettingsState>().get_page_cursor() < 0, "the first up shows the list's cursor");
+        nav(s, "move", -1);
+        assert!(ui.global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+        assert!(!ui.global::<crate::Theme>().get_bar_cursor(), "the top bar did not take the move");
+    };
+    open_settings(&mut s, &mut nav);
+    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Signing keys", "About"];
+    let last = pages.len() as i32 - 1;
+    for (want, name) in pages.iter().enumerate() {
+        let want = want as i32;
+        to_rail(&mut s, &mut nav);
+        // Walk the rail to this page's tab, then press.
+        let mut tries = 0;
+        while ui.global::<crate::SettingsState>().get_page_cursor() != want {
+            nav(&mut s, "move", 1);
+            tries += 1;
+            assert!(tries <= pages.len(), "the rail reaches {name}");
+        }
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert_eq!(ui.global::<crate::SettingsState>().get_page(), want, "a press on the tab shows {name}");
+        assert_eq!(title(&ui), format!("Settings › {name}"));
+        // Down into the page's list: past the last tab, the list's first row has the cursor.
+        let mut tries = 0;
+        while ui.global::<crate::SettingsState>().get_page_cursor() < last {
+            nav(&mut s, "move", 1);
+            tries += 1;
+            assert!(tries <= pages.len(), "the rail walks to its end from {name}");
+        }
+        nav(&mut s, "move", 1);
+        assert!(ui.global::<crate::SettingsState>().get_page_cursor() < 0, "{name}: the list has the cursor again");
+        // EXIT leaves the app; the tile opens it again.
+        nav(&mut s, "cancel", 1);
+        s.serve();
+        assert_eq!(ui.get_screen(), 0, "{name}: EXIT returns Home");
+        open_settings(&mut s, &mut nav);
+    }
+}

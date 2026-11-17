@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <sys/resource.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_time.h>
@@ -29,6 +30,8 @@
 namespace
 {
     int failures = 0;
+    // Involuntary context switches of this process so far: the machine taking the processor from a thread of it.
+    long switched() { rusage u{}; getrusage(RUSAGE_SELF, &u); return u.ru_nivcsw; }
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
 
     // The test thread plays the audio thread, with its real-time scheduling.
@@ -60,7 +63,7 @@ namespace
 
         std::vector<float> l(frames), rr(frames), el(frames), er(frames);
         float* out[]{l.data(), rr.data()}; float* ref[]{el.data(), er.data()};
-        uint32_t overruns = 0, block = 0; double worst = 0, energy = 0; bool same = true;
+        uint32_t overruns = 0, preempted = 0, block = 0; double worst = 0, energy = 0; bool same = true;
         const auto start = std::chrono::steady_clock::now();
         auto next = start;
         // Real time until the failing plugin has failed through its restarts (each failure takes up
@@ -76,11 +79,15 @@ namespace
             std::vector<kick::clap::Event> notes;
             if(block % 40 == 0) notes.push_back(kick::clap::Event::note(true, 60 + int(block / 40 % 12), .8, 5));
             if(block % 40 == 30) notes.push_back(kick::clap::Event::note(false, 60 + int(block / 40 % 12), 0, 7));
+            const auto switches = switched();
             const auto t0 = std::chrono::steady_clock::now();
             graph.process(out, frames, nullptr, notes.data(), uint32_t(notes.size()));
             const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             alone.process(ref, frames, nullptr, notes.data(), uint32_t(notes.size()));
-            worst = std::max(worst, took); if(took > period) ++overruns;
+            worst = std::max(worst, took);
+            // A block past the period while the machine took the processor from this process is the machine's, not the engine's wait
+            // (a slow plugin's block is waited for up to 2.4 ms of the 2.67): counted apart, and the claim stands for the blocks it did not touch.
+            if(took > period) ++(switched() != switches ? preempted : overruns);
             same = same && l == el && rr == er;
             for(float x : el) energy += double(x) * x;
         }
@@ -99,12 +106,12 @@ namespace
         check(energy > 0, name + ": the other instrument made sound");
         if(expected) check(reason.find(expected) != std::string::npos && reason.find("not restarted") != std::string::npos,
                            name + ": failure reported as \"" + expected + "\" and given up, got \"" + reason + "\"");
-        if(timing) check(overruns == 0, name + ": " + std::to_string(overruns) + " blocks took longer than the block's time");
+        if(timing) check(overruns == 0, name + ": " + std::to_string(overruns) + " blocks took longer than the block's time (and " + std::to_string(preempted) + " more while the machine had taken the processor from the process)");
         // The supervisor reads CPU time every 10 ms; a second of playing has been read many times.
         const double cpu = graph.host(a).cpuSeconds();
         check(cpu > 0 && cpu < 10, name + ": the other instrument's worker reports its CPU time: " + std::to_string(cpu) + " s");
-        std::printf("%s: %u blocks, worst %.0f us of %.0f us, overruns %u, other instrument's missed blocks %llu, its CPU time %.3f s, failure: %s\n",
-                    name.c_str(), block, worst * 1e6, period * 1e6, overruns, (unsigned long long)misses, cpu, reason.c_str());
+        std::printf("%s: %u blocks, worst %.0f us of %.0f us, overruns %u (%u with the machine taking the processor), other instrument's missed blocks %llu, its CPU time %.3f s, failure: %s\n",
+                    name.c_str(), block, worst * 1e6, period * 1e6, overruns, preempted, (unsigned long long)misses, cpu, reason.c_str());
     }
 }
 

@@ -121,8 +121,8 @@ component Strip inherits Section {
     property <length> fader-height: max(Theme.touch, db-y - Theme.pad-tight - fader-y);
     // The fader beside its meters as a pair, centered: each meter a thin bar.
     property <length> fader-width: Theme.touch;
-    property <length> meter-width: 7px;
-    property <length> meter-pitch: 10px;
+    property <length> meter-width: Theme.meter-width;
+    property <length> meter-pitch: Theme.meter-pitch;
     property <length> meter-gap: Theme.pad-wide;
     property <length> meter-inset: Theme.pad-narrow;
     property <length> meters-width: data.peaks.length == 0 ? 0px : (data.peaks.length - 1) * meter-pitch + meter-width;

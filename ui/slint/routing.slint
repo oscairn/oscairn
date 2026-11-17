@@ -172,7 +172,7 @@ component NodeBox inherits Rectangle {
     in property <RoutingBox> data;
     callback tapped();
     property <float> s: RoutingState.scale;
-    opacity: (data.bright ? 1 : 0.45) * (data.off ? 0.55 : 1);
+    opacity: (data.bright ? 1 : Theme.dim) * (data.off ? 0.55 : 1);
     Rectangle {
         border-radius: Theme.radius;
         background: data.chosen ? Theme.accent.with-alpha(Theme.wash) : Theme.surface;
@@ -225,7 +225,7 @@ component PartBox inherits Rectangle {
     callback tapped();
     callback chevron();
     property <float> s: RoutingState.scale;
-    opacity: data.bright ? 1 : 0.45;
+    opacity: data.bright ? 1 : Theme.dim;
     Rectangle {
         border-radius: Theme.section-radius;
         background: Theme.surface;

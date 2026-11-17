@@ -26,6 +26,8 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "../../test-support/relaxed.h"
+using oscairn::test::relaxed;
 
 extern char** environ;
 
@@ -34,20 +36,7 @@ namespace
     using namespace oscairn;
     void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
     void check(bool value,const std::string& message){check(value,message.c_str());}
-    // A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a timed scenario be run again.
-    bool relaxed()
-    {
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-        return true;
-#elif defined(__has_feature)
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-        return true;
-#endif
-#endif
-        const char* ci=std::getenv("CI");
-        return ci && *ci;
-    }
-    struct TooSlow:std::runtime_error{using std::runtime_error::runtime_error;}; // a latency over its limit: a shared runner's stall adds to one, so the scenario may be run again
+        struct TooSlow:std::runtime_error{using std::runtime_error::runtime_error;}; // a latency over its limit: a shared runner's stall adds to one, so the scenario may be run again
     std::array<int,2> pair()
     {
         std::array<int,2> fds;check(socketpair(AF_UNIX,SOCK_STREAM,0,fds.data())==0,"socketpair");

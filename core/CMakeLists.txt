@@ -144,8 +144,9 @@ elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")
 endif()
 
 # Sanitizers slow rendering several times over; there the paced tests check containment, not timing.
-# CI's virtual machines cannot keep real time either (GitHub sets CI).
-if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
+# CI's virtual machines cannot keep real time either (GitHub sets CI): the tests read that themselves when they run
+# (test-support/relaxed.h), so the same build behaves the same wherever it is run.
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set(worker_timing --no-timing)
 endif()
 

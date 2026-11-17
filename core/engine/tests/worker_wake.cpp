@@ -23,20 +23,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
+using oscairn::test::relaxed;
 
-// A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a paced measurement be repeated.
-bool relaxed()
-{
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-    return true;
-#elif defined(__has_feature)
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-    return true;
-#endif
-#endif
-    const char* ci=std::getenv("CI");
-    return ci && *ci;
-}
 
 int main(int argc, char** argv)
 {

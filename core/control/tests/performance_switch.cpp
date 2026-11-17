@@ -32,6 +32,8 @@
 #ifdef __APPLE__
 #include <libproc.h>
 #include <mach/mach_time.h>
+#include "../../test-support/relaxed.h"
+using oscairn::test::relaxed;
 #endif
 
 using namespace oscairn;
@@ -42,20 +44,7 @@ namespace
     int failures = 0;
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
     constexpr uint32_t frames = 128;
-    // A shared CI runner (CI is set) or a sanitizer build slows and enlarges what is timed and measured: only there are the limits relaxed.
-    bool relaxed()
-    {
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-        return true;
-#elif defined(__has_feature)
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-        return true;
-#endif
-#endif
-        const char* ci = std::getenv("CI");
-        return ci && *ci;
-    }
-
+    
     struct Audio
     {
         std::array<float, frames> l{}, r{};

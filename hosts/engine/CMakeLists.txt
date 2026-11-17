@@ -37,7 +37,7 @@ target_sources(oscairn_engine_pump_test PRIVATE tests/pump.cpp)
 target_compile_definitions(oscairn_engine_pump_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 target_link_libraries(oscairn_engine_pump_test PRIVATE oscairn_audio_host oscairn_control_socket juce::juce_recommended_config_flags)
 # As core/CMakeLists.txt: sanitizers and CI's virtual machines cannot keep real time, so the test checks behavior only.
-if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set(pump_timing --no-timing)
 endif()
 add_test(NAME engine-pump COMMAND oscairn_engine_pump_test ${pump_timing})

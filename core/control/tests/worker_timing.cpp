@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include "../../test-support/relaxed.h"
 
 namespace
 {
@@ -31,7 +32,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc != 4 && !(argc == 5 && !std::strcmp(argv[4], "--no-timing"))) return 2;
-    const bool timing = argc == 4; // --no-timing (sanitizers, CI's virtual machines): the stall's durations and counts are not checked
+    const bool timing = argc == 4 && !oscairn::test::relaxed(); // --no-timing (sanitizers, CI's virtual machines): the stall's durations and counts are not checked
     // Times far from a busy machine's noise: a 10 ms allowance, a 100 ms stall (under the 250 ms hang
     // limit) in the plugin's 30th block, touching 4 MiB there.
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);

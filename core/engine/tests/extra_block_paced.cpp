@@ -21,6 +21,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
 
 namespace
 {
@@ -118,7 +119,7 @@ int main(int argc, char** argv)
 {
     if(argc < 4) return 2;
     fixture = argv[2]; transpose = argv[3];
-    const bool timing = !(argc > 4 && std::strcmp(argv[4], "--no-timing") == 0);
+    const bool timing = !(argc > 4 && std::strcmp(argv[4], "--no-timing") == 0) && !oscairn::test::relaxed();
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);
     oscairn::worker::makeRealtime(1e6 * frames / rate, oscairn::worker::priority::engineAudio);
     constexpr int blocks = 1500;

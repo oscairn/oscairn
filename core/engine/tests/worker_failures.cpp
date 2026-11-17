@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
 #include <sys/resource.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -118,7 +119,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 7) { std::fprintf(stderr, "usage: %s WORKER NORMAL CRASH HANG SLOW LEAK [--no-timing]\n", argv[0]); return 2; }
-    const bool timing = !(argc > 7 && std::strcmp(argv[7], "--no-timing") == 0);
+    const bool timing = !(argc > 7 && std::strcmp(argv[7], "--no-timing") == 0) && !oscairn::test::relaxed();
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);
     setenv("OSCAIRN_WORKER_MEMORY_MB", "128", 1);
     makeRealtime(1e6 * 128 / 48000);

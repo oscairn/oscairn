@@ -37,6 +37,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
 using namespace oscairn;
 using kick::clap::Event;
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
@@ -264,7 +265,7 @@ Deadline late(const char* plugin){
 
 int main(int argc,char** argv){try{
     if(argc<2)return 2;
-    const bool timing=!(argc>2 && !std::strcmp(argv[2],"--no-timing"));
+    const bool timing=!(argc>2 && !std::strcmp(argv[2],"--no-timing")) && !oscairn::test::relaxed();
     const std::string only=argc>3?argv[3]:"";
     if(only.empty() || only=="losses"){
     const auto l=losses(argv[1]);

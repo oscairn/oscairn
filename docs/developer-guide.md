@@ -107,6 +107,37 @@ instead of unsetting it. The names group by area:
 `desktop-shell` also drives a third-party plugin when `OSCAIRN_THIRD_PARTY_CLAP` (a CMake cache
 path) names one that exists.
 
+#### Timing tests
+
+Some tests read the clock: the load guard, the worker failure and extra-block tests, the pump. On a shared CI
+runner (GitHub sets `CI`) or in a sanitizer build the machine stalls and throttles them, and a failure there
+says nothing about the code. One helper, `core/test-support/relaxed.h` (`oscairn::test::relaxed()`, true when `CI`
+is set when the test runs, or in a sanitizer build), is the only meaning of "relaxed" and every test uses it; the
+`--no-timing` argument CMake passes (sanitizer builds only; `CI` is no longer read at configure time) and `relaxed()`
+both turn off a test's `timing` assertions, so a build behaves the same wherever it runs. Off CI nothing is
+relaxed: every assertion is exact, on a quiet machine.
+
+The rule for an assertion that depends on wall time: where a slow machine can only add the failure, a measured
+premise decides whether that run's claim is checked; the other direction stays strict. The premise is something
+the test measures in the same run (lost blocks counted by the guard, blocks that took as long as the time they had,
+involuntary context switches, a second session played block by block beside the first), never a longer limit and
+never a retry. A run whose premise fails says so on its output and does not check that claim. Not skipped under
+CI: what a slow machine cannot fake, the direction that shows the fault.
+
+| Test | Checked only when the premise holds | Always checked |
+| --- | --- | --- |
+| `load-guard` | no note given up with one or two held-up blocks, and none lost by the cheap lane: the guard counted no more lost blocks than the test held up and gave no note up for the callback's own time | a sustained overload gives notes up; notes give way in both parts; the other part loses none; the worker is not restarted (off CI, with the rest under `timing`) |
+| `guard-deadline` | none given up while within the deadline: no two of four blocks took as long as the time they had | notes give way when the deadline is reached; a profile's threshold gives notes up |
+| `worker-failures` | blocks past the period count as overruns when the machine did not take the processor from the process during them | sound identical to playing alone; each failure named and given up; allowance reported (overruns off CI only, with `timing`) |
+| `extra-block-paced` | the delayed blocks lost to the stall are counted within 10 calls of it, not across the run | stereo equal; the timing checks run off CI only |
+| `control-shared-costs` | a voice costs no less shared than alone (off CI) | a voice costs no more shared than alone (the fault is three times): both sessions are played block by block together |
+| `control-performance-switch-stress-hosts` | | its first Performance's workers are all given up before the next one opens, so none is a dead instance the supervisor has not seen yet |
+
+Other tests with a `timing` flag (`guard-*` apart from `deadline`, `worker-timing`, `control-worker-deadline`,
+`worker-extra-block`, `plugin-hosts`, `engine-pump`) still skip their `timing` assertions whole when relaxed, and
+have not yet been given a premise of their own; `worker-wake`, `control-performance-switch` and the local-socket test
+use `relaxed()` to repeat a timed scenario.
+
 ### Tools
 
 Programs in `tools/`, and the ones built beside the tests, for plugin work:

@@ -18,6 +18,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
 
 namespace
 {
@@ -145,7 +146,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 5) { std::fprintf(stderr, "usage: %s WORKER FIXTURE NOTE-CRASH BASIC-SYNTH\n", argv[0]); return 2; }
-    timing = !(argc > 5 && std::strcmp(argv[5], "--no-timing") == 0);
+    timing = !(argc > 5 && std::strcmp(argv[5], "--no-timing") == 0) && !oscairn::test::relaxed();
     // Identical results, not timing: a period more for every block on a loaded machine.
     setenv("OSCAIRN_WORKER_BUDGET_US", "500000", 1);
     setenv("OSCAIRN_WORKER_EXTRA_BLOCK", "org.kick.test.synth,org.oscairn.basic-synth", 1);

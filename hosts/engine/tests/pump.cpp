@@ -5,6 +5,7 @@
 // device: a request is answered as soon as it arrives, not at the next tick; what one client
 // changes reaches the others at once; and an idle engine does not spin. It prints what it measured.
 #include "../Pump.h"
+#include "../../../core/test-support/relaxed.h"
 #include "oscairn/session.h"
 #include <juce_events/juce_events.h>
 #include <algorithm>
@@ -41,7 +42,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-    const bool timing = !(argc > 1 && std::strcmp(argv[1], "--no-timing") == 0); // sanitizers, CI's virtual machines: behavior only
+    const bool timing = !(argc > 1 && std::strcmp(argv[1], "--no-timing") == 0) && !oscairn::test::relaxed(); // sanitizers, CI's virtual machines: behavior only
     juce::ScopedJuceInitialiser_GUI juce;
     int failures = 0;
     auto check = [&](bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } };

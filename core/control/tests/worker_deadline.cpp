@@ -24,6 +24,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include "../../test-support/relaxed.h"
 
 namespace
 {
@@ -98,7 +99,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc != 3 && !(argc == 4 && !std::strcmp(argv[3], "--no-timing"))) return 2;
-    const bool timing = argc == 3;
+    const bool timing = argc == 3 && !oscairn::test::relaxed();
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);
     setenv("OSCAIRN_WORKER_BUDGET_US", "200000", 1);
     const auto deadline = std::chrono::microseconds(int64_t(2667 * (1 - oscairn::worker::mixingReserve)));

@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
 
 namespace
 {
@@ -337,7 +338,7 @@ int main(int argc, char** argv)
 {
     if(argc < 6) { std::fprintf(stderr, "usage: %s WORKER NORMAL.clap NOTE_CRASH.clap SLOW.clap LEAK.clap [--no-timing]\n", argv[0]); return 2; }
     worker = argv[1]; normal = argv[2]; noteCrash = argv[3]; slow = argv[4]; leak = argv[5];
-    timing = !(argc > 6 && std::strcmp(argv[6], "--no-timing") == 0);
+    timing = !(argc > 6 && std::strcmp(argv[6], "--no-timing") == 0) && !oscairn::test::relaxed();
     try
     {
         placement();

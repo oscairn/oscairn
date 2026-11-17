@@ -28,22 +28,11 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../../test-support/relaxed.h"
+using oscairn::test::relaxed;
 using namespace oscairn;
 using kick::clap::Event;
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
-// A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a paced measurement be repeated.
-static bool relaxed()
-{
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-    return true;
-#elif defined(__has_feature)
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-    return true;
-#endif
-#endif
-    const char* ci=std::getenv("CI");
-    return ci && *ci;
-}
 
 namespace {
 constexpr uint32_t frames=128,blocks=600,settle=300; // misses counted from block `settle` on
@@ -149,7 +138,7 @@ Result shed(const char* plugin,const std::vector<const char*>& env){
 
 int main(int argc,char** argv){try{
     if(argc<2)return 2;
-    const bool timing=!(argc>2 && !std::strcmp(argv[2],"--no-timing"));
+    const bool timing=!(argc>2 && !std::strcmp(argv[2],"--no-timing")) && !relaxed();
     auto render=[&](double budget){
         Result r;std::exception_ptr error;
         std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=play(argv[1],budget);}catch(...){error=std::current_exception();}}).join();

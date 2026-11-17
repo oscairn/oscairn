@@ -1804,7 +1804,14 @@ on the display; `--engine-only` the engine alone.
    of 3 hosts unstable (0 to 21 from run to run). A crash now takes down
    one part's chain (its plugins come back with their state; the other parts keep sounding).
    `OSCAIRN_WORKERS=plugin ./oscairn-fantom-start` gives each plugin instance a worker of its own
-   again, for comparing. Three
+   again, for comparing.
+
+   Parts do not share an instance unless a Performance would not fit the memory otherwise (the
+   owner's decision, 2026-11-17, [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#parts-apart-by-default-2026-11-17)):
+   stacked pianos on one Sampler instance ran its worker at about 1,600 us a block and got 12
+   voices each at 24 keys held (TSO Carol Bells); an instance each played every held key for about
+   70 MB more and switched within about 0.12 s of shared. A Performance saved sharing is split as it
+   opens. `OSCAIRN_SHARING=memory ./oscairn-fantom-start` shares as before, for comparing. Three
    plugin hosts, worker processes holding any plugins each, placed by measured cost
    ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)),
    measured worse on the unit (2026-11-14, ST Final in the app, 41 s played and recorded): 3,608

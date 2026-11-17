@@ -843,7 +843,39 @@ namespace oscairn
         return result;
     }
 
-    Control::Estimate Session::estimate(const std::string& directory)
+    bool Session::sharesParts() noexcept
+    {
+        const char* bias = std::getenv("OSCAIRN_SHARING");
+        return bias && (std::string(bias) == "memory" || std::string(bias) == "balanced");
+    }
+
+    bool Session::memoryFits(const Estimate& e) const
+    {
+        const auto ceiling = memoryCeiling();
+        return !ceiling || e.memory + recorder_.committedBytes() <= ceiling;
+    }
+
+    // RFC 0045 (the owner, 2026-11-17): parts that may sound together play on instances of their own, each its own audio thread,
+    // so stacked Sampler parts are not held to one core's time. Each instance loads its samples again (the kernel's file cache is
+    // all they share), so a Performance whose parts apart would not fit the memory and shared would opens shared, said: a
+    // Performance must load.
+    Session::Sharing Session::sharing(const std::string& directory)
+    {
+        Sharing s;
+        s.share = sharesParts();
+        s.estimate = estimate(directory, s.share);
+        if(s.share || directory.empty() || budget_.cpu <= 0 || memoryFits(s.estimate)) return s;
+        auto shared = estimate(directory, true);
+        if(!memoryFits(shared)) return s;
+        s.notice = "its parts of one plugin share an instance: each in an instance of its own it needs " + std::to_string((s.estimate.memory + recorder_.committedBytes()) >> 20) +
+                   " MiB of memory where this device allows " + std::to_string(memoryCeiling() >> 20) + ", so stacked parts share one instance's voices";
+        s.estimate = std::move(shared); s.share = true;
+        return s;
+    }
+
+    Control::Estimate Session::estimate(const std::string& directory) { return sharing(directory).estimate; }
+
+    Control::Estimate Session::estimate(const std::string& directory, bool share)
     {
         if(budget_.cpu > 0) loadMeasurements();
         // What plays now: this Performance's plugins, and any still ringing out from the last.
@@ -929,9 +961,9 @@ namespace oscairn
             const auto engine = text(detail::member(e->value, "engine"));
             const auto* sound = detail::member(e->value, "sound");
             const auto seen = measurementFor(measuredKey);
-            bool shares = engine != key; // saved sharing an engine's
+            bool shares = share && engine != key; // saved sharing an engine's; apart, split as it opens
             auto instance = engine;
-            if(!shares && SoundContext::sharesOnItsOwn() && engines[engine] == 1 && !offMain.count(key) && (!sound || sound->type == json_type_null) && seen && seen->contexts > 1)
+            if(!shares && share && engines[engine] == 1 && !offMain.count(key) && (!sound || sound->type == json_type_null) && seen && seen->contexts > 1)
             {
                 const auto n = formed[measuredKey]++;
                 shares = n % seen->contexts != 0;

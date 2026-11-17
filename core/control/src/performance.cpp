@@ -782,8 +782,8 @@ void Session::openPerformance(const std::string& directory) {
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
-    bool seamless=true,fades=false;uint64_t incoming=0;std::string uncertain,cut;
-    if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless || e.fades;incoming=e.memory;
+    bool seamless=true,fades=false;uint64_t incoming=0;std::string uncertain,cut;Sharing shares;shares.share=sharesParts();
+    if(budget_.cpu>0){shares=sharing(root.string());const auto& e=shares.estimate;if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless || e.fades;incoming=e.memory;
         // One change fading already: this one's tail rings out whole beside it (the load guard sheds voices if it must), as a
         // second fade on the one gain would step the newer tail down to where the older has faded.
         fades=e.fades && !fading_;
@@ -814,7 +814,7 @@ void Session::openPerformance(const std::string& directory) {
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
     if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them.
-    if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming);
+    if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming,shares);
     auto stats=prepared->stats;
     {Clock publish{stats.publish};open(*prepared,seamless,fades);}
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
@@ -828,7 +828,7 @@ void Session::openPerformance(const std::string& directory) {
     lastOpen_=stats;lastOpen_.total=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
 }
 
-std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming) {
+std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming,const Sharing& sharing) {
     // A worker that died a moment ago, not yet seen by its supervisor, reads as failed now: no instance of it is taken over
     // (it is loaded afresh, as for one known to have failed), and its supervisor restarts it.
     checkWorkers();
@@ -859,7 +859,7 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
     const ReplyBound bound(std::chrono::milliseconds(500));
     std::unique_ptr<Prepared> p;
     for(size_t pass=0;;++pass){const auto failures=workerFailures();
-        try{p=read(root,free);break;}
+        try{p=read(root,free,sharing);break;}
         catch(...){
             // Instances kept warm it gave a state to before it failed hold that state now, not the one remembered.
             for(auto& w:warm_)w.loaded.source.clear();for(auto& f:free)f.loaded.source.clear();
@@ -1008,22 +1008,22 @@ bool Session::preparePerformance(const std::string& directory) {
     prepared_.reset();preparedOpportunistic_=false;
     if(directory.empty())return false;
     const auto root=performanceRoot(directory);
-    bool opportunistic=false;
-    if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));
+    bool opportunistic=false;Sharing shares;shares.share=sharesParts();
+    if(budget_.cpu>0){shares=sharing(root.string());const auto& e=shares.estimate;if(!e.fits)bad("this Performance "+tooMuch(e));
         if(!e.seamless && !e.fades){
             // RFC 0025: with memory classes it is prepared anyway, as opportunistic data, when what
             // neither running apps' reservations nor committed memory hold allows, so the cut is fast.
             const auto used=memoryClasses()?reservedMemory(false)+budget_.margin+committedMemory():0;
             if(!memoryClasses() || used+e.memory>budget_.device){std::fprintf(stderr,"oscairn: not prepared: beside the open Performance it would not fit; it opens at the cue\n");return false;}
             opportunistic=true;}}
-    prepared_=readTaking(root,false,false);preparedOpportunistic_=opportunistic;
+    prepared_=readTaking(root,false,false,0,shares);preparedOpportunistic_=opportunistic;
     graph_.reserveIds(*prepared_->next); // so plugins added meanwhile cannot take its IDs
     return !opportunistic;
 }
 
 // Reads a Performance and loads its plugins with their state into a replacement graph, without
 // touching what plays. Throws, leaving nothing behind, on anything it cannot restore.
-std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vector<Free> free) {
+std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vector<Free> free,const Sharing& sharing) {
     Timing::Open stats;const auto loads=pluginInstancesLoaded();const auto began=std::chrono::steady_clock::now();
     validateTree(root);const auto doc=document(root);V d=doc.get();
     fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","unlinked","physicalControls","input","lock"});
@@ -1037,6 +1037,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // Every required sound asset must resolve before any plugin loads; report all that do not. An
     // optional one missing is a notice: the plugin loads, its resolve failing.
     std::vector<std::string> notices;
+    if(!sharing.notice.empty()){notices.push_back("Opened with "+sharing.notice);std::fprintf(stderr,"oscairn: %s\n",notices.back().c_str());}
     {
         std::map<std::string,std::string> names;
         if(member(d,"libraries"))for(auto l:array(field(d,"libraries"),4096)){fields(l,{"id","name","fingerprint"});names[text(field(l,"id"))]=text(field(l,"name"));}
@@ -1151,7 +1152,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         for(auto p:array(field(definitions.at(from),"outputs"),Graph::maxAudioChannels))if(integer(field(p,"id"))==port && !(integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN))offMain.insert(from);}
     auto placed=documentPlacement(nodes,array(field(d,"wires"),Graph::maxAudioConnections)); // the groups the plugins load in (compute.workers)
     auto kind=[&](V plugin){return text(field(plugin,"id"))+'\n'+text(field(plugin,"version"))+'\n'+text(field(plugin,"pathHint"));};
-    auto formable=[&](V node,const std::string& key){return SoundContext::sharesOnItsOwn() && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
+    auto formable=[&](V node,const std::string& key){return sharing.share && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
     std::map<std::string,size_t> kinds;for(auto node:nodes)if(formable(node,text(field(node,"key"))))++kinds[kind(field(node,"plugin"))];
     auto left=kinds; // those not read yet
     // The playing Performance's engines of the plugin, build and placement a node would load; none in an audition.
@@ -1212,6 +1213,18 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         {Clock c{stats.load};next->reload(runtime,path,text(field(field(node,"plugin"),"id")),room);}origins[runtime]={buildDigest(path),source(key)};--reused;
         if(free[f].node)std::erase(taken,free[f].node);
         restore(runtime,node,room);};
+    // RFC 0045, parts apart (sharing.share false): a saved engine is split as it opens. Its first node's instance loads the
+    // engine's state, each other node an instance of its own given its channel's sound saved on its own from it
+    // (sound-snapshots draft 4, as a part saved as a Sound), and last the first node's instance its own sound alone.
+    std::map<std::string,std::shared_ptr<PluginHost>> splitting; // by the engine's key: the instance holding the engine's state
+    auto soundOn=[](const PluginHost& h,uint16_t channel){
+        for(const auto& c:h.soundContexts())if(c.selected_channels>>channel&1)return c.id;
+        bad("no sound is selected on a shared engine's channel");return uint32_t(0);};
+    auto alone=[&](PluginHost& from,uint16_t channel,PluginHost& to,uint64_t room){
+        state_files::TemporaryDirectory folder;from.saveSound(soundOn(from,channel),(folder.path/"sound").string());
+        if(room)to.setMemoryRoom(room);
+        try{to.loadSnapshot((folder.path/"sound").string());}catch(...){if(room)to.setMemoryRoom(0);throw;}
+        if(room)to.setMemoryRoom(0);};
     // Roots first; siblings can refer forward to a root, never to an arbitrary chain.
     for(bool siblings:{false,true})for(auto node:nodes){const auto key=text(field(node,"key")),engine=text(field(node,"engine"));if((key!=engine)!=siblings)continue;
         const auto plugin=field(node,"plugin");fields(plugin,{"format","id","version","pathHint"});const auto format=text(field(plugin,"format")),id=text(field(plugin,"id")),path=text(field(plugin,"pathHint"));
@@ -1219,7 +1232,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         const auto name=text(field(node,"name"));
         const PlacementScope placement(placed[key]);
         try {
-            NodeId runtime;bool restored=false,fresh=false; // a taken-over instance gets its state its own way; a fresh one is this load's alone
+            NodeId runtime;bool restored=false,fresh=false,apart=false; // a taken-over instance gets its state its own way; a fresh one is this load's alone; apart: split from a saved engine
             // RFC 0025: each plugin may declare what the memory budget leaves beside those loaded
             // before it (the Performance alone, as its estimate was checked); more is refused before it activates.
             std::vector<NodeId> loaded;for(const auto& [n,x]:names)loaded.push_back(n);
@@ -1241,18 +1254,29 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             if(siblings){if(!definitions.contains(engine) || text(field(definitions.at(engine),"engine"))!=engine || !ids.contains(engine))bad("missing shared engine root");
                 const auto& source=next->host(ids.at(engine)).descriptor();if(source.id!=id || text(field(field(definitions.at(engine),"plugin"),"pathHint"))!=path)bad("incompatible shared engine identity"); // as saved: the root may have loaded from elsewhere
                 try{
-                    if(shared){runtime=next->add(claimedEngines.contains(engine)?claimedSound(node,engine):savedSound(node,root/"nodes"/key,nullptr,&next->host(ids.at(engine))));restored=true;if(claimedEngines.contains(engine))++reused;}
+                    if(shared && splitting.count(engine)){
+                        runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};LoadWindow window;return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+                                              [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
+                        if(SoundContext::busParameter(next->host(runtime))!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
+                            try{Clock c{stats.restore};alone(*splitting.at(engine),shared->first,next->host(runtime),room);}catch(...){next->remove(runtime);throw;}
+                            restored=true;apart=true;}}
+                    else if(shared){runtime=next->add(claimedEngines.contains(engine)?claimedSound(node,engine):savedSound(node,root/"nodes"/key,nullptr,&next->host(ids.at(engine))));restored=true;if(claimedEngines.contains(engine))++reused;}
                     else runtime=context(next->host(ids.at(engine)),[&]{return next->addEffectContext(ids.at(engine));});}
                 catch(const std::exception& e){
                     if(memoryRefusal(e))throw;
                     runtime=next->add(standIn(node,root/"nodes"/key,refs[key],std::string("its shared engine is not here: ")+e.what()));restored=false;}}
             // Not where nodes of its kind form groups on their own: opened fresh, they could join it.
-            else if(shared && !kinds.count(kind(plugin)) && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
+            else if(shared && sharing.share && !kinds.count(kind(plugin)) && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
             else if(shared){
                 runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};LoadWindow window;return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 const auto host=next->node(runtime).host;
-                if(SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
+                if(!sharing.share && SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // split: the engine's state here until its other nodes have theirs
+                    if(room)host->setMemoryRoom(room);
+                    try{Clock c{stats.restore};host->loadSnapshot((root/"nodes"/key/"engine").string());}catch(...){if(room)host->setMemoryRoom(0);throw;}
+                    if(room)host->setMemoryRoom(0);
+                    splitting[key]=host;restored=true;apart=true;}
+                else if(SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
                     if(room)host->setMemoryRoom(room);
                     std::shared_ptr<SoundContext> context;
                     try{context=savedSound(node,root/"nodes"/key,host,nullptr);next->share(runtime,context);}catch(...){if(room)host->setMemoryRoom(0);throw;}
@@ -1273,7 +1297,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 if(group[key]==1 && next->host(runtime).failure().empty())origins[runtime]={buildDigest(next->host(runtime).descriptor().path),source(key)};}
             if(!restored && fresh){LoadWindow window;restore(runtime,node,room);}
             else if(!restored)restore(runtime,node,room);
-            else if(shared || joined){auto& h=joined?*joined->engine()->host:next->host(runtime); // a node saved alone, as its plugin's ports
+            else if((shared && !apart) || joined){auto& h=joined?*joined->engine()->host:next->host(runtime); // a node saved alone, as its plugin's ports
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
                 if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");}
             if(first)if(const auto e=SoundContext::lead(next->node(runtime).host)){ // loaded with its state, now or kept warm; a stand-in stays as saved
@@ -1286,6 +1310,9 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             if(const auto role=roleFrom(node);!role.empty())roles[runtime]=role;
         }catch(const std::exception& e){bad("cannot restore "+name+" ("+id+"): "+e.what());}
     }
+    // A split engine's first node keeps its own sound alone.
+    for(const auto& [key,host]:splitting)try{Clock c{stats.restore};alone(*host,soundOf(definitions.at(key))->first,*host,0);}
+        catch(const std::exception& e){bad("cannot restore "+text(field(definitions.at(key),"name"))+" ("+host->descriptor().id+"): "+e.what());}
     // This Performance's own engines keep the sounds its nodes play: one a channel no node has selects
     // stays, and the rest go (prepared and not selected when saved, as the next Setlist entry's were).
     for(const auto& e:engines){
@@ -1721,10 +1748,10 @@ std::map<std::string,NodeId> Session::addNodes(const json_value_s* document,cons
             NodeId runtime;
             const auto snapshot=root/"nodes"/key;
             const auto shared=soundOf(node); // RFC 0021 slice 3
-            // Formed on their own: a node saved alone whose plugin plays here on an instance that can
-            // share plays a sound of it (one playing alone becomes its engine's first node).
+            // Formed on their own, with sharing asked for (RFC 0045): a node saved alone whose plugin plays here on an
+            // instance that can share plays a sound of it (one playing alone becomes its engine's first node).
             std::shared_ptr<SoundContext> joined;
-            if(!siblings && !shared && std::none_of(nodes.begin(),nodes.end(),[&](V n){return text(field(n,"key"))!=key && text(field(n,"engine"))==key;}) && !offMain(node,key))
+            if(sharesParts() && !siblings && !shared && std::none_of(nodes.begin(),nodes.end(),[&](V n){return text(field(n,"key"))!=key && text(field(n,"engine"))==key;}) && !offMain(node,key))
                 for(const auto& [n,x]:nodes_){
                     const auto host=graph_.node(n).host;const auto* c=dynamic_cast<const SoundContext*>(host.get());
                     const auto& d=host->descriptor();if(d.id!=id || d.path!=text(field(plugin,"pathHint")) || d.version!=text(field(plugin,"version")))continue;

@@ -72,7 +72,7 @@ namespace oscairn
     std::optional<NodeId> Session::sharingSource( const std::string& path, const std::string& pluginId ) const
     {
         std::error_code e;
-        if( !SoundContext::sharesOnItsOwn() ) return std::nullopt; // OSCAIRN_SHARING=cpu
+        if( !sharesParts() ) return std::nullopt; // RFC 0045: apart unless OSCAIRN_SHARING=memory
         for( const auto& [n, name] : nodes_ )
         {
             const auto host = graph_.node(n).host;

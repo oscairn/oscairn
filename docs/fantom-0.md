@@ -884,7 +884,7 @@ weston.service`, when it is not active), and unmounts the chroot. Before stoppin
 `oscairn-fantom-boot` ([Starting at power-on](#starting-at-power-on-not-done)). It
 does not turn Local Switch back on: a power cycle does. It
 leaves the panel holder running, so the panel goes on reporting; `--panel` stops the holder too,
-after which the panel stays silent until the next power-on. While the holder runs the bundle's
+after which the panel stays silent until the next power-on (it prints a warning saying so). While the holder runs the bundle's
 `/dev` stays mounted (the holder has the device open through it). It never starts Roland's app:
 started again after a stop it shows "program version error". A power cycle returns the
 instrument to Roland's system.
@@ -1027,7 +1027,11 @@ switches it; `OSCAIRN_UI=rust` in the start script's environment tries it once) 
 - **Touch** turned with the picture: libinput reads `LIBINPUT_CALIBRATION_MATRIX` from udev, so
   the start script writes `/run/udev/rules.d/99-oscairn-touch.rules` (the matrix `0 1 0 -1 0 1` for
   90 degrees, the one the bundle's `xorg.conf` gives the X server) and runs `udevadm trigger`. It is
-  in `/run`, gone at the next power-on; `oscairn-fantom-stop` removes it. Not checked: that
+  in `/run`, gone at the next power-on; `oscairn-fantom-stop` removes it. A stop that comes during
+  the handover between the JUCE app and the Rust UI (the keeper takes the rule away for the X
+  server and puts it back when the app ends) left the rule behind: the keeper now takes it away
+  again when it finds the stop's mark, and the stop looks for the rule a second time after
+  everything has ended. Not checked: that
   Roland's udev reads `/run/udev/rules.d` and that a tap lands where it is drawn.
 - **A screen not yet ported** (Library, Groovebox, Recordings, Settings, and the Performance's Edit;
   the Performance tile opens Play, which is Rust): the Rust
@@ -1134,7 +1138,7 @@ left unheld ([With Roland's app stopped](#with-rolands-app-stopped)).
   attaching raises SIGIO, which ends the wait so the holder takes it in at once; failing that,
   the next message does. A reader going raises SIGIO too (each reader's socket is set to signal
   on its hang-up), and the holder drops it then and logs `a reader detached`; one that goes
-  just before a wait begins is dropped at the next message, when sending to it fails, and costs
+  just before a wait begins is dropped at the next wake (the one-second timer, below), and costs
   nothing meanwhile. After any wake the holder reads every message queued, so a wake for a
   reader loses none of the device's. A reader that falls behind loses messages.
   `oscairn-panel-dump` is one reader: its first connection, which checks that a holder runs, is
@@ -1142,6 +1146,79 @@ left unheld ([With Roland's app stopped](#with-rolands-app-stopped)).
 - **Stopping:** SIGTERM or SIGINT, handled with every signal unblocked, end the wait (it returns
   0) and the holder closes the device and ends. A signal that comes just before the wait begins
   is only seen at the next message; SIGKILL is as clean for the driver.
+- **Readers that hang up.** A reader whose end closed is dropped at once (its socket signals the
+  hang-up), and every accept first clears the readers that have gone, so dead readers cannot fill
+  the eight; a one-second timer wakes the wait as well, so a signal that came between the last look
+  and the wait is acted on within a second. The ninth live reader is turned away; that is logged
+  once, counted, and the count is said when a reader next attaches, not a line each second. The
+  holder empties its log (`var/oscairn/log/oscairn-panel-holder.log`) when it passes 256 KiB.
+  (An earlier holder dropped a reader only when sending it a panel message failed, so every engine
+  restart with nobody touching the panel left a dead reader; on the unit, the holder from the
+  bundle `2dad0108`, started November 13, was full after eight restarts and turned the engine's
+  reader away once a second, 165,838 log lines, so the physical panel did not reach the engine
+  until a person touched a control: that message was lost, and a second later the engine attached.)
+
+#### The handover, and what the rule is
+
+What silences the panel is the driver's `close`, which unregisters the I2C slave
+([The panel's driver](#the-panels-driver)). By how Linux calls a driver's release (inferred, not
+tried on the unit): when the last reference to the open file goes, not when one process's
+descriptor is closed. So the open file can move between processes. The
+holder's lifetime is therefore: the first holder opens the device at power-on and nothing ever
+closes it again until the next power-on; a newer bundle's holder takes over the same open file.
+
+`oscairn-panel-holder DEVICE --takeover` (what `oscairn-fantom-start` runs for a holder of another
+build) connects to the running holder's socket, as a reader does, and sends
+`OSCAIRN-PANEL-HANDOVER <version>\n` (at most 64 bytes; `panelHolderVersion` is 1 in this build).
+
+- The running holder grants it to a **higher version only**. It sends, in one `SCM_RIGHTS`
+  message, `OK <its version>\n` with the open device, the listening socket and every attached
+  reader. It goes on holding all of them, reading nothing from the device, until the new holder
+  sends `TAKEN\n` (or five seconds pass and it simply goes on).
+- The new holder makes the descriptors its own (it sets itself as their signal owner), sends
+  `TAKEN\n` and waits for the old one to end. The socket never stops listening and the readers keep
+  their connections: **readers need not reconnect**; the engine's reader never notices. Messages
+  that arrive in between are queued by the driver (255) and read by the new holder.
+- The old holder then ends with only its own descriptors closed: it does not write, ioctl or reset
+  the device, and does not unlink the socket's path. The new holder never opens the device (the
+  guard on other openers, which would be wrong here, is not run).
+- The same or a lower version gets `REFUSED <version>\n` (the new holder ends with 3, the running
+  one serves on); one that does not answer in 1.5 seconds (or whose connection is closed), which
+  is what a holder of before the handover does, since it reads the request as junk, ends with 4.
+  A request that is not exactly the tag, one to six digits and a newline is malformed: its sender
+  loses the connection and nothing else happens. With no holder running `--takeover` starts one as
+  usual.
+
+`oscairn-fantom-start` decides (`take_panel`):
+
+| running holder | the start |
+|---|---|
+| none | starts this bundle's holder |
+| this bundle's own program (`/proc/<pid>/exe` is the same file) | keeps it |
+| another build that can hand over | asks it with `--takeover`; the device is never closed |
+| another build, same version or newer | keeps it |
+| another build that does not answer (before the handover) | keeps it and logs one line: `panel holder is an older version (from <path>): it will be replaced at the next power-on; until then stale readers clear when a panel control is touched` |
+| its process not found (no `/proc`) | keeps it |
+
+**The rule: a running holder is never stopped, killed or reopened to be replaced**, and a failed
+handover never fails a start; a silent panel is worse than an old holder. `oscairn-fantom-stop`
+leaves the holder unless `--panel` is given, and then prints a warning that the panel stays silent
+until the instrument is powered on again.
+
+*On an instrument whose holder predates the handover* (the unit before this change): the start
+logs the one line above and Oscairn runs with the old holder. What a person sees: nothing changes
+until the next power-on; after eight engine restarts with nobody touching the panel the physical
+panel does not reach the engine until a control is touched (that first message is lost; the
+engine's reader attaches a second later). The next power-on starts this bundle's holder, which
+supports the handover, and the situation does not recur.
+
+Tested off the unit with a pty standing in for the device (`control-panel-reader`, `fantom_start.sh`):
+a reader attached to the old holder hears the same connection from the new one with no reconnect, the
+pty is opened once and never hangs up, the same or a lower version and malformed requests are refused
+without harm, a holder that does not answer is left holding, and the start script's table above on a
+stand-in `/proc`. Not run on Linux or on the unit: `SCM_RIGHTS` of the driver's file (a character device
+whose `ioctl` waits), the real driver's behavior when a second process waits on the same open file,
+and the 1.5-second answer time against the unit's old holder.
 
 Tested off the unit, through a seam that stands in for the driver (`control-panel-reader`): the
 wait and the reads until nothing is left, the second holder refusing, the guard refusing while

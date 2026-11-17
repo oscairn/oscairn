@@ -70,6 +70,12 @@ So the family has three users today: the parameter pages (two levels), and Play'
   `spacing` (74.6 at spacing 1.6, 97 at font 1.4, 55.6 at spacing 0.6 and font 0.8, tests/tabs.rs
   `a_rails_width_is_the_themes_and_at_most_twelve_percent_of_the_screen`). Between the pages' rail and the tabs' there is the
   theme's gap; the content starts one margin after the last rail.
+  **A lone rail** (the Library's, the Settings': pages and no second level) is wider when its longest label needs it: the
+  label on one line at the small type in bold (a word that cannot break; a label with a space may break as before) plus the
+  tab's padding each side, at most `Theme.rail-label-share` (**16%**) of the width ("Performances" is 105 logical px at 826,
+  102.6 at spacing 0.7); beyond that the shrink and the ellipsis below stay the fallback (a user-named tab). Two rails (a
+  plugin's pages and tabs) keep the theme's width. The `auto` placement is decided at the theme's width, so a longer label
+  never turns the rails into strips.
 - **Text** (src/tabs.rs `abbreviate`, `two_lines`; slint/theme.slint `Rail`): every label of a rail is horizontal.
   (a) At the small type, on one line, or on two where it has a space to break at, when every label fits the rail's width that
   way ("Operators", "Voice Shaping": the keyboard's rails). (b) *Rotated text (reading bottom to top) was not built: Slint 1.18.1's

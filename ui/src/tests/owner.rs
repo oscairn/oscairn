@@ -93,3 +93,21 @@ fn last_character_shows(name: &str) -> bool {
 fn a_row_s_name_is_drawn_whole_when_the_row_has_the_room() {
     assert!(last_character_shows("owner-row"), "the name's last character is cut off the row");
 }
+
+// The rail is wide enough for its longest label on one line: "Performances" whole, at the default spacing and at 0.7.
+#[test]
+fn the_rail_holds_its_longest_label_on_one_line() {
+    for spacing in [1.0f32, 0.7] {
+        let mut s = scene("owner-rail", 10);
+        let ui = s.ui();
+        ui.global::<crate::Theme>().set_spacing(spacing);
+        s.f.screen.frame();
+        s.f.screen.frame();
+        owner_png(&s, &format!("owner-3-{spacing}"));
+        let (rail, need, fit) = (ui.get_library_rail(), ui.get_library_rail_need(), ui.get_library_rail_fit());
+        let across = 2. * (ui.global::<crate::Theme>().get_tab_pad() + ui.global::<crate::Theme>().get_pad_tight());
+        eprintln!("OWNER3 spacing {spacing}: rail {rail:.1}, need {need:.1} + {across:.1}, fit {fit}");
+        assert!(need > 0. && rail + 0.01 >= need + across, "the rail {rail} holds the label {need} and the padding {across}");
+        assert_eq!(fit, 1.0, "the label at the full small type");
+    }
+}

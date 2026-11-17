@@ -661,6 +661,16 @@ set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whate
   actions; Options opens the item menu for the item under the cursor, or the one last pressed (touch leaves no cursor).
   Without touch the dial walks the tabs and then the rows; up from the first row reaches the tabs, up from the first tab
   the top bar; a press on a Performance opens it, on any other row lists what can be done with it.
+- **A row shares its width by priority** (`part.slint` `Row`, a `fluid` row): the name first (it keeps what it needs, at least
+  70% of the type, before the tags do), then the tags and states (their natural width, at least a quarter of the row), then
+  the description (what is left, muted, only if that is six small-type heights or more); the name is cut only when the row
+  has no room (a test: the 42-character name with two tags is drawn whole at 1280x720). Sounds rows are the same rows.
+- **The scroll bar** (`part.slint` `Part`, every list of the shared list screen that is longer than its view; `Theme.scroll-bar`,
+  `scroll-lane`, `scroll-thumb-min`): a thin bar in its own lane at the list's right edge (the rows are narrower by the
+  lane), always shown, its thumb the view's share of the list (at least a touch target long) at the view's place. A touch
+  only: a tap on the track or a drag on it asks for the view at that place (`PartState.scrolled`, `Browser::scroll_to`,
+  a whole view at a time), drops the cursor (scrolling selects nothing), keeps the footer in step, and asks the engine
+  for nothing (the list is held whole); it is not a cursor stop.
 - **Requests:** `library.query` (`kind`, `limit` 1000, `text`, `tags`, `favorites`, `recent`, `source`), `library.libraries`,
   `packages.installed` and `packages.preinstalled` on opening (the preinstall line is asked again each second only
   while it runs); `library.favorite`, `library.tag`, `library.edit`, `library.copy`, `library.delete`, `parts.fromSound`,

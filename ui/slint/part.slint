@@ -21,6 +21,8 @@ export struct SettingData {
     busy: bool, // the engine is opening this item: a bar along the row's foot
     tint: color, // an item's own color, where the theme puts it (drawListRow): the whole row or a mark in it
     tinted: bool,
+    detail: string, // a fluid row's description: the last of its parts to keep room
+    fluid: bool, // the row's name, value and detail share its width by priority: the name, then the value, then the detail
     columns: [string], // a row in columns (the Catalog's: name, version, publisher, state and summary), each shrunk then cut on its own
 }
 
@@ -95,15 +97,44 @@ component Row inherits Section {
     }
     if !root.in-columns: FitText {
         x: Theme.pad + root.label-room;
-        width: parent.width * 0.4 - Theme.pad - root.label-room;
+        width: root.name-room;
         height: parent.height;
+    // A fluid row: the name keeps what it needs (at its least, 70% of the type) before the value does, the value its natural
+    // width before the detail gets any, and the detail what is left, if that is worth drawing.
+    property <length> room: root.width - 2 * Theme.pad - root.label-room - root.value-room - root.buttons;
+    property <length> name-need: name-measure.preferred-width;
+    property <length> value-need: value-measure.preferred-width;
+    property <length> name-room: root.data.fluid ? min(root.name-need, max(root.room - root.value-need - Theme.pad, root.name-need * 0.7), root.room - min(root.value-need, root.room * 0.25) - Theme.pad) : root.width * 0.4 - Theme.pad - root.label-room;
+    property <length> value-room-fluid: min(root.value-need, max(0px, root.room - root.name-room - Theme.pad));
+    property <length> detail-room: root.room - root.name-room - root.value-room-fluid - 2 * Theme.pad;
+    name-measure := Text {
+        visible: false;
+        font-size: Theme.body;
+        text: root.data.label;
+    }
+    value-measure := Text {
+        visible: false;
+        font-size: Theme.body;
+        font-weight: 700;
+        text: root.data.value;
+    }
         text: data.label;
         align: TextHorizontalAlignment.left;
     }
     if !root.in-columns: FitText {
-        x: parent.width * 0.4 + Theme.pad;
-        width: parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
+        x: root.data.fluid ? parent.width - Theme.pad - root.value-room - root.buttons - root.value-room-fluid : parent.width * 0.4 + Theme.pad;
+        width: root.data.fluid ? root.value-room-fluid : parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
         height: parent.height;
+    if !root.in-columns && root.data.fluid && root.data.detail != "" && root.detail-room >= 6 * Theme.small: Text {
+        x: Theme.pad + root.label-room + root.name-room + Theme.pad;
+        width: root.detail-room;
+        height: parent.height;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: root.data.detail;
+    }
         text: data.value;
         ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;
         bold: true;

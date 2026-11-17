@@ -470,12 +470,10 @@ impl Screen {
     // ---- what is shown ----
 
     /// An item's detail as the reference's row writes it: its tags and description, behind what is said first.
+    /// Its tags and states (what the row's value says) and, apart, its description (which the row gives room last).
     fn detail(&self, item: &Item) -> String {
         let sep = "  ·  ";
         let mut detail = item.tags.join(sep);
-        if !item.description.is_empty() {
-            detail += &format!("{}{}", if item.tags.is_empty() { "" } else { "   " }, item.description);
-        }
         let first = |what: &str, detail: String| if detail.is_empty() { what.to_string() } else { format!("{what}{sep}{detail}") };
         if !item.library.is_empty() {
             detail = first("Locked", detail);
@@ -504,7 +502,7 @@ impl Screen {
                 let mut rows = vec![(Row::Filters, row("Filters".into(), format!("{} ›", self.filters.summary(&self.libraries)), 2))];
                 rows.extend(self.items.iter().enumerate().map(|(i, item)| {
                     let tint = color(&item.color);
-                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
+                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), detail: item.description.as_str().into(), fluid: true, busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
                 }));
                 // Nothing of the kind and nothing narrowing it: a way to the Catalog (LibraryPane.cpp: "Browse the Catalog").
                 if self.total == 0 && !self.filters.narrowed() && self.kind != Kind::Setlist {

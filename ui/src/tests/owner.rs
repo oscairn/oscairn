@@ -64,3 +64,32 @@ fn more_is_an_icon_left_of_the_meters() {
     // Half of the title area, which is wider by what More gave up (a word and its padding, 62, for an icon, 36): 193 before.
     assert!(chip > 198., "the chip: {chip}");
 }
+
+/// The same scene with the last character of the long name changed: whether the row is drawn differently, that is,
+/// whether that character is drawn at all (when it is cut off, the two pictures are alike).
+fn last_character_shows(name: &str) -> bool {
+    let draw = |last: char| {
+        let mut s = scene(name, 10);
+        s.e.items[0].name = format!("{}{last}", &LONG[..LONG.len() - 1]);
+        shell::goto(shell::Screen::Home);
+        shell::goto(shell::Screen::Library);
+        s.serve();
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let w = s.f.screen.w;
+        // The second row of the list (the first is Filters): 1280x720 at 1.55, left of the panel.
+        let band: Vec<(u8, u8, u8)> = (160..226).flat_map(|y| (120..640).map(move |x| (x, y))).map(|(x, y)| s.f.screen.pixels[y * w + x]).map(|p| (p.r, p.g, p.b)).collect();
+        (band, s)
+    };
+    let (a, s) = draw('1');
+    let (b, _) = draw('7');
+    owner_png(&s, "owner-2");
+    a != b
+}
+
+// The row's name takes the room the row has: with two tags the whole 42-character name is drawn, in the Performances list
+// at 1280x720; tags give way to the name, and the description to the tags.
+#[test]
+fn a_row_s_name_is_drawn_whole_when_the_row_has_the_room() {
+    assert!(last_character_shows("owner-row"), "the name's last character is cut off the row");
+}

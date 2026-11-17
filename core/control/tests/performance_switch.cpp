@@ -387,6 +387,7 @@ int main(int argc, char** argv)
     {
         state_files::TemporaryDirectory home; // a budget's measurements, not the user's
         ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1);
+        ::setenv("OSCAIRN_SHARING", "memory", 1); // RFC 0045: what changes do to instances parts share, as before parts went apart by default
         // Every Session here with the load guard off: switched and fresh are compared sample for sample, which tests
         // rendering, not load; on a machine too slow for real time (a sanitizer build) the guard gives notes up unevenly.
         ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);

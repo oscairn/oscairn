@@ -260,7 +260,8 @@ revision). A successful commit publishes a complete
 plan for the audio thread to adopt at a block boundary; it does not wait for adoption.
 
 `graph.add` loads a native CLAP plugin in the engine process. Its optional name must be unique
-when nonempty; unnamed nodes use their numeric IDs. A plugin that can share its instance between
+when nonempty; unnamed nodes use their numeric IDs. With sharing asked for (`OSCAIRN_SHARING=memory`;
+by default not, [below](#parts-sharing-one-instance)), a plugin that can share its instance between
 parts (the Basic Synth), where this Performance plays one with room, is not loaded again: the new
 node plays a new sound of that instance, as `instruments.share` makes one
 ([below](#parts-sharing-one-instance)); `graph.get` lists it `shared`. IDs are not reused. Audio ports include
@@ -1073,7 +1074,15 @@ node, and its `channel` and `bus`; a saved Performance keeps them
 ([format](performance-format.md)). Undo takes a share back like any added node; one that made
 `source` the first node puts back `source`'s own instance.
 
-Sharing is also formed on its own: `graph.add` of such a plugin joins an instance with room, as
+By default ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#parts-apart-by-default-2026-11-17))
+sharing forms only on request: each part's instrument has an instance of its own, parts that sound
+together each on their own audio thread, and a Performance saved with parts sharing is split as it
+opens (each part an instance holding its own sound, as it played). A Performance that apart would
+not fit the memory allowance and shared would opens shared, as below, with a notice in
+`session.status`'s `notices`; `budget.estimate` and the library's fit count it in that layout.
+
+With `OSCAIRN_SHARING=memory` (or `balanced`) sharing is also formed on its own, as it was before:
+`graph.add` of such a plugin joins an instance with room, as
 above; opening, preparing or importing a Performance, or loading a Sound, puts nodes saved with an
 instance of their own (and wired from their main output only) into an instance with room, the
 Performance's own or, at a Performance change, the playing one's, whose incoming sounds are

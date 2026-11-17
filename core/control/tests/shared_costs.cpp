@@ -83,7 +83,7 @@ int main(int argc, char** argv)
     state_files::TemporaryDirectory temp;
     const auto alone = temp.path / "alone", shared = temp.path / "shared", performance = temp.path / "three";
 
-    // Three parts with an instance each (OSCAIRN_SHARING=cpu), at most eight notes each: opened, they share one instance.
+    // Three parts with an instance each (OSCAIRN_SHARING=cpu), at most eight notes each: opened with OSCAIRN_SHARING=memory, they share one instance.
     {
         ::setenv("OSCAIRN_DATA_HOME", (temp.path / "build").c_str(), 1);
         ::setenv("OSCAIRN_SHARING", "cpu", 1);
@@ -91,7 +91,7 @@ int main(int argc, char** argv)
         parts(s, 3, 8);
         check(s.graphState().shared.empty(), "built with an instance each");
         s.savePerformance(performance.string());
-        ::unsetenv("OSCAIRN_SHARING");
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
     }
 
     const auto one = measured(alone, 1), three = measured(shared, 3);

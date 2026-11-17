@@ -405,6 +405,10 @@ namespace oscairn
     // one of the plugin hosts, the plugin of each of its nodes, and their cost as placement counts it.
     struct PluginHostInfo { long pid = 0; bool pooled = false; std::vector<std::string> plugins; double cost = 0; };
     std::vector<PluginHostInfo> pluginHosts();
+    // Every worker process that has exited, failed now as its supervisor would at its next check (every 10 ms), so a
+    // Performance opening takes none of its instances over, as for any failed one; the supervisor restarts it. Returns how
+    // many. Never waits on a worker. Control thread.
+    size_t checkWorkers();
     // RFC 0005: one plugin's presets, read by the isolated scan helper the placement policy names
     // (its `scan`). The plugin's preset-provider code runs in that helper process (timeout, crash
     // isolation, stderr), never in this one, and off the caller's thread. One listing per binary

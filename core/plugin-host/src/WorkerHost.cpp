@@ -398,6 +398,7 @@ namespace oscairn
                 if(std::erase(nodes, n) && nodes.empty()) audioThreads.fetch_sub(1, std::memory_order_relaxed);
             }
             void supervise();
+            bool exitedNow(); // checkWorkers
             void restart();
             void separate(std::vector<WorkerHost*>& list); // the plugin a shared host's failure is put down to, out to a worker of its own
             void moveOut(std::vector<WorkerHost*>& list, std::shared_ptr<const Engine> engine); // a plugin's nodes, out of the list to a worker of their own
@@ -2064,6 +2065,22 @@ namespace oscairn
             }
         }
 
+        // A worker that exited, seen now rather than at its supervisor's next tick: failed as the tick would fail it, and the
+        // supervisor woken to restart it. Never waits: a supervisor in a tick or a restart, or a request under way, has it.
+        bool Process::exitedNow()
+        {
+            std::unique_lock lock(superviseMutex, std::try_to_lock);
+            if(!lock || stopping || gaveUp || failed.load()) return false;
+            std::unique_lock requests(control, std::try_to_lock);
+            int status = 0;
+            if(!requests || reaped || pid <= 0 || waitpid(pid, &status, WNOHANG) != pid) return false;
+            reaped = true;
+            if(WIFSIGNALED(status) && WTERMSIG(status) != SIGKILL) blame(bell->faulted);
+            fail(WIFSIGNALED(status) ? "Plugin worker crashed (signal " + std::to_string(WTERMSIG(status)) + ")" : "Plugin worker exited (status " + std::to_string(WEXITSTATUS(status)) + ")");
+            wakeSupervisor.notify_one();
+            return true;
+        }
+
         // Brings a failed worker back: a new process with the same plugin and its effect contexts,
         // each node restored and faded in. After maxRestarts within a minute the nodes stay silent.
         void Process::restart()
@@ -2358,6 +2375,18 @@ namespace oscairn
         if(!std::isfinite(share) || share < 0) return;
         std::lock_guard lock(pool().mutex);
         pool().costs[pluginId] = std::min(share, 1.0);
+    }
+
+    size_t checkWorkers()
+    {
+        std::vector<std::shared_ptr<Process>> all;
+        {
+            std::lock_guard lock(pool().listed);
+            for(const auto& w : pool().all) if(auto p = w.lock()) all.push_back(std::move(p));
+        }
+        size_t exited = 0;
+        for(const auto& p : all) if(p->exitedNow()) ++exited;
+        return exited;
     }
 
     std::vector<PluginHostInfo> pluginHosts()

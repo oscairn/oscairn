@@ -26,6 +26,7 @@
 #include <thread>
 #include <vector>
 #ifndef _WIN32
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -83,6 +84,45 @@ int main(int argc, char** argv)
         // again): the next one opens on instances of its own, not into the failed shared engines and
         // effect engines, which refused every later Performance using those plugins ("cannot restore
         // ... not restarted").
+        // Every worker killed at the moment of a switch, before a supervisor's tick (every 10 ms) has seen it: the next
+        // Performance opens all the same, its plugins loaded afresh where it would have taken over the dead instances,
+        // with the document's state, it sounds, and a notice says which had stopped. Before, the restore into a dead
+        // instance threw "cannot restore ...: Plugin worker connection lost" and the switch failed.
+        if(!placementPolicy().worker.empty())
+            for(int round = 0; round < 3; ++round)
+            {
+                Session g(48000, frames);
+                g.loadPerformance(performances[0].string());
+                render(g, 8);
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    std::vector<int> pids; char line[32];
+                    while(std::fgets(line, sizeof line, list)) pids.push_back(std::atoi(line));
+                    pclose(list);
+                    for(const int pid : pids) ::kill(pid, SIGKILL);
+                    for(const int pid : pids) // dead, not yet reaped (WNOWAIT: its supervisor reaps it)
+                        for(siginfo_t info{}; ::waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid != pid; info = {}) std::this_thread::yield();
+                }
+                std::string refused;
+                try { g.loadPerformance(performances[1].string()); } catch(const std::exception& e) { refused = e.what(); }
+                check(refused.empty(), "a switch at a worker's death opens: " + refused);
+                if(!refused.empty()) break;
+                // The document's state: each delay's time and each plain instrument's gain (save's values for variant 1).
+                bool state = true; std::string names;
+                for(const auto& [id, name] : g.graphState().names)
+                {
+                    if(name.rfind("delay 1-", 0) == 0) state = state && std::abs(g.parameter(id, 1) - .13) < 1e-6;
+                    if(name == "instrument 1-1" || name == "instrument 1-3") state = state && std::abs(g.parameter(id, 7) - .4) < 1e-6;
+                    names += name + " ";
+                }
+                check(state, "its plugins hold the document's state: " + names);
+                bool notice = false; for(const auto& n : g.sessionStatus().notices) notice = notice || n.find("had stopped") != std::string::npos;
+                check(notice, "a notice says the plugins had stopped");
+                g.note(true, 40, .9);
+                std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; float peak = 0;
+                for(int i = 0; i < 400 && peak < 1e-4f; ++i) { g.service(); g.process(out, frames); for(const float x : l) peak = std::max(peak, std::abs(x)); if(peak < 1e-4f) std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+                check(peak >= 1e-4f, "and it sounds: peak " + std::to_string(peak));
+            }
         if(!placementPolicy().worker.empty())
         {
             Session g(48000, frames);

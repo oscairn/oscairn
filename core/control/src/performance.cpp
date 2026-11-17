@@ -814,6 +814,10 @@ void Session::openPerformance(const std::string& directory) {
 }
 
 std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming) {
+    // A worker that died a moment ago, not yet seen by its supervisor, reads as failed now: no instance of it is taken over
+    // (it is loaded afresh, as for one known to have failed), and its supervisor restarts it.
+    checkWorkers();
+    std::string stopped;for(const auto& [n,name]:nodes_)if(!graph_.host(n).failure().empty())stopped+=(stopped.empty()?"":", ")+name;
     auto free=warm_;
     if(playing){auto more=freeInstances(all);
         // The middle rule (RFC 0021): unless it cuts, a playing instance is kept warm instead of taken
@@ -834,6 +838,7 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
     std::unique_ptr<Prepared> p;
     // Instances kept warm it gave a state to before it failed hold that state now, not the one remembered.
     try{p=read(root,std::move(free));}catch(...){for(auto& w:warm_)w.loaded.source.clear();throw;}
+    if(!stopped.empty()){p->notices.push_back("Plugins of the last Performance whose worker had stopped, loaded afresh where this one uses them: "+stopped);std::fprintf(stderr,"oscairn: %s\n",p->notices.back().c_str());}
     std::erase_if(warm_,[&](const Free& w){return std::find(p->warm.begin(),p->warm.end(),w.host.get())!=p->warm.end();});
     return p;
 }
@@ -1161,10 +1166,11 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto restoreTaken=[&](NodeId runtime,V node,uint64_t room,size_t f){
         auto& h=next->host(runtime);const auto key=text(field(node,"key"));
         // Its state already this node's, byte for byte: reset instead of loading it again.
-        if(free[f].loaded.source==source(key)){
+        if(free[f].loaded.source==source(key))try{ // one that fails here (its worker died since) is let go below, as one whose state does not load
             state_files::TemporaryDirectory now;{Clock c{stats.save};h.saveSnapshot((now.path/"now").string());}
             if(sameTree(now.path/"now",root/"nodes"/key) && [&]{Clock c{stats.reset};return h.reset();}()){
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());++kept;return;}}
+            catch(const std::exception& e){if(memoryRefusal(e))throw;}
         bool savable=true;
         if(free[f].node)try{saved.push_back({free[f].node,graph_.node(free[f].node).host,std::make_unique<state_files::TemporaryDirectory>()});Clock c{stats.save};h.saveSnapshot((saved.back().folder->path/"was").string());}
             catch(const std::exception&){saved.pop_back();savable=false;}

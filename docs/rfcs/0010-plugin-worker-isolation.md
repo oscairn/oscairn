@@ -307,6 +307,17 @@ Implemented 2026-10-30 in `WorkerHost.cpp` (native engines followed in step 5):
   state is loaded (sounds prepared from state, Performances restored from state), then the
   parameter values the old worker last published in the shared block. Each prepared sound is a
   plugin of its own, so each one comes back with its own record.
+- **A death at a switch** (2026-11-17): a worker's exit is seen at its supervisor's 10 ms tick, so a
+  Performance opened in between took its instances over as if alive, and the request restoring
+  one failed ("cannot restore …: Plugin worker connection lost"): the switch failed. Opening a
+  Performance now first asks each worker process whether it has exited (`checkWorkers`, a
+  non-blocking `waitpid`, never waiting on a supervisor busy with a tick or a restart): one that has
+  is failed then, as its tick would fail it, so nothing of it is taken over (the nodes that use
+  its plugin load afresh with the document's state, as for any failed instance) and its
+  supervisor restarts it; the opened Performance's notices name the last one's plugins whose
+  worker had stopped. A taken-over instance whose state check fails is let go for a fresh one, as
+  one whose state does not load (`control-performance-switch-stress-workers` and `-hosts`: every
+  worker killed and the next Performance opened at once, three rounds).
 - **Fade-in:** the restarted plugin's output fades in over 10 ms.
 - **Bounded:** at most 3 restarts a minute; after that the node stays silent and `failure()`
   says so ("…; not restarted: 3 restarts within a minute"). `Statistics::restarts` counts

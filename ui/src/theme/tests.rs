@@ -408,6 +408,14 @@ fn no_screen_hardcodes_what_the_theme_sets() {
             let literal = |key: &str| code.trim_start().strip_prefix(key).is_some_and(|v| v.trim_start().starts_with(|c: char| c.is_ascii_digit()));
             assert!(!hex_color && !code.contains("Colors.") && !code.contains("rgb(") && !code.contains("rgba("), "{name}:{}: a literal color: {line}", n + 1);
             assert!(!literal("border-radius:") && !literal("font-size:"), "{name}:{}: a literal radius or font size: {line}", n + 1);
+            if code.contains("opacity:") {
+                // A dimming alpha is the theme's `dim` (0.45) or `disabled` (0.4, theme.slint), never a literal with one of
+                // those values; an alpha of its own (routing.slint's 0.5 and 0.55) has no token and may stay.
+                let branch = code.split('?').nth(1).unwrap_or_default();
+                for word in branch.split(|c: char| !(c.is_ascii_digit() || c == '.')) {
+                    assert!(word.is_empty() || !["0.45", "0.4"].contains(&word), "{name}:{}: a literal dim or disabled alpha: {line}", n + 1);
+                }
+            }
         }
     }
     assert!(checked >= 9, "the screens were read");

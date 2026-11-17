@@ -24,7 +24,7 @@ export component Home inherits Rectangle {
     // The paddings grow the tile with the theme's spacing, so the chip, the name and the line keep their room.
     property <length> tile-height: 120px + 24px * (Theme.spacing - 1);
     property <length> icon-chip: 48px;
-    property <length> icon: 24px;
+    property <length> icon: Theme.icon;
     property <length> line: 18px;
     property <length> gap: Theme.gap-between(Theme.gap);
     // As home.rs's APPS: Performance, Library, Setlist, Groovebox, Recordings, Settings.

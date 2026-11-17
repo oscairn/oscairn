@@ -135,6 +135,11 @@ export global Theme {
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;
     out property <length> hair: 1px;
+    // The Home glyph (the top bar's and a tile's) and a strip's meter bars (play.slint and mixer.slint): each bar's
+    // thickness and the pitch from one to the next.
+    out property <length> icon: 24px;
+    out property <length> meter-width: 7px;
+    out property <length> meter-pitch: 10px;
     // A wait's bar (loading.slint): its thickness, the share of its track the sweep covers, and the sweep's period.
     out property <length> loading-bar: 3px;
     out property <float> loading-segment: 0.3;

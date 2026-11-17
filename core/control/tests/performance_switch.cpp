@@ -32,9 +32,9 @@
 #ifdef __APPLE__
 #include <libproc.h>
 #include <mach/mach_time.h>
+#endif
 #include "../../test-support/relaxed.h"
 using oscairn::test::relaxed;
-#endif
 
 using namespace oscairn;
 namespace fs = std::filesystem;

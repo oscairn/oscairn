@@ -134,10 +134,10 @@ export global Theme {
     // How much of the width a rail may take to hold its longest label on one line (the rail is the theme's width, more only
     // for that).
     out property <float> rail-label-share: 0.16;
-    // A list's scroll bar (touch aid only): the visible bar, its own lane (the touch target, wider than the bar) and the
+    // A list's scroll bar (touch aid only): its own lane (the touch target), the visible bar (a third of the lane) and the
     // thumb's least length.
-    out property <length> scroll-bar: 6px;
-    out property <length> scroll-lane: 24px;
+    in-out property <length> scroll-lane: touch;
+    in-out property <length> scroll-bar: scroll-lane / 3;
     out property <length> scroll-thumb-min: touch;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;

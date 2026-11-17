@@ -34,6 +34,13 @@ pub(super) fn scene(name: &str, n: usize) -> Shelf {
     s
 }
 
+/// A picture named as is (lib-B-search), when OWNER_SHOTS names a folder.
+pub(super) fn lib_png(s: &Shelf, name: &str) {
+    if let Ok(dir) = std::env::var("OWNER_SHOTS") {
+        png_of(&dir, &s.f.screen.pixels, s.f.screen.w, s.f.screen.h, name);
+    }
+}
+
 /// The picture, when OWNER_SHOTS names a folder.
 pub(super) fn owner_png(s: &Shelf, name: &str) {
     if let Ok(dir) = std::env::var("OWNER_SHOTS") {
@@ -196,4 +203,28 @@ fn the_scroll_bar_is_tapped_and_dragged() {
     // And back to the top, the footer in step.
     drag_bar(&mut s, 0.98, 0.0, 20);
     assert_eq!(first_shown(&s), 1);
+}
+
+// The scroll bar can be hit with a finger: its lane is the theme's touch target and the visible bar a third of it or more
+// (lib-A-1 is the narrower lane tried, three quarters of a touch target; lib-A-2 the default).
+#[test]
+fn the_scroll_bar_is_wide_enough_to_tap() {
+    for (n, lane_of_touch) in [(1, 0.75f32), (2, 1.0)] {
+        let mut s = scene("owner-wide", 300);
+        let ui = s.ui();
+        let t = ui.global::<crate::Theme>();
+        if n == 1 {
+            t.set_scroll_lane(t.get_touch() * lane_of_touch);
+        }
+        shell::act(Action::Move { pane: None, by: 1 });
+        shell::act(Action::Move { pane: None, by: 150 });
+        s.serve();
+        s.f.screen.frame();
+        s.f.screen.frame();
+        lib_png(&s, &format!("lib-A-{n}"));
+        if n == 2 {
+            assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "the lane is a touch target: {} of {}", t.get_scroll_lane(), t.get_touch());
+            assert!(t.get_scroll_bar() >= t.get_scroll_lane() / 3. - 0.01, "the bar is a third of the lane: {}", t.get_scroll_bar());
+        }
+    }
 }

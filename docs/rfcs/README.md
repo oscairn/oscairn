@@ -54,3 +54,4 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | proposed |
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |
 | [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | accepted 2026-11-13 but for decision 6, held; steps 1 to 4 and 6 built |
+| [0046](0046-voice-importance-across-parts.md) | Voice importance across parts | proposed |

@@ -61,7 +61,7 @@ export global PartState {
     callback step(int, int); // a row and -1 or 1
 }
 
-component Row inherits Section {
+export component Row inherits Section {
     in property <SettingData> data;
     callback tapped();
     callback step(int);
@@ -191,6 +191,49 @@ component Row inherits Section {
     }
 }
 
+// A list's scroll bar, a touch aid: a thin bar in a lane wider than it (the touch target), its thumb the view's share of the
+// list (never shorter than `Theme.scroll-thumb-min`) at the view's place. A tap on the track or a drag asks for the view at
+// that place (`scrolled`, a whole view's first row); it is not a cursor stop and draws nothing while the list fits.
+export component ScrollBar inherits Rectangle {
+    in property <int> total;
+    in property <int> first;
+    in property <int> per-view;
+    callback scrolled(int);
+    out property <length> thumb-h: min(root.height, max(Theme.scroll-thumb-min, root.height * root.per-view / max(1, root.total)));
+    out property <length> thumb-y: (root.height - root.thumb-h) * min(1.0, root.first / max(1, root.total - root.per-view));
+    function seek(y: length) {
+        let f = min(1.0, max(0.0, (y - root.thumb-h / 2) / max(1px, root.height - root.thumb-h)));
+        let page = floor(round(f * (root.total - root.per-view)) / root.per-view) * root.per-view;
+        if (page != root.first) {
+            root.scrolled(page);
+        }
+    }
+    Rectangle {
+        x: (parent.width - Theme.scroll-bar) / 2;
+        width: Theme.scroll-bar;
+        border-radius: self.width / 2;
+        background: Theme.track;
+        Rectangle {
+            y: root.thumb-y;
+            height: root.thumb-h;
+            border-radius: parent.border-radius;
+            background: Theme.muted;
+        }
+    }
+    TouchArea {
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.seek(self.mouse-y);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.seek(self.mouse-y);
+            }
+        }
+    }
+}
+
 export component Part inherits Rectangle {
     // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
     property <length> gap: Theme.gap-between(Theme.gap);
@@ -202,16 +245,9 @@ export component Part inherits Rectangle {
     // The scroll bar, when the list is longer than the view: its own lane at the list's right edge, the rows narrower by it.
     property <bool> long: PartState.total > root.per-view;
     property <length> lane: root.long ? Theme.scroll-lane : 0px;
-    out property <length> thumb-h: min(root.list-height, max(Theme.scroll-thumb-min, root.list-height * root.per-view / max(1, PartState.total)));
-    out property <length> thumb-y: (root.list-height - root.thumb-h) * min(1.0, PartState.first / max(1, PartState.total - root.per-view));
+    out property <length> thumb-h: bar.thumb-h;
+    out property <length> thumb-y: bar.thumb-y;
     out property <length> lane-x: root.list-width - root.lane + Theme.margin;
-    function seek(y: length) {
-        let f = min(1.0, max(0.0, (y - root.thumb-h / 2) / max(1px, root.list-height - root.thumb-h)));
-        let page = floor(round(f * (PartState.total - root.per-view)) / root.per-view) * root.per-view;
-        if (page != PartState.first) {
-            PartState.scrolled(page);
-        }
-    }
     property <length> line: Theme.body + Theme.margin;
     // A lane's key range as the strip over the keyboard, over the panel's lines.
     property <length> strip-height: StripState.shown ? Theme.body + Theme.pad-narrow + Theme.touch + Theme.pad : 0px;
@@ -232,35 +268,16 @@ export component Part inherits Rectangle {
         tapped => { PartState.tapped(i); }
         step(by) => { PartState.step(i, by); }
     }
-    if root.long: Rectangle {
-        x: root.lane-x + (Theme.scroll-lane - Theme.scroll-bar) / 2;
-        y: root.list-y;
-        width: Theme.scroll-bar;
-        height: root.list-height;
-        border-radius: self.width / 2;
-        background: Theme.track;
-        Rectangle {
-            y: root.thumb-y;
-            height: root.thumb-h;
-            border-radius: parent.border-radius;
-            background: Theme.muted;
-        }
-    }
-    if root.long: TouchArea {
+    bar := ScrollBar {
+        visible: root.long;
         x: root.lane-x;
         y: root.list-y;
         width: Theme.scroll-lane;
         height: root.list-height;
-        pointer-event(e) => {
-            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                root.seek(self.mouse-y);
-            }
-        }
-        moved => {
-            if (self.pressed) {
-                root.seek(self.mouse-y);
-            }
-        }
+        total: PartState.total;
+        first: PartState.first;
+        per-view: root.per-view;
+        scrolled(page) => { PartState.scrolled(page); }
     }
     Section {
         x: 2 * Theme.margin + root.list-width;

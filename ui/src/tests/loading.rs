@@ -376,3 +376,58 @@ fn a_long_name_is_cut_and_moves_nothing() {
     assert!(ui.get_loading_width() < chip);
     assert_eq!(place(&ui), before);
 }
+
+/// The chip's text stands centered against the pill: the gap from the text's ink to the pill's inner
+/// edge is the same above and below, within a pixel, in the dark theme and the light one. A text with
+/// neither descenders nor letters below the cap line stands for the text's box: its ink then reaches
+/// equally far from the box's top and bottom. The bar under the text keeps to the pill's foot.
+#[test]
+fn the_chip_s_text_is_centered_in_the_pill() {
+    let mut f = Fixture::new("loading-centering");
+    f.engine.answer();
+    f.pump();
+    f.reopened();
+    shell::goto(shell::Screen::Play);
+    let ui = f.screen.ui.clone_strong();
+    let bar = ui.global::<Bar>();
+    bar.set_performance("Harbor Lights".into());
+    bar.set_loading("LOADING AREA 123".into());
+    f.screen.frame();
+    f.screen.frame();
+    for id in ["oscairn-dark", "oscairn-light"] {
+        theme::apply(&ui, &theme::chosen(&theme::Places::default(), id, ""));
+        f.screen.frame();
+        let g = ui.global::<crate::Theme>();
+        let (fill, ink) = (g.get_loading_background(), g.get_loading_text());
+        let rgb = |c: slint::Color| (i32::from(c.red()), i32::from(c.green()), i32::from(c.blue()));
+        let (fill, ink) = (rgb(fill), rgb(ink));
+        let (w, h) = (f.screen.w, f.screen.h);
+        let at = |x: usize, y: usize| {
+            let p = f.screen.pixels[y * w + x];
+            (i32::from(p.r), i32::from(p.g), i32::from(p.b))
+        };
+        let near = |p: (i32, i32, i32), c: (i32, i32, i32)| (p.0 - c.0).pow(2) + (p.1 - c.1).pow(2) + (p.2 - c.2).pow(2);
+        // The chip: the rows of the top bar that hold its fill.
+        let top = h.min(60);
+        let fill_rows: Vec<usize> = (0..top).filter(|&y| (0..w).any(|x| near(at(x, y), fill) <= 64)).collect();
+        let (chip_top, chip_last) = (*fill_rows.first().unwrap(), *fill_rows.last().unwrap());
+        // The text: contiguous rows holding the ink, from the chip's top down; the first band is the
+        // text's, the ones after are the bar and its sweep.
+        let ink_rows: Vec<usize> = (chip_top..=chip_last).filter(|&y| (0..w).any(|x| near(at(x, y), ink) <= 64)).collect();
+        let mut bands: Vec<(usize, usize)> = Vec::new();
+        for y in ink_rows {
+            match bands.last_mut() {
+                Some(b) if y == b.1 + 1 => b.1 = y,
+                _ => bands.push((y, y)),
+            }
+        }
+        // The sweep's visible width varies with its phase, so its band may be too faint to count; the
+        // text's is always first (the bar keeps to the foot, a gap of theme paddings between).
+        assert!(!bands.is_empty(), "{id}: the text shows (bands {bands:?})");
+        let (text_top, text_last) = bands[0];
+        let (up, down) = (text_top - chip_top, chip_last - text_last);
+        assert!((up as i32 - down as i32).abs() <= 1, "{id}: the text's gap is {up} above and {down} below");
+        png(&f.screen, &format!("loading-centering-{id}"));
+    }
+    theme::apply(&ui, &theme::chosen(&theme::Places::default(), "", ""));
+}

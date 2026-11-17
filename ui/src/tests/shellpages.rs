@@ -64,7 +64,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     // Chorus, then its Parameters.
     shell::act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor
     shell::act(Action::Move { pane: None, by: 1 });
-    shell::act(Action::Confirm(None));
+    shell::act(Action::Confirm(None)); // Chorus, then its Parameters.
     let r = next(&mut f, "window.info");
     f.reply(&r, json!({"result": {"available": false}}));
     assert_eq!(rows(&ui)[0].0, "Parameters");
@@ -105,4 +105,117 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     assert_eq!(rows(&ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Search", "Filters", "Warm Rhodes"]);
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 4);
+}
+
+// A `session.resync` (the engine's parameter-change history wrapped, or a pending command dropped:
+// docs/control-protocol.md) means the page's values may be stale: it reads them again, as an Undo does,
+// while the page is shown; with no such screen shown it asks nothing.
+#[test]
+fn a_session_resync_reads_the_page_values_again() {
+    let mut f = Fixture::new("resync");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    let graph = super::part::part_graph();
+    let ui = f.screen.ui.clone_strong();
+    // What comes, comes in an order that drifts with how the events are pumped: answer whatever is
+    // asked until the engine goes quiet, then act, so no ordering is relied on.
+    let settle = |f: &mut Fixture| {
+        let mut quiet = 0;
+        while quiet < 2 {
+            let Some(r) = f.engine.try_request(std::time::Duration::from_millis(400)) else { quiet += 1; continue };
+            quiet = 0;
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "session.status" => json!({"midiInputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "window.info" => json!({"available": false}),
+                "params.list" => super::pages::param_list(),
+                "params.get" => json!({"values": [{"node": 2, "param": 1, "value": 0.25}]}),
+                "params.text" => json!({"text": format!("{}", r["params"]["value"].as_f64().unwrap_or_default())}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": result})));
+            // The answer's event and everything it wakes, without a blocking wait: nothing may be pending.
+            for _ in 0..25 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                f.drain();
+            }
+        }
+    };
+    settle(&mut f); // Play's data: its parts, so the tap finds one
+    ui.global::<crate::PlayState>().invoke_part_tapped(0); // Performance: Play's Part
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 4);
+    // The last view of the Part list: Name, Remove part (twelve rows a view; Sound and Insert effects end the one before).
+    shell::act(Action::End(1));
+    shell::act(Action::End(1));
+    shell::act(Action::Move { pane: None, by: -2 });
+    assert_eq!(rows(&ui)[11].0, "Insert effects");
+    shell::act(Action::Confirm(None)); // the chain opens
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (5, "Keys › Insert effects".to_string()));
+    assert_eq!(rows(&ui)[1].0, "1. Chorus");
+    // Chorus, then its Parameters.
+    shell::act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor, on Chorus
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Confirm(None)); // the plugin's actions
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (5, "Keys › Insert effects › Chorus".to_string()));
+    assert_eq!(rows(&ui)[0].0, "Parameters", "the plugin's actions");
+    // Parameters.
+    shell::act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor, on Parameters
+    shell::act(Action::Confirm(None));
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (7, "Keys › Insert effects › Chorus".to_string()));
+    assert_eq!(tiles(&ui)[2], ("Resonance".to_string(), "0.25".to_string()));
+    // A `session.resync` (the engine's parameter-change history wrapped, or a pending command dropped:
+    // docs/control-protocol.md) means the page's values may be stale: it reads them again, as an Undo
+    // does, in requests of at most 128, and the page shows what came back.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "session.resync", "params": {"topic": "params.changed"}})));
+    for _ in 0..25 {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        f.drain();
+    }
+let mut asked: Vec<usize> = Vec::new();
+    let mut quiet = 0;
+    while quiet < 2 {
+        let Some(r) = f.engine.try_request(std::time::Duration::from_millis(700)) else { quiet += 1; continue };
+        quiet = 0;
+        let method = r["method"].as_str().unwrap_or_default().to_string();
+        if method != "params.get" {
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "params.text" => json!({"text": "0.75"}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": result})));
+            for _ in 0..25 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                f.drain();
+            }
+            continue;
+        }
+        let values = r["params"]["values"].as_array().unwrap().iter().map(|v| v["param"].as_u64().unwrap()).collect::<Vec<_>>();
+        assert!(values.len() <= 128);
+        asked.push(values.len());
+        let all: Vec<_> = values.iter().map(|&p| json!({"node": 2, "param": p, "value": if p == 1 { 0.75 } else { 0.5 }})).collect();
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": {"values": all}})));
+        for _ in 0..25 {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            f.drain();
+        }
+    }
+    assert!(!asked.is_empty(), "a session.resync with the page shown asked for its values again: nothing came");
+    let shown: usize = super::pages::param_list()["parameters"].as_array().unwrap().iter().filter(|p| p["flags"].as_u64().unwrap_or(0) & 4 == 0).count(); // FLAG_HIDDEN
+    assert_eq!(asked.iter().sum::<usize>(), shown, "every parameter of the page asked again");
+    assert_eq!(tiles(&ui)[2], ("Resonance".to_string(), "0.75".to_string()), "the value read again is shown");
+    // Back on the chain (the page gone, params.changed let go): a resync asks nothing.
+    shell::act(Action::Cancel(None));
+    settle(&mut f);
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "session.resync", "params": {"topic": "params.changed"}})));
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "a resync with no parameter page shown asked for something");
 }

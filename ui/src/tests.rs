@@ -306,6 +306,13 @@ impl Fixture {
         shell::dispatch(self.events.recv_timeout(WAIT).unwrap());
     }
 
+    /// Hands the shell every event already delivered, so the next act runs on a settled screen.
+    fn drain(&mut self) {
+        while let Ok(event) = self.events.try_recv() {
+            shell::dispatch(event);
+        }
+    }
+
     /// The next request, answered with `result`.
     fn answer(&mut self, method: &str, result: serde_json::Value) {
         let mut request = self.engine.request();

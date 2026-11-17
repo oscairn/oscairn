@@ -161,8 +161,11 @@ Checked when built and tested; the sections below say how.
 - [ ] 9. Each version's plugins in the index; repositories' kept state keyed by their root key
       ([finding missing plugins](#finding-missing-plugins))
       (built 2026-11-11: serials seen and kept indexes keyed by root key and repository ID,
-      version 1's moved once; `control-repository`. Not yet: each version's plugins, the index
-      builder's checks, an address-to-ID map for lookups)
+      version 1's moved once; `control-repository`. Built 2026-11-16 with RFC 0043's step 1: each
+      version's plugins in the template's index, `{format,id,version,platforms}` and
+      `opensStateFrom` when claimed; `package-repository-index`. Not yet: the device reading them,
+      the index builder's checks (one publisher per plugin ID, IDs differing only in case), an
+      address-to-ID map for lookups)
 - [ ] 10. The repository hint, `pluginRepositories`, read, checked and kept in archives,
       Performances and Sounds
 - [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins

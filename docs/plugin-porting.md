@@ -165,6 +165,32 @@ right after every load, as the recovery record, so `save` must work straight aft
 Without the state extension, a Performance stores only parameter values, for plugins with up
 to 2,048 writable parameters.
 
+**Opening an older version's state.** A saved sound names the exact version it was saved with,
+and opens only with that version unless the musician moves it to a newer one
+([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md)). A move offers your newer
+version only where you declare, in the package's signed manifest, the oldest version whose state
+it opens: `oscairn-sign plugin-package --opens-state-from <id> <oldest-version>`, with
+`--sound-changes <id> "<what may sound different>"` for what a fix changes
+([the claim](library-archive.md#the-publishers-claim)). Versions must be dotted numbers
+(`0.4.6`). Declaring it is a promise that the state opens, not that it sounds identical. Before
+you declare it, make sure that for a state saved by every version from that one up to this one:
+
+- `load` accepts it without error (read every older layout your `save` ever wrote; version your
+  state's format yourself, since CLAP says nothing about versions);
+- the audio and note ports are the same;
+- every parameter keeps its ID, range and meaning, and nothing the state holds is dropped;
+- a parameter or setting added since takes, when an older state lacks it, the value that sounds
+  as the older version did (a new filter mode defaults to the old filter), not the new default;
+- it sounds the same except for what `--sound-changes` says (leave it out only when it sounds
+  the same).
+
+A plugin without the state extension cannot make the promise across an added parameter: its
+saved parameter list must match the new version's exactly, or the snapshot is refused.
+**Put a test in your plugin's own suite** that loads a state saved by each version you declare
+(the oldest and the last, at least, kept as files in the tests) and checks it loads, keeps every
+parameter's value and renders as expected. A false claim is grounds for the repository to yank
+the version.
+
 ### Oscairn extensions
 
 Oscairn's own extensions are optional: a plugin without them works as above, and gets what the
@@ -1010,6 +1036,9 @@ What changes for the plugin:
   A bundle holding several plugins is signed for all of them at once (`oscairn-sign build`
   takes the IDs comma-separated) and packed once, each plugin named with `--plugin <id>
   <name>`; a plugin whose version is not the package's is `<id>@<version>` to both. A preset-discovery provider in it is not a plugin and is neither listed nor signed.
+  `--opens-state-from <id> <version>` and `--sound-changes <id> <text>` add your claim that this
+  version opens older versions' saved state ([above](#state-clap)); a device keeps it only from a
+  package signed whole by a key that also signed the builds, and `plugins.list` shows it.
   `--estimate <platform> <cpu> <memory-bytes>` gives a build its resource estimate
   ([RFC 0025](rfcs/0025-resource-budgets.md#status)), as `oscairn-plugin-check` prints it
   on that platform: a device that has not measured your plugin itself counts it at this,

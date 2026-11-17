@@ -100,6 +100,7 @@ namespace oscairn
 
         // The parser preserves number tokens, so request IDs never pass through double.
         using detail::quote;
+        std::string orNull(const std::string& s) { return s.empty() ? std::string("null") : detail::quote(s); } // an optional text field: null when there is none
         std::string encode( double n )
         {
             if( !std::isfinite( n ) ) throw std::runtime_error( "Nonfinite control result" );
@@ -998,7 +999,8 @@ namespace oscairn
                     for(const auto& s:x.platforms)platforms.push_back(quote(s));
                     for(const auto& s:x.usedBy)used.push_back(quote(s));
                     out.push_back("{\"format\":"+quote(x.format)+",\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"name\":"+quote(x.name)+",\"platforms\":"+join(platforms)+
-                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+'}');
+                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+
+                                  ",\"opensStateFrom\":"+orNull(x.opensStateFrom)+",\"soundChanges\":"+orNull(x.soundChanges)+",\"claimKey\":"+orNull(x.claimKey)+'}');
                 }
                 return "{\"plugins\":"+join(out)+'}';
             }

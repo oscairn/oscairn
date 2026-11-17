@@ -29,7 +29,12 @@ namespace oscairn
         struct Build { std::string platform, path, sha256; std::vector<signing::Signature> signatures = {}; double cpu = 0; uint64_t memory = 0; };
         // absent: the platforms whose builds the manifest lists and the archive leaves out, as an
         // archive made for one device may (RFC 0031); those builds are not in `builds`.
-        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; std::vector<std::string> absent = {}; };
+        // opensStateFrom and soundChanges: the publisher's claim (RFC 0043), optional: the oldest
+        // version of this format and ID whose saved state this version opens (loads, the same
+        // ports, every setting kept, the same sound except as soundChanges says), and what may
+        // sound different, plain text of at most 1,000 bytes. A promise that the state opens, not
+        // that it sounds identical; signed only by the package signature (claimKey).
+        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; std::vector<std::string> absent = {}; std::string opensStateFrom = {}, soundChanges = {}; };
         std::string id, name;
         // "library"; "performance" or "sound" for an exported item; "plugin" for a plugin package,
         // which holds plugin builds and no items; "asset" for an asset package, which holds an
@@ -107,6 +112,14 @@ namespace oscairn
     // Untrusted: refuses anything else, leaving what it wrote for the caller to remove.
     void unpackPiece(const std::filesystem::path& zip, const std::filesystem::path& into, const std::string& under, uint64_t most);
 
+    // A version the publisher's claim can name (RFC 0043): 1 to 4 dot-separated numbers, each 1
+    // to 9 digits ("0.4.6"), as CLAP's version is otherwise any text and cannot be ordered.
+    bool claimVersion(const std::string& version);
+    // The key a plugin's claim (opensStateFrom) is kept under: the archive's package signature's,
+    // when the archive is signed and that key also signed each of the plugin's builds in it;
+    // empty when there is no claim or it is not to be kept (RFC 0043).
+    std::string claimKey(const Package& package, const Package::Plugin& plugin);
+
     // The manifest, library.json, as the archive and an installed library hold it.
     std::string manifestJson(const Package& package);
 
@@ -135,6 +148,8 @@ namespace oscairn
     // or digit and not ending in `.`), or whose items or builds are
     // not in the archive, not for a knownPlatform, or whose build is not a .clap or .lv2 bundle,
     // a plugin listed twice (several plugins may list one bundle's path: a bundle holding them all),
+    // a plugin's claim (RFC 0043) whose versions are not claimVersion's, whose opensStateFrom is
+    // newer than its version, or whose soundChanges is empty, over 1,000 bytes or without opensStateFrom,
     // and a signature that does not verify (each
     // build's over its listed digest, library.sig over the manifest, each item's over its content
     // hash). On refusal `into` is removed. With `into` empty, nothing is extracted: the same

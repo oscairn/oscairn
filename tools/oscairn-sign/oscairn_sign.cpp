@@ -38,6 +38,7 @@ namespace
                    "                             [--asset-dependency <library-id> <least-version>]...\n"
                    "                             [--package-dependency <package-id> <least-version>]...\n"
                    "                             [--estimate <platform> <cpu> <memory-bytes>]...\n"
+                   "                             [--opens-state-from <id> <version>]... [--sound-changes <id> <text>]...\n"
                    "                             <archive.olib> <format> <id> <version> <name> <platform>=<build>...\n"
                    "      pack plugin builds, each with the signatures in <build>.sig beside it, into a\n"
                    "      plugin package (an archive with no items) with that ID and name; with --key,\n"
@@ -53,7 +54,12 @@ namespace
                    "      kind it needs (installed first from a repository). --estimate gives that platform's build\n"
                    "      its resource estimate (RFC 0025), as oscairn-plugin-check prints it: its busiest\n"
                    "      block's share of the block's time and the bytes it holds; a device that has not\n"
-                   "      measured the plugin itself counts it at this\n"
+                   "      measured the plugin itself counts it at this. --opens-state-from is the publisher's\n"
+                   "      claim (RFC 0043) that plugin <id> opens the state saved by any version from <version>\n"
+                   "      up to its own: it loads, keeps its ports and every setting, and sounds the same but\n"
+                   "      for what --sound-changes says (at most 1,000 bytes). A promise that the state opens,\n"
+                   "      not that it sounds identical; versions must be dotted numbers. A device keeps the\n"
+                   "      claim only from a package signed whole (--key) by a key that signed the builds\n"
                    "  oscairn-sign asset-package [--key <key-file>] --license <spdx> [--license-file <file>]...\n"
                    "                            [--source <url> <commit-or-tag>] [--package-dependency <package-id> <least-version>]...\n"
                    "                            <archive.olib> <library-id> <version> <name> <folder>\n"
@@ -168,6 +174,7 @@ int main(int argc, char** argv)
             Package p;
             std::vector<fs::path> licenseFiles; // --license-file: each into Licenses/
             std::map<std::string, std::pair<double, uint64_t>> estimates; // --estimate: cpu and memory by platform
+            std::map<std::string, std::pair<std::string, std::string>> claims; // --opens-state-from and --sound-changes by plugin ID (RFC 0043)
             while(!rest.empty() && rest[0].rfind("--", 0) == 0)
             {
                 if(rest[0] == "--key" && rest.size() > 1) { key = std::make_unique<signing::Key>(signing::loadKey(rest[1])); rest.erase(rest.begin(), rest.begin() + 2); }
@@ -179,6 +186,8 @@ int main(int argc, char** argv)
                 else if(rest[0] == "--asset-dependency" && rest.size() > 2) { p.assetDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
                 else if(rest[0] == "--package-dependency" && rest.size() > 2) { p.packageDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
                 else if(rest[0] == "--estimate" && rest.size() > 3) { estimates[rest[1]] = {std::stod(rest[2]), std::stoull(rest[3])}; rest.erase(rest.begin(), rest.begin() + 4); }
+                else if(rest[0] == "--opens-state-from" && rest.size() > 2) { claims[rest[1]].first = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--sound-changes" && rest.size() > 2) { claims[rest[1]].second = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
                 else return usage();
             }
             if(rest.size() < 6) return usage();
@@ -191,6 +200,12 @@ int main(int argc, char** argv)
                 if(std::any_of(p.plugins.begin(), p.plugins.end(), [&](const auto& q) { return q.id == id; })) throw std::runtime_error("plugin " + id + " is listed twice");
                 p.plugins.push_back({rest[1], id, version, name, {}});
                 ids += (ids.empty() ? "" : ", ") + id + (version == rest[3] ? "" : "@" + version);
+            }
+            for(const auto& [id, claim] : claims)
+            {
+                const auto plugin = std::find_if(p.plugins.begin(), p.plugins.end(), [&](const auto& q) { return q.id == id; });
+                if(plugin == p.plugins.end()) throw std::runtime_error("--opens-state-from or --sound-changes names " + id + ", which the package does not hold");
+                plugin->opensStateFrom = claim.first; plugin->soundChanges = claim.second;
             }
             const auto format = rest[1], version = rest[3];
             std::random_device random;

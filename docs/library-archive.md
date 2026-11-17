@@ -32,7 +32,7 @@ The manifest:
 | `license` | Its license, an SPDX expression (at most 256 bytes); empty when it names none. A plugin package names one |
 | `source` | `null`, or where its source is: `{url, revision}`, an `https://` address and the exact commit or tag (at most 2048 and 128 bytes, no spaces or control characters) |
 | `items` | Each item's `kind` (its [item type](rfcs/0023-item-types.md)'s: `performance`, `sound`, or another type's), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
-| `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, `signatures` (optional) and `estimate` (optional, [RFC 0025](rfcs/0025-resource-budgets.md#status): `{cpu,memory}`, its busiest block's share of the block's time, 0 to 64, and the bytes it holds, at most 1 TiB, as `oscairn-plugin-check` measures it on that platform; installing keeps it beside the build as `estimate.json`, and a device that has not measured the plugin counts it at this) |
+| `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, `signatures` (optional) and `estimate` (optional, [RFC 0025](rfcs/0025-resource-budgets.md#status): `{cpu,memory}`, its busiest block's share of the block's time, 0 to 64, and the bytes it holds, at most 1 TiB, as `oscairn-plugin-check` measures it on that platform; installing keeps it beside the build as `estimate.json`, and a device that has not measured the plugin counts it at this); and optionally the publisher's claim, [below](#the-publishers-claim): `opensStateFrom` and `soundChanges` |
 | `files` | Every other entry's SHA-256, by its path |
 | `pluginRepositories` | Optional: where the plugins its items use are published ([below](#where-plugins-are-published)). Not built: no reader takes it yet |
 
@@ -619,8 +619,9 @@ that. A pulled drive or a bad hash leaves nothing behind.
 ## The plugin store
 
 `Plugins/<format>/<id>@<version>/` in the data folder (characters other than letters, digits,
-`.`, `-`, `@` and `_` made `_`) holds `plugin.json`, `{format, id, version, name}`, as the folder
-name cannot say them exactly, and a folder per platform with its build: `macos-arm64/Odin2.clap`.
+`.`, `-`, `@` and `_` made `_`) holds `plugin.json`, `{format, id, version, name, license}`, as the folder
+name cannot say them exactly, with the publisher's claim when one was kept
+(`opensStateFrom`, `soundChanges` and `claimKey`, [below](#the-publishers-claim)), and a folder per platform with its build: `macos-arm64/Odin2.clap`.
 The desktop's plugin scan looks in each plugin's folder for its own platform, so what an
 archive installed is found there.
 `plugins.list` shows each plugin with the library items that use it; removing one is refused
@@ -631,3 +632,43 @@ installed as a library on the device it came from shows the original, not the lo
 Installed into the user's own storage (the default for an export) it is a new copy.
 
 Not yet: a Sound from a locked library exported as that library's item, and grouped cleanup of plugins nothing uses (RFC 0006).
+
+### The publisher's claim
+
+A newer version of a plugin may say which older versions' saved state it opens
+([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)), on its entry
+in `plugins`:
+
+```json
+{"format": "clap", "id": "org.oscairn.analog", "version": "0.4.6", "name": "Oscairn Analog",
+ "opensStateFrom": "0.4.0", "soundChanges": "Notes no longer stick when a chord is released during the glide.",
+ "builds": [ … ]}
+```
+
+- **`opensStateFrom`**: the oldest version of the same format and ID whose saved state this version
+  opens. For a state saved by any version from that one up to this one, it promises that the
+  state loads without error, the audio and note ports are the same, every parameter keeps its ID,
+  value and meaning and nothing the state holds is dropped, and it sounds the same except as
+  `soundChanges` says. **It is a promise that the state opens and keeps its settings, not that it
+  sounds identical:** the musician's ears, and Compare, are the last check.
+- **`soundChanges`**: what may sound different from the older versions (the fixed bug), plain
+  text of at most 1,000 bytes, only with `opensStateFrom`. Absent: the same sound is part of the claim.
+- Both versions are 1 to 4 dot-separated numbers (`0.4.6`), compared as numbers, and
+  `opensStateFrom` is not newer than the version; a claim otherwise, or a `soundChanges` empty,
+  too long or without `opensStateFrom`, refuses the archive. CLAP's version is any text, so a
+  plugin whose versions are not dotted numbers cannot make the claim.
+- `oscairn-sign plugin-package --opens-state-from <id> <version> --sound-changes <id> <text>`
+  writes it, per plugin of the package.
+- **Signed by the package signature** (`library.sig`, over the manifest's bytes); build signatures
+  do not cover it. An install keeps it in the store's `plugin.json`, with the key as `claimKey`,
+  only when the archive is signed whole by a key that also signed each of that plugin's builds in
+  it, and only for this device's build as the archive holds it (a different build already there
+  keeps its own). A build stored from an archive without a kept claim drops any claim recorded
+  before. A plugin installed by hand or added with `plugins.addBuild` has none. `plugins.list`
+  shows `opensStateFrom`, `soundChanges` and `claimKey` (null when none).
+- A repository's index repeats `opensStateFrom` per version's plugin, so a newer version can be
+  offered before downloading ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-index-must-say-which-plugins-a-version-holds));
+  the device trusts the claim only from the installed archive. Nothing moves a saved sound on its
+  own because of it: moving is the musician's explicit action (RFC 0043).
+- Optional fields: archives without them read as before, so the archive's version stays 3, as
+  `dependencies.packages` did.

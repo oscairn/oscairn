@@ -51,6 +51,6 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0040](0040-ios-developer-builds.md) | iOS and iPadOS developer builds | proposed |
 | [0041](0041-windows-desktop.md) | Windows desktop, process and IPC support | proposed |
 | [0042](0042-sliders-and-drawbars.md) | Sliders that follow a part, and organ drawbars | proposed |
-| [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | proposed |
+| [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | in progress: step 1 built |
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |
 | [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | accepted 2026-11-13 but for decision 6, held; steps 1 to 4 and 6 built |

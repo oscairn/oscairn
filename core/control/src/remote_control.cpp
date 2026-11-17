@@ -35,6 +35,7 @@ namespace oscairn
             if(!v || v->type!=json_type_string)throw std::runtime_error("Expected RPC string");
             const auto* s=static_cast<const json_string_s*>(v->payload);return {s->string,s->string_size};
         }
+        std::string orEmpty(V v) { return v && v->type==json_type_null ? std::string() : string(v); } // an optional text field, null for none
         double number(V v)
         {
             if(!v || v->type!=json_type_number)throw std::runtime_error("Expected RPC number");
@@ -662,7 +663,8 @@ namespace oscairn
     std::vector<Control::InstalledPlugin> RemoteControl::installedPlugins() {
         auto d=impl_->call("plugins.list","{}",30000);std::vector<InstalledPlugin> out;
         for(auto x:array(field(field(d.get(),"result"),"plugins")))
-            out.push_back({string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),strings(field(x,"platforms")),uint64_t(integer(field(x,"bytes"))),strings(field(x,"usedBy")),boolean(field(x,"open")),string(field(x,"license"))});
+            out.push_back({string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),strings(field(x,"platforms")),uint64_t(integer(field(x,"bytes"))),strings(field(x,"usedBy")),boolean(field(x,"open")),string(field(x,"license")),
+                           orEmpty(field(x,"opensStateFrom")),orEmpty(field(x,"soundChanges")),orEmpty(field(x,"claimKey"))});
         return out;
     }
     void RemoteControl::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& platform) {

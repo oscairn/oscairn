@@ -335,6 +335,43 @@ def main(tool):
         (needy_dir / "1.0.0.json").write_text(json.dumps({k: v for k, v in needy.items() if k != "dependencies"}))
         out = build(temp / "needy-unnamed")
         check(out.returncode != 0 and "`dependencies` is not the archive's" in out.stderr, "a record not naming its archive's dependencies is refused: " + out.stderr.strip())
+        (needy_dir / "1.0.0.json").write_text(json.dumps(needy))
+
+        # The publisher's claim (RFC 0043), packed by oscairn-sign: the manifest holds opensStateFrom
+        # and soundChanges, the index each version's plugins with opensStateFrom alone.
+        claim_dir = repo / "packages" / "com.example.claim"
+        claim_dir.mkdir()
+        run(tool, "build", keys / "publisher.key", "clap", "com.example.claim", "1.1.0", "linux-arm64", duo)
+
+        def pack_claim(path, *claim, version="1.1.0"):
+            return run(tool, "plugin-package", "--license", "MIT", "--key", keys / "publisher.key", *claim, path, "clap", "com.example.claim", version, "Claim", f"linux-arm64={duo}")
+        out = pack_claim(claim_dir / "1.1.0.olib", "--opens-state-from", "com.example.claim", "1.0.0", "--sound-changes", "com.example.claim", "Notes no longer stick.")
+        check(out.returncode == 0, "a plugin package with a claim packs: " + out.stderr.strip())
+        with zipfile.ZipFile(claim_dir / "1.1.0.olib") as z:
+            packed = json.loads(z.read("library.json"))["plugins"][0]
+        check(packed.get("opensStateFrom") == "1.0.0" and packed.get("soundChanges") == "Notes no longer stick.", "the manifest carries the claim: " + json.dumps(packed))
+        for claim, what in ((("--opens-state-from", "com.example.claim", "1.2.0"), "opensStateFrom newer than the version"),
+                            (("--opens-state-from", "com.example.claim", "1.0.0", "--sound-changes", "com.example.claim", "x" * 1001), "soundChanges over 1,000 bytes"),
+                            (("--sound-changes", "com.example.claim", "Brighter."), "soundChanges without opensStateFrom"),
+                            (("--opens-state-from", "com.example.other", "1.0.0"), "a claim for a plugin the package does not hold")):
+            out = pack_claim(temp / "refused-claim.olib", *claim)
+            check(out.returncode != 0 and not (temp / "refused-claim.olib").exists(), f"{what} is refused: " + out.stderr.strip())
+        run(tool, "build", keys / "publisher.key", "clap", "com.example.claim", "1.1.0-beta", "linux-arm64", duo)
+        out = pack_claim(temp / "refused-claim.olib", "--opens-state-from", "com.example.claim", "1.0.0", version="1.1.0-beta")
+        check(out.returncode != 0 and "dotted numbers" in out.stderr, "a claim by a version that is not dotted numbers is refused: " + out.stderr.strip())
+        claim_data = (claim_dir / "1.1.0.olib").read_bytes()
+        (claim_dir / "1.1.0.json").write_text(json.dumps(dict(release, id="com.example.claim", release="1.1.0", license="MIT", source=None,
+            archive={"path": "1.1.0.olib", "sha256": hashlib.sha256(claim_data).hexdigest(), "size": len(claim_data)})))
+        out = build(temp / "claim")
+        check(out.returncode == 0, "a release with a claim builds: " + out.stderr.strip())
+        if out.returncode == 0:
+            claim_root = json.loads((temp / "claim" / "repository.json").read_text())
+            claim_index = {p["id"]: p for p in json.loads(gzip.decompress((temp / "claim" / claim_root["index"]["path"]).read_bytes()))["packages"]}
+            check(claim_index["com.example.claim"]["versions"][0]["plugins"] == [{"format": "clap", "id": "com.example.claim", "version": "1.1.0", "platforms": ["linux-arm64"], "opensStateFrom": "1.0.0"}],
+                  "the index carries the version's plugin with opensStateFrom, not soundChanges: " + json.dumps(claim_index["com.example.claim"]["versions"][0]["plugins"]))
+            check(claim_index["com.example.organ"]["versions"][0]["plugins"] == [{"format": "clap", "id": "com.example.organ", "version": "2.1.0", "platforms": ["linux-arm64"]}],
+                  "a version without a claim lists its plugin without one")
+            check([p["id"] for p in claim_index["com.example.duo"]["versions"][0]["plugins"]] == ["com.example.duo.a", "com.example.duo.b"], "a bundle's plugins are each listed")
 
         # A file in the folder of a type a handler keeps (a sample, a waveform) is a piece of its own, however small.
         spec = importlib.util.spec_from_file_location("build_index", BUILDER)

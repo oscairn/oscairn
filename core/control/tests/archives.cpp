@@ -605,6 +605,63 @@ int main(int argc, char** argv)
             const auto roomy = e.libraryQuery(installedItems);
             check(std::all_of(roomy.items.begin(), roomy.items.end(), [](const auto& i) { return i.unfit.empty(); }), "on a device it fits, nothing is shown");
         }
+        // Devices C, U and K (RFC 0043 step 1): the publisher's claim, opensStateFrom and
+        // soundChanges, packed by oscairn-sign, survives signing again, is kept in the store's
+        // plugin.json at install and shown by plugins.list, with the key that signed it; a claim in
+        // an unsigned package, or one signed whole by a key that did not sign the builds, is not
+        // kept. A claim out of shape is refused by every reader.
+        {
+            const auto author = temp.path / "author.key";
+            const auto build = temp.path / "c-build" / "Synth.clap";
+            fs::create_directories(build.parent_path());
+            fs::copy_file(fixture, build);
+            check(run(tool + " build " + shell(author) + " clap org.kick.test.synth " + shell(version) + " " + platform() + " " + shell(build)).first == 0, "the build is signed");
+            const auto claimed = temp.path / "Claimed.olib";
+            const auto pack = [&](const fs::path& to, const std::string& options) {
+                return run(tool + " plugin-package --license MIT " + options + " --opens-state-from org.kick.test.synth " + shell(version) + " --sound-changes org.kick.test.synth 'Notes no longer stick.' " +
+                           shell(to) + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(build) + " 2>&1");
+            };
+            check(pack(claimed, "--key " + shell(author)).first == 0, "oscairn-sign packs a claim");
+            auto claimOf = [](const fs::path& archive) { const auto p = readPackage(archive, {}); return p.plugins.at(0).opensStateFrom + "|" + p.plugins.at(0).soundChanges; };
+            check(claimOf(claimed) == version + "|Notes no longer stick.", "the manifest holds it");
+            check(run(tool + " archive " + shell(author) + " " + shell(claimed)).first == 0 && claimOf(claimed) == version + "|Notes no longer stick.", "signing the archive again keeps it");
+            auto installedClaim = [&](const fs::path& home, const fs::path& archive) {
+                device(home);
+                Session s(48000, 64);
+                s.installArchive(archive.string(), true, {}, true);
+                const auto listed = s.installedPlugins();
+                return listed.size() == 1 ? listed[0] : Control::InstalledPlugin{};
+            };
+            const auto kept = installedClaim(temp.path / "c", claimed);
+            check(kept.opensStateFrom == version && kept.soundChanges == "Notes no longer stick." && kept.claimKey == authorKey, "installed, the store keeps the claim and its key, and plugins.list shows it");
+            check(read(pluginStoreFolders().at(0).parent_path() / "plugin.json").find("\"opensStateFrom\":\"" + version + "\"") != std::string::npos, "in plugin.json");
+            const auto unsignedClaim = temp.path / "Unsigned-claim.olib";
+            check(pack(unsignedClaim, "").first == 0 && claimOf(unsignedClaim) == version + "|Notes no longer stick.", "an unsigned package may carry a claim");
+            const auto unkept = installedClaim(temp.path / "u", unsignedClaim);
+            check(!unkept.id.empty() && unkept.opensStateFrom.empty() && unkept.soundChanges.empty() && unkept.claimKey.empty(), "but its claim is not kept");
+            const auto other = temp.path / "other.key";
+            run(tool + " key " + shell(other));
+            const auto otherSigned = temp.path / "Other-claim.olib";
+            fs::copy_file(claimed, otherSigned);
+            check(run(tool + " archive " + shell(other) + " " + shell(otherSigned)).first == 0, "the package signed whole by another key");
+            const auto foreign = installedClaim(temp.path / "k", otherSigned);
+            check(!foreign.id.empty() && foreign.opensStateFrom.empty() && foreign.claimKey.empty(), "a claim signed by a key that did not sign the builds is not kept");
+            // Out of shape, written into an unsigned package's manifest by hand: refused.
+            const auto plain = temp.path / "Unclaimed.olib";
+            check(run(tool + " plugin-package --license MIT " + shell(plain) + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(fixture)).first == 0, "a plain package");
+            auto refusedClaim = [&](const std::string& claim, const std::string& why) {
+                const auto bent = temp.path / "Bent.olib";
+                fs::remove(bent);
+                rewriteArchive(plain, bent, [&](std::string m) { return m.replace(m.find("\"builds\""), 0, claim + ","); });
+                std::string said; try { readPackage(bent, {}); } catch(const std::exception& e) { said = e.what(); }
+                check(said.find(why) != std::string::npos, "refused: " + claim + ": " + said);
+            };
+            refusedClaim("\"opensStateFrom\":\"" + version + ".1\"", "newer than itself");
+            refusedClaim("\"opensStateFrom\":\"1.x\"", "dotted numbers");
+            refusedClaim("\"opensStateFrom\":\"1.0.0.0.0\"", "dotted numbers");
+            refusedClaim("\"opensStateFrom\":\"" + version + "\",\"soundChanges\":\"" + std::string(1001, 'x') + "\"", "over 1,000 bytes");
+            refusedClaim("\"soundChanges\":\"Brighter.\"", "without claiming");
+        }
         // Device S: one bundle holding two plugins, Oscairn's Splitters (Split and Join): packed once,
         // each plugin signed, both installed into the store and listed, and both play from it.
         if(splitters)

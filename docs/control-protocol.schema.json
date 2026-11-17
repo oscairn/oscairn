@@ -4220,7 +4220,7 @@
             },
             "method": {
               "const": "plugins.list",
-              "description": "The plugin store (RFC 0006): each plugin with its platforms' builds, size, the library items that use it and whether the open Performance plays it"
+              "description": "The plugin store (RFC 0006): each plugin with its platforms' builds, size, the library items that use it, whether the open Performance plays it and its publisher's claim (RFC 0043)"
             },
             "params": {
               "type": "object",

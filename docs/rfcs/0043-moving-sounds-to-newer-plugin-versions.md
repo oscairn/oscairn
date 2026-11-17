@@ -1,7 +1,7 @@
 # RFC 0043: Moving sounds to newer plugin versions, and removing unused ones
 
-Status: proposed, 2026-11-11, from the owner's request of that day. Design only: nothing here is
-built. Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
+Status: in progress (step 1 built 2026-11-16); proposed 2026-11-11, from the owner's request of that day.
+Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
 sound assets' retention roots ([RFC 0009](0009-sound-assets-and-dependencies.md)), plugin workers
 ([RFC 0010](0010-plugin-worker-isolation.md)), the library and audition
 ([RFC 0021](0021-sounds-performances-and-library.md)), resource budgets
@@ -20,8 +20,20 @@ index, the offer at a stand-in) and points here.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. The publisher's claim, `opensStateFrom` and `soundChanges`: written by `oscairn-sign`,
+- [x] 1. The publisher's claim, `opensStateFrom` and `soundChanges`: written by `oscairn-sign`,
       read from archives, carried into the index, kept in the plugin store, shown by `plugins.list`
+      (built 2026-11-16: `oscairn-sign plugin-package --opens-state-from <id> <version>
+      --sound-changes <id> <text>`; every archive reader refuses a claim whose versions are not 1
+      to 4 dotted numbers, whose `opensStateFrom` is newer than the version, or whose
+      `soundChanges` is empty, over 1,000 bytes or without `opensStateFrom`; an install keeps it
+      in `plugin.json` with `claimKey` only from a package signed whole by a key that signed the
+      plugin's builds, for this device's build as the archive holds it; `plugins.list` gives
+      `opensStateFrom`, `soundChanges` and `claimKey`, null when none; the template's index
+      builder writes each version's `plugins` (RFC 0031's shape) with `opensStateFrom`.
+      `control-archives`, `package-repository-index`. The archive's version stays 3: the fields
+      are optional, as `dependencies.packages` was. Not yet: `checked` (step 5); `packages.lookup`
+      reading the index's claim is RFC 0031's step 11; the live repository takes the template's
+      builder, [packages repository changes](../packages-repository-changes.md))
 - [ ] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
       `stateSavedBy`
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line

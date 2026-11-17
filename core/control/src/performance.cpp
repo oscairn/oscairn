@@ -201,7 +201,9 @@ fs::path bundledPlugin(const fs::path& folder,const std::string& format,const st
     return {};
 }
 // A store entry's plugin.json: the plugin's format, ID, version and name, as the folder's name
-// cannot say them exactly, and its plugin package's license. Empty ID when it cannot be read.
+// cannot say them exactly, its plugin package's license, and its publisher's claim (RFC 0043:
+// opensStateFrom, soundChanges and the key that signed them, claimKey; absent when none). Empty
+// ID when it cannot be read.
 Control::InstalledPlugin storedIdentity(const fs::path& folder){
     Control::InstalledPlugin p;
     try{
@@ -209,8 +211,16 @@ Control::InstalledPlugin storedIdentity(const fs::path& folder){
         const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
         if(!doc)return p;
         p.format=text(field(doc.get(),"format"));p.id=text(field(doc.get(),"id"));p.version=text(field(doc.get(),"version"));p.name=text(field(doc.get(),"name"));p.license=text(field(doc.get(),"license"));
+        if(member(doc.get(),"opensStateFrom")){p.opensStateFrom=text(field(doc.get(),"opensStateFrom"));p.claimKey=text(field(doc.get(),"claimKey"));}
+        if(member(doc.get(),"soundChanges"))p.soundChanges=text(field(doc.get(),"soundChanges"));
     }catch(const std::exception&){p.id.clear();}
     return p;
+}
+void writeIdentity(const fs::path& folder,const Control::InstalledPlugin& p){
+    std::string claim;
+    if(!p.opensStateFrom.empty())claim=",\"opensStateFrom\":"+quote(p.opensStateFrom)+(p.soundChanges.empty()?std::string():",\"soundChanges\":"+quote(p.soundChanges))+",\"claimKey\":"+quote(p.claimKey);
+    const auto identity="{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+",\"name\":"+quote(p.name)+",\"license\":"+quote(p.license)+claim+"}\n";
+    state_files::write(folder/"plugin.json",identity.data(),identity.size());
 }
 std::string storedName(const std::string& format,const std::string& id,const std::string& version){
     const auto p=storedIdentity(storeFolder(format,id,version));
@@ -224,14 +234,16 @@ void moveInto(const fs::path& from,const fs::path& to){
 }
 // Puts one platform's build into the store, whole or not at all, replacing that platform's, with
 // its publishers' signatures beside it as <bundle>.sig (RFC 0006); moved when `move`, else copied.
-// An empty license keeps the one recorded. Its package's declared estimate (RFC 0025), if any,
-// beside it as estimate.json, for a device that has not measured it yet.
+// An empty license keeps the one recorded, as does the claim (RFC 0043). Its package's declared
+// estimate (RFC 0025), if any, beside it as estimate.json, for a device that has not measured it yet.
 void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false,std::string license={},double cpu=0,uint64_t memory=0){
     const auto folder=storeFolder(format,id,version);
     fs::create_directories(folder);
-    if(license.empty())license=storedIdentity(folder).license;
-    const auto identity="{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+",\"name\":"+quote(name)+",\"license\":"+quote(license)+"}\n";
-    state_files::write(folder/"plugin.json",identity.data(),identity.size());
+    auto identity=storedIdentity(folder);
+    if(identity.id!=id)identity={};
+    identity.format=format;identity.id=id;identity.version=version;identity.name=name;
+    if(!license.empty())identity.license=license;
+    writeIdentity(folder,identity);
     const auto partial=folder/("."+forPlatform+".partial");
     std::error_code e;fs::remove_all(partial,e);fs::create_directories(partial);
     if(move)moveInto(build,partial/build.filename());else fs::copy(build,partial/build.filename(),fs::copy_options::recursive);
@@ -2337,20 +2349,33 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             if(std::none_of(plugin.builds.begin(),plugin.builds.end(),[](const auto& b){return b.platform==platform();}))
                 out.notes.push_back(plugin.name+" "+plugin.version+" has no build for this device in the archive");
             const auto there=storedBuilds(plugin.format,plugin.id,plugin.version);
+            bool claimHere=false,storedHere=false; // this device's build is the archive's: already there, or stored now
             for(const auto& build:plugin.builds){
                 if(thisPlatformOnly && build.platform!=platform())continue; // a repository install takes what this device runs (RFC 0031)
                 if(there.count(build.platform) && !replaced.count({plugin.id,build.platform})){
                     if(bundleDigest(there.at(build.platform))!=build.sha256){out.notes.push_back("a different "+build.platform+" build of "+plugin.name+" "+plugin.version+" is already installed; it was kept");out.otherBuild=true;}
+                    else if(build.platform==platform())claimHere=true;
                     continue;
                 }
                 if(revoked.count({plugin.id,build.path}))continue;
                 // A bundle that holds several plugins is copied for each but the last, which takes it.
                 const bool later=std::any_of(p.plugins.begin(),p.plugins.end(),[&](const auto& q){return &q>&plugin && std::any_of(q.builds.begin(),q.builds.end(),[&](const auto& b){return b.path==build.path;});});
                 storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string(),build.cpu,build.memory);
+                if(build.platform==platform())claimHere=storedHere=true;
+            }
+            std::error_code e;
+            // The publisher's claim (RFC 0043), for this device's build as the archive holds it: kept
+            // from a package signed by a key that signed the builds; a build stored now drops any other.
+            if(claimHere){
+                const auto key=claimKey(p,plugin);
+                auto identity=storedIdentity(storeFolder(plugin.format,plugin.id,plugin.version));
+                if(identity.id==plugin.id && (storedHere || !key.empty())){
+                    identity.opensStateFrom=key.empty()?std::string():plugin.opensStateFrom;identity.soundChanges=key.empty()?std::string():plugin.soundChanges;identity.claimKey=key;
+                    writeIdentity(storeFolder(plugin.format,plugin.id,plugin.version),identity);
+                }
             }
             // A plugin package's license texts and notices stay beside its plugins' builds, and the
             // asset libraries it needs in assets.tsv ("id<TAB>version"): a root they stay installed for.
-            std::error_code e;
             if(pluginPackage && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
                 std::string needs;for(const auto& d:p.assetDependencies)needs+=d.id+'\t'+d.version+'\n';
                 const auto list=storeFolder(plugin.format,plugin.id,plugin.version)/"assets.tsv";

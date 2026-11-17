@@ -1,7 +1,7 @@
-# Changes the packages repository needs (2026-11-14)
+# Changes the packages repository needs (2026-11-14, 2026-11-16)
 
 For whoever edits the separate packages repository (the one published at
-`https://packages.oscairn.org`, made from `tools/package-repository/template/`). Three changes,
+`https://packages.oscairn.org`, made from `tools/package-repository/template/`). Four changes,
 each already made and tested in this repository's template, so the simplest way is to bring its
 `scripts/build-index.py` over; each is also described here on its own.
 
@@ -71,3 +71,30 @@ library-package --type core/control/types/org.oscairn.sample-types/sample.json -
 org.oscairn.sample-types 1.0.0 ...`), and its record lists it in `dependencies.packages`. Once it is
 published, add `org.oscairn.sample-types 1.0.0` to this repository's `tools/preinstalled.txt` so a
 fresh device can take sample content.
+
+## 4. Each version's plugins, with the publisher's claim (2026-11-16)
+
+A plugin package may now carry its publisher's claim that a version opens older versions' saved
+state ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim),
+[library archive](library-archive.md#the-publishers-claim)): `opensStateFrom` and `soundChanges`
+on a plugin in the manifest's `plugins`, written by `oscairn-sign plugin-package --opens-state-from
+<id> <version> --sound-changes <id> <text>`. `oscairn-sign verify` refuses a claim out of shape, so
+an `oscairn-sign` built from this repository must check submissions from then on.
+
+In `scripts/build-index.py`, each version in the index gains `plugins`, from the manifest
+([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-index-must-say-which-plugins-a-version-holds)):
+
+```json
+"plugins": [{"format": "clap", "id": "org.oscairn.analog", "version": "0.4.6", "platforms": ["linux-arm64", "macos-arm64"], "opensStateFrom": "0.4.0"}]
+```
+
+each plugin's format, ID, version and the platforms it has builds for (sorted), and
+`opensStateFrom` only when the manifest has one; never `soundChanges`, which a device reads from
+the installed manifest. The template's `plugins_of()` is the exact code;
+`tools/package-repository/test_build_index.py` checks it. Devices do not read it yet (RFC 0031's
+step 11), so the index grows by about 100 bytes per plugin per version and nothing else changes.
+
+oscairn/packages' import workflow: `schemas/plugin-release.schema.json`'s plugins gain the two
+optional fields (`opensStateFrom`, a dotted version; `soundChanges`, text of at most 1,000 bytes),
+which its `additionalProperties: false` refuses now, and `scripts/import-release.py` passes them to
+`oscairn-sign plugin-package` as `--opens-state-from` and `--sound-changes`.

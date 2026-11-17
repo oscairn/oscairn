@@ -470,8 +470,10 @@ namespace oscairn
         // The plugin store (RFC 0006): the plugin builds installed from archives or added, by
         // platform, with their size on disk, the library items that use the plugin (names), and
         // whether the open Performance plays this device's build from the store. license: the SPDX
-        // expression of the plugin package it came from, empty when unknown.
-        struct InstalledPlugin { std::string format, id, version, name; std::vector<std::string> platforms; uint64_t bytes = 0; std::vector<std::string> usedBy; bool open = false; std::string license; };
+        // expression of the plugin package it came from, empty when unknown. opensStateFrom,
+        // soundChanges and claimKey: its publisher's claim (RFC 0043) as kept at install from a
+        // package signed by claimKey (a public key), which also signed its builds; empty for none.
+        struct InstalledPlugin { std::string format, id, version, name; std::vector<std::string> platforms; uint64_t bytes = 0; std::vector<std::string> usedBy; bool open = false; std::string license, opensStateFrom = {}, soundChanges = {}, claimKey = {}; };
         virtual std::vector<InstalledPlugin> installedPlugins() = 0;
         // Removes a plugin's builds from the store, one platform's or (empty) all. Refused while the
         // open Performance plays the build; items that use it open with a stand-in until it is back.

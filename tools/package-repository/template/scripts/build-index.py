@@ -210,6 +210,21 @@ def facts(archive):
     return manifest, {"sha256": sha256(manifest_bytes), "size": len(manifest_bytes)}, types
 
 
+def plugins_of(manifest):
+    """Each plugin a version holds (RFC 0031's per-version `plugins`): its format, ID, version and
+    the platforms it has builds for, with its publisher's claim to open older versions' saved state
+    (RFC 0043's `opensStateFrom`) when it makes one. `oscairn-sign verify` has refused a claim out of
+    shape, and read_release that the publisher's key signed the archive and every build, so the
+    claim is the publisher's. Not `soundChanges`, which a device reads from the installed manifest."""
+    out = []
+    for p in manifest["plugins"]:
+        entry = {"format": p["format"], "id": p["id"], "version": p["version"], "platforms": sorted({b["platform"] for b in p["builds"]})}
+        if p.get("opensStateFrom"):
+            entry["opensStateFrom"] = p["opensStateFrom"]
+        out.append(entry)
+    return out
+
+
 def store(cache, temporary):
     """A blob into --cache under its SHA-256, once: the same piece in two versions is one blob."""
     digest, size = sha256_file(temporary), temporary.stat().st_size
@@ -398,6 +413,7 @@ def read_release(path, root, publishers, tool, cache, problems):
         # The packages it needs, as RFC 0031's index names them: the asset libraries and packages its archive names.
         "requires": {**r.get("requires", {}), **({"packages": needs + needs_packages} if needs or needs_packages else {})},
         "types": types,
+        "plugins": plugins_of(contents),
         "platforms": {},
         "common": {"size": 0, "installed": 0},
         "estimates": {},

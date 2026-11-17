@@ -93,6 +93,9 @@ foreach(flag IN LISTS SAMPLEPACK_RUSTFLAGS) # the target's CPU flags, as samplep
     string(APPEND engine_core_flags "${engine_core_us}${flag}")
 endforeach()
 set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION} OSCAIRN_RELEASE=${OSCAIRN_RELEASE}) # the release the Rust CLAP host tells plugins, as kick_clap_host does
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
+    list(APPEND engine_core_env OSCAIRN_TSAN=1) # the Rust CLAP host tells ThreadSanitizer of its gate's handovers (clap-host/rust/build.rs)
+endif()
 set(engine_core_cmds)
 set(engine_core_libs)
 foreach(triple IN LISTS _sp_triples)

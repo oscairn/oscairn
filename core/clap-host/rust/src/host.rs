@@ -508,12 +508,46 @@ impl Gate<'_> {
         while flag.swap(true, Acquire) {
             std::thread::yield_now();
         }
+        tsan::acquired(flag);
         Gate(flag)
     }
 }
 impl Drop for Gate<'_> {
     fn drop(&mut self) {
+        tsan::releasing(self.0);
         self.0.store(false, Release);
+    }
+}
+
+/// ThreadSanitizer sees only instrumented code, and Rust's atomics are not: the gate's handover from one thread to the other is
+/// told to it, or every field the gate passes between the main and the audio thread (and the plugin's own state, which its
+/// activate and process calls touch on either side) reads to it as a race. Only in a ThreadSanitizer build (build.rs: OSCAIRN_TSAN).
+mod tsan {
+    use std::sync::atomic::AtomicBool;
+    #[cfg(oscairn_tsan)]
+    extern "C" {
+        fn __tsan_acquire(addr: *mut std::ffi::c_void);
+        fn __tsan_release(addr: *mut std::ffi::c_void);
+    }
+    /// After the gate was taken.
+    #[inline(always)]
+    pub fn acquired(flag: &AtomicBool) {
+        #[cfg(oscairn_tsan)]
+        // SAFETY: ThreadSanitizer's runtime, linked into every binary of such a build, only records the address.
+        unsafe {
+            __tsan_acquire(flag.as_ptr().cast())
+        };
+        let _ = flag;
+    }
+    /// Before the gate is let go.
+    #[inline(always)]
+    pub fn releasing(flag: &AtomicBool) {
+        #[cfg(oscairn_tsan)]
+        // SAFETY: as acquired.
+        unsafe {
+            __tsan_release(flag.as_ptr().cast())
+        };
+        let _ = flag;
     }
 }
 
@@ -2537,10 +2571,12 @@ pub unsafe fn process(
         silence();
         return false;
     }
+    tsan::acquired(&s.gate);
     // SAFETY: the caller's.
     let ok = unsafe { block(s, input, ni, output, no, frames, incoming, count, transport, &silence) };
     s.in_process.set(false);
     s.published_output_count.set(s.block_output_count.get());
+    tsan::releasing(&s.gate);
     s.gate.store(false, Release);
     ok
 }

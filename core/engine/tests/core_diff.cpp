@@ -246,7 +246,29 @@ void run(uint32_t seed,uint32_t blocks,vectors::Tape& tape)
                     p.push_back({b+(x.header.type==CLAP_EVENT_NOTE_CHOKE?1:endTail),note(CLAP_EVENT_NOTE_END,0,x.channel,x.key,0,x.note_id,x.port_index)});
                 }
                 const float took=(plan[s].rest+plan[s].perNote*float(live))*(spike?3.f:1.f);
-                const oscairn_finish f{took,processed,reset,false,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size())};
+                // Draft 2's importance report (RFC 0046), now and then none (draft 1): a list per context, its sound ID
+                // 7 and up, or one for a plugin without contexts; each voice's tier, age and level drawn.
+                std::vector<oscairn_voice_budget_importance_t> lists;
+                const uint32_t ids[2]{7,8};
+                const bool reports=plan[s].ownVoices && rng.below(4)!=0;
+                for(size_t c=0;reports && c<std::max<size_t>(1,plan[s].contexts.size());++c)
+                {
+                    oscairn_voice_budget_importance_t l{};
+                    l.context=plan[s].contexts.empty()?OSCAIRN_VOICE_BUDGET_SELECTED:ids[c];
+                    const uint32_t voicesNow=rng.below(2*live+1);
+                    const uint32_t listed=rng.below(OSCAIRN_VOICE_BUDGET_LEAST+1);
+                    l.voices=uint16_t(voicesNow);l.count=uint16_t(std::min(listed,voicesNow));
+                    for(uint32_t i=0;i<l.count;++i)
+                    {
+                        const uint32_t tier=rng.below(4);
+                        const uint32_t age=rng.below(3000);
+                        const uint32_t level=rng.below(120);
+                        l.least[i]={uint8_t(tier),0,uint16_t(age),-float(level)};
+                    }
+                    lists.push_back(l);
+                }
+                const oscairn_finish f{took,processed,reset,false,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size()),
+                    lists.data(),uint32_t(lists.size()),ids,uint32_t(std::min<size_t>(2,plan[s].contexts.size()))};
                 rust_core_notes_finish(side.notes,uint32_t(s),&f);
                 if(plan[s].ownVoices)a.voiceLimit=rust_core_notes_voice_limit(side.notes,uint32_t(s),2*live,soundLimits,uint32_t(plan[s].contexts.size()));
             }

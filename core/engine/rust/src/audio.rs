@@ -197,6 +197,29 @@ impl Audio {
     }
 
     /// A step's inputs mixed from its connections, or with `step` past the last the graph's outputs.
+    /// Each step's largest gain to the graph's outputs through its connections at the live gains `live` (a part's
+    /// level and its mix): for the budget, which hears a part's voices in the mix (RFC 0046). Sources come before the
+    /// steps they feed, so one pass back from the outputs.
+    pub fn reach(&self, live: &[f32], out: &mut [f32]) {
+        out.fill(0.0);
+        let gain = |c: &Connection| c.live.iter().filter(|&&s| s != 0).fold(c.gain.abs(), |g, &s| g * live.get(usize::from(s)).map_or(1.0, |v| v.abs()));
+        let through = |r: &Route, from: f32, out: &mut [f32]| {
+            if let Some(o) = usize::try_from(r.c.source).ok().and_then(|s| out.get_mut(s)) {
+                *o = o.max(gain(&r.c) * from);
+            }
+        };
+        for r in self.routes.get(self.outputs.0.start as usize..self.outputs.0.end as usize).unwrap_or(&[]) {
+            through(r, 1.0, out);
+        }
+        for (i, s) in self.steps.iter().enumerate().rev() {
+            let from = out.get(i).copied().unwrap_or(0.0);
+            if from > 0.0 {
+                for r in self.routes.get(s.routes.start as usize..s.routes.end as usize).unwrap_or(&[]) {
+                    through(r, from, out);
+                }
+            }
+        }
+    }
     pub fn mix(&mut self, step: usize, outputs: &mut Channels, frames: usize, live_from: &[f32], live_to: &[f32]) {
         let Some(s) = self.steps.get(step) else {
             for r in &mut self.routes[self.outputs.0.start as usize..self.outputs.0.end as usize] {

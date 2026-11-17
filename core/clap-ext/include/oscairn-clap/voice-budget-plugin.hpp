@@ -64,11 +64,11 @@ namespace oscairn::voices
     };
 
     // RFC 0046's scale, the same in every plugin: a voice's tier, then its audibility.
-    constexpr double struckMs = 50;        // a voice struck this recently is not judged by its level yet
+    constexpr double struckMs = 50;        // a voice struck this recently is not judged by its level, and goes last in its tier
     constexpr double inaudibleDb = -60;    // below this at the plugin's output a voice counts as released
     constexpr double agedDbPerSecond = 1;  // a voice counts this much quieter for each second of its age,
     constexpr double agedSecondsMost = 10; // up to this many
-    enum Tier : uint8_t { released = 0, pedaled = 1, keyHeld = 2, struck = 3 };
+    enum Tier : uint8_t { released = 0, pedaled = 1, keyHeld = 2 };
 
     inline float levelDb(double gain) noexcept
     { return gain > 1e-6 ? float(std::clamp(20 * std::log10(gain), -120.0, 24.0)) : -120.f; }
@@ -86,10 +86,10 @@ namespace oscairn::voices
         bool pedaled = false;
         double ageMs = -1;
 
+        bool struck() const noexcept { return ageMs >= 0 && ageMs < struckMs; }
         uint8_t tier() const noexcept
         {
-            if(ageMs >= 0 && ageMs < struckMs) return struck;
-            if(levelDb(loudness) < inaudibleDb) return released;
+            if(!struck() && levelDb(loudness) < inaudibleDb) return released;
             return held ? keyHeld : pedaled ? Tier::pedaled : released;
         }
         // Its level less its age's share: the larger, the more it is heard.
@@ -99,11 +99,12 @@ namespace oscairn::voices
 
     constexpr uint32_t none = OSCAIRN_VOICE_BUDGET_SELECTED; // victim()'s `incoming` when no new voice waits
 
-    // Whether a goes before b within one context: the lower tier, the less audible, the older.
+    // Whether a goes before b within one context: the lower tier, one not just struck, the less audible, the older.
     inline bool before(const Candidate& a, const Candidate& b) noexcept
     {
         const auto ta = a.tier(), tb = b.tier();
         if(ta != tb) return ta < tb;
+        if(a.struck() != b.struck()) return b.struck();
         const double xa = a.audibility(), xb = b.audibility();
         return xa != xb ? xa < xb : a.age < b.age;
     }
@@ -192,7 +193,7 @@ namespace oscairn::voices
                 for(uint32_t i = 0; i < n; ++i)
                 {
                     const auto& c = l.least[i];
-                    l.out.least[i] = {c.tier(), 0, uint16_t(std::clamp(c.ageMs, 0.0, 65535.0)), levelDb(c.loudness)};
+                    l.out.least[i] = {c.tier(), uint8_t(c.struck() ? OSCAIRN_VOICE_BUDGET_STRUCK : 0), uint16_t(std::clamp(c.ageMs, 0.0, 65535.0)), levelDb(c.loudness)};
                 }
             }
         }

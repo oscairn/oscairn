@@ -241,7 +241,7 @@ namespace oscairn
         /// (0 with no budget). instance: for a node playing a sound of a shared instance, the instance's, which
         /// the budget keeps for all its parts together (its notes, its lane); else the node's own (none for such
         /// a node). Main thread.
-        struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0, stolenForDevice = 0; double laneLimit = 0, laneTook = 0; uint64_t stolenForLoss = 0, lostBlocks = 0, stolenForDeadline = 0, unfitBlocks = 0; };
+        struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0, stolenForDevice = 0; double laneLimit = 0, laneTook = 0; uint64_t stolenForLoss = 0, lostBlocks = 0, stolenForDeadline = 0, unfitBlocks = 0, importanceMismatch = 0; };
         NoteCost noteCost( NodeId node, bool instance = false ) const;
         /// The output guard: a node's blocks not heard for a sample not finite or past outputBound (+120 dBFS), in
         /// all and in a row up to its last block; each faded out over 1 ms, the plugin playing on. Any thread.
@@ -517,6 +517,9 @@ namespace oscairn
             // lane with every part there down to its last voice (the chain after it cannot fit). Its layout is
             // engine_core.h's oscairn_activity.
             std::atomic<uint64_t> stolenForLoss{0}, lostBlocks{0}, stolenForDeadline{0}, unfitBlocks{0};
+            // RFC 0046: a context of its plugin (draft 2) found sounding more voices than the cap the budget gave it, by
+            // the order it listed, two reports on: the plugin did not keep to its own report.
+            std::atomic<uint64_t> importanceMismatch{0};
             float restNow() const noexcept { const float r = rest.load(std::memory_order_relaxed); return r >= 0 ? r : std::max(0.f, seedRest.load(std::memory_order_relaxed)); }
             float noteNow() const noexcept { const float n = perNote.load(std::memory_order_relaxed); return perNoteScale * (n >= 0 ? n : std::max(0.f, seedNote.load(std::memory_order_relaxed))); }
             // A block took `microseconds` with `notes` live: with none, its cost at rest; with some,

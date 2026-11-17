@@ -65,11 +65,12 @@ extern "C" {
  *      a legato line's included), nor a held voice of a context at or under its reserve, unless
  *      the new voice is for that same context;
  *   2. by tier: released (key up, no pedal holding it) or inaudible (below -60 dBFS at the
- *      plugin's output), then held only by a pedal, then key held, then struck under 50 ms ago;
+ *      plugin's output, unless struck under 50 ms ago: an attack is not judged by its level), then
+ *      held only by a pedal, then key held;
  *   3. the new voice's own context before others;
  *   4. the context of lower priority before higher;
- *   5. the least audible: its level in dBFS less a decibel per second of age (at most ten), then
- *      the oldest.
+ *   5. a voice struck under 50 ms ago after the others of its tier; then the least audible: its
+ *      level in dBFS less a decibel per second of age (at most ten), then the oldest.
  * A plugin may refine this (one element of a layered note before a whole note) but should not
  * break rule 1.
  *
@@ -111,13 +112,14 @@ typedef struct oscairn_voice_budget_note
 enum
 {
     OSCAIRN_VOICE_BUDGET_LEAST = 16, // the voices a context's importance report lists
+    OSCAIRN_VOICE_BUDGET_STRUCK = 1, // a listed voice's flag: struck under 50 ms ago
 };
 
 // A voice in an importance report (draft 2).
 typedef struct oscairn_voice_budget_least
 {
-    uint8_t  tier;     // 0 released or inaudible, 1 held by a pedal, 2 key held, 3 struck under 50 ms ago
-    uint8_t  flags;    // 0
+    uint8_t  tier;     // 0 released or inaudible, 1 held only by a pedal, 2 key held
+    uint8_t  flags;    // OSCAIRN_VOICE_BUDGET_STRUCK
     uint16_t age_ms;   // since its note-on, at most 65,535
     float    level_db; // its gain now at the plugin's output, dBFS (envelope, velocity, volume expression and
                        // the sound's own output level); -120 for silence

@@ -61,6 +61,7 @@ typedef struct
     float per_note_scale;
     uint32_t voice_limit, over_limit;
     uint64_t faded_for_loss, lost, faded_for_deadline, unfit;
+    uint64_t importance_mismatch; /* RFC 0046: a context found sounding more voices than the cap its plugin was given */
 } oscairn_activity;
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note
@@ -147,7 +148,7 @@ typedef struct
  * notes are gone (a lost block, or its host reset it), and whether its block was late or silenced (a
  * worker past its allowance); its oscairn.voice-budget report
  * (read when the budget counts its notes and it rendered); the events it sent (its NOTE_ENDs); draft 2's
- * importance report, a list per context (RFC 0046). */
+ * importance report, a list per context (RFC 0046), and the step's contexts' sound IDs by index, which the lists name. */
 typedef struct
 {
     float took;
@@ -160,6 +161,8 @@ typedef struct
     uint32_t sent_count;
     const oscairn_voice_budget_importance_t* importance;
     uint32_t importance_count;
+    const uint32_t* contexts;
+    uint32_t context_count;
 } oscairn_finish;
 
 /* A plan's audio (oscairn_audio): its buffers, the audio connections into its steps and the graph's

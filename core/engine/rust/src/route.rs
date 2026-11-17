@@ -78,6 +78,7 @@ pub struct Slot {
     pub faded: u8,
     midi: bool,
     voice_ended: bool,
+    born: u64, // the route's frames at its note-on, for its age
 }
 
 /// NoteZone (note_zone.h).
@@ -171,6 +172,7 @@ pub struct NoteRoute {
     held_count: [u16; 128],
     pedals_by: [[[u8; MAX_SOURCES as usize + 1]; 16]; 3], // each pedal's last value from each source by channel (untagged last)
     pedals_sent: [[u8; 16]; 3], // each pedal's value last sent on by channel
+    frames: u64,                // the frames it has passed, for its notes' ages
 }
 
 /// What a routed event may touch besides its route: its zones, where it entered the graph, whether
@@ -201,6 +203,7 @@ impl NoteRoute {
             held_count: [0; 128],
             pedals_by: [[[0; MAX_SOURCES as usize + 1]; 16]; 3],
             pedals_sent: [[0; 16]; 3],
+            frames: 0,
         }
     }
     pub fn slot(&self, i: usize) -> &Slot {
@@ -276,6 +279,14 @@ impl NoteRoute {
     /// Notes still sounding by the player's hand: keys down, or released under the sustain pedal.
     pub fn sounding(&self) -> u32 {
         self.held.count() + self.used.and_not(self.held).iter().filter(|&i| self.pedal_of(self.slot(i)) >= 64).count() as u32
+    }
+    /// Released and held only by the sustain pedal.
+    pub fn pedaled(&self, i: usize) -> bool {
+        !self.held.has(i) && self.pedal_of(self.slot(i)) >= 64
+    }
+    /// Note `i`'s age in frames.
+    pub fn age(&self, i: usize) -> u64 {
+        self.frames.saturating_sub(self.slot(i).born)
     }
     /// The notes it holds until their plugin ends them, released and fading ones included.
     pub fn live(&self) -> u32 {
@@ -362,6 +373,7 @@ impl NoteRoute {
     }
     /// A block of `frames` done: fades carry on from the next block's start.
     pub fn advance(&mut self, frames: u32) {
+        self.frames += u64::from(frames);
         for i in self.fading.iter() {
             let s = &mut self.slots[i % SLOTS];
             s.fade_at = (s.fade_at - frames as i32).max(0);
@@ -714,6 +726,7 @@ fn play(
         faded: 0,
         midi,
         voice_ended: false,
+        born: r.frames,
     };
     r.volume[i % SLOTS] = 1.0;
     r.used.set(i);

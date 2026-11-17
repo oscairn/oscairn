@@ -20,10 +20,10 @@ export component Loading inherits Rectangle {
     // The sweep's place in its period, 0 to 1 and round again.
     property <float> phase: mod(animation-tick() / Theme.loading-period, 1.0);
     property <length> segment: track.width * Theme.loading-segment;
-    // The text's line leaves room for its descenders before the bar.
+    // The text's line leaves room for its descenders before the bar: the text centered in the pill, the bar at its foot.
     property <length> line: Theme.button * 1.3;
     property <length> inset: root.filled ? Theme.pad-wide : 0px;
-    height: root.text == "" ? Theme.loading-bar : root.line + Theme.pad-tight + Theme.loading-bar;
+    height: root.text == "" ? Theme.loading-bar : root.line + 2 * (Theme.pad-tight + Theme.loading-bar);
     background: root.filled ? Theme.loading-background : transparent;
     border-radius: root.filled ? Theme.button-radius(root.height) : 0px;
     measure := Text {
@@ -33,7 +33,7 @@ export component Loading inherits Rectangle {
     }
     if root.text != "": Text {
         x: root.inset;
-        y: (parent.height - root.line - Theme.pad-tight - Theme.loading-bar) / 2;
+        y: (parent.height - root.line) / 2;
         width: parent.width - 2 * root.inset;
         height: root.line;
         overflow: elide;
@@ -44,7 +44,7 @@ export component Loading inherits Rectangle {
     }
     track := Rectangle {
         x: root.inset;
-        y: root.text == "" ? 0px : (parent.height + root.line + Theme.pad-tight - Theme.loading-bar) / 2;
+        y: root.text == "" ? 0px : parent.height - Theme.loading-bar;
         width: parent.width - 2 * root.inset;
         height: Theme.loading-bar;
         background: root.track-ink;

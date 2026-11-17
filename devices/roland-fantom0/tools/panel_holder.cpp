@@ -12,7 +12,22 @@
 #include <cstdio>
 #include <ctime>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
+
+namespace
+{
+    // The log is the file the start script gave as stderr (appended to). One line a second was 11 MB
+    // in four days once; whatever fills it again, it never passes this: past 256 KiB it is emptied,
+    // and says so.
+    constexpr off_t logLimit = 256 * 1024;
+    void emptyLogIfFull()
+    {
+        struct stat s{};
+        if(::fstat(STDERR_FILENO, &s) == 0 && S_ISREG(s.st_mode) && s.st_size > logLimit && ::ftruncate(STDERR_FILENO, 0) == 0)
+            std::fprintf(stderr, "oscairn-panel-holder: the log passed %lld KiB and was emptied\n", (long long)(logLimit / 1024));
+    }
+}
 
 int main(int argc, char** argv)
 {
@@ -24,6 +39,7 @@ int main(int argc, char** argv)
     }
     ::setsid();
     return oscairn::holdPanel(argv[1], argc == 4 ? argv[3] : oscairn::panelHolderSocket, [](const std::string& line) {
+        emptyLogIfFull();
         char when[32];
         const auto now = std::time(nullptr);
         std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));

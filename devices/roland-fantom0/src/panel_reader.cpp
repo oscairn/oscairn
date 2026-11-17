@@ -19,6 +19,7 @@
 #include <set>
 #include <stdexcept>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -112,7 +113,8 @@ namespace oscairn
 
         volatile std::sig_atomic_t holderStop = 0;
         void stopHolder(int) { holderStop = 1; }
-        void wakeHolder(int) {} // a reader attaching or going: the wait ends, and the holder takes it in or drops it
+        volatile std::sig_atomic_t woken = 0;
+        void wakeHolder(int) { woken = 1; } // a reader attaching or going: the wait ends, and the holder takes it in or drops it
 
     }
 
@@ -309,6 +311,7 @@ namespace oscairn
         ::sigaction(SIGINT, &on, nullptr);
         on.sa_handler = wakeHolder;
         ::sigaction(SIGIO, &on, nullptr);
+        ::sigaction(SIGALRM, &on, nullptr); // once a second, below: a SIGIO that came between the last look and the wait is not lost for long
         on.sa_handler = SIG_IGN;
         ::sigaction(SIGPIPE, &on, nullptr); // a reader gone: its send fails, and it is dropped
         sigset_t none;
@@ -373,18 +376,7 @@ namespace oscairn
         say("holding " + path + "; readers attach at " + socket);
 
         std::vector<int> readers;
-        uint64_t dropped = 0;
-        auto attach = [&] {
-            for(int c; (c = ::accept(listener, nullptr, nullptr)) >= 0;)
-            {
-                if(readers.size() >= 8) { ::close(c); say("a ninth reader turned away"); continue; }
-                ::fcntl(c, F_SETFD, FD_CLOEXEC);
-                ::fcntl(c, F_SETOWN, ::getpid());
-                ::fcntl(c, F_SETFL, O_NONBLOCK | O_ASYNC); // its hang-up raises SIGIO, as an attach does
-                readers.push_back(c);
-                say("a reader attached (" + std::to_string(readers.size()) + " now)");
-            }
-        };
+        uint64_t dropped = 0, turnedAway = 0;
         auto drop = [&](size_t i) {
             ::close(readers[i]);
             readers.erase(readers.begin() + ptrdiff_t(i));
@@ -402,10 +394,35 @@ namespace oscairn
                 else ++i;
             }
         };
+        // Every accept first clears the readers that have gone, so dead ones never fill the eight.
+        // A reader turned away is said once, then counted: the count is said when a reader next attaches.
+        auto attach = [&] {
+            for(int c; (c = ::accept(listener, nullptr, nullptr)) >= 0;)
+            {
+                reap();
+                if(readers.size() >= 8)
+                {
+                    ::close(c);
+                    if(!turnedAway++) say("a ninth reader turned away (eight live readers are attached); further ones are counted, and said when one attaches");
+                    continue;
+                }
+                ::fcntl(c, F_SETFD, FD_CLOEXEC);
+                ::fcntl(c, F_SETOWN, ::getpid());
+                ::fcntl(c, F_SETFL, O_NONBLOCK | O_ASYNC); // its hang-up raises SIGIO, as an attach does
+                readers.push_back(c);
+                say("a reader attached (" + std::to_string(readers.size()) + " now)" + (turnedAway ? "; " + std::to_string(turnedAway) + " turned away meanwhile" : ""));
+                turnedAway = 0;
+            }
+        };
         int status = 0;
+        const itimerval second{{1, 0}, {1, 0}};
+        ::setitimer(ITIMER_REAL, &second, nullptr);
         while(!holderStop)
         {
+            woken = 0;
             attach();
+            reap();
+            if(woken) continue; // a reader came or went meanwhile: look again before waiting
             if(device.wait(fd) < 0 && errno != EINTR) { say(std::string("waiting on ") + path + ": " + std::strerror(errno)); status = 1; break; }
             if(holderStop) break;
             attach();
@@ -420,6 +437,8 @@ namespace oscairn
                     drop(i);
                 }
         }
+        const itimerval off{};
+        ::setitimer(ITIMER_REAL, &off, nullptr);
         for(const int r : readers) ::close(r);
         ::close(fd);
         unbind();

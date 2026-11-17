@@ -386,6 +386,85 @@ namespace
         check(ended(failing.start(broken), 3000) == 1 && failing.saw("waiting on") && failing.count("seam: open") == 1, "a failed wait ends the holder; no other way of reading:\n" + failing.read());
     }
 
+    // True when a reader's connection has been closed by the holder (read gives 0) within `ms`.
+    bool closedByHolder(int fd, int ms)
+    {
+        pollfd p{fd, POLLIN, 0};
+        uint8_t b[8];
+        return ::poll(&p, 1, ms) == 1 && ::recv(fd, b, sizeof b, 0) == 0;
+    }
+    bool stays(int fd, int ms) // still connected: nothing to read, not closed
+    {
+        pollfd p{fd, POLLIN, 0};
+        return ::poll(&p, 1, ms) == 0;
+    }
+
+    // Readers that come and go with no traffic from the panel never fill the holder's eight, and a
+    // ninth live reader is turned away once, then attaches when one leaves, with no message. The
+    // unit's holder was full of eight readers whose engines had ended, and turned the live engine
+    // away a second at a time for days.
+    void readerLimit()
+    {
+        Bench bench;
+        const pid_t pid = bench.start(bench.seam());
+        check(bench.saw("holding " + bench.device), "the holder holds the device");
+        auto waitCount = [&](const std::string& what, size_t n) {
+            for(int i = 0; i < 300 && bench.count(what) < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            return bench.count(what) == n;
+        };
+        for(int i = 0; i < 20; ++i)
+        {
+            const int c = connectPanelHolder(bench.socket);
+            check(c >= 0 && waitCount("a reader attached", size_t(i) + 1), "reader " + std::to_string(i) + " attached:\n" + bench.read());
+            ::close(c);
+            check(waitCount("a reader detached", size_t(i) + 1), "reader " + std::to_string(i) + " dropped with no message from the panel:\n" + bench.read());
+        }
+        check(bench.count("a reader detached (0 left)") == 20 && bench.count("turned away") == 0, "20 readers in turn leave none:\n" + bench.read());
+
+        int live[8];
+        for(int i = 0; i < 8; ++i)
+        {
+            live[i] = connectPanelHolder(bench.socket);
+            check(live[i] >= 0 && waitCount("a reader attached", 21 + size_t(i)), "live reader " + std::to_string(i));
+        }
+        for(int k = 0; k < 4; ++k)
+        {
+            const int c = connectPanelHolder(bench.socket);
+            check(c >= 0 && closedByHolder(c, 2000), "a ninth reader is turned away");
+            ::close(c);
+        }
+        check(bench.count("a ninth reader turned away") == 1, "turned away once, though it came four times:\n" + bench.read());
+        ::close(live[0]);
+        check(waitCount("a reader detached (7 left)", 1), "one leaves:\n" + bench.read());
+        const int ninth = connectPanelHolder(bench.socket);
+        check(ninth >= 0 && bench.saw("4 turned away meanwhile") && stays(ninth, 300), "the ninth attaches as soon as one leaves, said with its count, without a message:\n" + bench.read());
+        ::close(ninth);
+        for(int i = 1; i < 8; ++i) ::close(live[i]);
+
+        // Eight readers that went while the holder could not look (stopped), a new one waiting: the
+        // holder clears the dead ones before it counts, and keeps the new one.
+        std::vector<int> eight;
+        const size_t before = bench.count("a reader attached");
+        for(int i = 0; i < 8; ++i)
+        {
+            eight.push_back(connectPanelHolder(bench.socket));
+            check(eight.back() >= 0 && waitCount("a reader attached", before + size_t(i) + 1), "reader " + std::to_string(i) + " of eight");
+        }
+        // The holder is not yet through dropping the last of the earlier ones: let it settle.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ::kill(pid, SIGSTOP);
+        for(const int c : eight) ::close(c);
+        const int late = connectPanelHolder(bench.socket);
+        const size_t away = bench.count("a ninth reader turned away"), ones = bench.count("a reader attached (1 now)");
+        ::kill(pid, SIGCONT);
+        for(int i = 0; i < 300 && bench.count("a reader attached (1 now)") == ones; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        check(late >= 0 && bench.count("a reader attached (1 now)") == ones + 1 && bench.count("a ninth reader turned away") == away && stays(late, 300),
+              "eight dead readers in the holder do not turn a live one away:\n" + bench.read());
+        ::close(late);
+        ::kill(pid, SIGTERM);
+        check(ended(pid, 2000) == 0, "the holder ends");
+    }
+
     // The takeover guard: while another process has the device open the holder does not open it.
     // Linux: it reads /proc.
     void guard()
@@ -607,6 +686,7 @@ int main(int argc, char** argv)
 {
     if(argc != 4) { std::fprintf(stderr, "usage: oscairn-panel-reader-test FIXTURE MAP PANEL_DUMP\n"); return 2; }
     holder(); // forks: first, before any thread
+    readerLimit();
     guard();
     dump(argv[3]);
     maps(argv[2]);

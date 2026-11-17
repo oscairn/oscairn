@@ -151,9 +151,13 @@ namespace oscairn
         std::set<uint32_t> mine_; // soundContexts()
         std::atomic<uint32_t> sound_{0};
         uint64_t seen_ = 0; // the engine's read of its sounds this context has taken
-        void showValues(uint32_t sound); // the sound's own values, where the plugin gives them
+        bool showValues(uint32_t sound); // the sound's own values, where the plugin gives them (false: it gave none)
         std::vector<kick::clap::Port> port_, none_;
         std::map<clap_id, double> values_;
+        // The values of each sound this node left, as it left them: shown when it selects one back that the plugin cannot
+        // show, as it gives no values of a sound another channel selects (an instance's first sound stays selected on the
+        // channels no part uses). Kept until the sound is discarded or selected again.
+        std::map<uint32_t, std::map<clap_id, double>> left_;
         uint64_t shown_ = 0; // values_ set from a sound's (valueRevision)
         std::array<kick::clap::Event, 256> queue_{}; // control thread to audio thread
         std::atomic<uint32_t> head_{0}, tail_{0};

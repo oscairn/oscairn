@@ -864,7 +864,11 @@ on another bus. A sharing node's `sounds.get` lists its own sounds only (those i
 prepared), the one its channel selects as selected on every channel, so the desktop's sound
 picker shows a part its own sounds and marks the playing one as for an instance of its own. A
 shared node's values come from the plugin (draft 4's `sound_values`) when it is made and when a
-sound is selected on it, so the Part page shows its sound's values. MIDI a recording tap hears from
+sound is selected on it, so the Part page shows its sound's values. A sound selected back that
+another channel still selects (an instance's first sound stays selected on the channels no part
+uses), for which the plugin gives no values, shows the values the node left it with
+(`SoundContext::left_`, kept until the sound is discarded); before, the node kept showing the sound
+it left. MIDI a recording tap hears from
 a shared node carries the channel the notes came in on, not the node's channel
 (`Graph::Plan::Step::heardOn`).
 

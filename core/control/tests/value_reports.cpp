@@ -3,6 +3,7 @@
 // Values a plugin changes with no output event reach params.changed (Session::service) without the control thread
 // comparing every parameter every tick: a quiet second of a 5,000-parameter plugin (4,000 in a worker) compares none;
 // a values rescan, a sound selected on a shared instance and a plugin's own output event are each published, as the plugin's.
+// A sound selected back that another channel also selects (no values from the plugin) shows the values this node left it with.
 //   oscairn-value-reports-test CONTROL_FIXTURE.clap BASIC_SYNTH.clap   (in a worker too: OSCAIRN_PLUGIN_WORKER)
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -96,6 +98,32 @@ int main(int argc, char** argv)
             const auto compared = s.parametersCompared();
             for(int i = 0; i < 200; ++i) p.tick();
             check(s.parametersCompared() == compared, "and then nothing is compared");
+
+            // A -> B -> A -> B on the lead, whose first sound (A) stays selected on the channels no part uses, so the plugin
+            // gives none of its values (sound_values: none for a selected sound): after each switch every value read is the
+            // sound's, and its changes are published once each.
+            uint32_t first = 0;
+            for(const auto& c : s.sounds(a).contexts) if(c.selectedChannels) first = c.id;
+            std::map<clap_id, double> soundA, soundB;
+            for(const auto& q : s.parameters(a)) soundA[q.id] = s.parameter(a, q.id);
+            const double wasA = soundA.at(1), nextB = wasA == .1 ? .2 : .1;
+            const auto other = s.prepareSound(a, "Other on a", {{1, nextB}, {2, .375}});
+            auto switchTo = [&](uint32_t id, const std::map<clap_id, double>& expected, const std::string& what) {
+                const auto from = s.changeSequence();
+                check(s.selectSound(a, id), "select " + what);
+                check(p.waitFor(from, [&](const Control::Change& c) { return c.kind == Kind::Value && c.node == a && c.param == 1 && c.value == expected.at(1) && c.plugin; }),
+                      what + ": its value of parameter 1 is published");
+                for(int i = 0; i < 20; ++i) p.tick();
+                for(const auto& [id, value] : expected) check(s.parameter(a, id) == value, what + ": parameter " + std::to_string(id) + " reads " + std::to_string(s.parameter(a, id)) + ", the sound's " + std::to_string(value));
+                std::map<clap_id, int> published;
+                for(const auto& c : s.changesAfter(from).events) if(c.kind == Kind::Value && c.node == a) ++published[c.param];
+                for(const auto& [id, n] : published) check(n == 1, what + ": parameter " + std::to_string(id) + " published " + std::to_string(n) + " times");
+            };
+            switchTo(other, [&] { auto x = soundA; x[1] = nextB; x[2] = .375; return x; }(), "sound B");
+            for(const auto& q : s.parameters(a)) soundB[q.id] = s.parameter(a, q.id);
+            switchTo(first, soundA, "sound A back (selected on other channels)");
+            switchTo(other, soundB, "sound B again");
+            switchTo(first, soundA, "sound A again");
         }
         std::puts("value reports ok");
         return 0;

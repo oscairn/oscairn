@@ -84,10 +84,12 @@ namespace oscairn
         return true;
     }
 
-    void SoundContext::showValues(uint32_t sound)
+    bool SoundContext::showValues(uint32_t sound)
     {
-        for(const auto& v : engine_->host->soundValues(sound)) if(values_.count(v.id)) values_[v.id] = v.value;
+        const auto values = engine_->host->soundValues(sound);
+        for(const auto& v : values) if(values_.count(v.id)) values_[v.id] = v.value;
         ++shown_;
+        return !values.empty();
     }
 
     SoundContext::~SoundContext() { engine_->channels &= ~(1u << channel_); engine_->buses &= ~(1u << bus_); }
@@ -134,9 +136,13 @@ namespace oscairn
     bool SoundContext::selectSound(uint32_t id, int16_t)
     {
         const auto shown = values_;
-        showValues(id); // before it is selected, while the audio thread leaves its values alone
+        // Before it is selected, while the audio thread leaves its values alone; a sound another channel selects, as this
+        // node left it (left_).
+        if(const auto left = left_.find(id); !showValues(id) && left != left_.end()) values_ = left->second;
         values_[engine_->busParameter] = bus_;
         if(!engine_->host->selectSound(id, int16_t(channel_))) { values_ = shown; return false; }
+        if(own_ != id) left_[own_] = shown;
+        left_.erase(id);
         sound_.store(id, std::memory_order_relaxed); own_ = id; later_ = false; mine_.insert(id);
         queue(engine_->busParameter, bus_); // a preset's sound keeps its own bus otherwise
         return true;
@@ -153,7 +159,7 @@ namespace oscairn
     bool SoundContext::discardSound(uint32_t id, bool cutTail)
     {
         if(!mine_.count(id) || !engine_->host->discardSound(id, cutTail)) return false;
-        mine_.erase(id);
+        mine_.erase(id); left_.erase(id);
         return true;
     }
 

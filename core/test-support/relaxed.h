@@ -9,7 +9,10 @@
 
 namespace oscairn::test
 {
-    inline bool relaxed()
+    // A sanitizer build: every process holds the sanitizer's shadow memory beside its own (several times the program's under
+    // ThreadSanitizer), so what a worker holds is not what its plugin uses, and a worker's memory limit taken from a plugin's
+    // declaration is under it. Not a CI runner, whose processes hold what they hold anywhere.
+    inline bool sanitized()
     {
 #if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
         return true;
@@ -18,6 +21,12 @@ namespace oscairn::test
         return true;
 #endif
 #endif
+        return false;
+    }
+
+    inline bool relaxed()
+    {
+        if(sanitized()) return true;
         const char* ci = std::getenv("CI");
         return ci && *ci;
     }

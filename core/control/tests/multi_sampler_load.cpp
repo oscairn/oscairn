@@ -10,11 +10,13 @@
 // parts kept in instances of their own (OSCAIRN_SHARING=cpu) each worker holds a copy and each counts
 // in full: a private copy is never counted once for several. Checks that each opens in workers; the
 // estimates just said; that neither is below the memory its workers hold; that an allowance under the
-// shared one refuses the Performance, saying so, and one above it opens it.
+// shared one refuses the Performance, saying so, and one above it opens it. In a sanitizer build only these: the
+// under-declaring sampler's cases after them would be stopped by its worker's limit (oscairn::test::sanitized).
 //   oscairn-multi-sampler-load-test WORKER HOLDER.clap SYNTH.clap EFFECT.clap SAMPLEPACK_CLI
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include "../../engine/tests/sample_source.h"
+#include "../../test-support/relaxed.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -159,6 +161,13 @@ int main(int argc, char** argv)
         check(f.memory >= heldApart, "the estimate is not below what the workers hold: " + megabytes(f.memory) + " against " + megabytes(heldApart));
         check(f.memory > e.memory, "private copies cost more than a shared instance");
         check(open(apart, f.memory + 128 * mib).empty(), "and opens within its estimate");
+        // The rest load a sampler that declares 1 MiB: its worker's limit (its declaration and 64 MiB) is under what a worker
+        // holds in a sanitizer build before any sample, which stops it (118 MB against 65 under ThreadSanitizer on CI).
+        if(oscairn::test::sanitized())
+        {
+            std::puts("sanitizer build: the under-declaring sampler and the one never played alone not loaded, their workers' limits under a sanitized worker's own memory");
+            return failures ? 1 : 0;
+        }
 
         // A sampler that under-declares its sound contexts (each holds `perContext`, declares 256 KiB): its further parts are priced
         // at what a context was measured to add once that is known, and before at 2.5 times its word (with its 1 MiB of samples:

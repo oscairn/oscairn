@@ -2,6 +2,7 @@
 #include "Worker.h"
 #include "oscairn/plugin_host.h"
 #include <algorithm>
+#include <bit>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -380,8 +381,9 @@ namespace oscairn::worker
             uint64_t reported = 0; uint32_t seen = 0;
             uint64_t reread = 0; // the host's valueRevision the engine was told of (Service)
             // RFC 0045's plugin groups: the engine's output guard mirrored (each channel's last good sample, frames faded
-            // since), its output as the guard leaves it when that differs (guarded), and the engine's last write seen.
-            std::vector<float> lastOut, guardedOut; uint32_t fadedFor = 0, published = 0; bool guarded = false;
+            // since), its output as the guard leaves it when that differs (guarded), the engine's last write seen, and
+            // whether a block it rendered has not been guarded yet (the guard runs once a node of the worker mixes from it).
+            std::vector<float> lastOut, guardedOut; uint32_t fadedFor = 0, published = 0; bool guarded = false, unguarded = false;
 #ifdef OSCAIRN_HOSTILE_SIZES
             uint32_t trueFrames = 0, trueInputs = 0, trueOutputs = 0; // the engine's, true until the first wreck
 #endif
@@ -409,15 +411,33 @@ namespace oscairn::worker
         // RFC 0045's plugin groups: the engine's output guard (audio_cpp.cpp's audio_finish, Graph::outputBound) on a
         // node's last block, as the engine will run it on the same output, so a node mixed from it here hears what it
         // would in the engine: a block with a sample not finite or past the bound fades from the last good samples.
+        // Only for a node another of the worker mixes from (mix): the engine guards what it reads from a worker itself.
         constexpr float outputBound = 1e6f;
+        // The largest magnitude in the channels, as bits (the Rust core's magnitude): past outputBound's for a sample
+        // past it, infinite or NaN. Four lanes at a time in two running maxima: GCC at -O2 (the device build) leaves a
+        // loop of one running value scalar, which on the A53 cost about 14 us a block over an instrument's 18 channels.
+        uint32_t magnitude(const std::vector<float*>& out, uint32_t channels, uint32_t frames)
+        {
+            using Lanes = uint32_t __attribute__((vector_size(16)));
+            Lanes a{}, b{};
+            uint32_t most = 0;
+            auto take = [](Lanes& m, const float* x) { Lanes v; std::memcpy(&v, x, sizeof v); v &= 0x7fffffffu; m = m > v ? m : v; };
+            for(uint32_t c = 0; c < channels; ++c)
+            {
+                const float* x = out[c]; uint32_t i = 0;
+                for(; i + 8 <= frames; i += 8) { take(a, x + i); take(b, x + i + 4); }
+                for(; i < frames; ++i) most = std::max(most, std::bit_cast<uint32_t>(x[i]) & 0x7fffffffu);
+            }
+            for(int l = 0; l < 4; ++l) most = std::max({most, a[l], b[l]});
+            return most;
+        }
         void guard(Node& n)
         {
             auto& s = *n.shared;
             const uint32_t channels = std::min<uint32_t>(s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), uint32_t(n.lastOut.size()));
             const uint32_t frames = std::min(s.frames, s.maxFrames), fade = std::max(1u, uint32_t(s.sampleRate * .001));
-            uint32_t bad = 0;
-            for(uint32_t c = 0; c < channels; ++c) { const float* x = n.out[c]; for(uint32_t i = 0; i < frames; ++i) bad |= uint32_t(!(std::fabs(x[i]) <= outputBound)); }
-            n.guarded = bad != 0;
+            const bool bad = magnitude(n.out, channels, frames) > std::bit_cast<uint32_t>(outputBound);
+            n.guarded = bad;
             if(!bad) { for(uint32_t c = 0; c < channels; ++c) n.lastOut[c] = frames ? n.out[c][frames - 1] : n.lastOut[c]; n.fadedFor = 0; return; }
             for(uint32_t c = 0; c < channels; ++c)
                 for(uint32_t f = 0; f < frames; ++f)
@@ -439,7 +459,8 @@ namespace oscairn::worker
                 const auto& r = s.fused[k];
                 Node* source = r.node < count ? live[r.node].load(std::memory_order_acquire) : nullptr;
                 if(r.to >= s.inputChannels || !source || !source->shared || r.from >= source->lastOut.size()) continue;
-                if(r.published && source->published != source->shared->published) { source->published = source->shared->published; guard(*source); }
+                // Guarded once a block, at the first route from it: a block the engine wrote (published), or one it rendered.
+                if(r.published ? source->published != source->shared->published : source->unguarded) { source->published = source->shared->published; source->unguarded = false; guard(*source); }
                 const float* from = source->guarded ? source->guardedOut.data() + size_t(r.from) * source->shared->maxFrames : source->out[r.from];
                 float* dest = s.input(r.to);
                 if(r.live)
@@ -513,7 +534,7 @@ namespace oscairn::worker
             s.asleep.store(host.asleep() ? 1 : 0, std::memory_order_relaxed);
             s.restful.store(host.restful() ? 1 : 0, std::memory_order_relaxed);
             s.reset = host.wasReset();
-            guard(n); // every block, so the mirror keeps step with the engine's guard
+            n.unguarded = true; // guarded when a node of this worker first mixes from this block (mix), not before
             {
                 double cost = 0; const oscairn_voice_budget_note_t* notes = nullptr; uint32_t noteCount = 0;
                 s.activeVoices = host.voiceReport(cost, notes, noteCount); s.voiceCost = cost;

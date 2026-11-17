@@ -1459,7 +1459,12 @@ the output guard, `called`/`rested`/`asleep`, render time, the voice report and 
 node; the run cores are unchanged. A follower's request carries its routes (the source's index in
 the worker, channels, gain, the block's live gain products, first); the worker renders a follower
 after its sources in the same pass, its input mixed from their outputs with the engine core's
-formula (`-ffp-contract=off`) after a mirror of the engine's output guard. Per block a follower
+formula (`-ffp-contract=off`) after a mirror of the engine's output guard, run on a source's block
+only when a follower first mixes from it (2026-11-17: run on every node's every block, its scan of
+every output channel was 27 % of a worker's audio thread at rest on the unit, about 14 us a block
+for an instrument's 18 channels; the engine guards what it reads from a worker itself, so a node
+nothing in its worker mixes from is never scanned there, and the scan is four lanes at a time;
+`control-group-guard`: a runaway mixed between two effects of one host stays in the first). Per block a follower
 is fused (a source was handed; a source not handed has its engine output, final by then, written
 into its shared output first), standalone (no source handed: its engine input is exact), or lost
 (a source still busy with an old block, or moved to another worker by a crash: silenced as a busy

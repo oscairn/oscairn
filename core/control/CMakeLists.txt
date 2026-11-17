@@ -392,6 +392,11 @@ add_test(NAME control-chain-placement COMMAND oscairn-chain-placement-test $<TAR
 set_tests_properties(control-chain-placement PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=chain")
 add_test(NAME control-chain-placement-plugin COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(control-chain-placement-plugin PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=plugin")
+# RFC 0045: a runaway mixed from one plugin into another in their worker is guarded there.
+add_executable(oscairn-group-guard-test tests/group_guard.cpp)
+target_link_libraries(oscairn-group-guard-test PRIVATE oscairn_control)
+add_test(NAME control-group-guard COMMAND oscairn-group-guard-test $<TARGET_FILE:oscairn-voice-fixture> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-group-guard PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=1")
 add_executable(oscairn-service-cost tests/service_cost.cpp)
 target_link_libraries(oscairn-service-cost PRIVATE oscairn_control)
 # Values changed with no event reach params.changed without comparing every parameter every tick; in a worker too.

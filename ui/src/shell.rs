@@ -1694,6 +1694,7 @@ impl App {
     /// Something for Routing, then what it asks the engine sent, a menu it has ready opened, and the wires'
     /// meters' timer started or stopped as Meters is switched.
     fn on_routing<R>(&mut self, f: impl FnOnce(&mut routing::Screen) -> R) -> R {
+        let was = self.routing.metering();
         let r = f(&mut self.routing);
         for (request, method, params) in std::mem::take(&mut self.routing.out) {
             self.send(Request::Routing(request), method, params);
@@ -1702,7 +1703,10 @@ impl App {
             self.open_menu(Screen::Routing, &title, items);
         }
         if self.screen == Screen::Routing {
-            if self.routing.metering() && !self.meters.running() {
+            // Only the meters' toggle starts and stops the polling here: a start on every call would wake the
+            // silent meters again at every changed status (the answers that say what the last said), and the shell
+            // would never rest. Entering the screen starts them in `go`.
+            if self.routing.metering() && !was && !self.meters.running() {
                 self.start_meters(routing::METER_INTERVAL);
             } else if !self.routing.metering() && self.meters.running() {
                 self.meters.stop();
@@ -2321,6 +2325,9 @@ impl App {
         if screen == Screen::Routing {
             self.send(Request::Routing(routing::Request::Status), "session.status", json!({}));
             self.on_routing(routing::Screen::shown);
+            if self.routing.metering() && !self.meters.running() {
+                self.start_meters(routing::METER_INTERVAL);
+            }
         }
         if screen == Screen::Chain {
             self.on_chain(chain::Screen::shown);

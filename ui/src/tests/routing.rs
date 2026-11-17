@@ -797,6 +797,132 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     f.screen.frame();
 }
 
+// Routing at rest costs nothing: shown with Meters off and nothing changing, the statuses that say what the last
+// said ask nothing and draw no frame; with Meters on, the answers that carry no signal stop the polling after a
+// moment, and nothing keeps asking or drawing while nothing changes.
+#[test]
+fn routing_at_rest_costs_no_request_and_no_frame() {
+    let mut shared = graph();
+    for w in shared["wires"].as_array_mut().unwrap() {
+        if matches!(w["id"].as_u64(), Some(3 | 5)) {
+            w["owner"] = json!("user");
+        }
+    }
+    let mut f = play_on_the_shell("routing-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), shared.clone());
+    let ui = f.screen.ui.clone_strong();
+    // Answers what the shell asks as an engine would; one not expected here is said.
+    fn drain(f: &mut Fixture, shared: &serde_json::Value, what: &str) {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(150)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => shared.clone(),
+                "edit.history" => json!({"undo": "Volume of Keys", "redo": ""}),
+                "session.status" => json!({"failures": []}),
+                "wires.meters" => json!({"meters": []}),
+                "parts.meters" => json!({"meters": []}),
+                "params.list" => json!({"parameters": []}),
+                "params.get" => json!({"values": []}),
+                "params.text" => json!({"text": ""}),
+                "subscribe" | "unsubscribe" | "controllers.view" | "record.get" | "memory.state" | "transport.get" | "controllers.set" => json!({}),
+                other => panic!("{what}: unexpected request {other}"),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    }
+    ui.global::<crate::Bar>().invoke_action(5);
+    assert_eq!(ui.get_screen(), 9);
+    ui.global::<PartsState>().invoke_tool(2);
+    assert_eq!(ui.get_screen(), 12);
+    drain(&mut f, &shared, "entering Routing");
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "at rest");
+    // The statuses that say what the last said, as the engine's do while nothing changes: the first of the
+    // connection reads the takes and the meters (docs/rust-ui.md); the ones after ask nothing and draw no frame.
+    for _ in 0..6 {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null", "failures": [], "heldNotes": []}})));
+        f.pump();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    drain(&mut f, &shared, "the first statuses");
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "at rest");
+    for _ in 0..6 {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null", "failures": [], "heldNotes": []}})));
+        f.pump();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(f.engine.try_request(std::time::Duration::from_millis(400)).is_none(), "an unchanged status asked for something");
+    assert_eq!(f.screen.frame(), None, "an unchanged status drew a frame");
+    assert!(!f.screen.animating());
+    // Meters on: the wires' peaks are asked on the 50 ms timer, and answers with no signal stop the asking
+    // for good (QUIET_AFTER, 2 s). The ticks are driven, as the event loop drives them.
+    ui.global::<crate::Bar>().invoke_action(2);
+    let mut asked = 0;
+    let mut quiet = std::time::Instant::now();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(9);
+    // The answers that carry no signal stop the polling after QUIET_AFTER (2 s): driven until it has.
+    while quiet.elapsed() < std::time::Duration::from_millis(2300) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        slint::platform::update_timers_and_animations();
+        if let Some(r) = f.engine.try_request(std::time::Duration::from_millis(50)) {
+            assert_eq!(r["method"], "wires.meters", "a meterless tick asked something else");
+            asked += 1;
+            assert!(asked < 120, "{asked} meters asked in 9 s: the silence never stopped the polling");
+            f.reply(&r, json!({"result": {"meters": []}}));
+            quiet = std::time::Instant::now();
+        }
+    }
+    assert!(asked > 0, "Meters on asked nothing");
+    assert!(quiet.elapsed() >= std::time::Duration::from_millis(2000), "the polling stopped early");
+    // Quiet now: ticks ask nothing and draw nothing.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        slint::platform::update_timers_and_animations();
+        f.screen.frame();
+    }
+    assert!(f.engine.try_request(std::time::Duration::from_millis(300)).is_none(), "the silent meters kept being asked");
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "at rest with the meters on and no signal");
+    // A later status whose figures moved (the engine's load wobbles) wakes nothing: the polling stays stopped.
+    // (The bar's own figure moving is the meters' accepted cost; it is drawn once here.)
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.5, "audioDevice": "null", "failures": [], "heldNotes": []}})));
+    f.pump();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.5, "audioDevice": "null", "failures": [], "heldNotes": []}})));
+    f.pump();
+    f.screen.frame();
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        slint::platform::update_timers_and_animations();
+        f.screen.frame();
+    }
+    let late = f.engine.try_request(std::time::Duration::from_millis(300));
+    assert!(late.is_none(), "a changed status woke the silent meters: {:?}", late.map(|r| r["method"].clone()));
+    // (The bar's own figure moving on a changed status is the meters' accepted cost, docs/rust-ui.md; only the
+    // polling must stay stopped.)
+    // The same statuses again, meters on: no request, no frame.
+    for _ in 0..6 {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.5, "audioDevice": "null", "failures": [], "heldNotes": []}})));
+        f.pump();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let late = f.engine.try_request(std::time::Duration::from_millis(400));
+    assert!(late.is_none(), "an unchanged status asked for something with the meters on: {:?}", late.map(|r| r["method"].clone()));
+    assert_eq!(f.screen.frame(), None, "an unchanged status drew a frame with the meters on");
+    // Cancel goes back to the Parts list: the shell is as still as it was. (The switch itself draws;
+// its answers are answered; what follows asks and draws nothing.)
+    crate::shell::act(Action::Cancel(None));
+    assert_eq!(ui.get_screen(), 9);
+    drain(&mut f, &shared, "back on the list");
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None);
+}
+
 // The keys and MIDI have a button for the on-screen keyboard where the profile offers one; a plugin that has a
 // window of its own shows a disabled entry saying that view is not in this shell yet (the one item allowed to stay
 // unported), asked with window.info when the plugin is chosen; a plugin that failed is outlined and said.

@@ -366,11 +366,9 @@ impl Screen {
     }
 
     pub fn at_top(&self) -> bool {
-        if self.tab_at.is_some() {
-            self.tab_at == Some(0)
-        } else {
-            self.b.at_top()
-        }
+        // The pages are always shown: the rail is above the list, so the top is the rail's first tab,
+        // as the Library's is while its tabs show.
+        self.tab_at == Some(0)
     }
 
     /// The bar's title: Settings, the page, and the level of its own.

@@ -252,7 +252,9 @@ Decided 2026-11-08, from what the milestone test found:
      shell with Home, the Setlist and Play is built and tested off the device; every other screen is
      still JUCE, which stays the default unless a profile says `"ui": "rust"`; not yet run on a unit
    - [x] the engine thread's core (note routing, the voice budget) and the graph's audio in Rust,
-     each tested bit for bit against its C++ reference (`engine-core-diff`, `engine-audio-diff`)
+     each tested bit for bit against its C++ reference (`engine-core-diff`, `engine-audio-diff`,
+     `engine-run-diff`); the reference deleted once the Rust core had run on the keyboard, its outputs
+     kept as recorded vectors the same tests replay ([developer guide](developer-guide.md#the-engine-cores-vectors))
    - [x] the full scene model: blocks and wires enabled per scene, and what each scene saves
      (plugins and wires switched off and on, seamlessly, scenes recording all of it with a
      scope, and the desktop's controls for it, done

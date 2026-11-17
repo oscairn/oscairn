@@ -247,7 +247,7 @@ fn midi_out(midi: &mut [Midi], count: &mut u32, drops: &AtomicU64, m: Midi) {
 
 impl Curve {
     /// Graph::ControlCurve::shape, point and next; mul_add where the C++ says std::fma (graph.h point,
-    /// graph.cpp Db, run_cpp.cpp's minimum + x * range), so the values are the same at every optimization level.
+    /// graph.cpp Db; the C++ reference's minimum + x * range), so the values are the same at every optimization level.
     fn shape(&self, value: f64) -> f64 {
         let x = value.clamp(0.0, 1.0);
         match self.kind {

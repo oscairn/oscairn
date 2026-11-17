@@ -71,9 +71,8 @@ the [LV2 guide](../core/lv2-host/README.md). The default build does not require 
 
 Every configuration needs Rust 1.95.0 through rustup (`tools/install-rust.sh`): the sample pack
 library and the engine core are built with cargo. The engine core, which holds the engine thread's
-note routing and voice budget and the graph's audio and run loop, is Rust by default; its C++
-reference is always compiled for the differential tests, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the
-engine use the reference instead. The CLAP host is Rust by default (`core/clap-host/rust`); its C++ reference
+note routing and voice budget and the graph's audio and run loop, is Rust (its C++ reference is gone;
+see [The engine core's vectors](#the-engine-cores-vectors)). The CLAP host is Rust by default (`core/clap-host/rust`); its C++ reference
 (`kick::clap::Host`) is always compiled for the comparison tests, and `-DOSCAIRN_CLAP_HOST=cpp` makes the engine and the
 plugin worker use it. The plugin worker's process is C++. Other options:
 `-DOSCAIRN_UI=ON` builds the Rust UI, `oscairn-ui` ([Rust UI](rust-ui.md)), with cargo;
@@ -139,6 +138,30 @@ Other tests with a `timing` flag (`guard-*` apart from `deadline`, `worker-timin
 `worker-extra-block`, `plugin-hosts`, `engine-pump`) still skip their `timing` assertions whole when relaxed, and
 have not yet been given a premise of their own; `worker-wake`, `control-performance-switch` and the local-socket test
 use `relaxed()` to repeat a timed scenario.
+
+#### The engine core's vectors
+
+`engine-core-diff`, `engine-audio-diff` and `engine-run-diff` drive the Rust engine core with random plans and event
+streams (plan n from seed n; 60 plans of 3,000 blocks, 200 of 2,000 and 150 of 1,500) and compare every result bit for
+bit with recorded outputs in `core/engine/tests/vectors` (`vectors.h`: a running digest of every value compared, 16
+bits of it per block and all 64 every 64th block). A mismatch names the plan and the first block that differs. The
+files hold the outputs of the C++ reference the core was ported from and proven against, recorded before it was
+deleted; each file's header names the reference's commit (`bd57eed7`), the seeds, the sizes and the
+floating-point conditions. That reference cannot be run again without checking out `271f6e9a`, the last commit with
+it and its record mode.
+
+The conditions record and replay share: the core is always built `cargo --release`; the tests and `vectors_math.c`
+are built `-ffp-contract=off`; and the test executables define `exp`, `log1p` and `pow` themselves
+(`vectors_math.c`, IEEE arithmetic alone), which the core calls in place of the platform's libm, whose last bit
+differs between macOS and glibc. A test fails if the core never reached them. So the vectors do not depend on the
+build type, the compiler or the libm. The generators draw each random number in its own statement (a call's
+arguments and an operator's operands are evaluated in an unspecified order: GCC on x86_64 goes right to left), and
+samples are digested with every NaN as one pattern (a NaN made from infinities has the CPU's sign: x86's is set).
+
+The rule: a change to the core that changes what these tests see is a change to the core's behavior, and needs new
+vectors recorded from the Rust core itself (`oscairn-core-diff-test record FILE COMMIT`, likewise the other two,
+after which the header names `rust_core_` and that commit), with the reason in the commit and a review of that
+reason. A change meant to keep the behavior keeps the vectors: if they fail, the change is wrong, not the vectors.
 
 ### Tools
 

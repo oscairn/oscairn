@@ -14,18 +14,31 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
 
-// The engine core (engine_core.h): the Rust one, or with OSCAIRN_ENGINE_CORE=cpp its C++ reference.
-#if OSCAIRN_ENGINE_CORE_RUST
-#define OSCAIRN_CORE(name) rust_core_##name
-#else
-#define OSCAIRN_CORE(name) cpp_core_##name
-#endif
+// The layouts the engine core (engine_core.h) shares with graph.h and note_zone.h; the Rust side asserts its own (lib.rs layouts).
+static_assert(sizeof(oscairn_event)==sizeof(kick::clap::Event) && alignof(oscairn_event)==alignof(kick::clap::Event));
+static_assert(sizeof(oscairn_zones)==sizeof(oscairn::NoteZones) && offsetof(oscairn_zones,count)==offsetof(oscairn::NoteZones,count));
+#define OSCAIRN_SAME(a,b) static_assert(offsetof(oscairn::NoteZone,a)==offsetof(oscairn_zone,b));
+OSCAIRN_SAME(lowVelocity,low_velocity) OSCAIRN_SAME(channels,channels) OSCAIRN_SAME(transpose,transpose) OSCAIRN_SAME(curve,curve)
+OSCAIRN_SAME(fixedVelocity,fixed_velocity) OSCAIRN_SAME(sources,sources) OSCAIRN_SAME(maxNotes,max_notes) OSCAIRN_SAME(part,part)
+OSCAIRN_SAME(reserve,reserve) OSCAIRN_SAME(priority,priority) OSCAIRN_SAME(pedals,pedals)
+#undef OSCAIRN_SAME
+static_assert(sizeof(oscairn::NoteZone)==sizeof(oscairn_zone));
+#define OSCAIRN_SAME(a,b) static_assert(offsetof(oscairn::Graph::Activity,a)==offsetof(oscairn_activity,b));
+OSCAIRN_SAME(sounding,sounding) OSCAIRN_SAME(quiet,quiet) OSCAIRN_SAME(age,age) OSCAIRN_SAME(asleep,asleep) OSCAIRN_SAME(rest,rest)
+OSCAIRN_SAME(perNote,per_note) OSCAIRN_SAME(seedRest,seed_rest) OSCAIRN_SAME(seedNote,seed_note) OSCAIRN_SAME(stolen,stolen)
+OSCAIRN_SAME(hardChokes,hard_chokes) OSCAIRN_SAME(stolenForDevice,stolen_for_device) OSCAIRN_SAME(laneLimit,lane_limit)
+OSCAIRN_SAME(laneTook,lane_took) OSCAIRN_SAME(badOutput,bad_output) OSCAIRN_SAME(badRun,bad_run) OSCAIRN_SAME(stranded,stranded)
+OSCAIRN_SAME(ownVoices,own_voices) OSCAIRN_SAME(honorsVolume,honors_volume) OSCAIRN_SAME(perNoteScale,per_note_scale)
+OSCAIRN_SAME(voiceLimit,voice_limit) OSCAIRN_SAME(overLimit,over_limit) OSCAIRN_SAME(stolenForLoss,faded_for_loss) OSCAIRN_SAME(lostBlocks,lost) OSCAIRN_SAME(stolenForDeadline,faded_for_deadline) OSCAIRN_SAME(unfitBlocks,unfit)
+#undef OSCAIRN_SAME
+static_assert(sizeof(oscairn::Graph::Activity)==sizeof(oscairn_activity));
 
 namespace oscairn
 {
@@ -34,8 +47,8 @@ namespace oscairn
     struct NoteRoute
     {
         oscairn_route* const ledger;
-        explicit NoteRoute(uint32_t ports,uint16_t clap=0,uint32_t fadeFrames=0):ledger(OSCAIRN_CORE(route_new)(ports,clap,fadeFrames)) {}
-        ~NoteRoute() { OSCAIRN_CORE(route_free)(ledger); }
+        explicit NoteRoute(uint32_t ports,uint16_t clap=0,uint32_t fadeFrames=0):ledger(rust_core_route_new(ports,clap,fadeFrames)) {}
+        ~NoteRoute() { rust_core_route_free(ledger); }
         NoteRoute(const NoteRoute&)=delete;
         NoteRoute& operator=(const NoteRoute&)=delete;
     };
@@ -98,11 +111,11 @@ namespace oscairn
         std::vector<uint32_t> waves; // RFC 0034: where each wave of steps ends; a wave's steps render at the same time
         // Its note routing and shared budget (Graph::setVoiceBudget), its audio, and its block, in the engine core; last,
         // so freed before what they name (the block first).
-        struct FreeNotes { void operator()(oscairn_notes* n) const noexcept { OSCAIRN_CORE(notes_free)(n); } };
+        struct FreeNotes { void operator()(oscairn_notes* n) const noexcept { rust_core_notes_free(n); } };
         std::unique_ptr<oscairn_notes,FreeNotes> notes;
-        struct FreeAudio { void operator()(oscairn_audio* a) const noexcept { OSCAIRN_CORE(audio_free)(a); } };
+        struct FreeAudio { void operator()(oscairn_audio* a) const noexcept { rust_core_audio_free(a); } };
         std::unique_ptr<oscairn_audio,FreeAudio> audio;
-        struct FreeRun { void operator()(oscairn_run* r) const noexcept { OSCAIRN_CORE(run_free)(r); } };
+        struct FreeRun { void operator()(oscairn_run* r) const noexcept { rust_core_run_free(r); } };
         std::unique_ptr<oscairn_run,FreeRun> run;
     };
 
@@ -937,12 +950,12 @@ namespace oscairn
                 steps.push_back({step.host.get(),step.audioInputs,step.audioOutputs,step.audioOutputs-(step.ringOut?Graph::ringOutChannels:0u),reinterpret_cast<Peaks>(step.peaks.get()),
                                  coreActivity(step.activity.get()),audioSources[i].data(),uint32_t(audioSources[i].size()),buses[i].data(),uint32_t(buses[i].size())});
             }
-            plan->audio.reset(OSCAIRN_CORE(audio_new)(steps.data(),uint32_t(steps.size()),outputRoutes.data(),uint32_t(outputRoutes.size()),inputChannels_,outputChannels_,maxFrames_));
+            plan->audio.reset(rust_core_audio_new(steps.data(),uint32_t(steps.size()),outputRoutes.data(),uint32_t(outputRoutes.size()),inputChannels_,outputChannels_,maxFrames_));
         }
         for(size_t i=0;i<plan->steps.size();++i)
         {
             auto& step=plan->steps[i];
-            step.in=OSCAIRN_CORE(audio_buffers)(plan->audio.get(),int32_t(i),false);step.out=OSCAIRN_CORE(audio_buffers)(plan->audio.get(),int32_t(i),true);
+            step.in=rust_core_audio_buffers(plan->audio.get(),int32_t(i),false);step.out=rust_core_audio_buffers(plan->audio.get(),int32_t(i),true);
         }
         // The notes, then the block around them (the steps' parts only it reads besides).
         std::vector<oscairn_step> steps;
@@ -957,7 +970,7 @@ namespace oscairn
                              step.host && (worker::workerRest()==worker::WorkerRest::all || (worker::workerRest()==worker::WorkerRest::disabled && !step.playable))});
         }
         const auto budgeted=std::make_unique<bool[]>(steps.size());
-        plan->notes.reset(OSCAIRN_CORE(notes_new)(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
+        plan->notes.reset(rust_core_notes_new(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
         std::vector<oscairn_harmony_source> harmonies;
         for(auto& h:plan->harmonies)harmonies.push_back({h.held->route.ledger,reinterpret_cast<const oscairn_zones*>(&h.zones),h.input,h.root,h.scale,&h.held->last});
         std::vector<oscairn_tap> taps;
@@ -965,7 +978,7 @@ namespace oscairn
         std::vector<oscairn_control> controls;
         static_assert(sizeof(ControlCurve)==sizeof(oscairn_curve) && offsetof(ControlCurve,start)==offsetof(oscairn_curve,start) && offsetof(ControlCurve,exponent)==offsetof(oscairn_curve,exponent));
         for(auto& c:plan->controls)controls.push_back({reinterpret_cast<const oscairn_curve*>(c.path.data()),uint32_t(c.path.size()),c.origin,c.modulate});
-        plan->run.reset(OSCAIRN_CORE(run_new)(plan->notes.get(),plan->audio.get(),steps.data(),budgeted.get(),uint32_t(steps.size()),plan->waves.data(),uint32_t(plan->waves.size()),
+        plan->run.reset(rust_core_run_new(plan->notes.get(),plan->audio.get(),steps.data(),budgeted.get(),uint32_t(steps.size()),plan->waves.data(),uint32_t(plan->waves.size()),
                                               harmonies.data(),uint32_t(harmonies.size()),taps.data(),uint32_t(taps.size()),controls.data(),uint32_t(controls.size())));
         return plan.release();
     }
@@ -1037,7 +1050,7 @@ namespace oscairn
                 const bool replacement=!current_?plan->replacementSerial!=0:current_->replacementSerial!=plan->replacementSerial;
                 if( current_ ) {
                     // Retired connections' releases, stranded plugins, taps gone, a played change's gains (the engine core).
-                    OSCAIRN_CORE(run_adopt)(plan->run.get(),current_->run.get(),plan->rampGains,std::max<uint32_t>(1,uint32_t(sampleRate_*.005)),
+                    rust_core_run_adopt(plan->run.get(),current_->run.get(),plan->rampGains,std::max<uint32_t>(1,uint32_t(sampleRate_*.005)),
                                             reinterpret_cast<oscairn_midi*>(midiOut_.data()),&midiOutCount_,reinterpret_cast<uint64_t*>(&eventDrops_));
                     retired_.push( current_ );
                 }
@@ -1193,14 +1206,14 @@ namespace oscairn
             {voiceBudget_.load(std::memory_order_relaxed),period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_),lowSlack_},
             int64_t(callbackEnds.time_since_epoch().count()),helpers_->worth(),liveFrom_.data(),liveTo_.data(),&nextNoteId_,reinterpret_cast<uint64_t*>(&eventDrops_),
             reinterpret_cast<oscairn_midi*>(midiOut_.data()),&midiOutCount_};
-        return OSCAIRN_CORE(run_block)(plan->run.get(),&run,&plugins);
+        return rust_core_run_block(plan->run.get(),&run,&plugins);
     }
 
     const float* Graph::audioOutput(NodeId node,uint32_t channel) const noexcept
     {
         const Plan* plan=current_;
         if(!plan)return nullptr;
-        if(node==graphInput)return channel<inputChannels_?OSCAIRN_CORE(audio_buffers)(plan->audio.get(),-1,false)[channel]:nullptr;
+        if(node==graphInput)return channel<inputChannels_?rust_core_audio_buffers(plan->audio.get(),-1,false)[channel]:nullptr;
         for(const auto& step:plan->steps)
         {
             if(step.id==node && step.contexts.empty())return channel<step.audioOutputs?step.out[channel]:nullptr;

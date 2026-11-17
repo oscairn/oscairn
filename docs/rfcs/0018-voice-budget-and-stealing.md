@@ -213,8 +213,9 @@ setters; the socket test reads them back over the protocol.
 
 ## Step 3 status
 
-The shared budget, 2026-11-06 (`VoiceBudget` in `core/engine/src/NoteRoute.h`;
-`Graph::setVoiceBudget`). It is RFC 0025's CPU budget, not a second one: with `budget.set`'s
+The shared budget, 2026-11-06 (`VoiceBudget` in `core/engine/src/NoteRoute.h`, now
+the engine core's `Budget` in `core/engine/rust/src/budget.rs`; `Graph::setVoiceBudget`).
+It is RFC 0025's CPU budget, not a second one: with `budget.set`'s
 `cpu` set, the hard limit is that share of the block's time for all the plugins, and the soft
 limit 85% of it. Until a budget is set, nothing is stolen.
 

@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The differential test of a plan's block (engine_core.h's run_*): the Rust implementation against its
-// C++ reference (Graph::process and beginBlock as they were), each over its own notes, audio and routes,
-// driven by the same random plans and the same modeled plugins, and compared after every block: every
+// The differential test of a plan's block (engine_core.h's run_*): the Rust implementation over its notes,
+// audio and routes, driven by random plans and modeled plugins, and compared after every block with the
+// outputs its C++ reference (Graph::process and beginBlock as they were) gave on the same streams: every
 // call either makes on the plugins (in order, with what it hands them: the merged events, voice
 // limits, listener events, deadlines), the graph's audio out, MIDI out, event drops, note IDs, every
-// route's state, every activity and the parts' harmonies (vectors.h: live, or against the reference's
-// recorded outputs). Plans are replaced under it (retired
-// connections, stranded plugins, taps gone, gains carried). The plugins are modeled, the same for both:
+// route's state, every activity and the parts' harmonies (vectors.h, core/engine/tests/vectors/engine-run.vec).
+// Plans are replaced under it (retired connections, stranded plugins, taps gone, gains carried). The plugins are modeled:
 // what each sends is a function of what it was handed (notes on and off as an arpeggiator's, NOTE_ENDs,
 // parameter-target lane events, MIDI), blocks lost, late, reset, a clock that advances with each call.
-// The Rust core's guard rules the reference lacks get no input (as engine-core-diff): no missed blocks,
+// The core's guard rules the reference lacked get no input (as engine-core-diff): no missed blocks,
 // no audio links, the callback's slack never low.
-//   oscairn-run-diff-test [plans] [blocks]                    live: the C++ reference's run, then the Rust's against it
-//   oscairn-run-diff-test record FILE COMMIT [plans] [blocks]  the C++ reference's outputs to FILE (COMMIT: its source's)
-//   oscairn-run-diff-test replay FILE [plans] [blocks]         the Rust core against FILE
+//   oscairn-run-diff-test replay FILE [plans] [blocks]
+//   oscairn-run-diff-test record FILE COMMIT [plans] [blocks]   new vectors from the Rust core (docs/developer-guide.md)
 #include "../src/engine_core.h"
 #include "vectors.h"
 #include "oscairn/graph.h"
@@ -34,19 +32,6 @@ namespace
 {
 using Event=oscairn_event;
 constexpr uint32_t frames=128,hosts=24;
-
-struct Api
-{
-    const char* name;
-    decltype(&rust_core_route_new) routeNew; decltype(&rust_core_route_free) routeFree; decltype(&rust_core_route_live) routeLive;
-    decltype(&rust_core_route_pedals) routePedals; decltype(&rust_core_route_held_keys) heldKeys;
-    decltype(&rust_core_notes_new) notesNew; decltype(&rust_core_notes_free) notesFree;
-    decltype(&rust_core_audio_new) audioNew; decltype(&rust_core_audio_free) audioFree; decltype(&rust_core_audio_buffers) buffers;
-    decltype(&rust_core_run_new) runNew; decltype(&rust_core_run_free) runFree; decltype(&rust_core_run_adopt) adopt; decltype(&rust_core_run_block) block;
-};
-#define OSCAIRN_RUN_TABLE(p) Api{#p,p##route_new,p##route_free,p##route_live,p##route_pedals,p##route_held_keys,p##notes_new,p##notes_free,\
-    p##audio_new,p##audio_free,p##audio_buffers,p##run_new,p##run_free,p##run_adopt,p##run_block}
-const Api apis[2]{OSCAIRN_RUN_TABLE(cpp_core_),OSCAIRN_RUN_TABLE(rust_core_)};
 
 struct Rng
 {
@@ -81,7 +66,7 @@ struct Activity
     oscairn_activity* core() { return reinterpret_cast<oscairn_activity*>(bytes); }
 };
 
-// A plan, the same for both sides.
+// A plan.
 struct Plan
 {
     struct Source { int32_t from; uint32_t route; oscairn_zones zones{}; int16_t channel=-1; bool draining=false; };
@@ -159,10 +144,9 @@ Plan change(Rng& rng,Plan p,uint32_t& routes)
     return p;
 }
 
-// One implementation's side: its routes, activities, notes, audio and run; the modeled plugins' state.
+// A plan's routes, activities, notes, audio and run; the modeled plugins' state.
 struct Side
 {
-    const Api& api;
     std::vector<oscairn_route*> routes;
     std::array<Activity,hosts*3> activities; // a host's, then its two contexts'
     std::array<oscairn_harmony_t,8> harmonies{};
@@ -175,10 +159,9 @@ struct Side
     std::vector<uint32_t> hostOf;
     std::array<std::vector<float>,2> out{std::vector<float>(frames),std::vector<float>(frames)};
     Rng rng{1}; const Plan* plan=nullptr; uint32_t block=0;
-    explicit Side(const Api& a):api(a) {}
-    void free(Built& b) { if(b.run)api.runFree(b.run);if(b.audio)api.audioFree(b.audio);if(b.notes)api.notesFree(b.notes);b={}; }
-    ~Side() { free(now);free(was);for(auto* r:routes)api.routeFree(r); }
-    oscairn_route* route(uint32_t r) { while(routes.size()<=r)routes.push_back(api.routeNew(1,uint16_t(routes.size()%3?1:0),routes.size()%2?64:0));return routes[r]; }
+    void free(Built& b) { if(b.run)rust_core_run_free(b.run);if(b.audio)rust_core_audio_free(b.audio);if(b.notes)rust_core_notes_free(b.notes);b={}; }
+    ~Side() { free(now);free(was);for(auto* r:routes)rust_core_route_free(r); }
+    oscairn_route* route(uint32_t r) { while(routes.size()<=r)routes.push_back(rust_core_route_new(1,uint16_t(routes.size()%3?1:0),routes.size()%2?64:0));return routes[r]; }
     void build(const Plan& p,bool replace)
     {
         std::vector<std::vector<oscairn_source>> sources(p.steps.size());std::vector<std::vector<oscairn_context>> contexts(p.steps.size());
@@ -196,17 +179,17 @@ struct Side
         }
         auto budgeted=std::make_unique<bool[]>(steps.size()+1);
         Built b;
-        b.notes=api.notesNew(steps.data(),uint32_t(steps.size()),3,budgeted.get());
-        b.audio=api.audioNew(audio.data(),uint32_t(audio.size()),outs.data(),uint32_t(outs.size()),0,2,frames);
+        b.notes=rust_core_notes_new(steps.data(),uint32_t(steps.size()),3,budgeted.get());
+        b.audio=rust_core_audio_new(audio.data(),uint32_t(audio.size()),outs.data(),uint32_t(outs.size()),0,2,frames);
         std::vector<oscairn_harmony_source> harmonies;
         for(size_t h=0;h<p.harmonies.size();++h)harmonies.push_back({route(p.harmonies[h].route),&p.harmonies[h].zones,p.harmonies[h].input,p.harmonies[h].root,p.harmonies[h].scale,&this->harmonies[h]});
         std::vector<oscairn_tap> taps;
         for(const auto& t:p.taps)taps.push_back({t.step,route(t.route),&t.zones,t.ports,t.channel});
         std::vector<oscairn_control> controls;
         for(size_t c=0;c<p.paths.size();++c)controls.push_back({p.paths[c].data(),uint32_t(p.paths[c].size()),p.controls[c].first,p.controls[c].second});
-        b.run=api.runNew(b.notes,b.audio,steps.data(),budgeted.get(),uint32_t(steps.size()),p.waves.data(),uint32_t(p.waves.size()),harmonies.data(),uint32_t(harmonies.size()),
-                         taps.data(),uint32_t(taps.size()),controls.data(),uint32_t(controls.size()));
-        if(now.run && replace)api.adopt(b.run,now.run,true,240,midi.data(),&midiCount,&drops);
+        b.run=rust_core_run_new(b.notes,b.audio,steps.data(),budgeted.get(),uint32_t(steps.size()),p.waves.data(),uint32_t(p.waves.size()),harmonies.data(),uint32_t(harmonies.size()),
+                                taps.data(),uint32_t(taps.size()),controls.data(),uint32_t(controls.size()));
+        if(now.run && replace)rust_core_run_adopt(b.run,now.run,true,240,midi.data(),&midiCount,&drops);
         free(was);was=now;now=b; // the plan replaced is kept a block, as Graph retires it
         plan=&p;sent.assign(p.steps.size(),{});
     }
@@ -239,7 +222,7 @@ struct Model
         }
         if(!r.below(5)){const uint32_t time=r.below(frames);const uint8_t status=uint8_t(0xB0|r.below(16)),a=uint8_t(r.below(128)),b=uint8_t(r.below(128));out.push_back(midi(time,status,a,b));}
         if(!r.below(7)){const uint32_t time=r.below(frames);const int16_t ch=int16_t(r.below(16)),key=int16_t(36+r.below(40));const double v=r.unit();out.push_back(note(CLAP_EVENT_NOTE_ON,time,ch,key,v));}
-        auto* o=x.api.buffers(x.plan==nullptr?nullptr:x.now.audio,int32_t(s),true);
+        auto* o=rust_core_audio_buffers(x.plan==nullptr?nullptr:x.now.audio,int32_t(s),true);
         for(uint32_t ch=0;ch<2;++ch)for(uint32_t f=0;f<frames;++f){const float sample=float(r.unit()-.5);o[ch][f]=sample*(r.below(9)?1.f:0.f);}
         return !side(c).plan->lossy || r.below(10);
     }
@@ -295,13 +278,13 @@ void input(Rng& rng,std::vector<Event>& out,std::vector<uint8_t>& tags)
 
 struct Totals { uint64_t plans=0,blocks=0,replaced=0,calls=0,midi=0; } totals;
 
-void run(const Api& api,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
+void run(uint32_t seed,uint32_t blocks,vectors::Tape& tape)
 {
     tape.plan(seed,blocks);
     Rng rng{seed*0x9E3779B97F4A7C15ull+7};
     uint32_t routes=0;
     std::vector<std::unique_ptr<Plan>> plans;plans.push_back(std::make_unique<Plan>(randomPlan(rng,routes)));
-    auto side=std::make_unique<Side>(api);
+    auto side=std::make_unique<Side>();
     side->build(*plans.back(),false);
     std::vector<Event> events;std::vector<uint8_t> tags;
     std::array<float,256> live;live.fill(1.f);
@@ -331,40 +314,35 @@ void run(const Api& api,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
             const oscairn_run_block run{nullptr,0,outs,2,frames,48,events.data(),uint32_t(events.size()),tags.data(),params.data(),paramCount,&beat,panicInput,panicNotes,listening,parallel,deadlines,transportWake,
                                         timing,hasDeadline?s->clock+1'000'000'000:0,worth,live.data(),live.data(),&s->nextId,&s->drops,s->midi.data(),&s->midiCount};
             oscairn_plugins calls=plugins;calls.context=s.get();
-            s->log.push_back(s->api.block(s->now.run,&run,&calls));
+            s->log.push_back(rust_core_run_block(s->now.run,&run,&calls));
         }
         auto& x=*side;
-        for(size_t i=0;i<x.log.size();++i)tape.see("calls on the plugins",int(i),x.log[i]); // a live mismatch names the call
+        for(size_t i=0;i<x.log.size();++i)tape.see(x.log[i]);
         totals.calls+=x.log.size();x.log.clear();
-        for(const auto& o:x.out)tape.see("audio out",-1,o.data(),o.size()*sizeof(float));
-        tape.see("MIDI out",-1,x.midiCount);tape.see("MIDI out",-1,x.midi.data(),x.midiCount*sizeof(oscairn_midi));
+        for(const auto& o:x.out)tape.see(o.data(),o.size()*sizeof(float));
+        tape.see(x.midiCount);tape.see(x.midi.data(),x.midiCount*sizeof(oscairn_midi));
         totals.midi+=x.midiCount;x.midiCount=0;
-        tape.see("event drops",-1,x.drops);
-        tape.see("note IDs",-1,x.nextId);
-        tape.see("harmonies",-1,x.harmonies);
-        for(size_t i=0;i<x.activities.size();++i)tape.see("activity",int(i),x.activities[i].bytes);
+        tape.see(x.drops);
+        tape.see(x.nextId);
+        tape.see(x.harmonies);
+        for(size_t i=0;i<x.activities.size();++i)tape.see(x.activities[i].bytes);
         for(size_t r=0;r<x.routes.size();++r)
         {
             uint8_t pedals[256];uint64_t held[2];
-            x.api.routePedals(x.routes[r],pedals);x.api.heldKeys(x.routes[r],held);
-            tape.see("route state",int(r),x.api.routeLive(x.routes[r]));tape.see("route state",int(r),pedals);tape.see("route state",int(r),held);
+            rust_core_route_pedals(x.routes[r],pedals);rust_core_route_held_keys(x.routes[r],held);
+            tape.see(rust_core_route_live(x.routes[r]));tape.see(pedals);tape.see(held);
         }
         tape.block();
         ++totals.blocks;
     }
-    tape.endPlan();
     ++totals.plans;
 }
 }
 
 int main(int argc,char** argv)
 {
-    vectors::Args args(argc,argv,150,1500,"engine-run-diff","core/engine/tests/run_diff.cpp (oscairn-run-diff-test record)","cpp_core_ (core/engine/src/run_cpp.cpp, core_cpp.cpp, audio_cpp.cpp)");
-    for(uint32_t p=0;p<args.plans;++p)
-    {
-        if(args.live()){const Totals t=totals;args.tape.mode=vectors::Tape::LiveRecord;run(apis[0],p,args.blocks,args.tape);totals=t;args.tape.mode=vectors::Tape::LiveCheck;}
-        run(apis[args.recording?0:1],p,args.blocks,args.tape);
-    }
+    vectors::Args args(argc,argv,150,1500,"engine-run-diff","core/engine/tests/run_diff.cpp (oscairn-run-diff-test record)");
+    for(uint32_t p=0;p<args.plans;++p)run(p,args.blocks,args.tape);
     const char* outcome=args.done(7); // a curve's shapes: exp, log1p, pow
     std::printf("engine run differential: %llu plans (%llu replaced), %llu blocks, %llu plugin calls, %llu MIDI messages: %s\n",
                 (unsigned long long)totals.plans,(unsigned long long)totals.replaced,(unsigned long long)totals.blocks,(unsigned long long)totals.calls,(unsigned long long)totals.midi,outcome);

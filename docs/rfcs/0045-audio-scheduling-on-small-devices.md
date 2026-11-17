@@ -823,9 +823,9 @@ now expects no panic after the stall's blocks.
 The owner's requirement: notes never glitch, and anything that would push the CPU hard enough to
 glitch notes is given up before that happens; voices may be given up for load from outside the
 audio too (the app, the engine's other threads), which separate UI work keeps rare. The guard is in
-the engine core (`core/engine/rust`, behind `core/engine/src/engine_core.h`; the C++ core is kept
-selectable with `OSCAIRN_ENGINE_CORE=cpp`, as the reference the differential test holds the Rust
-to, which has rule 12a and none after it). Its rules, as built:
+the engine core (`core/engine/rust`, behind `core/engine/src/engine_core.h`; its C++ reference,
+which had rule 12a and none after it, was deleted on 2026-11-16, its outputs on the differential
+tests' streams kept as recorded vectors in `core/engine/tests/vectors`). Its rules, as built:
 
 - Which note goes, for every rule: released notes before held ones, held notes beyond their part's
   reserve next, a part's highest and lowest held keys last; within each, the part of lower priority,

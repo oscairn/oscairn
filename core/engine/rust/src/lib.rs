@@ -1,7 +1,7 @@
 //! The engine thread's core in Rust: note routing, the voice budget, the budget's per-block
 //! bookkeeping and the plan's audio (buffers, mixing, the output guard, meters), behind the C interface in core/engine/src/engine_core.h (names rust_core_*). The
-//! C++ implementation of the same interface (core_cpp.cpp) is the reference the differential test
-//! holds this to. All unsafe code is in this file, at that boundary.
+//! differential tests (core/engine/tests: core_diff.cpp, audio_diff.cpp, run_diff.cpp) hold it to the outputs its C++
+//! reference gave, recorded in core/engine/tests/vectors. All unsafe code is in this file, at that boundary.
 
 mod audio;
 #[rustfmt::skip]
@@ -668,7 +668,7 @@ mod tests {
     use std::mem::{offset_of, size_of};
     use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
-    // The layouts the C++ shares (engine_core.h; core_cpp.cpp asserts the C++ side).
+    // The layouts the C++ shares (engine_core.h; graph.cpp asserts the C++ side).
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);

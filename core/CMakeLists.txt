@@ -73,10 +73,7 @@ set_tests_properties(hardware-plugin PROPERTIES TIMEOUT 30)
 
 # The engine thread's core (engine/src/engine_core.h): note routing and the voice budget, in Rust
 # (engine/rust), built as samplepack is: cargo, offline, for the Rust targets samplepack's module
-# chose, at OSCAIRN_RUST_VERSION. Its C++ reference (engine/src/core_cpp.cpp) is always built too, for
-# the differential test; OSCAIRN_ENGINE_CORE picks the one the engine uses.
-set(OSCAIRN_ENGINE_CORE rust CACHE STRING "The engine core the engine uses: rust, or cpp (its C++ reference)")
-set_property(CACHE OSCAIRN_ENGINE_CORE PROPERTY STRINGS rust cpp)
+# chose, at OSCAIRN_RUST_VERSION.
 set(engine_core_crate "${CMAKE_CURRENT_SOURCE_DIR}/engine/rust")
 file(STRINGS "${engine_core_crate}/rust-toolchain.toml" engine_core_toolchain REGEX "^channel = \"${OSCAIRN_RUST_VERSION}\"$")
 if(NOT engine_core_toolchain)
@@ -120,11 +117,8 @@ add_dependencies(oscairn_engine_core oscairn_engine_core_build)
 set_target_properties(oscairn_engine_core PROPERTIES INTERFACE_LINK_LIBRARIES kick_clap_host)
 
 add_library(oscairn_engine STATIC
-    engine/src/audio_cpp.cpp
     engine/src/chain.cpp
-    engine/src/core_cpp.cpp
     engine/src/graph.cpp
-    engine/src/run_cpp.cpp
     engine/src/sound_context.cpp
     engine/src/AudioHelpers.cpp
     engine/src/harmony.cpp
@@ -136,15 +130,10 @@ add_library(oscairn_engine STATIC
 target_include_directories(oscairn_engine PUBLIC engine/include)
 target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host oscairn_engine_core)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
-# Rust never fuses a multiply and an add unless it says mul_add; nor does the C++ core (run_cpp.cpp says std::fma at those same spots), so the two agree bit for bit. Nor does the
-# recorder, whose taps redo the graph's mix of a connection (live gains ramped) and must sum to what plays exactly. Nor does a worker,
-# which mixes a plugin group's routes as the core does (RFC 0045).
-set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp engine/src/run_cpp.cpp engine/src/recorder.cpp plugin-host/src/Worker.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
-if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
-    target_compile_definitions(oscairn_engine PRIVATE OSCAIRN_ENGINE_CORE_RUST=1)
-elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")
-    message(FATAL_ERROR "OSCAIRN_ENGINE_CORE is rust or cpp, not ${OSCAIRN_ENGINE_CORE}")
-endif()
+# Rust never fuses a multiply and an add unless it says mul_add; nor does the recorder, whose taps redo the core's mix of a
+# connection (live gains ramped) and must sum to what plays exactly; nor a worker, which mixes a plugin group's routes as the
+# core does (RFC 0045).
+set_source_files_properties(engine/src/recorder.cpp plugin-host/src/Worker.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 
 # Sanitizers slow rendering several times over; there the paced tests check containment, not timing.
 # CI's virtual machines cannot keep real time either (GitHub sets CI): the tests read that themselves when they run
@@ -376,11 +365,11 @@ set_tests_properties(note-routing PROPERTIES TIMEOUT 30)
 if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set_tests_properties(note-routing PROPERTIES TIMEOUT 120) # its work is CPU, which a sanitizer multiplies (26 of 30 s under ThreadSanitizer on CI); the limit is for a hang
 endif()
-# The engine core: the Rust implementation bit for bit against its C++ reference, live (engine-*-diff) and against the
-# reference's outputs recorded in engine/tests/vectors (engine-*-replay, vectors.h); and the crate's own tests. The tests
-# and vectors_math.c (the cores' exp, log1p and pow there, so the vectors hold no libm's rounding) are built -ffp-contract=off.
-# engine-core-diff: the notes core; engine-audio-diff: a plan's audio (buffers, mixing, output guard, meters; `bench cpp|rust`
-# times each); engine-run-diff: a plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls).
+# The engine core: bit for bit against the outputs recorded in engine/tests/vectors (vectors.h; its C++ reference's, until a
+# reviewed change records new ones: docs/developer-guide.md); and the crate's own tests. The tests and vectors_math.c (the
+# core's exp, log1p and pow there, so the vectors hold no libm's rounding) are built -ffp-contract=off.
+# engine-core-diff: the notes core; engine-audio-diff: a plan's audio (buffers, mixing, output guard, meters; `bench` times
+# it); engine-run-diff: a plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls).
 set(engine_diff_size_core)
 set(engine_diff_size_audio) # under a sanitizer the same 200 plans for 700 blocks, not 2000: the whole took 280 of its 300 s under ThreadSanitizer on CI
 set(engine_diff_size_run) # under a sanitizer its 150 plans of 1500 blocks take longer than the limit; the same plans, a third of the blocks (the rest of the matrix runs in the builds without one)
@@ -393,18 +382,15 @@ foreach(diff IN ITEMS core audio run)
     target_link_libraries(oscairn-${diff}-diff-test PRIVATE oscairn_engine)
     target_compile_options(oscairn-${diff}-diff-test PRIVATE -ffp-contract=off)
     target_compile_definitions(oscairn-${diff}-diff-test PRIVATE OSCAIRN_VECTORS_BUILD="${CMAKE_BUILD_TYPE}")
-    add_test(NAME engine-${diff}-diff COMMAND oscairn-${diff}-diff-test ${engine_diff_size_${diff}})
-    add_test(NAME engine-${diff}-replay COMMAND oscairn-${diff}-diff-test replay "${CMAKE_CURRENT_SOURCE_DIR}/engine/tests/vectors/engine-${diff}.vec" ${engine_diff_size_${diff}})
-    set_tests_properties(engine-${diff}-diff engine-${diff}-replay PROPERTIES TIMEOUT 300)
+    add_test(NAME engine-${diff}-diff COMMAND oscairn-${diff}-diff-test replay "${CMAKE_CURRENT_SOURCE_DIR}/engine/tests/vectors/engine-${diff}.vec" ${engine_diff_size_${diff}})
+    set_tests_properties(engine-${diff}-diff PROPERTIES TIMEOUT 300)
 endforeach()
-if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
-    add_executable(oscairn-core-recovery-test engine/tests/core_recovery.cpp)
-    target_link_libraries(oscairn-core-recovery-test PRIVATE oscairn_engine)
-    add_test(NAME engine-core-recovery COMMAND oscairn-core-recovery-test)
-    add_executable(oscairn-core-pool-test engine/tests/core_pool.cpp)
-    target_link_libraries(oscairn-core-pool-test PRIVATE oscairn_engine)
-    add_test(NAME engine-core-pool COMMAND oscairn-core-pool-test)
-endif()
+add_executable(oscairn-core-recovery-test engine/tests/core_recovery.cpp)
+target_link_libraries(oscairn-core-recovery-test PRIVATE oscairn_engine)
+add_test(NAME engine-core-recovery COMMAND oscairn-core-recovery-test)
+add_executable(oscairn-core-pool-test engine/tests/core_pool.cpp)
+target_link_libraries(oscairn-core-pool-test PRIVATE oscairn_engine)
+add_test(NAME engine-core-pool COMMAND oscairn-core-pool-test)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --workspace --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)
@@ -588,16 +574,14 @@ set_tests_properties(voice-extension-hostile PROPERTIES TIMEOUT 60 ENVIRONMENT "
 # RFC 0045's load guard in real time: notes give way before a worker's block is missed, with no budget and with the profiles' budget.
 add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture> ${worker_timing})
 set_tests_properties(load-guard PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
-# RFC 0045's no-glitch guard: lost blocks, the chain after an instrument and the callback's slack (the Rust core's rules).
+# RFC 0045's no-glitch guard: lost blocks, the chain after an instrument and the callback's slack.
 add_executable(oscairn-guard-test engine/tests/guard.cpp)
 target_link_libraries(oscairn-guard-test PRIVATE oscairn_engine)
 add_dependencies(oscairn-guard-test oscairn-voice-fixture oscairn-plugin-worker)
-if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
-    foreach(case IN ITEMS losses chain asleep deadline burst limit-first starved pedalled)
-        add_test(NAME guard-${case} COMMAND oscairn-guard-test $<TARGET_FILE:oscairn-voice-fixture> $<IF:$<BOOL:${worker_timing}>,--no-timing,--timing> ${case})
-        set_tests_properties(guard-${case} PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
-    endforeach()
-endif()
+foreach(case IN ITEMS losses chain asleep deadline burst limit-first starved pedalled)
+    add_test(NAME guard-${case} COMMAND oscairn-guard-test $<TARGET_FILE:oscairn-voice-fixture> $<IF:$<BOOL:${worker_timing}>,--no-timing,--timing> ${case})
+    set_tests_properties(guard-${case} PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
+endforeach()
 # RFC 0045's extra block: a listed plugin one block late, sample for sample, others on time.
 add_executable(oscairn-worker-extra-block-test engine/tests/worker_extra_block.cpp)
 target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)

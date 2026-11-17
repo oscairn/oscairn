@@ -1,4 +1,4 @@
-//! VoiceBudget (core/engine/src/NoteRoute.h; RFC 0018 option B, per lane as RFC 0045) and the node
+//! The voice budget (RFC 0018 option B, per lane as RFC 0045; once VoiceBudget in core/engine/src/NoteRoute.h) and the node
 //! costs it reads (Graph::Activity). Counts the C++ scans for are popcounts of the routes' maps.
 
 use crate::route::FADE_STEPS;
@@ -585,5 +585,22 @@ impl Budget {
         let least = if l.over { (voices as f32 * 0.75).floor() } else { admitted };
         // Held below 2^16 voices, as a cost near 0 makes the room huge.
         Some(65536f32.min(1f32.max(least).max(admitted + room)) as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A node whose voices cost next to nothing leaves room for billions: the limit stays a count a u32 holds (found
+    /// by a sanitizer in the C++ reference, which converted the float out of range).
+    #[test]
+    fn voice_limit_held_at_2_16() {
+        let mut budget = Budget::new(Vec::new(), 1);
+        budget.lanes[0].limit = 2000.0;
+        let cheap = Activity::default();
+        cheap.per_note.set(1e-7);
+        cheap.per_note_scale.set(1.0);
+        assert_eq!(budget.voice_limit(&crate::Routes(()), 0, &cheap, 10, 10.0), 65536);
     }
 }

@@ -12,9 +12,9 @@ thread contract. The complete control API is not implemented (what remains is in
 [roadmap](../docs/roadmap.md)).
 
 `engine/` holds the graph and transport. The engine thread's core (note routing and the voice
-budget), the graph's audio (buffers, mixing, output guard, meters) and its run loop are Rust by
-default, in `engine/rust`; their C++ reference is built too, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the
-engine use it. Everything else in `core/` is C++.
+budget), the graph's audio (buffers, mixing, output guard, meters) and its run loop are Rust, in
+`engine/rust`, held to their C++ reference's recorded outputs (`engine/tests/vectors`). Everything else in
+`core/` is C++.
 
 `plugin-host/` is the graph's shared plugin-host interface. The CLAP adapter delegates to
 `clap-host/` through a C interface (`plugin-host/src/clap_host.h`); optional `lv2-host/` uses Lilv. Event and metadata structures retain the

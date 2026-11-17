@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The differential test of the engine core (engine_core.h): the Rust implementation against its C++
-// reference, driven through the same C interface by the same random plans and event streams, and
-// every result compared bit for bit (vectors.h: live, or against the reference's recorded outputs):
-// the events each step is sent, its overflow, each route's notes, pedals and held keys, every activity counter, the voice limits, what taps and harmonies route,
-// what a plan change's retired routes send, and the pedals each part takes by its receive setting. The plugins' side is modeled here, the same for
-// both: block times from the notes each holds, NOTE_ENDs after a tail (one in 13 never), lost and
-// reset blocks, silence for the note-end watchdog, a plugin that gives up its own voices. The Rust core's rules the C++
-// reference does not have (RFC 0045's guard past 12a: lost blocks, the chain after a step, the callback's slack) get
+// The differential test of the engine core (engine_core.h): the Rust implementation, driven through its
+// C interface by random plans and event streams, and every result compared bit for bit with the outputs its
+// C++ reference gave on the same streams (vectors.h, core/engine/tests/vectors/engine-core.vec):
+// the events each step is sent, its overflow, each route's notes, pedals and held keys, every activity counter, the
+// voice limits, what taps and harmonies route, what a plan change's retired routes send, and the pedals each part takes
+// by its receive setting. The plugins' side is modeled here: block times from the notes each holds, NOTE_ENDs after a
+// tail (one in 13 never), lost and reset blocks, silence for the note-end watchdog, a plugin that gives up its own voices. The core's rules the C++
+// reference did not have (RFC 0045's guard past 12a: lost blocks, the chain after a step, the callback's slack) get
 // no input here: no block reported lost, no audio links, no slack; the guard's own test (guard.cpp) covers them.
-//   oscairn-core-diff-test [plans] [blocks]                    live: the C++ reference's run, then the Rust's against it
-//   oscairn-core-diff-test record FILE COMMIT [plans] [blocks]  the C++ reference's outputs to FILE (COMMIT: its source's)
-//   oscairn-core-diff-test replay FILE [plans] [blocks]         the Rust core against FILE
+//   oscairn-core-diff-test replay FILE [plans] [blocks]
+//   oscairn-core-diff-test record FILE COMMIT [plans] [blocks]   new vectors from the Rust core (docs/developer-guide.md)
 #include "../src/engine_core.h"
 #include "vectors.h"
 #include "oscairn/graph.h"
@@ -28,19 +27,6 @@ namespace
 {
 using Event=oscairn_event;
 constexpr uint32_t frames=128,capacity=kick::clap::Host::maxProcessEvents;
-
-struct Core // one implementation's entry points
-{
-    const char* name;
-    decltype(&rust_core_route_new) routeNew; decltype(&rust_core_route_free) routeFree; decltype(&rust_core_route_live) routeLive;
-    decltype(&rust_core_route_pedals) routePedals; decltype(&rust_core_route_held_keys) routeHeldKeys; decltype(&rust_core_route_retire) routeRetire;
-    decltype(&rust_core_route_let_go) routeLetGo; decltype(&rust_core_route_events) routeEvents; decltype(&rust_core_notes_new) notesNew;
-    decltype(&rust_core_notes_free) notesFree; decltype(&rust_core_notes_begin) notesBegin; decltype(&rust_core_notes_route) notesRoute;
-    decltype(&rust_core_notes_finish) notesFinish; decltype(&rust_core_notes_voice_limit) notesVoiceLimit; decltype(&rust_core_notes_end) notesEnd;
-};
-#define OSCAIRN_CORE_TABLE(p) Core{#p,p##route_new,p##route_free,p##route_live,p##route_pedals,p##route_held_keys,p##route_retire,p##route_let_go,\
-    p##route_events,p##notes_new,p##notes_free,p##notes_begin,p##notes_route,p##notes_finish,p##notes_voice_limit,p##notes_end}
-const Core cores[2]{OSCAIRN_CORE_TABLE(cpp_core_),OSCAIRN_CORE_TABLE(rust_core_)};
 
 struct Rng
 {
@@ -112,18 +98,16 @@ struct Activity
     oscairn_activity* core() { return reinterpret_cast<oscairn_activity*>(bytes); }
 };
 
-// One implementation's side of a plan: its routes, activities and notes; the plugins' side kept per side.
+// A plan's routes, activities and notes, and the plugins' side.
 struct Side
 {
-    const Core& core;
     std::vector<oscairn_route*> routes; // per source, then the tap's and the harmony's
     std::vector<std::unique_ptr<Activity>> activities; // per step, then per context
     oscairn_notes* notes=nullptr;
     struct End { uint32_t due; Event event; };
     std::vector<std::vector<End>> pending; // per step
     uint32_t nextId=0,released=0;
-    explicit Side(const Core& c):core(c) {}
-    ~Side() { core.notesFree(notes);for(auto* r:routes)core.routeFree(r); }
+    ~Side() { rust_core_notes_free(notes);for(auto* r:routes)rust_core_route_free(r); }
 };
 
 struct Source { uint32_t route; oscairn_zones zones{}; int16_t channel=-1; bool draining=false; std::vector<uint32_t> peers; };
@@ -140,7 +124,7 @@ oscairn_zone zone(Rng& rng)
 
 struct Totals { uint64_t blocks=0,events=0,merged=0,plans=0,replaced=0; } totals;
 
-void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
+void run(uint32_t seed,uint32_t blocks,vectors::Tape& tape)
 {
     tape.plan(seed,blocks);
     Rng rng{seed*0x9E3779B97F4A7C15ull+1};
@@ -175,9 +159,9 @@ void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
     oscairn_zones tapZones{};tapZones.count=rng.below(2);tapZones.zones[0]=zone(rng);
     const uint32_t endTail=1+rng.below(40);
 
-    Side side(core);
-    for(uint32_t r=0;r<sourceCount;++r)side.routes.push_back(side.core.routeNew(1,uint16_t(clap[r]),fade[r]));
-    side.routes.push_back(side.core.routeNew(16,0,0));side.routes.push_back(side.core.routeNew(16,0,0)); // a tap's, a harmony's
+    Side side;
+    for(uint32_t r=0;r<sourceCount;++r)side.routes.push_back(rust_core_route_new(1,uint16_t(clap[r]),fade[r]));
+    side.routes.push_back(rust_core_route_new(16,0,0));side.routes.push_back(rust_core_route_new(16,0,0)); // a tap's, a harmony's
     for(auto& st:plan)side.activities.push_back(std::make_unique<Activity>(st.seedRest,st.perNote));
     for(auto& st:plan)for(size_t c=0;c<st.contexts.size();++c)side.activities.push_back(std::make_unique<Activity>(-1,-1));
     side.pending.resize(plan.size());
@@ -196,9 +180,9 @@ void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
             steps.push_back({side.activities[i]->core(),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),plan[i].lane,plan[i].inProcess,plan[i].lateLane,nullptr,0});
         }
         auto budgeted=std::make_unique<bool[]>(plan.size());
-        side.core.notesFree(side.notes);
-        side.notes=side.core.notesNew(steps.data(),uint32_t(steps.size()),3,budgeted.get());
-        tape.see("budgeted steps",-1,budgeted.get(),plan.size());
+        rust_core_notes_free(side.notes);
+        side.notes=rust_core_notes_new(steps.data(),uint32_t(steps.size()),3,budgeted.get());
+        tape.see(budgeted.get(),plan.size());
     };
     build(side);
 
@@ -213,7 +197,7 @@ void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
         // Each step's events: the beat, a release or two, parameter lane events through a source, every source's input.
         std::vector<oscairn_key> keys;std::vector<Event> extra;extra.reserve(16);
         const bool lostNow=!rng.below(300); // a block that did not fit (keys past the merged room, a lost release)
-        side.core.notesBegin(side.notes,&timing);
+        rust_core_notes_begin(side.notes,&timing);
         for(size_t s=0;s<plan.size();++s)
         {
             keys.clear();extra.clear();uint32_t order=0;
@@ -233,17 +217,17 @@ void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
                     keys.push_back({time,order++,&input[i],c,tags[i],false});
                 }
             bool overflow=lostNow;
-            const uint32_t n=side.core.notesRoute(side.notes,uint32_t(s),keys.data(),uint32_t(keys.size()),frames,&side.nextId,out.merged.data(),capacity,
+            const uint32_t n=rust_core_notes_route(side.notes,uint32_t(s),keys.data(),uint32_t(keys.size()),frames,&side.nextId,out.merged.data(),capacity,
                                                   plan[s].contexts.empty()?nullptr:out.heard.data(),&overflow);
-            tape.see("events sent",int(s),n);tape.see("events sent",int(s),overflow);tape.see("events sent",int(s),out.merged.data(),n*sizeof(Event));
-            if(!plan[s].contexts.empty())tape.see("channels heard",int(s),out.heard.data(),n*2);
+            tape.see(n);tape.see(overflow);tape.see(out.merged.data(),n*sizeof(Event));
+            if(!plan[s].contexts.empty())tape.see(out.heard.data(),n*2);
             totals.merged+=n;
             // The plugin: its time from the notes it holds, its NOTE_ENDs, sometimes a lost block, a reset, silence.
             const bool processed=rng.below(50),reset=!rng.below(400),silent=!rng.below(3),spike=!rng.below(200);
             uint32_t soundLimits[2]{}; // the limits for the step's sound contexts
             const uint32_t loudness=rng.below(100);
             {
-                uint32_t live=0;for(auto& src:plan[s].sources)live+=side.core.routeLive(side.routes[src.route]);
+                uint32_t live=0;for(auto& src:plan[s].sources)live+=rust_core_route_live(side.routes[src.route]);
                 auto& a=side.activities[s]->get();
                 a.quiet.store(silent?a.quiet.load()+frames:0);
                 for(size_t c=0;c<plan[s].contexts.size();++c){auto& x=side.activities[plan.size()+c]->get();x.quiet.store(silent?x.quiet.load()+frames:0);}
@@ -263,55 +247,50 @@ void run(const Core& core,uint32_t seed,uint32_t blocks,vectors::Tape& tape)
                 }
                 const float took=(plan[s].rest+plan[s].perNote*float(live))*(spike?3.f:1.f);
                 const oscairn_finish f{took,processed,reset,false,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size())};
-                side.core.notesFinish(side.notes,uint32_t(s),&f);
-                if(plan[s].ownVoices)a.voiceLimit=side.core.notesVoiceLimit(side.notes,uint32_t(s),2*live,soundLimits,uint32_t(plan[s].contexts.size()));
+                rust_core_notes_finish(side.notes,uint32_t(s),&f);
+                if(plan[s].ownVoices)a.voiceLimit=rust_core_notes_voice_limit(side.notes,uint32_t(s),2*live,soundLimits,uint32_t(plan[s].contexts.size()));
             }
-            if(plan[s].ownVoices){tape.see("voice limits",int(s),side.activities[s]->get().voiceLimit);tape.see("voice limits",int(s),soundLimits);}
+            if(plan[s].ownVoices){tape.see(side.activities[s]->get().voiceLimit);tape.see(soundLimits);}
         }
         // A MIDI tap and a harmony: the input through each one's route alone.
         out.sent.clear();out.held.assign(2*input.size(),0);
-        side.core.routeEvents(side.routes[sourceCount],&tapZones,input.data(),uint32_t(input.size()),tags.data(),true,&side.nextId,collect,&out.sent,nullptr);
-        side.core.routeEvents(side.routes[sourceCount+1],&tapZones,input.data(),uint32_t(input.size()),nullptr,false,&side.nextId,nullptr,nullptr,out.held.data());
-        tape.see("tap events",-1,out.sent.data(),out.sent.size()*sizeof(Event));
-        tape.see("harmony keys",-1,out.held.data(),out.held.size()*8);
-        side.core.notesEnd(side.notes,NAN);
+        rust_core_route_events(side.routes[sourceCount],&tapZones,input.data(),uint32_t(input.size()),tags.data(),true,&side.nextId,collect,&out.sent,nullptr);
+        rust_core_route_events(side.routes[sourceCount+1],&tapZones,input.data(),uint32_t(input.size()),nullptr,false,&side.nextId,nullptr,nullptr,out.held.data());
+        tape.see(out.sent.data(),out.sent.size()*sizeof(Event));
+        tape.see(out.held.data(),out.held.size()*8);
+        rust_core_notes_end(side.notes,NAN);
         // Every route's state and every activity, compared.
         for(size_t r=0;r<side.routes.size();++r)
         {
             uint8_t p[256];uint64_t h[2];
-            side.core.routePedals(side.routes[r],p);side.core.routeHeldKeys(side.routes[r],h);
-            tape.see("route state",int(r),side.core.routeLive(side.routes[r]));tape.see("route state",int(r),p);tape.see("route state",int(r),h);
+            rust_core_route_pedals(side.routes[r],p);rust_core_route_held_keys(side.routes[r],h);
+            tape.see(rust_core_route_live(side.routes[r]));tape.see(p);tape.see(h);
         }
-        for(size_t i=0;i<side.activities.size();++i)tape.see("activity",int(i),side.activities[i]->bytes);
-        tape.see("note IDs",-1,side.nextId);
+        for(size_t i=0;i<side.activities.size();++i)tape.see(side.activities[i]->bytes);
+        tape.see(side.nextId);
         // Now and then the plan is replaced: a connection leaves (retired, its pedals to those staying), the tap goes, the rest go on.
         if(b%500==499 && sourceCount)
         {
             const uint32_t gone=rng.below(sourceCount);
             uint8_t remaining[256]{},pedals[256];
-            for(uint32_t r=0;r<sourceCount;++r)if(r!=gone){side.core.routePedals(side.routes[r],pedals);for(int i=0;i<256;++i)remaining[i]=std::max(remaining[i],pedals[i]);}
+            for(uint32_t r=0;r<sourceCount;++r)if(r!=gone){rust_core_route_pedals(side.routes[r],pedals);for(int i=0;i<256;++i)remaining[i]=std::max(remaining[i],pedals[i]);}
             out.sent.clear();
-            const bool ok=side.core.routeRetire(side.routes[gone],remaining,collect,&out.sent);
-            side.core.routeLetGo(side.routes[sourceCount],collect,&out.sent);
-            tape.see("retired routes",-1,ok);tape.see("retired routes",-1,out.sent.data(),out.sent.size()*sizeof(Event));
+            const bool ok=rust_core_route_retire(side.routes[gone],remaining,collect,&out.sent);
+            rust_core_route_let_go(side.routes[sourceCount],collect,&out.sent);
+            tape.see(ok);tape.see(out.sent.data(),out.sent.size()*sizeof(Event));
             build(side);
             ++totals.replaced;
         }
         tape.block();
     }
-    tape.endPlan();
     ++totals.plans;
 }
 }
 
 int main(int argc,char** argv)
 {
-    vectors::Args args(argc,argv,60,3000,"engine-core-diff","core/engine/tests/core_diff.cpp (oscairn-core-diff-test record)","cpp_core_ (core/engine/src/core_cpp.cpp, around NoteRoute.h)");
-    for(uint32_t p=0;p<args.plans;++p)
-    {
-        if(args.live()){const Totals t=totals;args.tape.mode=vectors::Tape::LiveRecord;run(cores[0],p,args.blocks,args.tape);totals=t;args.tape.mode=vectors::Tape::LiveCheck;}
-        run(cores[args.recording?0:1],p,args.blocks,args.tape);
-    }
+    vectors::Args args(argc,argv,60,3000,"engine-core-diff","core/engine/tests/core_diff.cpp (oscairn-core-diff-test record)");
+    for(uint32_t p=0;p<args.plans;++p)run(p,args.blocks,args.tape);
     const char* outcome=args.done(4);
     std::printf("engine core differential: %llu plans (%llu replaced), %llu blocks, %llu input events, %llu events sent: %s\n",
                 (unsigned long long)totals.plans,(unsigned long long)totals.replaced,(unsigned long long)totals.blocks,(unsigned long long)totals.events,(unsigned long long)totals.merged,outcome);

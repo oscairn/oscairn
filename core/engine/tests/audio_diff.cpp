@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The differential test of a plan's audio (engine_core.h's audio_*): the Rust implementation against
-// its C++ reference (graph.cpp's mixing, output guard and meters as they were), driven through the
-// same C interface by the same random plans and blocks, and compared bit for bit after every call
-// (vectors.h: live, or against the reference's recorded outputs; samples with every NaN alike):
+// The differential test of a plan's audio (engine_core.h's audio_*): the Rust implementation, driven
+// through its C interface by random plans and blocks, and compared bit for bit after every call with
+// the outputs its C++ reference (graph.cpp's mixing, output guard and meters as they were) gave on the
+// same streams (vectors.h, core/engine/tests/vectors/engine-audio.vec; samples with every NaN alike):
 // each step's input buffers after its mix, its output buffers after the guard, its and its buses'
 // meters and activity counters, and the graph's outputs. Plans change under it with their gains
-// carried over (a played change); live gains move and jump. The plugins are modeled, the same for
-// both: outputs from their inputs and noise, now and then a NaN, an infinity, a sample past
-// outputBound, silence, a block not rendered, its inputs written over (working in place).
-//   oscairn-audio-diff-test [plans] [blocks]                    live: the C++ reference's run, then the Rust's against it
-//   oscairn-audio-diff-test record FILE COMMIT [plans] [blocks]  the C++ reference's outputs to FILE (COMMIT: its source's)
-//   oscairn-audio-diff-test replay FILE [plans] [blocks]         the Rust core against FILE
-//   oscairn-audio-diff-test bench cpp|rust [blocks]              a 16-part Performance's audio, ns a block
+// carried over (a played change); live gains move and jump. The plugins are modeled: outputs from
+// their inputs and noise, now and then a NaN, an infinity, a sample past outputBound, silence, a
+// block not rendered, its inputs written over (working in place).
+//   oscairn-audio-diff-test replay FILE [plans] [blocks]
+//   oscairn-audio-diff-test record FILE COMMIT [plans] [blocks]   new vectors from the Rust core (docs/developer-guide.md)
+//   oscairn-audio-diff-test bench [blocks]                        a 16-part Performance's audio, ns a block
 #include "../src/engine_core.h"
 #include "vectors.h"
 #include "oscairn/graph.h"
@@ -30,16 +29,6 @@ namespace
 {
 constexpr uint32_t maxFrames=128,hosts=32,maxBuses=3;
 
-struct Api // one implementation's entry points
-{
-    const char* name;
-    decltype(&rust_core_audio_new) make; decltype(&rust_core_audio_free) free; decltype(&rust_core_audio_buffers) buffers;
-    decltype(&rust_core_audio_carry) carry; decltype(&rust_core_audio_begin) begin; decltype(&rust_core_audio_mix) mix;
-    decltype(&rust_core_audio_finish) finish;
-};
-#define OSCAIRN_AUDIO_TABLE(p) Api{#p,p##audio_new,p##audio_free,p##audio_buffers,p##audio_carry,p##audio_begin,p##audio_mix,p##audio_finish}
-const Api apis[2]{OSCAIRN_AUDIO_TABLE(cpp_core_),OSCAIRN_AUDIO_TABLE(rust_core_)};
-
 struct Rng
 {
     uint64_t s;
@@ -56,7 +45,7 @@ struct Activity
     oscairn_activity* core() { return reinterpret_cast<oscairn_activity*>(bytes); }
 };
 
-// A plan, the same for both sides: steps by plugin (host), their channels, meters, activities, buses and connections.
+// A plan: steps by plugin (host), their channels, meters, activities, buses and connections.
 struct Plan
 {
     uint32_t inputs=0,channels=2;
@@ -65,16 +54,14 @@ struct Plan
     std::vector<oscairn_audio_route> outputs;
 };
 
-// One implementation's side: its audio, and each plugin's meters and activities (kept across plans, as a node's).
+// The plan's audio, and each plugin's meters and activities (kept across plans, as a node's).
 struct Side
 {
-    const Api& api;
     oscairn_audio* audio=nullptr;
     std::array<Activity,hosts*(1+maxBuses)> activities;
     std::array<oscairn_peaks,hosts*(1+maxBuses)> peaks{};
     std::vector<float> outputs;
-    explicit Side(const Api& a):api(a) {}
-    ~Side() { if(audio)api.free(audio); }
+    ~Side() { if(audio)rust_core_audio_free(audio); }
     void build(const Plan& plan,uint32_t ramp)
     {
         std::vector<std::vector<oscairn_bus>> buses(plan.steps.size());
@@ -86,8 +73,8 @@ struct Side
             steps.push_back({reinterpret_cast<const void*>(uintptr_t(s.host+1)),s.ins,s.outs,s.metered,s.peaks?&peaks[s.host]:nullptr,s.activity?activities[s.host].core():nullptr,
                              s.routes.data(),uint32_t(s.routes.size()),buses[i].data(),uint32_t(buses[i].size())});
         }
-        auto* next=api.make(steps.data(),uint32_t(steps.size()),plan.outputs.data(),uint32_t(plan.outputs.size()),plan.inputs,plan.channels,maxFrames);
-        if(audio){if(ramp)api.carry(next,audio,ramp);api.free(audio);}
+        auto* next=rust_core_audio_new(steps.data(),uint32_t(steps.size()),plan.outputs.data(),uint32_t(plan.outputs.size()),plan.inputs,plan.channels,maxFrames);
+        if(audio){if(ramp)rust_core_audio_carry(next,audio,ramp);rust_core_audio_free(audio);}
         audio=next;
     }
 };
@@ -138,14 +125,14 @@ Plan change(Rng& rng,Plan plan)
 
 uint64_t compared=0;
 
-void run(const Api& api,uint32_t seed,uint32_t blocks,uint64_t& total,vectors::Tape& tape)
+void run(uint32_t seed,uint32_t blocks,uint64_t& total,vectors::Tape& tape)
 {
     tape.plan(seed,blocks);
-    auto see=[&](const char* what,size_t step,const void* p,size_t n){compared+=n;tape.see(what,int(step),p,n);};
+    auto see=[&](const void* p,size_t n){compared+=n;tape.see(p,n);};
     std::vector<uint32_t> scratch;
-    auto samples=[&](const char* what,size_t step,const void* p,size_t n){see(what,step,vectors::canonical(p,n,scratch),n);};
+    auto samples=[&](const void* p,size_t n){see(vectors::canonical(p,n,scratch),n);};
     Rng rng{0x9e3779b97f4a7c15ull*(seed+1)};
-    Side side(api);
+    Side side;
     Plan plan=randomPlan(rng);
     side.build(plan,0);
     std::array<float,oscairn::Graph::liveGains> liveFrom,liveTo;liveFrom.fill(1.f);liveTo.fill(1.f);
@@ -170,13 +157,13 @@ void run(const Api& api,uint32_t seed,uint32_t blocks,uint64_t& total,vectors::T
         std::vector<float*> outs;
         side.outputs.assign(size_t(no)*maxFrames,7.f); // what was there: silenced or mixed over
         for(uint32_t c=0;c<no;++c)outs.push_back(c>=plan.channels && nullExtra?nullptr:side.outputs.data()+size_t(c)*maxFrames);
-        api.begin(side.audio,in.data(),ni,outs.data(),no,frames);
+        rust_core_audio_begin(side.audio,in.data(),ni,outs.data(),no,frames);
         for(uint32_t i=0;i<plan.steps.size();++i)
         {
             const auto& step=plan.steps[i];
-            api.mix(side.audio,i,nullptr,frames,liveFrom.data(),liveTo.data());
-            float* const* ins=api.buffers(side.audio,int32_t(i),false);float* const* out=api.buffers(side.audio,int32_t(i),true);
-            for(uint32_t c=0;c<step.ins;++c)samples("input",i,ins[c],frames*sizeof(float));
+            rust_core_audio_mix(side.audio,i,nullptr,frames,liveFrom.data(),liveTo.data());
+            float* const* ins=rust_core_audio_buffers(side.audio,int32_t(i),false);float* const* out=rust_core_audio_buffers(side.audio,int32_t(i),true);
+            for(uint32_t c=0;c<step.ins;++c)samples(ins[c],frames*sizeof(float));
             // The plugin: from its inputs and noise; now and then a bad sample, silence, a block not rendered.
             for(uint32_t c=0;c<step.outs;++c)
             {
@@ -190,25 +177,24 @@ void run(const Api& api,uint32_t seed,uint32_t blocks,uint64_t& total,vectors::T
             if(!rng.below(8))for(uint32_t c=0;c<step.ins;++c)std::fill_n(ins[c],frames,.125f); // a plugin working in place
             const bool processed=rng.below(12)!=0,asleep=!rng.below(3);
             const uint32_t fade=rng.below(4)?48:1+rng.below(300);
-            api.finish(side.audio,i,frames,processed,asleep,fade);
-            for(uint32_t c=0;c<step.outs;++c)samples("output",i,out[c],frames*sizeof(float));
+            rust_core_audio_finish(side.audio,i,frames,processed,asleep,fade);
+            for(uint32_t c=0;c<step.outs;++c)samples(out[c],frames*sizeof(float));
             for(uint32_t b=0;b<=maxBuses;++b)
             {
                 const uint32_t k=hosts*b+step.host;
-                see("activity",i,side.activities[k].bytes,sizeof(Activity));samples("meter",i,side.peaks[k],sizeof(oscairn_peaks));
+                see(side.activities[k].bytes,sizeof(Activity));samples(side.peaks[k],sizeof(oscairn_peaks));
                 if(!rng.below(7))std::memset(side.peaks[k],0,sizeof(oscairn_peaks)); // takePeaks
             }
         }
-        api.mix(side.audio,uint32_t(plan.steps.size()),outs.data(),frames,liveFrom.data(),liveTo.data());
-        for(uint32_t c=0;c<no;++c)if(outs[c])samples("graph output",plan.steps.size(),outs[c],frames*sizeof(float));
+        rust_core_audio_mix(side.audio,uint32_t(plan.steps.size()),outs.data(),frames,liveFrom.data(),liveTo.data());
+        for(uint32_t c=0;c<no;++c)if(outs[c])samples(outs[c],frames*sizeof(float));
         tape.block();
     }
-    tape.endPlan();
 }
 
 // A 16-part Performance: each part's instrument into its chain, the chains into the master at the
 // part's live volume and into two send buses, the buses into the master, the master out.
-int bench(const Api& api,uint32_t blocks)
+int bench(uint32_t blocks)
 {
     Plan plan;plan.channels=2;
     auto route=[](int32_t source,uint32_t c,float gain,uint8_t live=0){return oscairn_audio_route{source,c,c,gain,{live,0,0,0}};};
@@ -218,21 +204,21 @@ int bench(const Api& api,uint32_t blocks)
     plan.steps.push_back({34,2,2,2,true,true,{},{}});
     for(uint32_t p=0;p<18;++p)for(uint32_t c=0;c<2;++c)plan.steps.back().routes.push_back(route(int32_t(16+p),c,p<16?.8f:1.f,p<16?uint8_t(1+p):0));
     plan.outputs={route(34,0,1),route(34,1,1)};
-    Side side(api);side.build(plan,0);
+    Side side;side.build(plan,0);
     std::array<float,oscairn::Graph::liveGains> live;live.fill(1.f);
     std::vector<float> signal(maxFrames),out(2*maxFrames);
     for(uint32_t f=0;f<maxFrames;++f)signal[f]=std::sin(float(f)*.1f)*.5f;
     float* outs[2]{out.data(),out.data()+maxFrames};
     auto block=[&]{
-        api.begin(side.audio,nullptr,0,outs,2,maxFrames);
+        rust_core_audio_begin(side.audio,nullptr,0,outs,2,maxFrames);
         for(uint32_t i=0;i<plan.steps.size();++i)
         {
-            api.mix(side.audio,i,nullptr,maxFrames,live.data(),live.data());
-            float* const* o=api.buffers(side.audio,int32_t(i),true);
+            rust_core_audio_mix(side.audio,i,nullptr,maxFrames,live.data(),live.data());
+            float* const* o=rust_core_audio_buffers(side.audio,int32_t(i),true);
             for(uint32_t c=0;c<2;++c)std::memcpy(o[c],signal.data(),maxFrames*sizeof(float)); // the plugin
-            api.finish(side.audio,i,maxFrames,true,false,48);
+            rust_core_audio_finish(side.audio,i,maxFrames,true,false,48);
         }
-        api.mix(side.audio,uint32_t(plan.steps.size()),outs,maxFrames,live.data(),live.data());};
+        rust_core_audio_mix(side.audio,uint32_t(plan.steps.size()),outs,maxFrames,live.data(),live.data());};
     for(uint32_t b=0;b<1000;++b)block();
     std::vector<double> ns;
     for(uint32_t round=0;round<9;++round)
@@ -242,21 +228,17 @@ int bench(const Api& api,uint32_t blocks)
         ns.push_back(std::chrono::duration<double,std::nano>(std::chrono::steady_clock::now()-t0).count()/blocks);
     }
     std::sort(ns.begin(),ns.end());
-    std::printf("%s audio, %zu steps x 128 frames: median %.0f ns a block (min %.0f, max %.0f), out %g\n",api.name,plan.steps.size(),ns[4],ns[0],ns[8],double(out[5]));
+    std::printf("audio, %zu steps x 128 frames: median %.0f ns a block (min %.0f, max %.0f), out %g\n",plan.steps.size(),ns[4],ns[0],ns[8],double(out[5]));
     return 0;
 }
 }
 
 int main(int argc,char** argv)
 {
-    if(argc>2 && !std::strcmp(argv[1],"bench"))return bench(apis[std::strcmp(argv[2],"cpp")?1:0],argc>3?uint32_t(std::atoi(argv[3])):20000);
-    vectors::Args args(argc,argv,200,2000,"engine-audio-diff","core/engine/tests/audio_diff.cpp (oscairn-audio-diff-test record)","cpp_core_ (core/engine/src/audio_cpp.cpp)");
+    if(argc>1 && !std::strcmp(argv[1],"bench"))return bench(argc>2?uint32_t(std::atoi(argv[2])):20000);
+    vectors::Args args(argc,argv,200,2000,"engine-audio-diff","core/engine/tests/audio_diff.cpp (oscairn-audio-diff-test record)");
     uint64_t total=0;
-    for(uint32_t p=0;p<args.plans;++p)
-    {
-        if(args.live()){const uint64_t t=total,c=compared;args.tape.mode=vectors::Tape::LiveRecord;run(apis[0],p,args.blocks,total,args.tape);total=t;compared=c;args.tape.mode=vectors::Tape::LiveCheck;}
-        run(apis[args.recording?0:1],p,args.blocks,total,args.tape);
-    }
+    for(uint32_t p=0;p<args.plans;++p)run(p,args.blocks,total,args.tape);
     const char* outcome=args.done(0); // no exp, log1p or pow in a plan's audio
     std::printf("engine audio differential: %u plans, %llu blocks, %llu bytes compared: %s\n",args.plans,(unsigned long long)total,(unsigned long long)compared,outcome);
     return 0;

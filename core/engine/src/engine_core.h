@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
-/* The engine thread's core: note routing (NoteRoute), the voice budget (VoiceBudget, RFC 0018 and
- * 0045), the budget's per-block bookkeeping and the plan's audio (buffers, mixing, the output guard,
- * meters), behind one C interface with two implementations:
- * Rust (core/engine/rust, names rust_core_*) and C++ (core_cpp.cpp around NoteRoute.h, cpp_core_*).
- * graph.cpp calls the one OSCAIRN_ENGINE_CORE selects through OSCAIRN_CORE(name); the differential
- * test (core/engine/tests/core_diff.cpp) runs both on the same streams and compares every result.
+/* The engine thread's core: note routing, the voice budget (RFC 0018 and 0045), the budget's
+ * per-block bookkeeping and the plan's audio (buffers, mixing, the output guard, meters), behind one
+ * C interface, in Rust (core/engine/rust, names rust_core_*), which graph.cpp calls. The differential
+ * tests (core/engine/tests: core_diff.cpp, audio_diff.cpp, run_diff.cpp) hold it to recorded outputs
+ * (core/engine/tests/vectors; each file's header says which core and commit gave them).
  *
  * Threads: *_new and *_free on the control thread, audio_buffers on either; everything else on the audio thread, one call at
  * a time. The caller keeps every route and activity a plan names alive until that plan's notes are
@@ -124,7 +123,7 @@ typedef struct
 /* One block's timing, microseconds: budget as Graph::setVoiceBudget (0 none, below 0 the load
  * guard alone); a period, the callback's deadline and a worker's allowance; the audio cores; the
  * frames a node stays silent before its released notes are let go (the note-end watchdog); and the
- * callback's slack at or under which its time is running out (notes_end; the Rust core). */
+ * callback's slack at or under which its time is running out (notes_end). */
 typedef struct
 {
     float budget, period, deadline, allowance, cores;
@@ -258,41 +257,40 @@ typedef struct
     uint32_t* midi_count;
 } oscairn_run_block;
 
-#define OSCAIRN_CORE_API(p) \
-    oscairn_audio* p##audio_new(const oscairn_audio_step* steps, uint32_t count, const oscairn_audio_route* outputs, uint32_t output_count, \
-                                uint32_t inputs, uint32_t channels, uint32_t max_frames); \
-    void p##audio_free(oscairn_audio* audio); \
-    float* const* p##audio_buffers(oscairn_audio* audio, int32_t step, bool outputs); \
-    void p##audio_carry(oscairn_audio* next, const oscairn_audio* current, uint32_t ramp); \
-    void p##audio_begin(oscairn_audio* audio, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames); \
-    void p##audio_mix(oscairn_audio* audio, uint32_t step, float* const* outputs, uint32_t frames, const float* live_from, const float* live_to); \
-    void p##audio_finish(oscairn_audio* audio, uint32_t step, uint32_t frames, bool processed, bool asleep, uint32_t fade); \
-    bool p##audio_quiet(const oscairn_audio* audio, uint32_t step, uint32_t frames); \
-    void p##audio_silence(oscairn_audio* audio, uint32_t step, uint32_t frames); \
-    oscairn_run* p##run_new(oscairn_notes* notes, oscairn_audio* audio, const oscairn_step* steps, const bool* budgeted, uint32_t count, \
-                            const uint32_t* waves, uint32_t wave_count, \
-                            const oscairn_harmony_source* harmonies, uint32_t harmony_count, const oscairn_tap* taps, uint32_t tap_count, \
-                            const oscairn_control* controls, uint32_t control_count); \
-    void p##run_free(oscairn_run* run); \
-    void p##run_adopt(oscairn_run* next, oscairn_run* current, bool ramp, uint32_t ramp_frames, oscairn_midi* midi, uint32_t* midi_count, uint64_t* drops); \
-    bool p##run_block(oscairn_run* run, const oscairn_run_block* block, const oscairn_plugins* plugins); \
-    oscairn_route* p##route_new(uint32_t ports, uint16_t clap_ports, uint32_t fade_frames); \
-    void p##route_free(oscairn_route* route); \
-    uint32_t p##route_live(const oscairn_route* route); \
-    void p##route_pedals(const oscairn_route* route, uint8_t pedals[256]); \
-    void p##route_held_keys(const oscairn_route* route, uint64_t keys[2]); \
-    bool p##route_retire(oscairn_route* route, const uint8_t remaining[256], oscairn_emit emit, void* context); \
-    void p##route_let_go(oscairn_route* route, oscairn_emit emit, void* context); \
-    void p##route_events(oscairn_route* route, const oscairn_zones* zones, const oscairn_event* events, uint32_t count, \
-                         const uint8_t* tags, bool skip_ends, uint32_t* next_id, oscairn_emit emit, void* context, uint64_t* held); \
-    oscairn_notes* p##notes_new(const oscairn_step* steps, uint32_t count, uint32_t lanes, bool* budgeted); \
-    void p##notes_free(oscairn_notes* notes); \
-    void p##notes_begin(oscairn_notes* notes, const oscairn_block* block); \
-    uint32_t p##notes_route(oscairn_notes* notes, uint32_t step, oscairn_key* keys, uint32_t count, uint32_t frames, uint32_t* next_id, \
-                            oscairn_event* merged, uint32_t capacity, int16_t* heard, bool* overflow); \
-    void p##notes_finish(oscairn_notes* notes, uint32_t step, const oscairn_finish* finish); \
-    uint32_t p##notes_voice_limit(const oscairn_notes* notes, uint32_t step, uint32_t voices, uint32_t* contexts, uint32_t count); \
-    void p##notes_end(oscairn_notes* notes, float slack);
+oscairn_audio* rust_core_audio_new(const oscairn_audio_step* steps, uint32_t count, const oscairn_audio_route* outputs, uint32_t output_count,
+                                   uint32_t inputs, uint32_t channels, uint32_t max_frames);
+void rust_core_audio_free(oscairn_audio* audio);
+float* const* rust_core_audio_buffers(oscairn_audio* audio, int32_t step, bool outputs);
+void rust_core_audio_carry(oscairn_audio* next, const oscairn_audio* current, uint32_t ramp);
+void rust_core_audio_begin(oscairn_audio* audio, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames);
+void rust_core_audio_mix(oscairn_audio* audio, uint32_t step, float* const* outputs, uint32_t frames, const float* live_from, const float* live_to);
+void rust_core_audio_finish(oscairn_audio* audio, uint32_t step, uint32_t frames, bool processed, bool asleep, uint32_t fade);
+bool rust_core_audio_quiet(const oscairn_audio* audio, uint32_t step, uint32_t frames);
+void rust_core_audio_silence(oscairn_audio* audio, uint32_t step, uint32_t frames);
+oscairn_run* rust_core_run_new(oscairn_notes* notes, oscairn_audio* audio, const oscairn_step* steps, const bool* budgeted, uint32_t count,
+                               const uint32_t* waves, uint32_t wave_count,
+                               const oscairn_harmony_source* harmonies, uint32_t harmony_count, const oscairn_tap* taps, uint32_t tap_count,
+                               const oscairn_control* controls, uint32_t control_count);
+void rust_core_run_free(oscairn_run* run);
+void rust_core_run_adopt(oscairn_run* next, oscairn_run* current, bool ramp, uint32_t ramp_frames, oscairn_midi* midi, uint32_t* midi_count, uint64_t* drops);
+bool rust_core_run_block(oscairn_run* run, const oscairn_run_block* block, const oscairn_plugins* plugins);
+oscairn_route* rust_core_route_new(uint32_t ports, uint16_t clap_ports, uint32_t fade_frames);
+void rust_core_route_free(oscairn_route* route);
+uint32_t rust_core_route_live(const oscairn_route* route);
+void rust_core_route_pedals(const oscairn_route* route, uint8_t pedals[256]);
+void rust_core_route_held_keys(const oscairn_route* route, uint64_t keys[2]);
+bool rust_core_route_retire(oscairn_route* route, const uint8_t remaining[256], oscairn_emit emit, void* context);
+void rust_core_route_let_go(oscairn_route* route, oscairn_emit emit, void* context);
+void rust_core_route_events(oscairn_route* route, const oscairn_zones* zones, const oscairn_event* events, uint32_t count,
+                            const uint8_t* tags, bool skip_ends, uint32_t* next_id, oscairn_emit emit, void* context, uint64_t* held);
+oscairn_notes* rust_core_notes_new(const oscairn_step* steps, uint32_t count, uint32_t lanes, bool* budgeted);
+void rust_core_notes_free(oscairn_notes* notes);
+void rust_core_notes_begin(oscairn_notes* notes, const oscairn_block* block);
+uint32_t rust_core_notes_route(oscairn_notes* notes, uint32_t step, oscairn_key* keys, uint32_t count, uint32_t frames, uint32_t* next_id,
+                               oscairn_event* merged, uint32_t capacity, int16_t* heard, bool* overflow);
+void rust_core_notes_finish(oscairn_notes* notes, uint32_t step, const oscairn_finish* finish);
+uint32_t rust_core_notes_voice_limit(const oscairn_notes* notes, uint32_t step, uint32_t voices, uint32_t* contexts, uint32_t count);
+void rust_core_notes_end(oscairn_notes* notes, float slack);
 
 /* route_new: a ledger for a destination with `ports` note ports, bit p of clap_ports set where port p
  *   takes CLAP notes (else MIDI), and a stolen note's fade of fade_frames (0: choked at once).
@@ -311,7 +309,7 @@ typedef struct
  *   already lost; out, whether it was: then its routes are emptied and nothing is merged. Returns the
  *   events merged.
  * notes_finish: after the step's plugin rendered: its notes counted and costed, a lost block marked on
- *   its lane and the lanes before it (the Rust core), its NOTE_ENDs taken.
+ *   its lane and the lanes before it, its NOTE_ENDs taken.
  * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep, `voices`
  *   sounding now: those of the notes admitted and the room left at its cost per voice, never fewer than
  *   those admitted unless its lane is measured over its limit (then at most a quarter fewer a block);
@@ -319,7 +317,7 @@ typedef struct
  *   voices and its share of the instance's room, 0 for one holding none.
  * notes_end: the block is done: the lanes judged against their limits, the timing report kept; slack,
  *   the microseconds left before the callback's deadline once the block was collected (NaN: unknown),
- *   which the Rust core gives notes up for when it runs low.
+ *   which the core gives notes up for when it runs low.
  * audio_new: a plan's audio, every buffer max_frames long: `inputs` external input channels, each
  *   step's; the graph's own `channels` out are the caller's. Connections to one channel add up, in order.
  * audio_buffers: a step's input or output channels (the plugin's buffers), or with step -1 the external input.
@@ -341,8 +339,6 @@ typedef struct
  * run_block: the block (Graph::process from the beat on); false where a plugin did not render. A step whose
  *   plugin may sleep through the block (no core events merged for it, its input quiet, the transport as it
  *   went, and plugins.rest true) is not called: its outputs silence, rendered (RFC 0045, sleeping plugins). */
-OSCAIRN_CORE_API(rust_core_)
-OSCAIRN_CORE_API(cpp_core_)
 
 #ifdef __cplusplus
 }

@@ -132,6 +132,7 @@ CI: what a slow machine cannot fake, the direction that shows the fault.
 | `extra-block-paced` | the delayed blocks lost to the stall are counted within 10 calls of it, not across the run | stereo equal; the timing checks run off CI only |
 | `control-shared-costs` | a voice costs no less shared than alone (off CI) | a voice costs no more shared than alone (the fault is three times): both sessions are played block by block together |
 | `control-performance-switch-stress-hosts` | | its first Performance's workers are all given up before the next one opens, so none is a dead instance the supervisor has not seen yet |
+| `plugin-groups-*` (chain kill) | another part's silent block counts against the kill when no plugin on its path (the shared instrument, its chain) missed its deadline from the block before to the one after; part 3 as loud as before when none on its path missed one around the blocks compared | the other parts never silent off CI; part 3 goes silent and comes back; every insert of its chain restarted with its own gain |
 | `worker-service` | services shown at the interval at first and after a parameter is set, and ticks past it held back once quiet: the ticks came in time to show them | each tick serviced the worker only once due, and always once due, by the clock it ran at (the last service's tick bounds its ask) |
 
 Other tests with a `timing` flag (`guard-*` apart from `deadline`, `worker-timing`, `control-worker-deadline`,

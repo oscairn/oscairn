@@ -9,7 +9,7 @@
 #include "oscairn/transport.h"
 
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,8 +26,8 @@ int main( int argc, char** argv )
     constexpr double   rate  = 48000.0;
     constexpr uint32_t block = 256;
     const auto         scan  = kick::clap::inspect( argv[1] );
-    kick::clap::Host   host;
-    if( scan.plugins.empty() || !host.load( scan.plugins.front(), rate, block ) )
+    const auto         host  = scan.plugins.empty() ? nullptr : loaded( scan.plugins.front(), rate, block );
+    if( !host )
         return std::fprintf( stderr, "FAIL: load\n" ), 1;
 
     oscairn::Transport transport( rate, 120.0 );
@@ -44,7 +44,7 @@ int main( int argc, char** argv )
         for( uint32_t i = 0; i < block; ++i )
             inL[i] = inR[i] = 0.5f * (float)std::sin( 2.0 * M_PI * 5.0 * (double)( n + i ) / rate );
         const auto t = transport.current();
-        if( !host.process( inputs, 2, outputs, 2, block, nullptr, 0, &t ) )
+        if( !host->process( inputs, 2, outputs, 2, block, nullptr, 0, &t ) )
             return std::fprintf( stderr, "FAIL: process\n" ), 1;
         for( uint32_t i = 0; i < block; ++i )
         {

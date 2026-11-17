@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The Rust CLAP host (rust_clap_*, core/clap-host/rust) against its C++ reference (cpp_clap_*, kick::clap::Host
-// unchanged), through clap_host.h: every plugin of each library loaded, described and played the same way by each, in
-// a process of its own (a binary is opened once per process), each writing down everything the engine could see: the
-// description, flags, parameter texts, each block's audio bit for bit, its output events, parameter values and outputs,
-// sleep and reset, the counters, failures as kind and message. The two transcripts must be the same, item by item, and
-// the Rust host's blocks must allocate nothing (malloc and operator new counted while they run).
-// The C++ host's transcript is also kept as recorded vectors (core/clap-host/tests/vectors, one file per target, as
-// failure messages and the fixtures' builds differ between systems), so the check survives the reference's deletion:
-// --record FILE writes the reference's, --replay FILE compares the Rust host's with it and names the first item that
-// differs. Paths in it are written as $SCRATCH and $PLUGINS (the plugins' folder), so a recording replays from another
+// The Rust CLAP host (rust_clap_*, core/clap-host/rust) against what its C++ reference did, recorded (kick::clap::Host,
+// deleted since; core/clap-host/tests/vectors, one file per target, as failure messages and the fixtures' builds differ
+// between systems), through clap_host.h: every plugin of each library loaded, described and played the same way, in a
+// process of its own (a binary is opened once per process), writing down everything the engine could see: the
+// description, flags, parameter texts, each block's audio, its output events, parameter values and outputs, sleep and
+// reset, the counters, limits and failures as kind and message. The Rust host's transcript must match the recording
+// item by item, the first difference named, and its blocks must allocate nothing (malloc and operator new counted
+// while they run). Paths are written as $SCRATCH and $PLUGINS (the plugins' folder), so a recording replays from another
 // checkout. A recording holds the test's fixtures, not Oscairn's plugins, whose every release would change it.
-//   oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...
+//   oscairn-clap-host-rust-test --replay FILE PLUGIN.clap...   (exits 77, skipped, where FILE does not exist)
+//   oscairn-clap-host-rust-test --record FILE PLUGIN.clap...   (the Rust host's transcript, for a deliberate change)
 #include "../../clap-host/tests/AllocationGuard.h"
 #include "../../plugin-host/src/clap_host.h"
 #include <kick_clap/Discovery.h>
@@ -67,28 +66,28 @@ namespace
     // The interface, as either implementation provides it.
     struct Api
     {
-        decltype(&cpp_clap_error) error; decltype(&cpp_clap_new) make; decltype(&cpp_clap_free) free; decltype(&cpp_clap_revision) revision;
-        decltype(&cpp_clap_describe) describe; decltype(&cpp_clap_note_input_ports) noteInputs; decltype(&cpp_clap_note_output_ports) noteOutputs;
-        decltype(&cpp_clap_uses_clap_notes) usesClapNotes; decltype(&cpp_clap_takes_sysex) takesSysex; decltype(&cpp_clap_emits_sysex) emitsSysex;
-        decltype(&cpp_clap_supports_state) supportsState; decltype(&cpp_clap_supports_sound_snapshot) supportsSoundSnapshot; decltype(&cpp_clap_has_window) hasWindow;
-        decltype(&cpp_clap_voice_budget) voiceBudget; decltype(&cpp_clap_honors_volume) honorsVolume; decltype(&cpp_clap_service) service;
-        decltype(&cpp_clap_reset) reset; decltype(&cpp_clap_declared_memory) declaredMemory; decltype(&cpp_clap_effect_resources) effectResources;
-        decltype(&cpp_clap_parameter_value) value; decltype(&cpp_clap_parameter_text) text; decltype(&cpp_clap_set_parameter) set;
-        decltype(&cpp_clap_parameter_gesture) gesture; decltype(&cpp_clap_parameter_reports) reports; decltype(&cpp_clap_send_event) send;
-        decltype(&cpp_clap_pop_output) pop; decltype(&cpp_clap_output_event_drops) drops; decltype(&cpp_clap_statistics) statistics;
-        decltype(&cpp_clap_sound_context_capacity) capacity; decltype(&cpp_clap_prepares_snapshots) preparesSnapshots; decltype(&cpp_clap_saves_sounds) savesSounds;
-        decltype(&cpp_clap_rings_out) ringsOut; decltype(&cpp_clap_process) process; decltype(&cpp_clap_output_events) outputEvents;
-        decltype(&cpp_clap_panic) panic; decltype(&cpp_clap_asleep) asleep; decltype(&cpp_clap_restful) restful; decltype(&cpp_clap_rested) rested;
-        decltype(&cpp_clap_was_reset) wasReset;
-        decltype(&cpp_clap_save_state) saveState; decltype(&cpp_clap_load_state) loadState; decltype(&cpp_clap_effect_context) effectContext;
-        decltype(&cpp_clap_sound_contexts) soundContexts; decltype(&cpp_clap_prepare_sound) prepareSound; decltype(&cpp_clap_prepare_preset) preparePreset;
-        decltype(&cpp_clap_select_sound) selectSound; decltype(&cpp_clap_discard_sound) discardSound; decltype(&cpp_clap_prepare_snapshot) prepareSnapshot;
-        decltype(&cpp_clap_save_sound) saveSound; decltype(&cpp_clap_sound_values) soundValues; decltype(&cpp_clap_choke_retiring) chokeRetiring;
-        decltype(&cpp_clap_asset_dependencies) assetDependencies; decltype(&cpp_clap_load_preset) loadPreset;
-        decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
-        decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
-        decltype(&cpp_clap_wants_events) wantsEvents; decltype(&cpp_clap_value_rescans) valueRescans;
-        decltype(&cpp_clap_reconfigure) reconfigure; decltype(&cpp_clap_set_active_outputs) setActiveOutputs; decltype(&cpp_clap_show_window) showWindow;
+        decltype(&rust_clap_error) error; decltype(&rust_clap_new) make; decltype(&rust_clap_free) free; decltype(&rust_clap_revision) revision;
+        decltype(&rust_clap_describe) describe; decltype(&rust_clap_note_input_ports) noteInputs; decltype(&rust_clap_note_output_ports) noteOutputs;
+        decltype(&rust_clap_uses_clap_notes) usesClapNotes; decltype(&rust_clap_takes_sysex) takesSysex; decltype(&rust_clap_emits_sysex) emitsSysex;
+        decltype(&rust_clap_supports_state) supportsState; decltype(&rust_clap_supports_sound_snapshot) supportsSoundSnapshot; decltype(&rust_clap_has_window) hasWindow;
+        decltype(&rust_clap_voice_budget) voiceBudget; decltype(&rust_clap_honors_volume) honorsVolume; decltype(&rust_clap_service) service;
+        decltype(&rust_clap_reset) reset; decltype(&rust_clap_declared_memory) declaredMemory; decltype(&rust_clap_effect_resources) effectResources;
+        decltype(&rust_clap_parameter_value) value; decltype(&rust_clap_parameter_text) text; decltype(&rust_clap_set_parameter) set;
+        decltype(&rust_clap_parameter_gesture) gesture; decltype(&rust_clap_parameter_reports) reports; decltype(&rust_clap_send_event) send;
+        decltype(&rust_clap_pop_output) pop; decltype(&rust_clap_output_event_drops) drops; decltype(&rust_clap_statistics) statistics;
+        decltype(&rust_clap_sound_context_capacity) capacity; decltype(&rust_clap_prepares_snapshots) preparesSnapshots; decltype(&rust_clap_saves_sounds) savesSounds;
+        decltype(&rust_clap_rings_out) ringsOut; decltype(&rust_clap_process) process; decltype(&rust_clap_output_events) outputEvents;
+        decltype(&rust_clap_panic) panic; decltype(&rust_clap_asleep) asleep; decltype(&rust_clap_restful) restful; decltype(&rust_clap_rested) rested;
+        decltype(&rust_clap_was_reset) wasReset;
+        decltype(&rust_clap_save_state) saveState; decltype(&rust_clap_load_state) loadState; decltype(&rust_clap_effect_context) effectContext;
+        decltype(&rust_clap_sound_contexts) soundContexts; decltype(&rust_clap_prepare_sound) prepareSound; decltype(&rust_clap_prepare_preset) preparePreset;
+        decltype(&rust_clap_select_sound) selectSound; decltype(&rust_clap_discard_sound) discardSound; decltype(&rust_clap_prepare_snapshot) prepareSnapshot;
+        decltype(&rust_clap_save_sound) saveSound; decltype(&rust_clap_sound_values) soundValues; decltype(&rust_clap_choke_retiring) chokeRetiring;
+        decltype(&rust_clap_asset_dependencies) assetDependencies; decltype(&rust_clap_load_preset) loadPreset;
+        decltype(&rust_clap_presets) presets; decltype(&rust_clap_set_assets) setAssets;
+        decltype(&rust_clap_set_voice_limits) setVoiceLimits; decltype(&rust_clap_voice_report) voiceReport; decltype(&rust_clap_mirror_wake) mirrorWake;
+        decltype(&rust_clap_wants_events) wantsEvents; decltype(&rust_clap_value_rescans) valueRescans;
+        decltype(&rust_clap_reconfigure) reconfigure; decltype(&rust_clap_set_active_outputs) setActiveOutputs; decltype(&rust_clap_show_window) showWindow;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
     p##clap_uses_clap_notes, p##clap_takes_sysex, p##clap_emits_sysex, p##clap_supports_state, p##clap_supports_sound_snapshot, p##clap_has_window, \
@@ -510,17 +509,17 @@ std::string portable(const std::string& transcript, int argc, char** argv)
 // bytes it shares with the last label, then the rest), a kind and bytes. Up to 64 bytes are kept as they are, more as their
 // FNV-1a digest and size; a plugin's audio other than the recorder's (whose audio is its hash of everything it was given)
 // as its size, nonzero samples, sum of magnitudes and peak, compared within a tolerance: its DSP calls libm, whose last
-// bits differ between systems. Live, every item is compared whole.
+// bits differ between systems.
 namespace
 {
     struct Entry { std::string label; char kind; std::string bytes; };
     constexpr char raw = 'r', digest = 'd', audio = 'a';
     template<class T> void append(std::string& s, const T& v) { s.append(reinterpret_cast<const char*>(&v), sizeof v); }
     template<class T> T at(const std::string& s, size_t offset) { T v{}; std::memcpy(&v, s.data() + offset, sizeof v); return v; }
-    Entry entry(const std::string& label, const std::string& value, bool whole)
+    Entry entry(const std::string& label, const std::string& value)
     {
         const bool sound = label.size() > 6 && !label.compare(label.size() - 6, 6, " audio");
-        if(whole || (value.size() <= 64 && !sound)) return {label, raw, value};
+        if(value.size() <= 64 && !sound) return {label, raw, value};
         std::string b;
         append(b, uint32_t(value.size()));
         if(!sound || label.rfind("org.oscairn.test.recorder", 0) == 0)
@@ -535,10 +534,10 @@ namespace
         append(b, nonzero); append(b, float(sum)); append(b, float(peak));
         return {label, audio, b};
     }
-    std::vector<Entry> entries(const std::string& transcript, bool whole)
+    std::vector<Entry> entries(const std::string& transcript)
     {
         std::vector<Entry> r;
-        for(const auto& [label, value] : items(transcript)) r.push_back(entry(label, value, whole));
+        for(const auto& [label, value] : items(transcript)) r.push_back(entry(label, value));
         return r;
     }
     // The same audio within a tolerance: a thousandth of its samples zero or not, sums and peaks within 1e-4 of each other.
@@ -636,54 +635,45 @@ int main(int argc, char** argv)
         (argv[1][2] == 'r' && argv[1][3] == 'e' && argv[1][4] == 'c' ? record : replay) = argv[2];
         argv += 2; argc -= 2;
     }
-    if(argc < 2) { std::fprintf(stderr, "usage: oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...\n"); return 2; }
-    bool cppAllocated = false, rustAllocated = false;
-    scratch = (std::filesystem::temp_directory_path() / ("oscairn-clap-host-rust-" + std::to_string(getpid()))).string();
+    if(argc < 2 || record.empty() == replay.empty()) { std::fprintf(stderr, "usage: oscairn-clap-host-rust-test --record FILE | --replay FILE PLUGIN.clap...\n"); return 2; }
     const std::string magic = "oscairn clap-host vectors 1\n", target = "target: " OSCAIRN_VECTORS_TARGET "\n";
     std::vector<Entry> expected;
     if(!replay.empty())
     {
         std::ifstream in(replay, std::ios::binary); const std::string file(std::istreambuf_iterator<char>(in), {});
+        if(!in.is_open()) { std::printf("skipped: no vectors for %s at %s\n", OSCAIRN_VECTORS_TARGET, replay.c_str()); return 77; }
         const auto body = file.find("\n\n");
         if(file.rfind(magic, 0) != 0 || body == std::string::npos) { std::fprintf(stderr, "FAIL: no recording in %s\n", replay.c_str()); return 1; }
         if(file.find(target) > body) { std::fprintf(stderr, "FAIL: %s was recorded for another target than %s", replay.c_str(), target.c_str()); return 1; }
         std::string problem; expected = entries(file, body + 2, problem);
         if(!problem.empty()) { std::fprintf(stderr, "FAIL: %s: %s\n", replay.c_str(), problem.c_str()); return 1; }
     }
-    else
-    {
-        std::filesystem::create_directories(scratch);
-        const auto cpp = portable(run(OSCAIRN_API(cpp_), argc, argv, cppAllocated), argc, argv);
-        std::filesystem::remove_all(scratch);
-        if(cpp.empty()) return 1;
-        expected = entries(cpp, record.empty());
-        if(!record.empty())
-        {
-            std::string header = magic + "recorded from: the C++ CLAP host (kick::clap::Host through clap_host_cpp.cpp) at " OSCAIRN_CPP_HOST_REVISION "\n" + target;
-            header += "scenarios: per plugin, load and description; 400 blocks (audio in, notes, MIDI, both note dialects translated, a choke, the beat, "
-                      "a harmony, refused events, a gesture, a parameter set, an event sent, a panic, rests, voice limits); state saved and loaded with its refusals; "
-                      "effect contexts, one refused by the activation observer; native sounds, presets, snapshots, ring-out, assets; limits (offline, a full queue, "
-                      "too many events, refused values, a rate change, outputs activated, a missing window, no memory room); counters; a missing plugin and library\n";
-            for(const auto& e : expected) if(e.label == "library" || e.label == "plugin") header += e.label + ": " + e.bytes + "\n";
-            header += "items: " + std::to_string(expected.size()) + "\nreplay: oscairn-clap-host-rust-test --replay FILE LIBRARY... (ctest: clap-host-rust-replay); "
-                      "record: cmake --build BUILD --target clap-host-vectors\n\n";
-            std::ofstream out(record, std::ios::binary); out << header << vectors(expected);
-            if(!out) { std::fprintf(stderr, "FAIL: cannot write %s\n", record.c_str()); return 1; }
-            std::printf("clap host: the C++ host's vectors recorded, %zu items\n", expected.size());
-            return 0;
-        }
-    }
+    bool allocated = false;
+    scratch = (std::filesystem::temp_directory_path() / ("oscairn-clap-host-rust-" + std::to_string(getpid()))).string();
     std::filesystem::create_directories(scratch);
-    const auto rust = portable(run(OSCAIRN_API(rust_), argc, argv, rustAllocated), argc, argv);
+    const auto rust = portable(run(OSCAIRN_API(rust_), argc, argv, allocated), argc, argv);
     std::filesystem::remove_all(scratch);
     if(rust.empty()) return 1;
+    const auto got = entries(rust);
+    if(!record.empty())
+    {
+        std::string header = magic + "recorded from: the Rust CLAP host at " OSCAIRN_HOST_REVISION " (a deliberate change; the C++ reference's recording it replaces is in git)\n" + target;
+        header += "scenarios: per plugin, load and description; 400 blocks (audio in, notes, MIDI, both note dialects translated, a choke, the beat, "
+                  "a harmony, refused events, a gesture, a parameter set, an event sent, a panic, rests, voice limits); state saved and loaded with its refusals; "
+                  "effect contexts, one refused by the activation observer; native sounds, presets, snapshots, ring-out, assets; limits (offline, a full queue, "
+                  "too many events, refused values, a rate change, outputs activated, a missing window, no memory room); counters; a missing plugin and library\n";
+        for(const auto& e : got) if(e.label == "library" || e.label == "plugin") header += e.label + ": " + e.bytes + "\n";
+        header += "items: " + std::to_string(got.size()) + "\nreplay: oscairn-clap-host-rust-test --replay FILE LIBRARY... (ctest: clap-host-rust-replay); "
+                  "record: cmake --build BUILD --target clap-host-vectors\n\n";
+        std::ofstream out(record, std::ios::binary); out << header << vectors(got);
+        if(!out) { std::fprintf(stderr, "FAIL: cannot write %s\n", record.c_str()); return 1; }
+        std::printf("clap host: the Rust host's vectors recorded, %zu items\n", got.size());
+        return 0;
+    }
     size_t approximate = 0;
-    int failures = replay.empty() ? compare(expected, entries(rust, true), "C++", "Rust", approximate)
-                                  : compare(expected, entries(rust, false), "recorded", "Rust", approximate);
-    if(rustAllocated) { std::fprintf(stderr, "FAIL: the Rust host's blocks allocated\n"); ++failures; }
-    if(cppAllocated) std::fprintf(stderr, "note: the C++ host's blocks allocated\n");
+    int failures = compare(expected, got, "recorded", "Rust", approximate);
+    if(allocated) { std::fprintf(stderr, "FAIL: the Rust host's blocks allocated\n"); ++failures; }
     if(failures) return 1;
-    if(replay.empty()) std::printf("clap host: Rust and C++ the same over %zu items, the Rust blocks allocating nothing\n", expected.size());
-    else std::printf("clap host: Rust the same as the C++ host's recording over %zu items (%zu audio within the tolerance), the Rust blocks allocating nothing\n",
-                     expected.size(), approximate);
+    std::printf("clap host: Rust the same as the recording over %zu items (%zu audio within the tolerance), the Rust blocks allocating nothing\n",
+                expected.size(), approximate);
 }

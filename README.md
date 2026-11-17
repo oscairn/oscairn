@@ -117,8 +117,8 @@ configuring says so when it is missing). Every build needs Rust: the sample pack
 engine core, which holds the engine thread's note routing and voice budget, the graph's audio
 (buffers, mixing, output guard, meters) and its run loop, are Rust by default. The engine core's
 C++ reference is built too; `-DOSCAIRN_ENGINE_CORE=cpp` makes the engine use it. The CLAP host
-is Rust too (`core/clap-host/rust`); its C++ reference is built too, and `-DOSCAIRN_CLAP_HOST=cpp` makes the engine and
-the plugin worker use it. The plugin worker's process is C++.
+is Rust (`core/clap-host/rust`); the C++ host it replaced was deleted on 2026-11-17, its behavior kept as recorded vectors
+that the Rust host is tested against. The plugin worker's process is C++.
 
 ### The desktop app
 

@@ -7,6 +7,7 @@
 //   oscairn-hardware-plugin-test oscairn-hardware-fixture.clap simulated-profile.json
 #include "simulated.h"
 #include <kick_clap/Discovery.h>
+#include <oscairn/plugin_host.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -25,20 +26,23 @@ constexpr uint32_t blocks = 400, frames = 128;
 kick::clap::Descriptor fixture;
 
 // Renders the fixture for blocks x frames, left channel; right must equal it.
-std::vector<float> render(kick::clap::Host& host) {
+// The fixture, loaded as the engine loads a plugin (the CLAP host in this process); null when it does not load.
+std::shared_ptr<oscairn::PluginHost> load(bool offline = false) {
+    try { return oscairn::loadPlugin(fixture.path, fixture.id, 48000, frames, offline ? oscairn::ProcessingMode::Offline : oscairn::ProcessingMode::Realtime); }
+    catch (const std::exception& e) { std::printf("load failed: %s\n", e.what()); return nullptr; }
+}
+std::vector<float> render(oscairn::PluginHost& host) {
     std::vector<float> out(blocks * frames), right(frames);
     for (uint32_t b = 0; b < blocks; ++b) {
         float* channels[] = {out.data() + b * frames, right.data()};
-        if (!host.process(nullptr, 0, channels, 2, frames)) { std::printf("process failed: %s\n", host.error().c_str()); return {}; }
+        if (!host.process(nullptr, 0, channels, 2, frames, nullptr, 0, nullptr)) { std::printf("process failed\n"); return {}; }
         if (!std::equal(right.begin(), right.end(), channels[0])) { std::printf("the channels differ\n"); return {}; }
     }
     return out;
 }
 std::vector<float> render(bool offline = false) {
-    kick::clap::Host host;
-    host.setOfflineRendering(offline);
-    if (!host.load(fixture, 48000, frames)) { std::printf("load failed: %s\n", host.error().c_str()); return {}; }
-    return render(host);
+    const auto host = load(offline);
+    return host ? render(*host) : std::vector<float>{};
 }
 double difference(const std::vector<float>& a, const std::vector<float>& b, size_t from = 0, size_t to = SIZE_MAX) {
     if (a.size() != b.size() || a.empty()) return INFINITY;
@@ -83,23 +87,25 @@ int main(int argc, char** argv) {
         test::SimulatedDriver* sim = nullptr;
         Service s(profile, with(sim), 100);
         setCurrent(&s);
-        kick::clap::Host host;
-        expect(host.load(fixture, 48000, frames), "the fixture loads with the simulated accelerator");
+        auto host = load();
+        expect(host != nullptr, "the fixture loads with the simulated accelerator");
+        if (!host) return 1;
         expect(s.json().find(R"("reserved":{"voices":1,"parts":0,"memory":4096,"regions":["osc"]})") != std::string::npos &&
                s.json().find(R"("cpuFallback":{"micros":100,"reserved":20})") != std::string::npos,
                "it reserved a voice, 4 KiB, the region and 20 us of CPU fallback when it activated");
-        const auto out = render(host);
+        const auto out = render(*host);
         const double d = difference(out, reference);
         std::printf("accelerator vs CPU path: %llu jobs, largest difference %.3g\n", (unsigned long long)sim->jobs.load(), d);
         expect(sim->jobs.load() == blocks, "every block rendered on the accelerator (" + std::to_string(sim->jobs.load()) + " jobs)");
         expect(d <= tolerance, "the same output as the CPU path, within " + std::to_string(tolerance));
         // A second instance wants the same exclusive region: refused, it plays on its CPU path.
-        kick::clap::Host second;
-        expect(second.load(fixture, 48000, frames), "a second instance loads");
+        const auto second = load();
+        expect(second != nullptr, "a second instance loads");
+        if (!second) return 1;
         const auto jobs = sim->jobs.load();
-        const auto out2 = render(second);
+        const auto out2 = render(*second);
         expect(sim->jobs.load() == jobs && difference(out2, reference) == 0, "the second, refused the busy region, renders on its CPU path, identically");
-        host.unload();
+        host.reset();
         expect(s.json().find(R"("reserved":{"voices":0,"parts":0,"memory":0,"regions":[]})") != std::string::npos,
                "unloading the plugin released its lease");
         setCurrent(nullptr);

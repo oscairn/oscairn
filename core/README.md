@@ -17,7 +17,7 @@ default, in `engine/rust`; their C++ reference is built too, and `-DOSCAIRN_ENGI
 engine use it. Everything else in `core/` is C++.
 
 `plugin-host/` is the graph's shared plugin-host interface. The CLAP adapter delegates to
-`clap-host/` through a C interface (`plugin-host/src/clap_host.h`); optional `lv2-host/` uses Lilv. Event and metadata structures retain the
+`clap-host/`, the CLAP host in Rust, through a C interface (`plugin-host/src/clap_host.h`); optional `lv2-host/` uses Lilv. Event and metadata structures retain the
 existing CLAP-shaped representation internally, translated at the LV2 boundary. See
 [LV2 hosting](lv2-host/README.md) for the supported subset and build option.
 

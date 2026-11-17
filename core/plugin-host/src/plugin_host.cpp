@@ -79,7 +79,7 @@ namespace oscairn
         // A failed clap_host.h call thrown as the exception ClapHost threw for it.
         [[noreturn]] void fail()
         {
-            int kind=0;const std::string message=OSCAIRN_CLAP(error)(&kind);
+            int kind=0;const std::string message=rust_clap_error(&kind);
             if(kind==OSCAIRN_CLAP_INVALID_ARGUMENT)throw std::invalid_argument(message);
             if(kind==OSCAIRN_CLAP_LOGIC_ERROR)throw std::logic_error(message);
             throw std::runtime_error(message);
@@ -104,7 +104,7 @@ namespace oscairn
             // After each control call: a rescan or a restart changed the description.
             void sync()
             {
-                const auto revision=OSCAIRN_CLAP(revision)(host);if(revision==revision_)return;
+                const auto revision=rust_clap_revision(host);if(revision==revision_)return;
                 descriptor_={};parameters_.clear();inputs_.clear();outputs_.clear();
                 const oscairn_clap_description to{this,
                     [](void* c,const oscairn_clap_descriptor* d){static_cast<ClapHost*>(c)->descriptor_={d->path,d->id,d->name,d->vendor,d->version,d->description,{},d->preset_discovery,{},{}};},
@@ -114,112 +114,112 @@ namespace oscairn
                     [](void* c,bool input,const oscairn_clap_port* p){auto& h=*static_cast<ClapHost*>(c);(input?h.inputs_:h.outputs_).push_back({p->id,p->name,p->channels,p->flags});},
                     [](void* c,const oscairn_clap_parameter* p){static_cast<ClapHost*>(c)->parameters_.push_back({p->id,p->name,p->module,p->minimum,p->maximum,p->default_value,p->flags,
                         p->widget,p->priority,p->range_high,p->group,p->role,p->view,p->field,p->index,{reinterpret_cast<const std::array<uint8_t,11>*>(p->algorithms),reinterpret_cast<const std::array<uint8_t,11>*>(p->algorithms)+p->algorithm_count},{p->seconds,p->seconds+p->second_count}});}};
-                OSCAIRN_CLAP(describe)(host,&to);
+                rust_clap_describe(host,&to);
                 revision_=revision;
             }
             // A control call that can rescan or restart the plugin: the description brought up to date, then its failure thrown.
             void control(bool ok){sync();checked(ok);}
         public:
             explicit ClapHost(oscairn_clap_host* h):host(h){sync();}
-            ~ClapHost() override {OSCAIRN_CLAP(free)(host);}
+            ~ClapHost() override {rust_clap_free(host);}
             ClapHost(const ClapHost&)=delete;
             ClapHost& operator=(const ClapHost&)=delete;
-            std::shared_ptr<PluginHost> createEffectContext() override {return std::make_shared<ClapHost>(checked(OSCAIRN_CLAP(effect_context)(host)));}
+            std::shared_ptr<PluginHost> createEffectContext() override {return std::make_shared<ClapHost>(checked(rust_clap_effect_context(host)));}
             std::optional<oscairn_effect_resources_t> effectResources() const override {
-                oscairn_effect_resources_t r{};if(checked(OSCAIRN_CLAP(effect_resources)(host,&r)))return r;return {};
+                oscairn_effect_resources_t r{};if(checked(rust_clap_effect_resources(host,&r)))return r;return {};
             }
-            std::optional<oscairn_memory_t> declaredMemory() const override {oscairn_memory_t m{};if(checked(OSCAIRN_CLAP(declared_memory)(host,&m)))return m;return {};}
-            void setMemoryRoom(uint64_t bytes) override {OSCAIRN_CLAP(set_memory_room)(host,bytes);}
-            void setActiveOutputs(uint64_t ports) override {OSCAIRN_CLAP(set_active_outputs)(host,ports);}
-            uint32_t soundContextCapacity() const noexcept override {return OSCAIRN_CLAP(sound_context_capacity)(host);}
+            std::optional<oscairn_memory_t> declaredMemory() const override {oscairn_memory_t m{};if(checked(rust_clap_declared_memory(host,&m)))return m;return {};}
+            void setMemoryRoom(uint64_t bytes) override {rust_clap_set_memory_room(host,bytes);}
+            void setActiveOutputs(uint64_t ports) override {rust_clap_set_active_outputs(host,ports);}
+            uint32_t soundContextCapacity() const noexcept override {return rust_clap_sound_context_capacity(host);}
             std::vector<oscairn_sound_context_info_t> soundContexts() const override {
-                std::vector<oscairn_sound_context_info_t> r;checked(OSCAIRN_CLAP(sound_contexts)(host,append<oscairn_sound_context_info_t>,&r));return r;
+                std::vector<oscairn_sound_context_info_t> r;checked(rust_clap_sound_contexts(host,append<oscairn_sound_context_info_t>,&r));return r;
             }
             uint32_t prepareSound(const std::string& name,const std::vector<oscairn_sound_parameter_t>& p,const std::string& state,const std::string& preset,const std::string& sfz,const std::string& library,const std::string& directory) override {
                 uint32_t id=0;
                 if(!preset.empty()){if(!state.empty() || !p.empty() || !sfz.empty() || !library.empty() || !directory.empty())throw std::invalid_argument("A native sound from a preset takes nothing else");
                     const auto k=presetFrom(preset);const oscairn_clap_preset c{"",k.kind,k.location.c_str(),k.loadKey.c_str()};
-                    checked(OSCAIRN_CLAP(prepare_preset)(host,name.c_str(),&c,&id));return id;}
+                    checked(rust_clap_prepare_preset(host,name.c_str(),&c,&id));return id;}
                 if(!state.empty())throw std::invalid_argument("Native contexts accept parameter, SFZ or preset patches only");
-                checked(OSCAIRN_CLAP(prepare_sound)(host,name.c_str(),p.data(),uint32_t(p.size()),sfz.c_str(),library.c_str(),directory.c_str(),&id));return id;}
-            bool selectSound(uint32_t id,int16_t channel) override {return checked(OSCAIRN_CLAP(select_sound)(host,id,channel));}
-            bool discardSound(uint32_t id,bool) override {return checked(OSCAIRN_CLAP(discard_sound)(host,id));}
-            bool preparesSnapshots() const noexcept override {return OSCAIRN_CLAP(prepares_snapshots)(host);}
-            bool ringsOut() const noexcept override {return OSCAIRN_CLAP(rings_out)(host);}
-            uint32_t wantsEvents() const noexcept override {return OSCAIRN_CLAP(wants_events)(host);}
-            bool chokeRetiring() override {return checked(OSCAIRN_CLAP(choke_retiring)(host));}
-            bool voiceBudget() const noexcept override {return OSCAIRN_CLAP(voice_budget)(host);}
-            bool honorsVolume() const noexcept override {return OSCAIRN_CLAP(honors_volume)(host);}
-            void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {OSCAIRN_CLAP(set_voice_limits)(host,limit,contexts,count);}
-            uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return OSCAIRN_CLAP(voice_report)(host,&voiceCost,&notes,&count);}
+                checked(rust_clap_prepare_sound(host,name.c_str(),p.data(),uint32_t(p.size()),sfz.c_str(),library.c_str(),directory.c_str(),&id));return id;}
+            bool selectSound(uint32_t id,int16_t channel) override {return checked(rust_clap_select_sound(host,id,channel));}
+            bool discardSound(uint32_t id,bool) override {return checked(rust_clap_discard_sound(host,id));}
+            bool preparesSnapshots() const noexcept override {return rust_clap_prepares_snapshots(host);}
+            bool ringsOut() const noexcept override {return rust_clap_rings_out(host);}
+            uint32_t wantsEvents() const noexcept override {return rust_clap_wants_events(host);}
+            bool chokeRetiring() override {return checked(rust_clap_choke_retiring(host));}
+            bool voiceBudget() const noexcept override {return rust_clap_voice_budget(host);}
+            bool honorsVolume() const noexcept override {return rust_clap_honors_volume(host);}
+            void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {rust_clap_set_voice_limits(host,limit,contexts,count);}
+            uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return rust_clap_voice_report(host,&voiceCost,&notes,&count);}
             std::array<uint32_t,16> prepareSnapshot(const std::string& directory) override {
-                std::array<uint32_t,16> ids{};checked(OSCAIRN_CLAP(prepare_snapshot)(host,directory.c_str(),ids.data()));return ids;
+                std::array<uint32_t,16> ids{};checked(rust_clap_prepare_snapshot(host,directory.c_str(),ids.data()));return ids;
             }
-            bool savesSounds() const noexcept override {return OSCAIRN_CLAP(saves_sounds)(host);}
-            void saveSound(uint32_t id,const std::string& directory) override {checked(OSCAIRN_CLAP(save_sound)(host,id,directory.c_str()));}
+            bool savesSounds() const noexcept override {return rust_clap_saves_sounds(host);}
+            void saveSound(uint32_t id,const std::string& directory) override {checked(rust_clap_save_sound(host,id,directory.c_str()));}
             std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const override {
-                std::vector<oscairn_sound_parameter_t> r;checked(OSCAIRN_CLAP(sound_values)(host,id,append<oscairn_sound_parameter_t>,&r));return r;
+                std::vector<oscairn_sound_parameter_t> r;checked(rust_clap_sound_values(host,id,append<oscairn_sound_parameter_t>,&r));return r;
             }
-            bool supportsState() const noexcept override {return OSCAIRN_CLAP(supports_state)(host);}
-            bool hasWindow() const override {return OSCAIRN_CLAP(has_window)(host);}
-            void showWindow(bool show,const std::string& title) override {checked(OSCAIRN_CLAP(show_window)(host,show,title.c_str()));}
+            bool supportsState() const noexcept override {return rust_clap_supports_state(host);}
+            bool hasWindow() const override {return rust_clap_has_window(host);}
+            void showWindow(bool show,const std::string& title) override {checked(rust_clap_show_window(host,show,title.c_str()));}
             // RFC 0005: through the isolated scan helper where one is configured; without one, this
             // plugin already runs in this process, and so does its index (within the index's budget).
             std::vector<PresetInfo> presets() override {
                 if(!placementPolicy().scan.empty())return scanPluginPresets(descriptor_.path,descriptor_.id);
                 std::vector<PresetInfo> r;
-                checked(OSCAIRN_CLAP(presets)(host,[](void* to,const oscairn_clap_preset* p){static_cast<std::vector<PresetInfo>*>(to)->push_back({presetUri({p->name,p->kind,p->location,p->load_key}),p->name});},&r));
+                checked(rust_clap_presets(host,[](void* to,const oscairn_clap_preset* p){static_cast<std::vector<PresetInfo>*>(to)->push_back({presetUri({p->name,p->kind,p->location,p->load_key}),p->name});},&r));
                 return r;
             }
             void loadPreset(const std::string& uri) override {
                 const auto p=presetFrom(uri);const oscairn_clap_preset c{p.name.c_str(),p.kind,p.location.c_str(),p.loadKey.c_str()};
-                control(OSCAIRN_CLAP(load_preset)(host,&c));
+                control(rust_clap_load_preset(host,&c));
             }
-            void setAssets(kick::clap::AssetResolver* assets) noexcept override {const auto table=oscairn_clap_assets_of(assets);OSCAIRN_CLAP(set_assets)(host,assets?&table:nullptr);}
+            void setAssets(kick::clap::AssetResolver* assets) noexcept override {const auto table=oscairn_clap_assets_of(assets);rust_clap_set_assets(host,assets?&table:nullptr);}
             std::vector<kick::clap::AssetReference> assetDependencies() const override {
                 std::vector<kick::clap::AssetReference> r;
-                checked(OSCAIRN_CLAP(asset_dependencies)(host,[](void* to,const oscairn_clap_asset* a){static_cast<std::vector<kick::clap::AssetReference>*>(to)->push_back({a->library,a->path,a->sha256,a->optional});},&r));
+                checked(rust_clap_asset_dependencies(host,[](void* to,const oscairn_clap_asset* a){static_cast<std::vector<kick::clap::AssetReference>*>(to)->push_back({a->library,a->path,a->sha256,a->optional});},&r));
                 return r;
             }
             void saveSnapshot(const std::string& directory) override {
-                if(soundContextCapacity() && !OSCAIRN_CLAP(supports_sound_snapshot)(host))throw std::runtime_error("Native engine has no complete sound-context snapshot interface");
+                if(soundContextCapacity() && !rust_clap_supports_sound_snapshot(host))throw std::runtime_error("Native engine has no complete sound-context snapshot interface");
                 PluginHost::saveSnapshot(directory);
             }
-            void saveState(const std::string& directory) override {checked(OSCAIRN_CLAP(save_state)(host,directory.c_str()));}
-            void loadState(const std::string& directory) override {control(OSCAIRN_CLAP(load_state)(host,directory.c_str()));}
-            void service() override {control(OSCAIRN_CLAP(service)(host));}
-            bool reset() override {checked(OSCAIRN_CLAP(reset)(host));return true;}
-            void reconfigure(double rate,uint32_t frames) override {control(OSCAIRN_CLAP(reconfigure)(host,rate,frames));}
+            void saveState(const std::string& directory) override {checked(rust_clap_save_state(host,directory.c_str()));}
+            void loadState(const std::string& directory) override {control(rust_clap_load_state(host,directory.c_str()));}
+            void service() override {control(rust_clap_service(host));}
+            bool reset() override {checked(rust_clap_reset(host));return true;}
+            void reconfigure(double rate,uint32_t frames) override {control(rust_clap_reconfigure(host,rate,frames));}
             const kick::clap::Descriptor& descriptor() const noexcept override { return descriptor_; }
             const std::vector<kick::clap::Parameter>& parameters() const noexcept override { return parameters_; }
             const std::vector<kick::clap::Port>& inputPorts() const noexcept override { return inputs_; }
             const std::vector<kick::clap::Port>& outputPorts() const noexcept override { return outputs_; }
-            bool usesClapNotes(uint32_t port) const noexcept override { return OSCAIRN_CLAP(uses_clap_notes)(host,port); }
-            bool takesSysex() const noexcept override { return OSCAIRN_CLAP(takes_sysex)(host); }
-            bool emitsSysex() const noexcept override { return OSCAIRN_CLAP(emits_sysex)(host); }
-            void panic() noexcept override { OSCAIRN_CLAP(panic)(host); }
-            uint32_t noteInputPorts() const noexcept override { return OSCAIRN_CLAP(note_input_ports)(host); }
-            uint32_t noteOutputPorts() const noexcept override { return OSCAIRN_CLAP(note_output_ports)(host); }
-            double parameterValue(clap_id id) const noexcept override { return OSCAIRN_CLAP(parameter_value)(host,id); }
-            uint64_t parameterReports() const noexcept override { return OSCAIRN_CLAP(parameter_reports)(host); }
-            uint64_t valueRevision() const noexcept override { return OSCAIRN_CLAP(value_rescans)(host); }
-            uint64_t parameterRevision() const noexcept override { return OSCAIRN_CLAP(revision)(host); }
+            bool usesClapNotes(uint32_t port) const noexcept override { return rust_clap_uses_clap_notes(host,port); }
+            bool takesSysex() const noexcept override { return rust_clap_takes_sysex(host); }
+            bool emitsSysex() const noexcept override { return rust_clap_emits_sysex(host); }
+            void panic() noexcept override { rust_clap_panic(host); }
+            uint32_t noteInputPorts() const noexcept override { return rust_clap_note_input_ports(host); }
+            uint32_t noteOutputPorts() const noexcept override { return rust_clap_note_output_ports(host); }
+            double parameterValue(clap_id id) const noexcept override { return rust_clap_parameter_value(host,id); }
+            uint64_t parameterReports() const noexcept override { return rust_clap_parameter_reports(host); }
+            uint64_t valueRevision() const noexcept override { return rust_clap_value_rescans(host); }
+            uint64_t parameterRevision() const noexcept override { return rust_clap_revision(host); }
             std::string parameterText(clap_id id, double value) const override {
-                std::string s;checked(OSCAIRN_CLAP(parameter_text)(host,id,value,[](void* to,const char* text,size_t size){static_cast<std::string*>(to)->assign(text,size);},&s));return s;
+                std::string s;checked(rust_clap_parameter_text(host,id,value,[](void* to,const char* text,size_t size){static_cast<std::string*>(to)->assign(text,size);},&s));return s;
             }
-            bool setParameter(clap_id id, double value) noexcept override { return OSCAIRN_CLAP(set_parameter)(host,id,value); }
-            bool parameterGesture(clap_id id, bool begin) noexcept override { return OSCAIRN_CLAP(parameter_gesture)(host,id,begin); }
-            bool sendEvent(const kick::clap::Event& e) noexcept override { return OSCAIRN_CLAP(send_event)(host,&e); }
-            bool popOutput(kick::clap::Event& event) noexcept override { return OSCAIRN_CLAP(pop_output)(host,&event); }
-            uint64_t outputEventDrops() const noexcept override { return OSCAIRN_CLAP(output_event_drops)(host); }
-            const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return OSCAIRN_CLAP(output_events)(host,&count); }
-            kick::clap::Statistics statistics() const noexcept override { kick::clap::Statistics s;OSCAIRN_CLAP(statistics)(host,&s);return s; }
-            bool asleep() const noexcept override { return OSCAIRN_CLAP(asleep)(host); }
-            bool restful() const noexcept override { return OSCAIRN_CLAP(restful)(host); }
-            void rested(uint32_t frames, uint32_t blocks) noexcept override { OSCAIRN_CLAP(rested)(host,frames,blocks); }
-            void mirrorWake(std::atomic<uint32_t>* mirror) noexcept override { OSCAIRN_CLAP(mirror_wake)(host,mirror); }
-            bool wasReset() const noexcept override { return OSCAIRN_CLAP(was_reset)(host); }
-            bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override { return OSCAIRN_CLAP(process)(host,inputs,ni,outputs,no,frames,events,count,transport); }
+            bool setParameter(clap_id id, double value) noexcept override { return rust_clap_set_parameter(host,id,value); }
+            bool parameterGesture(clap_id id, bool begin) noexcept override { return rust_clap_parameter_gesture(host,id,begin); }
+            bool sendEvent(const kick::clap::Event& e) noexcept override { return rust_clap_send_event(host,&e); }
+            bool popOutput(kick::clap::Event& event) noexcept override { return rust_clap_pop_output(host,&event); }
+            uint64_t outputEventDrops() const noexcept override { return rust_clap_output_event_drops(host); }
+            const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return rust_clap_output_events(host,&count); }
+            kick::clap::Statistics statistics() const noexcept override { kick::clap::Statistics s;rust_clap_statistics(host,&s);return s; }
+            bool asleep() const noexcept override { return rust_clap_asleep(host); }
+            bool restful() const noexcept override { return rust_clap_restful(host); }
+            void rested(uint32_t frames, uint32_t blocks) noexcept override { rust_clap_rested(host,frames,blocks); }
+            void mirrorWake(std::atomic<uint32_t>* mirror) noexcept override { rust_clap_mirror_wake(host,mirror); }
+            bool wasReset() const noexcept override { return rust_clap_was_reset(host); }
+            bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override { return rust_clap_process(host,inputs,ni,outputs,no,frames,events,count,transport); }
         };
     }
     void PluginHost::saveSnapshot(const std::string& directory)
@@ -604,6 +604,6 @@ namespace oscairn
         const auto placement=policy.plugins.find(id);
         if(!policy.worker.empty() && (placement==policy.plugins.end()?policy.standard:placement->second)==Placement::Worker)
             return loadPluginInWorker(policy.worker,path,id,rate,frames,mode,policy.memoryLimit,memoryRoom);
-        return std::make_shared<ClapHost>(checked(OSCAIRN_CLAP(new)(path.c_str(),id.c_str(),rate,frames,mode==ProcessingMode::Offline,memoryRoom)));
+        return std::make_shared<ClapHost>(checked(rust_clap_new(path.c_str(),id.c_str(),rate,frames,mode==ProcessingMode::Offline,memoryRoom)));
     }
 }

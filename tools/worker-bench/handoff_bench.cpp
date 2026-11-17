@@ -9,7 +9,7 @@
 //
 //   oscairn-handoff-bench [--blocks N] [--frames F] [--rate HZ] [--work-us US] [--spin-us US]
 //                         [--realtime] [--plugin PATH --id ID] [--workers 1,8,32] [--check]
-#include <kick_clap/Discovery.h>
+#include <oscairn/plugin_host.h>
 #include <kick_clap/Host.h>
 #include <algorithm>
 #include <atomic>
@@ -102,13 +102,11 @@ namespace
     [[noreturn]] void worker(Slot& slot, const Options& o)
     {
         if(o.realtime) makeRealtime(o.frames / o.rate * 1e6);
-        std::unique_ptr<kick::clap::Host> host;
+        std::shared_ptr<oscairn::PluginHost> host;
         if(!o.plugin.empty())
         {
-            const auto catalog = kick::clap::inspect(o.plugin);
-            const auto found = std::find_if(catalog.plugins.begin(), catalog.plugins.end(), [&](const auto& d) { return d.id == o.id; });
-            host = std::make_unique<kick::clap::Host>();
-            if(found == catalog.plugins.end() || !host->load(*found, o.rate, o.frames)) { slot.failed = 1; slot.done.store(~0u, std::memory_order_release); wake(slot.done); _exit(1); }
+            try { host = oscairn::loadPlugin(o.plugin, o.id, o.rate, o.frames); } // the CLAP host, in this worker process
+            catch(const std::exception&) { slot.failed = 1; slot.done.store(~0u, std::memory_order_release); wake(slot.done); _exit(1); }
         }
         uint32_t seen = 0; bool noteSent = false;
         for(;;)
@@ -121,7 +119,7 @@ namespace
             {
                 float* outputs[]{slot.out[0], slot.out[1]};
                 const auto note = kick::clap::Event::note(true, 60, .8);
-                if(!host->process(nullptr, 0, outputs, 2, slot.frames, noteSent ? nullptr : &note, noteSent ? 0 : 1)) slot.failed = 1;
+                if(!host->process(nullptr, 0, outputs, 2, slot.frames, noteSent ? nullptr : &note, noteSent ? 0 : 1, nullptr)) slot.failed = 1;
                 noteSent = true;
                 host->service();
             }

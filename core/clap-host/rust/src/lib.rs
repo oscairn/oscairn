@@ -414,7 +414,7 @@ mod tests {
     /// must say the same.
     #[test]
     fn host_h_limits_are_the_hosts() {
-        let h = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../include/kick_clap/Host.h")).unwrap();
+        let h = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugin-host/include/kick_clap/Host.h")).unwrap();
         let value = |name: &str| {
             let line = h.lines().find(|l| l.contains(&format!(" {name} = "))).unwrap_or_else(|| panic!("Host.h has no {name}"));
             line.split(" = ").nth(1).unwrap().split(';').next().unwrap().trim().to_owned()

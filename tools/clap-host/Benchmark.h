@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <kick_clap/Host.h>
+#include <oscairn/plugin_host.h>
 #include <atomic>
 #include <chrono>
 
@@ -47,7 +48,7 @@ public:
     const Timing& timing() const noexcept { return measured; }
 private:
     struct Instance {
-        std::unique_ptr<Host> host;
+        std::shared_ptr<oscairn::PluginHost> host; // as the engine loads a plugin (the CLAP host in this process)
         std::vector<float> buffer;
         std::array<float*, 2> channels{};
         Statistics baseline;

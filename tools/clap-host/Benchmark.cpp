@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Benchmark.h"
 #include <kick_clap/Discovery.h>
+#include <filesystem>
+#include <unistd.h>
 #include <clap/ext/params.h>
 #include <algorithm>
 #include <cmath>
@@ -146,8 +148,8 @@ bool Workload::load() {
     instances.reserve(config.instances);
     for (uint32_t i = 0; i < config.instances; ++i) {
         Instance instance;
-        instance.host = std::make_unique<Host>();
-        if (!instance.host->load(descriptor, config.sampleRate, config.frames)) { message = instance.host->error(); return false; }
+        try { instance.host = oscairn::loadPlugin(descriptor.path, descriptor.id, config.sampleRate, config.frames); }
+        catch (const std::exception& e) { message = e.what(); return false; }
         if (config.snapshotMs && !instance.host->supportsState()) { message = "Snapshot workload requires opaque state support"; return false; }
         if (config.parameter != CLAP_INVALID_ID) {
             const auto& params = instance.host->parameters();
@@ -176,9 +178,9 @@ void Workload::control(double elapsed) {
     if (elapsed >= nextNotes) {
         for (auto& instance : instances) {
             for (uint32_t n = 0; n < config.notes; ++n) {
-                if (notesHeld) instance.host->enqueue(Event::note(false, heldNotes[n], 0));
+                if (notesHeld) instance.host->sendEvent(Event::note(false, heldNotes[n], 0));
                 const auto key = 36 + static_cast<int>(n) + (static_cast<int>(elapsed * 2) % 12);
-                instance.host->enqueue(Event::note(true, key, .7));
+                instance.host->sendEvent(Event::note(true, key, .7));
             }
         }
         for (uint32_t n = 0; n < config.notes; ++n) heldNotes[n] = 36 + static_cast<int>(n) + (static_cast<int>(elapsed * 2) % 12);
@@ -198,15 +200,20 @@ void Workload::control(double elapsed) {
     if (stage != lastTransportStage) { if (measuring) ++transportChanges; lastTransportStage = stage; }
     if (elapsed >= nextSnapshot) {
         for (auto& instance : instances) {
-            std::vector<uint8_t> state;
+            // Saved as the engine saves a plugin's state: to a new folder (plugin.id, state.clap), timed with its files.
+            const auto folder = std::filesystem::temp_directory_path() / ("kick-clap-bench-" + std::to_string(::getpid()) + "-" + std::to_string(snapshots));
+            std::error_code none; std::filesystem::remove_all(folder, none);
             const auto start = std::chrono::steady_clock::now();
-            const auto ok = instance.host->saveState(state);
+            std::string why;
+            try { instance.host->saveState(folder.string()); } catch (const std::exception& e) { why = e.what(); }
             const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+            const auto size = std::filesystem::file_size(folder / "state.clap", none);
+            std::filesystem::remove_all(folder, none);
             if (measuring) {
-                ++snapshots; snapshotBytes += state.size(); snapshotTotalUs += us; snapshotMaximumUs = std::max(snapshotMaximumUs, us);
-                if (!ok) ++snapshotFailures;
+                ++snapshots; snapshotBytes += none ? 0 : size; snapshotTotalUs += us; snapshotMaximumUs = std::max(snapshotMaximumUs, us);
+                if (!why.empty()) ++snapshotFailures;
             }
-            if (!ok) { message = instance.host->error(); failed.store(true); }
+            if (!why.empty()) { message = why; failed.store(true); }
         }
         nextSnapshot = elapsed + config.snapshotMs / 1000.;
     }
@@ -232,8 +239,9 @@ void Workload::render(float* const* outputs, uint32_t channels, uint32_t count) 
     transport.song_pos_beats = static_cast<clap_beattime>(audioBeats * CLAP_BEATTIME_FACTOR);
     if (transport.flags & CLAP_TRANSPORT_IS_PLAYING) audioBeats += count / config.sampleRate * transport.tempo / 60.;
     for (auto& instance : instances) {
-        instance.host->process(nullptr, 0, instance.channels.data(), 2, count, nullptr, 0, &transport);
-        if (instance.host->faulted()) failed.store(true);
+        // A false block is a fault when the host counted a process error (a control silence is not one).
+        if (!instance.host->process(nullptr, 0, instance.channels.data(), 2, count, nullptr, 0, &transport) && instance.host->statistics().processErrors)
+            failed.store(true);
         for (uint32_t c = 0; c < 2; ++c) for (uint32_t n = 0; n < count; ++n)
             mix[c * capacity + n] += instance.channels[c][n] / config.instances;
     }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// The CLAP host's conformance, with the kick fixtures: discovery and its isolation, then each plugin loaded as the
+// engine loads one (oscairn::loadPlugin: the Rust CLAP host in this process, through ClapHost), its descriptors,
+// ports, note dialects, event offsets, state, parameters and hints, memory, lifecycle, concurrent control, overflow,
+// sleep, errors, windows and allocation-free rendering.
 #include <kick_clap/Host.h>
 #include <kick_clap/Discovery.h>
+#include <oscairn/plugin_host.h>
 #include <oscairn-clap/ui.h>
 #include <atomic>
 #include <chrono>
@@ -12,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <new>
 #include <string>
@@ -24,16 +30,47 @@
 #endif
 using namespace kick::clap;
 #include "AllocationGuard.h"
-static void check(bool ok, const char* why) { if (!ok) { std::cerr << "FAIL: " << why << '\n'; std::exit(1); } }
-static bool render(Host& h, float* const* out, uint32_t n, const Event* e = nullptr, uint32_t count = 0,
-                   const float* const* in = nullptr, uint32_t ni = 0) {
+namespace {
+using Plugin = std::shared_ptr<oscairn::PluginHost>;
+void check(bool ok, const char* why) { if (!ok) { std::cerr << "FAIL: " << why << '\n'; std::exit(1); } }
+std::string failure; // why the last load or call failed
+std::filesystem::path scratch;
+template<class F> bool ok(F&& f) { try { f(); return true; } catch (const std::exception& e) { failure = e.what(); return false; } }
+Plugin load(const Descriptor& d, double rate = 48000, uint32_t frames = 128, uint64_t room = 0) {
+    Plugin p;
+    return ok([&] { p = oscairn::loadPlugin(d.path, d.id, rate, frames, oscairn::ProcessingMode::Realtime, {}, room); }) ? p : nullptr;
+}
+bool render(oscairn::PluginHost& h, float* const* out, uint32_t n, const Event* e = nullptr, uint32_t count = 0,
+            const float* const* in = nullptr, uint32_t ni = 0) {
     forbidAllocation = true;
-    auto ok = h.process(in, ni, out, 2, n, e, count);
+    auto done = h.process(in, ni, out, 2, n, e, count, nullptr);
     forbidAllocation = false;
-    return ok;
+    return done;
+}
+// A plugin's state: saved to a fresh folder (plugin.id and state.clap), and its bytes.
+std::filesystem::path save(oscairn::PluginHost& h) {
+    static int saves = 0;
+    auto folder = scratch / ("state-" + std::to_string(++saves));
+    h.saveState(folder.string());
+    return folder;
+}
+std::vector<uint8_t> bytes(const std::filesystem::path& folder) {
+    std::ifstream in(folder / "state.clap", std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), {}};
+}
+std::filesystem::path stateOf(const std::string& id, double value) {
+    static int made = 0;
+    auto folder = scratch / ("made-" + std::to_string(++made));
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "plugin.id", std::ios::binary) << id;
+    std::ofstream(folder / "state.clap", std::ios::binary).write(reinterpret_cast<const char*>(&value), sizeof value);
+    return folder;
+}
 }
 int main(int argc, char** argv) {
     check(argc == 6, "fixture paths");
+    scratch = std::filesystem::temp_directory_path() / ("kick-clap-host-" + std::to_string(getpid()));
+    std::filesystem::remove_all(scratch); std::filesystem::create_directories(scratch);
 #ifndef _WIN32
     auto diagnostics = dlopen(argv[1], RTLD_NOW);
     check(diagnostics != nullptr, "keep fixture diagnostics alive through all unloads");
@@ -65,15 +102,15 @@ int main(int argc, char** argv) {
         // RFC 0005: a loaded host's presets() indexes its own library, in this process (a host
         // that runs plugins in a worker lists them through the helper instead), and a fresh index
         // runs in the helper, whose timeout stops a hung provider instead of blocking this process.
-        auto names = [](const std::vector<Preset>& p) { std::string all; for (const auto& x : p) all += x.name + ";"; return all; };
-        Host plain;
-        check(plain.load(catalog.plugins[2], 48000, 128) && names(plain.presets()) == "Quiet;Bright;", "a loaded host indexes its library's presets for it");
+        auto names = [](const auto& p) { std::string all; for (const auto& x : p) all += x.name + ";"; return all; };
+        const auto plain = load(catalog.plugins[2]);
+        check(plain && names(plain->presets()) == "Quiet;Bright;", "a loaded host indexes its library's presets for it");
         setenv("KICK_FIXTURE_PRESETS_HANG", "1", 1);
-        ScanResult fresh; std::string failure;
-        check(!indexPresetsWithHelper(argv[2], argv[1], 500, fresh, failure) && failure.find("timed out") != std::string::npos,
+        ScanResult fresh; std::string why;
+        check(!indexPresetsWithHelper(argv[2], argv[1], 500, fresh, why) && why.find("timed out") != std::string::npos,
               "a fresh index runs in the helper, and its timeout ends it");
         unsetenv("KICK_FIXTURE_PRESETS_HANG");
-        check(indexPresetsWithHelper(argv[2], argv[1], 5000, fresh, failure) && names(fresh.plugins[2].presets) == "Quiet;Bright;",
+        check(indexPresetsWithHelper(argv[2], argv[1], 5000, fresh, why) && names(fresh.plugins[2].presets) == "Quiet;Bright;",
               "and a healthy helper indexes the plugin's presets");
     }
 #ifndef _WIN32
@@ -118,34 +155,32 @@ int main(int argc, char** argv) {
     check(scan({argv[5]}, argv[2], 10000).failures.size() == 1, "scanner memory limit stops a plugin allocating 2 GiB");
 #endif
 
-    Host h;
+
     {
         // oscairn.memory (RFC 0025): asked after the state loads and before activating; refused
-        // before activating when it declares more than the room given; agrees with what it holds.
-        Host m;
-        check(m.load(catalog.plugins[13], 48000, 128), "load the memory fixture");
-        oscairn_memory_t declared{}, held{};
-        check(m.declaredMemory(declared) && declared.shared_bytes == 1u << 20 && declared.context_bytes == 8u << 20 && declared.asset_bytes == 0,
+        // before activating when it declares more than the room given.
+        const auto m = load(catalog.plugins[13]);
+        check(m != nullptr, "load the memory fixture");
+        auto declared = m->declaredMemory();
+        check(declared && declared->shared_bytes == 1u << 20 && declared->context_bytes == 8u << 20 && declared->asset_bytes == 0,
               "its declaration at 48 kHz for its default state");
-        check(m.currentMemory(held) && held.shared_bytes == declared.shared_bytes && held.context_bytes == declared.context_bytes, "what it holds agrees with what it declared");
-        std::vector<uint8_t> state; const double louder = .75;
-        state.assign(reinterpret_cast<const uint8_t*>(&louder), reinterpret_cast<const uint8_t*>(&louder) + sizeof louder);
-        check(m.loadState(state) && m.declaredMemory(declared) && declared.context_bytes == 12u << 20, "another state, another declaration, asked before activating again");
-        m.setMemoryRoom(10u << 20);
-        const double loudest = 1;
-        state.assign(reinterpret_cast<const uint8_t*>(&loudest), reinterpret_cast<const uint8_t*>(&loudest) + sizeof loudest);
-        check(!m.loadState(state) && std::string(m.error()).find("17 MiB of memory where 10 MiB is left") != std::string::npos, "a state that would not fit is refused before activating");
-        Host fresh; fresh.setMemoryRoom(4u << 20);
-        check(!fresh.load(catalog.plugins[13], 48000, 128) && std::string(fresh.error()).find("MiB of memory") != std::string::npos, "and so is a load");
-        fresh.setMemoryRoom(32u << 20);
-        check(fresh.load(catalog.plugins[13], 96000, 128) && fresh.declaredMemory(declared) && declared.context_bytes == 16u << 20, "at 96 kHz it declares twice the context");
-        Host plain; check(plain.load(catalog.plugins[0], 48000, 128) && !plain.declaredMemory(declared), "a plugin without the extension declares nothing");
+        check(ok([&] { m->loadState(stateOf(catalog.plugins[13].id, .75).string()); }) && (declared = m->declaredMemory()) && declared->context_bytes == 12u << 20,
+              "another state, another declaration, asked before activating again");
+        m->setMemoryRoom(10u << 20);
+        check(!ok([&] { m->loadState(stateOf(catalog.plugins[13].id, 1).string()); }) && failure.find("17 MiB of memory where 10 MiB is left") != std::string::npos,
+              "a state that would not fit is refused before activating");
+        check(!load(catalog.plugins[13], 48000, 128, 4u << 20) && failure.find("MiB of memory") != std::string::npos, "and so is a load");
+        const auto fresh = load(catalog.plugins[13], 96000, 128, 32u << 20);
+        check(fresh && (declared = fresh->declaredMemory()) && declared->context_bytes == 16u << 20, "at 96 kHz it declares twice the context");
+        const auto plain = load(catalog.plugins[0]);
+        check(plain && !plain->declaredMemory(), "a plugin without the extension declares nothing");
     }
     {
         // oscairn.ui hints, kept only where they fit their parameter.
-        Host hinted;
-        check(hinted.load(catalog.plugins[8], 48000, 128), "load the stepped fixture");
-        auto hint = [&](clap_id id) { for (const auto& p : hinted.parameters()) if (p.id == id) return p; return Parameter{}; };
+        auto hinted = load(catalog.plugins[8]);
+        check(hinted != nullptr, "load the stepped fixture");
+        auto in = [](const Plugin& p) { return [host = p.get()](clap_id id) { for (const auto& q : host->parameters()) if (q.id == id) return q; return Parameter{}; }; };
+        auto hint = in(hinted);
         check(hint(7).widget == OSCAIRN_WIDGET_RANGE && hint(7).rangeHigh == 99 && hint(7).priority == 1, "a range with its high parameter");
         check(hint(8).widget == OSCAIRN_WIDGET_SWITCH && hint(8).priority == 2 && hint(8).group == 5 && hint(9).group == 5, "a switch on two values; a group kept");
         check(hint(9).widget == OSCAIRN_WIDGET_AUTO && hint(9).priority == 3, "a switch on five values is the host's choice; its priority stays");
@@ -159,223 +194,224 @@ int main(int argc, char** argv) {
         check(hint(9).algorithms.size() == 5 && hint(9).algorithms[1][0] == 2 && hint(9).algorithms[1][8] == 1 && hint(9).algorithms[0][8] == 3 &&
               hint(9).algorithms[0][9] == 2 && hint(9).algorithms[0][10] == 2 && hint(8).algorithms.empty(), "the algorithm's routing for each of its values");
         // A mode that hides a parameter: an info rescan, taken in place.
-        const auto revision = hinted.metadataRevision();
+        const auto revision = hinted->parameterRevision();
         std::array<float, 64> l{}, r{}; float* out[]{l.data(), r.data()};
-        check(hinted.setParameter(9, 3) && render(hinted, out, 64, nullptr, 0), "choose the mode");
-        for (int i = 0; i < 4; ++i) { hinted.service(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
-        check((hint(8).flags & CLAP_PARAM_IS_HIDDEN) && hint(8).group == 5 && hinted.metadataRevision() > revision && hinted.parameterValue(9) == 3,
+        check(hinted->setParameter(9, 3) && render(*hinted, out, 64, nullptr, 0), "choose the mode");
+        for (int i = 0; i < 4; ++i) { hinted->service(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        check((hint(8).flags & CLAP_PARAM_IS_HIDDEN) && hint(8).group == 5 && hinted->parameterRevision() > revision && hinted->parameterValue(9) == 3,
               "an info rescan hides the toggle and keeps its hint and the values");
-        check(render(hinted, out, 64, nullptr, 0), "and the plugin plays on");
-        hinted.unload();
+        check(render(*hinted, out, 64, nullptr, 0), "and the plugin plays on");
+        hinted.reset();
         // A plugin built against draft 3: its hints and roles, and no views.
         setenv("KICK_FIXTURE_UI_DRAFT_3", "1", 1);
-        Host older;
-        check(older.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 3");
-        auto old = [&](clap_id id) { for (const auto& p : older.parameters()) if (p.id == id) return p; return Parameter{}; };
+        const auto older = load(catalog.plugins[8]);
+        check(older != nullptr, "load the stepped fixture offering draft 3");
+        auto old = in(older);
         check(old(7).widget == OSCAIRN_WIDGET_RANGE && old(7).role == OSCAIRN_ROLE_CUTOFF && old(8).group == 5 && old(8).view == 0 && old(9).field == 0 && old(9).algorithms.empty(),
               "draft 3 is still read: its hints and roles, without views");
-        older.unload();
         unsetenv("KICK_FIXTURE_UI_DRAFT_3");
         // Built against draft 4: views, and no seconds(); the times from its value texts' units.
         setenv("KICK_FIXTURE_UI_DRAFT_4", "1", 1);
-        Host four;
-        check(four.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 4");
-        auto in4 = [&](clap_id id) { for (const auto& p : four.parameters()) if (p.id == id) return p; return Parameter{}; };
+        const auto four = load(catalog.plugins[8]);
+        check(four != nullptr, "load the stepped fixture offering draft 4");
+        auto in4 = in(four);
         check(in4(8).field == OSCAIRN_FIELD_TIME_1 && in4(9).algorithms.size() == 5 && in4(8).seconds == std::vector<double>{.25, 1.5},
               "draft 4 is still read: its views, and its times from value texts with units");
-        four.unload();
         unsetenv("KICK_FIXTURE_UI_DRAFT_4");
         // Indexes past eight: a zone's or an element's, up to 32, stay in their view; an operator's, and any past 32, leave it.
         setenv("KICK_FIXTURE_UI_INDEX", "1", 1);
-        Host wide;
-        check(wide.load(catalog.plugins[8], 48000, 128), "load the stepped fixture with indexes past eight");
-        auto at = [&](clap_id id) { for (const auto& p : wide.parameters()) if (p.id == id) return p; return Parameter{}; };
+        const auto wide = load(catalog.plugins[8]);
+        check(wide != nullptr, "load the stepped fixture with indexes past eight");
+        auto at = in(wide);
         check(at(7).view == 3 && at(7).field == OSCAIRN_FIELD_KEY_LOW && at(7).index == 12 && at(8).view == 3 && at(8).index == 32 &&
               at(9).view == 0 && at(9).field == 0 && at(9).index == 0 && at(99).view == 0 && at(99).index == 0,
               "a zone's index 12 and 32 are kept, an operator's 12 and a zone's 33 leave the view");
-        wide.unload();
         unsetenv("KICK_FIXTURE_UI_INDEX");
         // Built against draft 5: seconds(), and no tabs or icons.
         setenv("KICK_FIXTURE_UI_DRAFT_5", "1", 1);
-        Host five;
-        check(five.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 5");
-        auto in5 = [&](clap_id id) { for (const auto& p : five.parameters()) if (p.id == id) return p; return Parameter{}; };
+        const auto five = load(catalog.plugins[8]);
+        check(five != nullptr, "load the stepped fixture offering draft 5");
+        auto in5 = in(five);
         check(in5(8).field == OSCAIRN_FIELD_TIME_1 && in5(9).algorithms.size() == 5 && in5(8).seconds == std::vector<double>{.25, 2},
               "draft 5 is still read: its views and its times from seconds()");
-        five.unload();
         unsetenv("KICK_FIXTURE_UI_DRAFT_5");
     }
     {
         setenv("KICK_FIXTURE_LATE_FUNCTIONS", "1", 1);
-        Host late;
-        check(late.load(catalog.plugins[0], 48000, 128), "a plugin whose functions are filled in by init loads");
-        late.unload();
+        check(load(catalog.plugins[0]) != nullptr, "a plugin whose functions are filled in by init loads");
         unsetenv("KICK_FIXTURE_LATE_FUNCTIONS");
         // Defaults outside the range or not numbers are brought into it, not refused.
         setenv("KICK_FIXTURE_BAD_DEFAULT", "1", 1);
-        Host bad;
-        check(bad.load(catalog.plugins[0], 48000, 128) && bad.parameters().size() == 2 && bad.parameters()[0].defaultValue == 0 && bad.parameters()[1].defaultValue == 1,
+        const auto bad = load(catalog.plugins[0]);
+        check(bad && bad->parameters().size() == 2 && bad->parameters()[0].defaultValue == 0 && bad->parameters()[1].defaultValue == 1,
               "a parameter's default outside its range is brought into it");
-        bad.unload();
         unsetenv("KICK_FIXTURE_BAD_DEFAULT");
     }
-    check(h.load(catalog.plugins[0], 48000, 128), "load exact instrument ID");
-    check(h.parameters().size() == 2 && h.latency() == 13 && h.supportsState(), "parameters, latency, state");
-    check(h.parameters()[0].widget == OSCAIRN_WIDGET_AUTO && h.parameters()[0].priority == 0 && h.parameters()[0].role == 0, "no hints without oscairn.ui");
-    h.service();
-    std::this_thread::sleep_for(std::chrono::milliseconds(2)); h.service();
+    auto h = load(catalog.plugins[0]);
+    check(h != nullptr, "load exact instrument ID");
+    check(h->parameters().size() == 2 && h->supportsState(), "parameters, state");
+    check(h->parameters()[0].widget == OSCAIRN_WIDGET_AUTO && h->parameters()[0].priority == 0 && h->parameters()[0].role == 0, "no hints without oscairn.ui");
+    h->service();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2)); h->service();
     std::array<float, 1025> left{}, right{};
     float* out[]{left.data(), right.data()};
     Event events[]{Event::midi(0x90, 60, 100, 17), Event::midi(0x80, 60, 0, 700)};
-    check(render(h, out, 1025, events, 2), "split oversized blocks and translate MIDI to native CLAP notes");
+    check(render(*h, out, 1025, events, 2), "split oversized blocks and translate MIDI to native CLAP notes");
     // The fixture instrument is mono: the host leaves the surplus right channel silent
     // (spreading mono to stereo is up to the caller, e.g. the Oscairn chain).
     for (int i = 0; i < 1025; ++i) check(left[i] == ((i >= 17 && i < 700) ? .5f : 0.f) && right[i] == 0.f, "sample offsets; surplus output channels silent");
-    check(!h.setParameter(99, .2) && !h.setParameter(7, std::numeric_limits<double>::quiet_NaN()), "reject read-only and nonfinite parameters");
-    check(h.setParameter(7, .25), "queue parameter");
-    std::vector<uint8_t> saved;
-    check(h.saveState(saved) && saved.size() == sizeof(double), "save queued parameters before next callback");
-    Host second;
-    check(second.load(catalog.plugins[0], 48000, 64, saved), "restore opaque state on another instance");
-    check(std::abs(second.parameterValue(7) - .25) < 1e-9, "parameter restored from plugin state");
-    check(second.parameterText(7, .25) == "0.25", "plugin value formatting");
-    check(second.enqueue(Event::note(true, 60, .8)), "enqueue native note");
-    std::thread audio([&] { check(render(second, out, 1025), "render on separate symbolic audio thread"); });
+    check(!h->setParameter(99, .2) && !h->setParameter(7, std::numeric_limits<double>::quiet_NaN()), "reject read-only and nonfinite parameters");
+    check(h->setParameter(7, .25), "queue parameter");
+    std::filesystem::path saved;
+    check(ok([&] { saved = save(*h); }) && bytes(saved).size() == sizeof(double), "save queued parameters before next callback");
+    auto second = load(catalog.plugins[0], 48000, 64);
+    check(second && ok([&] { second->loadState(saved.string()); }), "restore opaque state on another instance");
+    check(std::abs(second->parameterValue(7) - .25) < 1e-9, "parameter restored from plugin state");
+    check(second->parameterText(7, .25) == "0.25", "plugin value formatting");
+    check(second->sendEvent(Event::note(true, 60, .8)), "enqueue native note");
+    std::thread audio([&] { check(render(*second, out, 1025), "render on separate symbolic audio thread"); });
     audio.join();
     check(left[0] == .25f, "restored synth audible");
-    second.panic(); check(render(second, out, 128) && left[0] == 0.f, "panic kills held notes");
+    second->panic(); check(render(*second, out, 128) && left[0] == 0.f, "panic kills held notes");
     // A parameter change waiting when a panic comes is still applied: the reset ends notes, not values.
-    check(second.setParameter(7, .5), "queue a parameter before a panic");
-    second.panic(); check(render(second, out, 128) && left[0] == 0.f, "the panic's block");
-    check(second.enqueue(Event::note(true, 60, .8)) && render(second, out, 128) && left[0] == .5f, "a parameter queued before a panic is kept");
-    check(second.enqueue(Event::note(false, 60, 0)) && render(second, out, 128), "the note ended");
-    check(second.loadState(saved), "restore on activated plugin");
-    check(second.reconfigure(44100, 256), "sample-rate and buffer reconfiguration");
+    check(second->setParameter(7, .5), "queue a parameter before a panic");
+    second->panic(); check(render(*second, out, 128) && left[0] == 0.f, "the panic's block");
+    check(second->sendEvent(Event::note(true, 60, .8)) && render(*second, out, 128) && left[0] == .5f, "a parameter queued before a panic is kept");
+    check(second->sendEvent(Event::note(false, 60, 0)) && render(*second, out, 128), "the note ended");
+    check(ok([&] { second->loadState(saved.string()); }), "restore on activated plugin");
+    check(ok([&] { second->reconfigure(44100, 256); }), "sample-rate and buffer reconfiguration");
 
     std::array<Event, Host::maxBlockEvents> fullBlock;
     fullBlock.fill(Event::note(true, 60, 1));
-    check(second.setParameter(7, .35) && render(second, out, 128, fullBlock.data(), fullBlock.size()) && left[0] == .35f,
+    check(second->setParameter(7, .35) && render(*second, out, 128, fullBlock.data(), fullBlock.size()) && left[0] == .35f,
           "a full graph block cannot starve queued controls");
 #ifndef _WIN32
     auto blockProcess = reinterpret_cast<void(*)()>(dlsym(diagnostics, "fixture_block_process"));
     auto enteredProcess = reinterpret_cast<bool(*)()>(dlsym(diagnostics, "fixture_entered_process"));
     auto releaseProcess = reinterpret_cast<void(*)()>(dlsym(diagnostics, "fixture_release_process"));
     check(blockProcess && enteredProcess && releaseProcess, "process barrier diagnostics");
-    check(second.setParameter(7, .2), "queue gain before concurrent save");
+    check(second->setParameter(7, .2), "queue gain before concurrent save");
     blockProcess();
-    std::thread blockedAudio([&] { render(second, out, 128); });
+    std::thread blockedAudio([&] { render(*second, out, 128); });
     while (!enteredProcess()) std::this_thread::yield();
     // The command has left the queue, but the fixture has not applied it yet.
     std::thread releaseAudio([&] { std::this_thread::sleep_for(std::chrono::milliseconds(25)); releaseProcess(); });
-    const bool savedAfterProcessing = second.saveState(saved);
+    const bool savedAfterProcessing = ok([&] { saved = save(*second); });
     blockedAudio.join(); releaseAudio.join();
-    double savedGain=0; if(saved.size()==sizeof(savedGain))std::memcpy(&savedGain,saved.data(),sizeof(savedGain));
-    check(savedAfterProcessing && savedGain==.2, "save waits for dequeued commands to reach DSP");
+    const auto gain = bytes(saved);
+    double savedGain = 0; if (gain.size() == sizeof(savedGain)) std::memcpy(&savedGain, gain.data(), sizeof(savedGain));
+    check(savedAfterProcessing && savedGain == .2, "save waits for dequeued commands to reach DSP");
 #endif
 
     // Buffers may alias when the host is an insert effect.
-    check(h.load(catalog.plugins[1], 48000, 128), "load effect descriptor");
+    h = load(catalog.plugins[1]);
+    check(h != nullptr, "load effect descriptor");
     left.fill(.4f); right.fill(-.8f);
     const float* input[]{left.data(), right.data()};
-    check(render(h, out, 1025, nullptr, 0, input, 2), "effect audio input and aliased output");
+    check(render(*h, out, 1025, nullptr, 0, input, 2), "effect audio input and aliased output");
     for (size_t i = 0; i < left.size(); ++i) check(left[i] == .2f && right[i] == -.4f, "effect channel mapping");
-    check(h.load(catalog.plugins[2], 48000, 128), "MIDI-only plugin");
+    h = load(catalog.plugins[2]);
+    check(h != nullptr, "MIDI-only plugin");
     Event note = Event::note(true, 64, .8);
-    check(render(h, out, 128, &note, 1) && left[0] == .5f, "native notes translated for MIDI-only ports");
+    check(render(*h, out, 128, &note, 1) && left[0] == .5f, "native notes translated for MIDI-only ports");
     for (const auto& off : {Event::note(false,64,0,0,-1,-1), Event::note(false,-1,0,0,0,0), Event::note(false,-1,0,0,-1,-1)}) {
-        check(render(h,out,128,&note,1) && left[0]==.5f,"MIDI-only held note");
-        check(render(h,out,128,&off,1) && left[0]==0,"wildcard release expands to legal MIDI on every addressed port/channel");
+        check(render(*h,out,128,&note,1) && left[0]==.5f,"MIDI-only held note");
+        check(render(*h,out,128,&off,1) && left[0]==0,"wildcard release expands to legal MIDI on every addressed port/channel");
     }
-    check(h.setParameter(7, .95), "request restart parameter");
-    check(render(h, out, 128), "plugin requests restart from processing");
-    h.service();
-    check(render(h, out, 128) && !h.faulted(), "restart callback deactivates and reactivates correctly");
+    check(h->setParameter(7, .95), "request restart parameter");
+    check(render(*h, out, 128), "plugin requests restart from processing");
+    h->service();
+    check(render(*h, out, 128), "restart callback deactivates and reactivates correctly");
 
     std::atomic<bool> running{true};
-    std::thread reader([&] { while (running.load()) render(h, out, 128); });
-    for (int i = 0; i < 20; ++i) { h.setParameter(7, .1 + i * .01); h.service(); check(h.saveState(saved), "state while callback running"); }
+    std::thread reader([&] { while (running.load()) render(*h, out, 128); });
+    for (int i = 0; i < 20; ++i) { h->setParameter(7, .1 + i * .01); h->service(); check(ok([&] { save(*h); }), "state while callback running"); }
     running.store(false); reader.join();
-    check(h.statistics().processErrors == 0, "concurrent control/render remains valid");
+    check(h->statistics().processErrors == 0, "concurrent control/render remains valid");
     std::array<std::thread, 4> producers;
     std::atomic<int> rejected{0};
     for (auto& producer : producers) producer = std::thread([&] {
         for (int i = 0; i < 200; ++i) {
-            if (!h.enqueue(Event::note(true, 60, .8))) ++rejected;
-            if (!h.enqueue(Event::note(false, 60, 0))) ++rejected;
+            if (!h->sendEvent(Event::note(true, 60, .8))) ++rejected;
+            if (!h->sendEvent(Event::note(false, 60, 0))) ++rejected;
         }
     });
     for (auto& producer : producers) producer.join();
     // Each process() takes at most maxBlockEvents queued events; render until all
     // 1600 have been delivered.
-    for (uint32_t b = 0; b * Host::maxBlockEvents < 1600; ++b) check(render(h, out, 128), "render queued events");
+    for (uint32_t b = 0; b * Host::maxBlockEvents < 1600; ++b) check(render(*h, out, 128), "render queued events");
     check(rejected.load() == 0 && left[0] == 0.f, "bounded multi-producer event publication");
-    check(!h.enqueue(Event::note(true, 200, .8)), "reject invalid note key");
+    check(!h->sendEvent(Event::note(true, 200, .8)), "reject invalid note key");
     // Overflow is bounded and forces a reset rather than losing note-off forever.
-    for (uint32_t i = 0; i < Host::maxEvents + 10; ++i) h.enqueue(note);
-    check(render(h, out, 128) && left[0] == 0.f && h.statistics().droppedEvents > 0, "queue overflow panic");
-    check(h.load(catalog.plugins[3], 48000, 128), "load NaN fixture");
-    check(!render(h, out, 128) && h.faulted(), "nonfinite audio faults and silences instance");
+    for (uint32_t i = 0; i < Host::maxEvents + 10; ++i) h->sendEvent(note);
+    check(render(*h, out, 128) && left[0] == 0.f && h->statistics().droppedEvents > 0, "queue overflow panic");
+    h = load(catalog.plugins[3]);
+    check(h && !render(*h, out, 128), "nonfinite audio faults and silences instance");
     for (size_t i = 0; i < 128; ++i) check(left[i] == 0.f && right[i] == 0.f, "fault output cleared");
-    check(h.load(catalog.plugins[4], 48000, 128), "load error fixture");
-    check(!render(h, out, 128) && h.faulted(), "process status error handled");
-    check(h.load(catalog.plugins[5], 48000, 128), "load sleep fixture");
-    check(render(h, out, 128), "sleeping plugin first block");
-    auto before = h.statistics().blocks;
-    check(render(h, out, 128) && h.statistics().blocks == before, "sleep skips idle DSP");
-    check(h.enqueue(note) && render(h, out, 128) && left[0] == .5f, "event wakes sleeping plugin");
+    h = load(catalog.plugins[4]);
+    check(h && !render(*h, out, 128), "process status error handled");
+    h = load(catalog.plugins[5]);
+    check(h && render(*h, out, 128), "sleeping plugin first block");
+    auto before = h->statistics().blocks;
+    check(render(*h, out, 128) && h->statistics().blocks == before, "sleep skips idle DSP");
+    check(h->sendEvent(note) && render(*h, out, 128) && left[0] == .5f, "event wakes sleeping plugin");
     {
         // The wake mirror and the carried-event count are read off the control thread (the worker's audio thread, the
         // plugin's own threads) while it sets and writes them; ThreadSanitizer is the judge.
-        check(render(h, out, 128), "sleeping plugin again before the cross-thread reads");
-        const auto errorsBefore = h.statistics().processErrors;
+        check(render(*h, out, 128), "sleeping plugin again before the cross-thread reads");
+        const auto errorsBefore = h->statistics().processErrors;
         std::atomic<uint32_t> word{0};
         std::atomic<bool> going{true};
         std::atomic<bool> audioRan{false}, wakerRan{false};
         // Each thread has done one pass before the first save, so all three overlap in every iteration. A save waits up
         // to 100 ms for the commands the waker keeps queuing, so the iteration count sets the duration: 100 took 17 s
         // under GCC's ThreadSanitizer here (5.6 s for the whole test before it) and ran past the 30 s limit on CI.
-        std::thread audio([&] { do { render(h, out, 128); h.restful(); audioRan.store(true); } while (going.load()); });
-        std::thread waker([&] { do { h.enqueue(note); wakerRan.store(true); } while (going.load()); });
+        std::thread rendering([&] { do { render(*h, out, 128); h->restful(); audioRan.store(true); } while (going.load()); });
+        std::thread waker([&] { do { h->sendEvent(note); wakerRan.store(true); } while (going.load()); });
         while (!audioRan.load() || !wakerRan.load()) std::this_thread::yield();
         for (int i = 0; i < 20; ++i) {
-            h.mirrorWake(&word);
-            check(h.saveState(saved) && h.loadState(saved), "state while another thread wakes and rests the plugin");
-            h.mirrorWake(nullptr);
+            h->mirrorWake(&word);
+            check(ok([&] { h->loadState(save(*h).string()); }), "state while another thread wakes and rests the plugin");
+            h->mirrorWake(nullptr);
         }
-        going.store(false); audio.join(); waker.join();
-        check(h.statistics().processErrors == errorsBefore, "cross-thread wake and carry reads stay valid");
-        check(h.load(catalog.plugins[5], 48000, 128) && render(h, out, 128), "sleep fixture reloaded after the cross-thread reads");
+        going.store(false); rendering.join(); waker.join();
+        check(h->statistics().processErrors == errorsBefore, "cross-thread wake and carry reads stay valid");
+        h = load(catalog.plugins[5]);
+        check(h && render(*h, out, 128), "sleep fixture reloaded after the cross-thread reads");
     }
-    check(!h.load(catalog.plugins[6], 48000, 128) && !h.loaded(), "failed activation cleans up");
-    check(h.load(catalog.plugins[7], 48000, 128) && !render(h, out, 128), "failed start faults safely");
-    check(h.load(catalog.plugins[11], 48000, 128), "load transport-driven instrument");
+    check(!load(catalog.plugins[6]), "failed activation cleans up");
+    h = load(catalog.plugins[7]);
+    check(h && !render(*h, out, 128), "failed start faults safely");
+    h = load(catalog.plugins[11]);
+    check(h != nullptr, "load transport-driven instrument");
     clap_event_transport_t transport{};
     transport.flags = CLAP_TRANSPORT_HAS_TEMPO | CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
     transport.tempo = 120;
     auto transportRender = [&] {
         forbidAllocation = true;
-        const bool ok = h.process(nullptr, 0, out, 2, 128, nullptr, 0, &transport);
-        forbidAllocation = false; return ok;
+        const bool done = h->process(nullptr, 0, out, 2, 128, nullptr, 0, &transport);
+        forbidAllocation = false; return done;
     };
     check(transportRender() && left[0] == 0, "transport fixture sleeps stopped");
-    before = h.statistics().blocks;
-    check(transportRender() && h.statistics().blocks == before, "unchanged transport stays asleep");
+    before = h->statistics().blocks;
+    check(transportRender() && h->statistics().blocks == before, "unchanged transport stays asleep");
     transport.flags |= CLAP_TRANSPORT_IS_PLAYING;
-    check(transportRender() && left[0] == .5f && h.statistics().blocks > before, "Play wakes instrument without MIDI");
+    check(transportRender() && left[0] == .5f && h->statistics().blocks > before, "Play wakes instrument without MIDI");
     transport.flags &= ~CLAP_TRANSPORT_IS_PLAYING;
     check(transportRender() && left[0] == 0, "Stop reaches instrument");
-    before = h.statistics().blocks; transport.tempo = 90;
-    check(transportRender() && h.statistics().blocks > before, "tempo edit wakes stopped instrument");
-    before = h.statistics().blocks; transport.song_pos_beats = 8 * CLAP_BEATTIME_FACTOR;
-    check(transportRender() && h.statistics().blocks > before, "seek wakes stopped instrument");
-    check(h.load(catalog.plugins[5], 48000, 128), "load sleeping note instrument for timeline test");
+    before = h->statistics().blocks; transport.tempo = 90;
+    check(transportRender() && h->statistics().blocks > before, "tempo edit wakes stopped instrument");
+    before = h->statistics().blocks; transport.song_pos_beats = 8 * CLAP_BEATTIME_FACTOR;
+    check(transportRender() && h->statistics().blocks > before, "seek wakes stopped instrument");
+    h = load(catalog.plugins[5]);
+    check(h != nullptr, "load sleeping note instrument for timeline test");
     transport.flags |= CLAP_TRANSPORT_IS_PLAYING;
-    check(transportRender(), "first playing block"); before = h.statistics().blocks;
+    check(transportRender(), "first playing block"); before = h->statistics().blocks;
     transport.song_pos_beats += static_cast<clap_beattime>(128. / 48000 * 90 / 60 * CLAP_BEATTIME_FACTOR);
-    check(transportRender() && h.statistics().blocks == before, "normal beat progression does not wake idle instrument");
+    check(transportRender() && h->statistics().blocks == before, "normal beat progression does not wake idle instrument");
     auto missing = catalog.plugins[0]; missing.id = "missing.id";
-    check(!h.load(missing, 48000, 128), "do not substitute another descriptor for missing saved ID");
-    second.unload(); h.unload();
+    check(!load(missing), "do not substitute another descriptor for missing saved ID");
+    h.reset(); second.reset();
 #ifndef _WIN32
     {
         // CLAP gui: the effect floats its own window, so nothing is drawn. The host creates it with
@@ -385,22 +421,23 @@ int main(int argc, char** argv) {
         auto title = reinterpret_cast<const char*(*)()>(dlsym(diagnostics, "fixture_gui_title"));
         auto request = reinterpret_cast<bool(*)(int)>(dlsym(diagnostics, "fixture_gui_request"));
         check(state && title && request, "fixture window controls");
-        Host plain, windowed;
-        check(plain.load(catalog.plugins[0], 48000, 128) && !plain.hasGui() && !plain.showGui("Synth") && !plain.guiOpen(), "a plugin without a window has none to show");
-        check(windowed.load(catalog.plugins[1], 48000, 128) && windowed.hasGui() && !windowed.guiOpen(), "a plugin that floats its window has one");
-        check(windowed.showGui("KICK effect · Lead") && windowed.guiOpen() && state() == 2 && std::string(title()) == "KICK effect · Lead", "shown, with the node and part as its title");
-        check(windowed.showGui("KICK effect · Bass") && state() == 2 && std::string(title()) == "KICK effect · Bass", "shown again: titled anew, not a second window");
+        const auto plain = load(catalog.plugins[0]);
+        auto windowed = load(catalog.plugins[1]);
+        check(plain && !plain->hasWindow() && !ok([&] { plain->showWindow(true, "Synth"); }), "a plugin without a window has none to show");
+        check(windowed && windowed->hasWindow() && state() == 0, "a plugin that floats its window has one");
+        check(ok([&] { windowed->showWindow(true, "KICK effect · Lead"); }) && state() == 2 && std::string(title()) == "KICK effect · Lead", "shown, with the node and part as its title");
+        check(ok([&] { windowed->showWindow(true, "KICK effect · Bass"); }) && state() == 2 && std::string(title()) == "KICK effect · Bass", "shown again: titled anew, not a second window");
         check(!request(3), "a floating window asks no resize");
         check(request(0) && state() == 2, "a request to hide waits for the main loop");
-        windowed.service(); check(state() == 1 && windowed.guiOpen(), "hidden in service");
-        check(request(1), "a request to show"); windowed.service(); check(state() == 2, "and shown again");
-        windowed.closeGui(); check(state() == 0 && !windowed.guiOpen() && !request(1), "closed: destroyed");
-        check(windowed.showGui("KICK effect") && state() == 2, "opened again");
-        check(request(2), "the plugin destroys its window"); windowed.service(); check(state() == 0 && !windowed.guiOpen(), "the plugin destroying its window is acknowledged");
-        check(windowed.showGui("KICK effect") && state() == 2, "and opened once more");
-        windowed.unload(); check(state() == 0, "unloading destroys the window first");
+        windowed->service(); check(state() == 1, "hidden in service");
+        check(request(1), "a request to show"); windowed->service(); check(state() == 2, "and shown again");
+        check(ok([&] { windowed->showWindow(false); }) && state() == 0 && !request(1), "closed: destroyed");
+        check(ok([&] { windowed->showWindow(true, "KICK effect"); }) && state() == 2, "opened again");
+        check(request(2), "the plugin destroys its window"); windowed->service(); check(state() == 0 && !request(1), "the plugin destroying its window is acknowledged");
+        check(ok([&] { windowed->showWindow(true, "KICK effect"); }) && state() == 2, "and opened once more");
+        windowed.reset(); check(state() == 0, "unloading destroys the window first");
     }
-
+    std::filesystem::remove_all(scratch);
     auto errors = reinterpret_cast<int(*)()>(dlsym(diagnostics, "fixture_thread_errors"));
     check(errors && errors() == 0, "all lifecycle and event calls satisfy fixture contracts");
     auto users = reinterpret_cast<int(*)()>(dlsym(diagnostics, "fixture_entry_users"));

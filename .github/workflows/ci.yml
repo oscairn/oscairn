@@ -51,18 +51,6 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      # Until the C++ CLAP host's vectors for Linux are committed (core/clap-host/tests/vectors), each run records them.
-      - name: Record the C++ CLAP host's vectors (Linux)
-        if: runner.os == 'Linux'
-        run: cmake --build build --target clap-host-vectors
-
-      - name: Keep the C++ CLAP host's vectors (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clap-host-vectors-linux
-          path: core/clap-host/tests/vectors/
-
       - name: Check core/clap-ext against its pinned oscairn-clap commit
         env:
           OSCAIRN_REQUIRE_NETWORK: "1"
@@ -164,20 +152,3 @@ jobs:
       - name: Test
         # The scanner tests deliberately crash and hang plugins in child processes.
         run: ctest --test-dir build --output-on-failure -E "scanner|benchmark-cli"
-
-  cpp-reference-host:
-    # The Rust CLAP host is the default and the jobs above build it; this builds the C++ reference host
-    # (-DOSCAIRN_CLAP_HOST=cpp) and runs the tests that go through the engine, the worker and the host.
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libsndfile1-dev libsamplerate0-dev
-      - name: Install Rust 1.95.0 (samplepack's pinned release)
-        run: tools/install-rust.sh
-      - name: Configure
-        run: cmake -S . -B build-cpp-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_CLAP_HOST=cpp
-      - name: Build
-        run: cmake --build build-cpp-host
-      - name: Test
-        run: ctest --test-dir build-cpp-host -R "clap-host|kick-clap|worker|plugin-hosts|control-|engine-|graph-|pressure-|memory" --output-on-failure

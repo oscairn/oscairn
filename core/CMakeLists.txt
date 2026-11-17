@@ -1,22 +1,18 @@
 add_subdirectory(clap-host)
 
 find_package(Threads REQUIRED)
-add_library(oscairn_plugin_host STATIC plugin-host/src/plugin_host.cpp plugin-host/src/clap_host_cpp.cpp plugin-host/src/unavailable_plugin.cpp plugin-host/src/discovery.cpp plugin-host/src/assets.cpp
+# The C++ face of the Rust CLAP host (clap-host/rust, in the engine core's static library below) for C++ callers:
+# kick_clap/Host.h and Discovery.h (plugin-host/include), over clap_host.h's rust_clap_* calls.
+add_library(kick_clap_host STATIC plugin-host/src/kick_clap.cpp)
+target_include_directories(kick_clap_host PUBLIC plugin-host/include clap-host/third_party/clap/include clap-ext/include)
+target_compile_features(kick_clap_host PUBLIC cxx_std_17)
+target_compile_options(kick_clap_host PRIVATE -Wall -Wextra)
+target_link_libraries(kick_clap_host PUBLIC oscairn_engine_core ${CMAKE_DL_LIBS} Threads::Threads)
+add_library(oscairn_plugin_host STATIC plugin-host/src/plugin_host.cpp plugin-host/src/unavailable_plugin.cpp plugin-host/src/discovery.cpp plugin-host/src/assets.cpp
     plugin-host/src/samples.cpp plugin-host/src/Worker.cpp plugin-host/src/WorkerHost.cpp)
 target_include_directories(oscairn_plugin_host PUBLIC plugin-host/include)
 target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack oscairn_engine_core PRIVATE Threads::Threads) # oscairn_engine_core: the Rust CLAP host (clap-host/rust) too
 target_compile_options(oscairn_plugin_host PRIVATE -Wall -Wextra)
-# The CLAP host the engine and the plugin worker use (plugin-host/src/clap_host.h): the Rust one (clap-host/rust), or its
-# C++ reference (kick::clap::Host). Rust is the default (the owner's decision after the keyboard comparison). Both are
-# always built: the C++ host stays as the reference the comparison tests run against, until it is deleted after recorded
-# transcripts replace it; -DOSCAIRN_CLAP_HOST=cpp makes the engine and the worker use it.
-set(OSCAIRN_CLAP_HOST rust CACHE STRING "The CLAP host plugins load in: cpp (kick::clap::Host), or rust (clap-host/rust)")
-set_property(CACHE OSCAIRN_CLAP_HOST PROPERTY STRINGS cpp rust)
-if(OSCAIRN_CLAP_HOST STREQUAL "rust")
-    target_compile_definitions(oscairn_plugin_host PRIVATE OSCAIRN_CLAP_HOST_RUST=1)
-elseif(NOT OSCAIRN_CLAP_HOST STREQUAL "cpp")
-    message(FATAL_ERROR "OSCAIRN_CLAP_HOST is cpp or rust, not ${OSCAIRN_CLAP_HOST}")
-endif()
 if(OSCAIRN_LV2)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LILV REQUIRED IMPORTED_TARGET lilv-0>=0.24)
@@ -65,7 +61,7 @@ target_link_libraries(oscairn-hardware-service-test PRIVATE oscairn_hardware_sim
 add_test(NAME hardware-service COMMAND oscairn-hardware-service-test "${CMAKE_CURRENT_SOURCE_DIR}/hardware/tests/simulated-profile.json"
     "${PROJECT_SOURCE_DIR}/hosts/standalone/profiles")
 add_executable(oscairn-hardware-plugin-test hardware/tests/plugin.cpp)
-target_link_libraries(oscairn-hardware-plugin-test PRIVATE oscairn_hardware_sim)
+target_link_libraries(oscairn-hardware-plugin-test PRIVATE oscairn_hardware_sim oscairn_plugin_host)
 add_dependencies(oscairn-hardware-plugin-test oscairn-hardware-fixture)
 add_test(NAME hardware-plugin COMMAND oscairn-hardware-plugin-test $<TARGET_FILE:oscairn-hardware-fixture>
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware/tests/simulated-profile.json")
@@ -92,7 +88,7 @@ set(engine_core_flags "--remap-path-prefix${engine_core_us}${engine_core_crate}=
 foreach(flag IN LISTS SAMPLEPACK_RUSTFLAGS) # the target's CPU flags, as samplepack takes them
     string(APPEND engine_core_flags "${engine_core_us}${flag}")
 endforeach()
-set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION} OSCAIRN_RELEASE=${OSCAIRN_RELEASE}) # the release the Rust CLAP host tells plugins, as kick_clap_host does
+set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION} OSCAIRN_RELEASE=${OSCAIRN_RELEASE}) # the release the Rust CLAP host tells plugins
 set(engine_core_cmds)
 set(engine_core_libs)
 foreach(triple IN LISTS _sp_triples)
@@ -112,9 +108,9 @@ add_custom_target(oscairn_engine_core_build ${engine_core_cmds} BYPRODUCTS ${eng
 add_library(oscairn_engine_core STATIC IMPORTED GLOBAL)
 set_target_properties(oscairn_engine_core PROPERTIES IMPORTED_LOCATION "${engine_core_lib}")
 add_dependencies(oscairn_engine_core oscairn_engine_core_build)
-# The staticlib holds the Rust CLAP host, which calls C symbols of kick_clap_host (Bridge.cpp, WindowBridge.cpp). A GNU linker reads archives
-# once, in order, so kick_clap_host must come after this library in every consumer's link line; this edge makes CMake put it there.
-set_target_properties(oscairn_engine_core PROPERTIES INTERFACE_LINK_LIBRARIES kick_clap_host)
+# The staticlib holds the Rust CLAP host, which calls the host's windows (clap-host/src, kick_clap/window.h). A GNU linker reads archives
+# once, in order, so they must come after this library in every consumer's link line; this edge makes CMake put them there.
+set_target_properties(oscairn_engine_core PROPERTIES INTERFACE_LINK_LIBRARIES oscairn_clap_windows)
 
 add_library(oscairn_engine STATIC
     engine/src/audio_cpp.cpp
@@ -152,42 +148,76 @@ endif()
 
 add_subdirectory(control)
 
-# The CLAP host's C interface (plugin-host/src/clap_host.h) against kick::clap::Host straight.
-add_executable(oscairn-clap-host-c-test engine/tests/clap_host_c.cpp)
-target_link_libraries(oscairn-clap-host-c-test PRIVATE oscairn_engine)
-add_test(NAME clap-host-c COMMAND oscairn-clap-host-c-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>
-    $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay>)
-set_tests_properties(clap-host-c PROPERTIES TIMEOUT 60)
-
-# The Rust CLAP host (clap-host/rust) against its C++ reference, through clap_host.h.
-# Its recording fixture shows each host what it was given.
+# The Rust CLAP host (clap-host/rust) against its deleted C++ reference's recorded vectors for this target
+# (clap-host/tests/vectors, recorded from kick::clap::Host before its deletion; skipped where none is committed), through
+# clap_host.h, with the test's fixtures. Its recording fixture shows a host everything it was given. The clap-host-vectors
+# target records the Rust host's, for a deliberate change in behavior.
 add_library(oscairn-recording-fixture MODULE engine/tests/recording_fixture.cpp)
 target_link_libraries(oscairn-recording-fixture PRIVATE oscairn_clap_headers)
 set_target_properties(oscairn-recording-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
 add_executable(oscairn-clap-host-rust-test engine/tests/clap_host_rust.cpp)
 target_link_libraries(oscairn-clap-host-rust-test PRIVATE oscairn_engine)
-add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-voice-fixture)
-add_test(NAME clap-host-rust COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
-    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
-set_tests_properties(clap-host-rust PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
-# The same check against the C++ host's recorded vectors for this target (clap-host/tests/vectors), as it runs once the C++
-# host is gone; the test's fixtures only. Where none is committed yet, the reference is recorded first. The clap-host-vectors
-# target records them again, from the C++ host, at the commit it last changed.
+add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-voice-fixture kick-clap-fixture-normal)
 set(clap_host_vectors ${CMAKE_CURRENT_SOURCE_DIR}/clap-host/tests/vectors/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}.vectors)
 set(clap_host_fixtures $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-voice-fixture>)
-execute_process(COMMAND git log -1 --format=%h -- clap-host/src clap-host/include plugin-host/src/clap_host_cpp.cpp WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    OUTPUT_VARIABLE cpp_host_revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(COMMAND git log -1 --format=%h -- clap-host/rust WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE clap_host_revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 target_compile_definitions(oscairn-clap-host-rust-test PRIVATE OSCAIRN_VECTORS_TARGET="${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
-    OSCAIRN_CPP_HOST_REVISION="$<IF:$<BOOL:${cpp_host_revision}>,${cpp_host_revision},unknown>")
-if(EXISTS ${clap_host_vectors})
-    add_test(NAME clap-host-rust-replay COMMAND oscairn-clap-host-rust-test --replay ${clap_host_vectors} ${clap_host_fixtures})
-else()
-    add_test(NAME clap-host-rust-replay COMMAND sh -c "t=\"$0\" b=\"$1\"; shift; \"$b\" --record \"$t.vectors\" \"$@\" >/dev/null && \"$b\" --replay \"$t.vectors\" \"$@\""
-        "${CMAKE_CURRENT_BINARY_DIR}/clap-host" $<TARGET_FILE:oscairn-clap-host-rust-test> ${clap_host_fixtures})
-endif()
-set_tests_properties(clap-host-rust-replay PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1")
+    OSCAIRN_HOST_REVISION="$<IF:$<BOOL:${clap_host_revision}>,${clap_host_revision},unknown>")
+add_test(NAME clap-host-rust-replay COMMAND oscairn-clap-host-rust-test --replay ${clap_host_vectors} ${clap_host_fixtures})
+set_tests_properties(clap-host-rust-replay PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
 add_custom_target(clap-host-vectors COMMAND ${CMAKE_COMMAND} -E env OSCAIRN_FIXTURE_VOICE_BUDGET=1 $<TARGET_FILE:oscairn-clap-host-rust-test> --record ${clap_host_vectors} ${clap_host_fixtures}
-    DEPENDS oscairn-clap-host-rust-test kick-clap-fixture-normal VERBATIM)
+    DEPENDS oscairn-clap-host-rust-test VERBATIM)
+
+# The CLAP tools that go into every image (RFC 0035), over the Rust host: the scanner and its isolated helper, and the
+# benchmark (tools/clap-host).
+add_executable(kick-clap-scan ../tools/clap-host/scan.cpp)
+target_link_libraries(kick-clap-scan PRIVATE kick_clap_host)
+install(TARGETS kick-clap-scan RUNTIME DESTINATION bin)
+add_library(kick_clap_benchmark STATIC ../tools/clap-host/Benchmark.cpp)
+target_include_directories(kick_clap_benchmark PUBLIC ../tools/clap-host)
+target_link_libraries(kick_clap_benchmark PUBLIC oscairn_plugin_host)
+target_compile_options(kick_clap_benchmark PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math)
+set(KICK_BENCH_REVISION "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE KICK_BENCH_GIT_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE KICK_BENCH_GIT_RESULT ERROR_QUIET)
+    if(KICK_BENCH_GIT_RESULT EQUAL 0)
+        set(KICK_BENCH_REVISION "${KICK_BENCH_GIT_REVISION}")
+        execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE KICK_BENCH_DIRTY ERROR_QUIET)
+        if(KICK_BENCH_DIRTY)
+            string(APPEND KICK_BENCH_REVISION "+dirty")
+        endif()
+    endif()
+endif()
+target_compile_definitions(kick_clap_benchmark PRIVATE KICK_BENCH_REVISION="${KICK_BENCH_REVISION}" KICK_BENCH_BUILD_TYPE="$<CONFIG>")
+add_executable(kick-clap-bench ../tools/clap-host/bench.cpp)
+target_link_libraries(kick-clap-bench PRIVATE kick_clap_benchmark)
+install(TARGETS kick-clap-bench RUNTIME DESTINATION bin)
+install(PROGRAMS ../tools/clap-host/benchmark_matrix.py DESTINATION bin RENAME kick-clap-benchmark-matrix)
+if(NOT WIN32)
+    add_test(NAME kick-clap-scanner-cli COMMAND ${CMAKE_COMMAND} -E env
+        "PATH=$<TARGET_FILE_DIR:kick-clap-scan>:$ENV{PATH}"
+        kick-clap-scan $<TARGET_FILE:kick-clap-fixture-normal>)
+    set_tests_properties(kick-clap-scanner-cli PROPERTIES TIMEOUT 10)
+endif()
+add_executable(kick-clap-benchmark-tests ../tools/clap-host/tests/BenchmarkTests.cpp)
+target_include_directories(kick-clap-benchmark-tests PRIVATE clap-host/tests) # AllocationGuard.h
+target_link_libraries(kick-clap-benchmark-tests PRIVATE kick_clap_benchmark)
+add_test(NAME kick-clap-benchmark COMMAND kick-clap-benchmark-tests
+    $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:kick-clap-fixture-held_state>)
+set_tests_properties(kick-clap-benchmark PROPERTIES TIMEOUT 20)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME kick-clap-benchmark-cli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/clap-host/tests/BenchmarkCliTests.py"
+        $<TARGET_FILE:kick-clap-bench> $<TARGET_FILE:kick-clap-fixture-normal>
+        $<TARGET_FILE:kick-clap-fixture-process_crash> $<TARGET_FILE:kick-clap-fixture-process_hang>
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/clap-host/benchmark_matrix.py")
+    set_tests_properties(kick-clap-benchmark-cli PROPERTIES TIMEOUT 30)
+endif()
 
 add_executable(oscairn-sequencer-timing-test engine/tests/sequencer_timing.cpp)
 target_link_libraries(oscairn-sequencer-timing-test PRIVATE oscairn_engine)
@@ -198,7 +228,7 @@ target_link_libraries(oscairn-sequencer-tracks-test PRIVATE oscairn_engine)
 add_test(NAME sequencer-tracks COMMAND oscairn-sequencer-tracks-test $<TARGET_FILE:oscairn_step_sequencer>)
 
 add_executable(oscairn-host-policy-test engine/tests/host_policy.cpp)
-target_link_libraries(oscairn-host-policy-test PRIVATE kick_clap_host)
+target_link_libraries(oscairn-host-policy-test PRIVATE oscairn_plugin_host)
 add_test(NAME host-policy COMMAND oscairn-host-policy-test $<TARGET_FILE:oscairn_basic_synth>)
 
 add_executable(oscairn-chain-mono-test engine/tests/chain_mono.cpp)
@@ -479,7 +509,7 @@ set_tests_properties(effect-contexts PROPERTIES TIMEOUT 60)
 # RFC 0010 step 1: plugin worker hand-off measurements (tools/worker-bench).
 if(UNIX)
     add_executable(oscairn-handoff-bench ../tools/worker-bench/handoff_bench.cpp)
-    target_link_libraries(oscairn-handoff-bench PRIVATE kick_clap_host)
+    target_link_libraries(oscairn-handoff-bench PRIVATE oscairn_plugin_host)
     add_test(NAME handoff-bench COMMAND oscairn-handoff-bench --check)
     add_test(NAME handoff-bench-plugin COMMAND oscairn-handoff-bench --check --plugin $<TARGET_FILE:oscairn_basic_synth> --id org.oscairn.basic-synth)
     # RFC 0045's plugin groups: a 22-plugin Performance's block by placement, groups on or off (tools/worker-bench).

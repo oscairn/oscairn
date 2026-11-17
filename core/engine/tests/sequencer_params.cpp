@@ -12,7 +12,7 @@
 #include "../../../plugins/step-sequencer/Parameters.h"
 
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 
 #include <cstdio>
 #include <map>
@@ -45,7 +45,7 @@ namespace
     }
 
     // Note-on keys by sample, for `samples` samples. `events` are sent at absolute times.
-    std::map<int64_t, int> play( kick::clap::Host& host, int64_t samples, const std::multimap<int64_t, kick::clap::Event>& events = {} )
+    std::map<int64_t, int> play( oscairn::PluginHost& host, int64_t samples, const std::multimap<int64_t, kick::clap::Event>& events = {} )
     {
         oscairn::Transport     transport( rate, 120.0 );
         std::map<int64_t, int> ons;
@@ -87,35 +87,35 @@ int main( int argc, char** argv )
         return fail( "sequencer not found" );
 
     {
-        kick::clap::Host host;
-        if( !host.load( scan.plugins.front(), rate, block ) )
+        const auto host = loaded( scan.plugins.front(), rate, block );
+        if( !host )
             return fail( "load" );
-        if( host.parameters().size() != oscairn::sequencer::parameterCount )
+        if( host->parameters().size() != oscairn::sequencer::parameterCount )
             return fail( "expected 206 parameters" );
-        if( host.parameterValue( 100 ) != 1.0 || host.parameterValue( 200 ) != 45.0 || host.parameterValue( 300 ) != 0.8 )
+        if( host->parameterValue( 100 ) != 1.0 || host->parameterValue( 200 ) != 45.0 || host->parameterValue( 300 ) != 0.8 )
             return fail( "default values" );
 
-        host.setParameter( 101, 0.0 );  // step 2 off
-        host.setParameter( 202, 70.0 ); // step 3 note
-        const auto ons = play( host, 4 * step );
+        host->setParameter( 101, 0.0 );  // step 2 off
+        host->setParameter( 202, 70.0 ); // step 3 note
+        const auto ons = play( *host, 4 * step );
         if( ons.count( 0 ) != 1 || ons.at( 0 ) != 45 )
             return fail( "step 1 should play its default note" );
         if( ons.count( step ) != 0 )
             return fail( "step 2 is off but played" );
         if( ons.count( 2 * step ) != 1 || ons.at( 2 * step ) != 70 )
             return fail( "step 3 should play the edited note 70" );
-        if( host.parameterValue( 101 ) != 0.0 || host.parameterValue( 202 ) != 70.0 )
+        if( host->parameterValue( 101 ) != 0.0 || host->parameterValue( 202 ) != 70.0 )
             return fail( "edited values not reported" );
     }
     {
-        kick::clap::Host host;
-        if( !host.load( scan.plugins.front(), rate, block ) )
+        const auto host = loaded( scan.plugins.front(), rate, block );
+        if( !host )
             return fail( "load" );
         // Step 2 (at 6000): note 72 one sample late, so the first pass plays the default;
         // step 3 (at 12000): note 74 exactly at its sample, so it applies at once.
         const std::multimap<int64_t, kick::clap::Event> events{ { step + 1, paramEvent( 201, 72.0, 0 ) },
                                                                 { 2 * step, paramEvent( 202, 74.0, 0 ) } };
-        const auto ons = play( host, 17 * step + 1, events );
+        const auto ons = play( *host, 17 * step + 1, events );
         if( ons.count( step ) != 1 || ons.at( step ) != 57 )
             return fail( "a change one sample after step 2 started should not affect it" );
         if( ons.count( 2 * step ) != 1 || ons.at( 2 * step ) != 74 )

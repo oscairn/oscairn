@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
-/* The CLAP host behind one C interface: one plugin instance, loaded from its library, with what ClapHost
- * (plugin_host.cpp, the PluginHost the engine and the plugin worker use) asks of it. Implementations:
- * cpp_clap_* (clap_host_cpp.cpp, around kick::clap::Host, the reference) and rust_clap_* (core/clap-host/rust).
- * plugin_host.cpp calls the one picked through OSCAIRN_CLAP(name). Rust's types are generated from this file
- * into core/clap-host/rust/src/bindings.rs (its test clap_host_h_unchanged fails when this file moves).
+/* The CLAP host, Rust (core/clap-host/rust), behind one C interface for its C++ callers: one plugin instance, loaded from
+ * its library, with what ClapHost (plugin_host.cpp, the PluginHost the engine and the plugin worker use) asks of it;
+ * discovery, the event types and the process's settings for kick_clap/Host.h and Discovery.h (kick_clap.cpp). Rust's
+ * types are generated from this file into core/clap-host/rust/src/bindings.rs (its test clap_host_h_unchanged fails
+ * when this file moves).
  *
- * Threads, as kick::clap::Host's (Host.h): control calls on one main thread; process and the calls named
+ * Threads: control calls on one main thread; process and the calls named
  * audio thread on one audio thread; enqueue (send_event), statistics and the counters on any. Nothing an audio
  * thread calls allocates or locks.
  *
@@ -13,7 +13,7 @@
  * Lists are given item by item to a callback, during the call; the strings and arrays it is handed live as long.
  *
  * C, so bindgen reads it; C++ sees kick::clap::Event, kick::clap::Statistics and std::atomic<uint32_t> in the same
- * bytes (clap_host_cpp.cpp asserts their layout). */
+ * bytes (asserted below). */
 #pragma once
 #include <clap/entry.h>
 #include <clap/events.h>
@@ -35,6 +35,10 @@ typedef kick::clap::Event oscairn_clap_event;
 typedef kick::clap::Statistics oscairn_clap_statistics;
 typedef std::atomic<uint32_t> oscairn_clap_wake;
 typedef std::atomic<bool> oscairn_clap_flag;
+static_assert(sizeof(oscairn_clap_event) == 64 && alignof(oscairn_clap_event) == 8, "an event is 64 bytes");
+static_assert(sizeof(oscairn_clap_wake) == 4 && std::atomic<uint32_t>::is_always_lock_free, "the wake word");
+static_assert(sizeof(kick::clap::Statistics) == 8 * 20 && offsetof(kick::clap::Statistics, restarts) == 8 * 8 &&
+              offsetof(kick::clap::Statistics, cpuMicroseconds) == 8 * 19, "kick::clap::Statistics as the C struct lays it out");
 extern "C" {
 #else
 typedef struct { _Alignas(8) uint8_t bytes[64]; } oscairn_clap_event; /* kick::clap::Event */
@@ -130,95 +134,86 @@ typedef struct
     void (*parameter)(void* context, const oscairn_clap_parameter* parameter);
 } oscairn_clap_description;
 typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
-#define OSCAIRN_CLAP_API(p) \
-    /* Failures */ \
-    const char* p##clap_error(int* kind); \
-    /* Life: new does what loading a CLAP plugin in this process did (its library inspected, the plugin with id loaded, \
-     * its audio layout locked, its first service run); effect_context makes one from a loaded instance; free unloads. */ \
-    oscairn_clap_host* p##clap_new(const char* path, const char* id, double rate, uint32_t frames, bool offline, uint64_t memory_room); \
-    oscairn_clap_host* p##clap_effect_context(oscairn_clap_host* source); \
-    void p##clap_free(oscairn_clap_host* host); \
-    /* Description: changes only when revision does (a rescan, a restart). */ \
-    uint64_t p##clap_revision(const oscairn_clap_host* host); \
-    void p##clap_describe(const oscairn_clap_host* host, const oscairn_clap_description* to); \
-    uint32_t p##clap_note_input_ports(const oscairn_clap_host* host); \
-    uint32_t p##clap_note_output_ports(const oscairn_clap_host* host); \
-    bool p##clap_uses_clap_notes(const oscairn_clap_host* host, uint32_t port); \
-    bool p##clap_takes_sysex(const oscairn_clap_host* host); \
-    bool p##clap_emits_sysex(const oscairn_clap_host* host); \
-    bool p##clap_supports_state(const oscairn_clap_host* host); \
-    bool p##clap_supports_sound_snapshot(const oscairn_clap_host* host); \
-    bool p##clap_has_window(const oscairn_clap_host* host); \
-    bool p##clap_voice_budget(const oscairn_clap_host* host); \
-    bool p##clap_honors_volume(const oscairn_clap_host* host); \
-    /* Control thread */ \
-    bool p##clap_service(oscairn_clap_host* host); \
-    bool p##clap_reset(oscairn_clap_host* host); \
-    bool p##clap_reconfigure(oscairn_clap_host* host, double rate, uint32_t frames); \
-    int p##clap_effect_resources(const oscairn_clap_host* host, oscairn_effect_resources_t* resources); \
-    int p##clap_declared_memory(const oscairn_clap_host* host, oscairn_memory_t* memory); \
-    void p##clap_set_memory_room(oscairn_clap_host* host, uint64_t bytes); \
-    void p##clap_set_active_outputs(oscairn_clap_host* host, uint64_t ports); \
-    void p##clap_set_assets(oscairn_clap_host* host, const oscairn_clap_assets* assets); /* copied; null: none */ \
-    bool p##clap_asset_dependencies(const oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_asset* asset), void* context); \
-    bool p##clap_show_window(oscairn_clap_host* host, bool show, const char* title); \
-    bool p##clap_presets(oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_preset* preset), void* context); \
-    bool p##clap_load_preset(oscairn_clap_host* host, const oscairn_clap_preset* preset); \
-    /* State, in the directories ClapHost's saveState and saveSound write (StateFiles.h): a new one to save to. */ \
-    bool p##clap_save_state(oscairn_clap_host* host, const char* directory); \
-    bool p##clap_load_state(oscairn_clap_host* host, const char* directory); \
-    /* Parameters */ \
-    double p##clap_parameter_value(const oscairn_clap_host* host, uint32_t id); \
-    bool p##clap_parameter_text(const oscairn_clap_host* host, uint32_t id, double value, oscairn_clap_text text, void* context); \
-    bool p##clap_set_parameter(oscairn_clap_host* host, uint32_t id, double value); \
-    bool p##clap_parameter_gesture(oscairn_clap_host* host, uint32_t id, bool begin); \
-    uint64_t p##clap_parameter_reports(const oscairn_clap_host* host); \
-    uint64_t p##clap_value_rescans(const oscairn_clap_host* host); /* values read again with no output events */ \
-    bool p##clap_send_event(oscairn_clap_host* host, const oscairn_clap_event* event); \
-    bool p##clap_pop_output(oscairn_clap_host* host, oscairn_clap_event* event); \
-    uint64_t p##clap_output_event_drops(const oscairn_clap_host* host); \
-    void p##clap_statistics(const oscairn_clap_host* host, oscairn_clap_statistics* statistics); \
-    /* Native sounds (oscairn.sound-contexts, sound-snapshots), control thread */ \
-    uint32_t p##clap_sound_context_capacity(const oscairn_clap_host* host); \
-    bool p##clap_sound_contexts(const oscairn_clap_host* host, void (*each)(void* context, const oscairn_sound_context_info_t* info), void* context); \
-    bool p##clap_prepare_sound(oscairn_clap_host* host, const char* name, const oscairn_sound_parameter_t* parameters, uint32_t count, \
-                               const char* patch, const char* library, const char* directory, uint32_t* id); \
-    bool p##clap_prepare_preset(oscairn_clap_host* host, const char* name, const oscairn_clap_preset* preset, uint32_t* id); \
-    int p##clap_select_sound(oscairn_clap_host* host, uint32_t id, int16_t channel); \
-    int p##clap_discard_sound(oscairn_clap_host* host, uint32_t id); \
-    bool p##clap_prepares_snapshots(const oscairn_clap_host* host); \
-    bool p##clap_prepare_snapshot(oscairn_clap_host* host, const char* directory, uint32_t ids[16]); \
-    bool p##clap_saves_sounds(const oscairn_clap_host* host); \
-    bool p##clap_save_sound(oscairn_clap_host* host, uint32_t id, const char* directory); \
-    bool p##clap_sound_values(const oscairn_clap_host* host, uint32_t id, void (*each)(void* context, const oscairn_sound_parameter_t* value), void* context); \
-    bool p##clap_rings_out(const oscairn_clap_host* host); \
-    uint32_t p##clap_wants_events(const oscairn_clap_host* host); \
-    int p##clap_choke_retiring(oscairn_clap_host* host); \
-    /* Audio thread */ \
-    bool p##clap_process(oscairn_clap_host* host, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, \
-                         const oscairn_clap_event* events, uint32_t count, const clap_event_transport_t* transport); \
-    const oscairn_clap_event* p##clap_output_events(const oscairn_clap_host* host, uint32_t* count); \
-    void p##clap_panic(oscairn_clap_host* host); \
-    bool p##clap_asleep(const oscairn_clap_host* host); \
-    bool p##clap_restful(const oscairn_clap_host* host); \
-    void p##clap_rested(oscairn_clap_host* host, uint32_t frames, uint32_t blocks); \
-    void p##clap_mirror_wake(oscairn_clap_host* host, oscairn_clap_wake* mirror); \
-    bool p##clap_was_reset(const oscairn_clap_host* host); \
-    void p##clap_set_voice_limits(oscairn_clap_host* host, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count); \
-    uint32_t p##clap_voice_report(const oscairn_clap_host* host, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count);
+/* Failures */
+const char* rust_clap_error(int* kind);
+/* Life: new does what loading a CLAP plugin in this process did (its library inspected, the plugin with id loaded,
+ * its audio layout locked, its first service run); effect_context makes one from a loaded instance; free unloads. */
+oscairn_clap_host* rust_clap_new(const char* path, const char* id, double rate, uint32_t frames, bool offline, uint64_t memory_room);
+oscairn_clap_host* rust_clap_effect_context(oscairn_clap_host* source);
+void rust_clap_free(oscairn_clap_host* host);
+/* Description: changes only when revision does (a rescan, a restart). */
+uint64_t rust_clap_revision(const oscairn_clap_host* host);
+void rust_clap_describe(const oscairn_clap_host* host, const oscairn_clap_description* to);
+uint32_t rust_clap_note_input_ports(const oscairn_clap_host* host);
+uint32_t rust_clap_note_output_ports(const oscairn_clap_host* host);
+bool rust_clap_uses_clap_notes(const oscairn_clap_host* host, uint32_t port);
+bool rust_clap_takes_sysex(const oscairn_clap_host* host);
+bool rust_clap_emits_sysex(const oscairn_clap_host* host);
+bool rust_clap_supports_state(const oscairn_clap_host* host);
+bool rust_clap_supports_sound_snapshot(const oscairn_clap_host* host);
+bool rust_clap_has_window(const oscairn_clap_host* host);
+bool rust_clap_voice_budget(const oscairn_clap_host* host);
+bool rust_clap_honors_volume(const oscairn_clap_host* host);
+/* Control thread */
+bool rust_clap_service(oscairn_clap_host* host);
+bool rust_clap_reset(oscairn_clap_host* host);
+bool rust_clap_reconfigure(oscairn_clap_host* host, double rate, uint32_t frames);
+int rust_clap_effect_resources(const oscairn_clap_host* host, oscairn_effect_resources_t* resources);
+int rust_clap_declared_memory(const oscairn_clap_host* host, oscairn_memory_t* memory);
+void rust_clap_set_memory_room(oscairn_clap_host* host, uint64_t bytes);
+void rust_clap_set_active_outputs(oscairn_clap_host* host, uint64_t ports);
+void rust_clap_set_assets(oscairn_clap_host* host, const oscairn_clap_assets* assets); /* copied; null: none */
+bool rust_clap_asset_dependencies(const oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_asset* asset), void* context);
+bool rust_clap_show_window(oscairn_clap_host* host, bool show, const char* title);
+bool rust_clap_presets(oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_preset* preset), void* context);
+bool rust_clap_load_preset(oscairn_clap_host* host, const oscairn_clap_preset* preset);
+/* State, in the directories ClapHost's saveState and saveSound write (StateFiles.h): a new one to save to. */
+bool rust_clap_save_state(oscairn_clap_host* host, const char* directory);
+bool rust_clap_load_state(oscairn_clap_host* host, const char* directory);
+/* Parameters */
+double rust_clap_parameter_value(const oscairn_clap_host* host, uint32_t id);
+bool rust_clap_parameter_text(const oscairn_clap_host* host, uint32_t id, double value, oscairn_clap_text text, void* context);
+bool rust_clap_set_parameter(oscairn_clap_host* host, uint32_t id, double value);
+bool rust_clap_parameter_gesture(oscairn_clap_host* host, uint32_t id, bool begin);
+uint64_t rust_clap_parameter_reports(const oscairn_clap_host* host);
+uint64_t rust_clap_value_rescans(const oscairn_clap_host* host); /* values read again with no output events */
+bool rust_clap_send_event(oscairn_clap_host* host, const oscairn_clap_event* event);
+bool rust_clap_pop_output(oscairn_clap_host* host, oscairn_clap_event* event);
+uint64_t rust_clap_output_event_drops(const oscairn_clap_host* host);
+void rust_clap_statistics(const oscairn_clap_host* host, oscairn_clap_statistics* statistics);
+/* Native sounds (oscairn.sound-contexts, sound-snapshots), control thread */
+uint32_t rust_clap_sound_context_capacity(const oscairn_clap_host* host);
+bool rust_clap_sound_contexts(const oscairn_clap_host* host, void (*each)(void* context, const oscairn_sound_context_info_t* info), void* context);
+bool rust_clap_prepare_sound(oscairn_clap_host* host, const char* name, const oscairn_sound_parameter_t* parameters, uint32_t count,
+                           const char* patch, const char* library, const char* directory, uint32_t* id);
+bool rust_clap_prepare_preset(oscairn_clap_host* host, const char* name, const oscairn_clap_preset* preset, uint32_t* id);
+int rust_clap_select_sound(oscairn_clap_host* host, uint32_t id, int16_t channel);
+int rust_clap_discard_sound(oscairn_clap_host* host, uint32_t id);
+bool rust_clap_prepares_snapshots(const oscairn_clap_host* host);
+bool rust_clap_prepare_snapshot(oscairn_clap_host* host, const char* directory, uint32_t ids[16]);
+bool rust_clap_saves_sounds(const oscairn_clap_host* host);
+bool rust_clap_save_sound(oscairn_clap_host* host, uint32_t id, const char* directory);
+bool rust_clap_sound_values(const oscairn_clap_host* host, uint32_t id, void (*each)(void* context, const oscairn_sound_parameter_t* value), void* context);
+bool rust_clap_rings_out(const oscairn_clap_host* host);
+uint32_t rust_clap_wants_events(const oscairn_clap_host* host);
+int rust_clap_choke_retiring(oscairn_clap_host* host);
+/* Audio thread */
+bool rust_clap_process(oscairn_clap_host* host, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
+                     const oscairn_clap_event* events, uint32_t count, const clap_event_transport_t* transport);
+const oscairn_clap_event* rust_clap_output_events(const oscairn_clap_host* host, uint32_t* count);
+void rust_clap_panic(oscairn_clap_host* host);
+bool rust_clap_asleep(const oscairn_clap_host* host);
+bool rust_clap_restful(const oscairn_clap_host* host);
+void rust_clap_rested(oscairn_clap_host* host, uint32_t frames, uint32_t blocks);
+void rust_clap_mirror_wake(oscairn_clap_host* host, oscairn_clap_wake* mirror);
+bool rust_clap_was_reset(const oscairn_clap_host* host);
+void rust_clap_set_voice_limits(oscairn_clap_host* host, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count);
+uint32_t rust_clap_voice_report(const oscairn_clap_host* host, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count);
 
 /* new: null when it cannot load, saying why. sound_contexts, sound_values, asset_dependencies, presets: false only
  * when they fail; nothing given then. int returns: 1 true, 0 false, -1 failed. prepare_snapshot: what saveSnapshot
  * wrote for a native engine, prepared beside the playing sounds, the sound each MIDI channel selects into ids.
  * save_sound: one sound as such a snapshot. parameter_text: the text, given once. */
-/* The host the build picked (CMake's OSCAIRN_CLAP_HOST): the Rust one, or its C++ reference. */
-#if OSCAIRN_CLAP_HOST_RUST
-#define OSCAIRN_CLAP(name) rust_clap_##name
-#else
-#define OSCAIRN_CLAP(name) cpp_clap_##name
-#endif
-OSCAIRN_CLAP_API(cpp_)
-OSCAIRN_CLAP_API(rust_) /* being written: the ones core/clap-host/rust defines so far, which clap-host-rust compares */
 
 /* Discovery (core/clap-host/rust/src/discovery.rs; Discovery.h's functions over these): a scan arrives as the scan wire
  * format's bytes (encodeScan's), given once to out; paths one by one. Timeouts in milliseconds; canceled may be null. */

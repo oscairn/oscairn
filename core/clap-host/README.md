@@ -1,11 +1,13 @@
 # CLAP host
 
-Oscairn's raw CLAP adapter retains the `kick::clap` namespace and `kick-clap-*` tool
-names from the KICK host imported with its history. It has no device or JUCE dependency.
-The JUCE session, touchscreen panel, player and audio-device benchmark that came with the
-KICK host were removed as unused on 2026-11-12.
-The engine and the plugin workers reach it through a C interface,
-[`clap_host.h`](../plugin-host/src/clap_host.h), whose C++ reference is `clap_host_cpp.cpp`.
+Oscairn's CLAP host is Rust (`rust/`, one crate in the engine core's workspace, `core/Cargo.toml`). Its C++ API keeps
+the `kick::clap` namespace and the `kick-clap-*` tool names from the KICK host imported with its history: the types and
+limits in [`kick_clap/Host.h`](../plugin-host/include/kick_clap/Host.h) and discovery in
+[`kick_clap/Discovery.h`](../plugin-host/include/kick_clap/Discovery.h), both in `core/plugin-host`, over the C interface
+[`clap_host.h`](../plugin-host/src/clap_host.h). The C++ host it replaced (`src/Host.cpp`) was deleted on 2026-11-17;
+what it did with the test fixtures is kept in `tests/vectors`, which `clap-host-rust-replay` holds the Rust host to. The
+one C++ left here is the host's own windows for plugins' editors (`src/Window.mm` on macOS), which the Rust host calls,
+and the test fixtures. It has no device or JUCE dependency.
 The [shared PluginHost](../plugin-host/include/oscairn/plugin_host.h) and graph build on it;
 new plugin authors should start with the [developer guide](../../docs/developer-guide.md).
 The vendored CLAP SDK revision is in `third_party/clap/upstream.json`.
@@ -18,10 +20,9 @@ From the Oscairn root:
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-build/core/clap-host/kick-clap-scan build/plugins/oscairn-basic-synth.clap
+build/core/kick-clap-scan build/plugins/oscairn-basic-synth.clap
 ```
 
-The raw host can also be built with `cmake -S core/clap-host -B build-clap`.
 Oscairn's app uses JUCE 9 via `OSCAIRN_STANDALONE=ON`;
 see [host instructions](../../hosts/README.md).
 
@@ -69,11 +70,11 @@ see [host instructions](../../hosts/README.md).
 `kick-clap-bench` runs offline against an exact instrument ID. It measures a
 stereo host workload with multiple instances, held chords and repeated note
 changes, synthetic play/stop/tempo/seek activity, optional parameter edits, and
-optional opaque state snapshots. It runs as fast as possible. It does not open
+optional state snapshots (each saved as the engine saves a plugin's state, to a folder). It runs as fast as possible. It does not open
 an audio device or measure ALSA xruns.
 
 ```sh
-build/core/clap-host/kick-clap-bench --plugin /path/to/instrument.clap \
+build/core/kick-clap-bench --plugin /path/to/instrument.clap \
   --id plugin.unique.id --rate 48000 --frames 128 --instances 4 --notes 8 \
   --seconds 30 --warmup 3 --output baseline.json
 ```
@@ -106,8 +107,8 @@ records the machine/OS alongside each configuration. macOS bundle-directory
 hashes are reported as `null`.
 
 ```sh
-python3 core/clap-host/tools/benchmark_matrix.py \
-  --bench build/core/clap-host/kick-clap-bench --plugin /path/to/instrument.clap \
+python3 tools/clap-host/benchmark_matrix.py \
+  --bench build/core/kick-clap-bench --plugin /path/to/instrument.clap \
   --id plugin.unique.id --frames 64,128,256 --instances 1,4,8 \
   --notes 8 --seconds 60 --warmup 3 --output target-matrix.json
 ```
@@ -138,7 +139,7 @@ fault can terminate the engine. Error statuses and nonfinite audio fault/silence
 
 ## Verification
 
-The raw-host CTest targets use shared-library fixtures for lifecycle/thread checks,
+The host's CTest targets (`kick-clap-host`, `clap-host-rust-replay`, the crate's own in `engine-core-cargo`) use shared-library fixtures for lifecycle/thread checks,
 native/MIDI note conversion, sample offsets, ports, parameters, state, idle sleep/wake,
 concurrent rendering, overflow recovery, and plugin failures. Scanner fixtures deliberately
 crash/hang in child processes. Oscairn's separate engine tests exercise graph ownership,

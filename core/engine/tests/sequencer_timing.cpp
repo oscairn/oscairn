@@ -7,7 +7,7 @@
 #include "oscairn/transport.h"
 
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 
 #include <cmath>
 #include <cstdio>
@@ -29,10 +29,10 @@ int main( int argc, char** argv )
         std::fprintf( stderr, "FAIL: sequencer not found\n" );
         return 1;
     }
-    kick::clap::Host host;
-    if( !host.load( scan.plugins.front(), rate, maxFrames ) )
+    const auto host = loaded( scan.plugins.front(), rate, maxFrames );
+    if( !host )
     {
-        std::fprintf( stderr, "FAIL: load: %s\n", host.error().c_str() );
+        std::fprintf( stderr, "FAIL: load\n" );
         return 1;
     }
 
@@ -49,13 +49,13 @@ int main( int argc, char** argv )
     {
         const uint32_t frames = blocks[b % 5];
         const auto     t      = transport.current();
-        if( !host.process( nullptr, 0, nullptr, 0, frames, nullptr, 0, &t ) )
+        if( !host->process( nullptr, 0, nullptr, 0, frames, nullptr, 0, &t ) )
         {
-            std::fprintf( stderr, "FAIL: process at %lld: %s\n", (long long)position, host.error().c_str() );
+            std::fprintf( stderr, "FAIL: process at %lld\n", (long long)position );
             return 1;
         }
         uint32_t    count  = 0;
-        const auto* events = host.outputEvents( count );
+        const auto* events = host->outputEvents( count );
         for( uint32_t i = 0; i < count; ++i )
         {
             const auto* h = events[i].header();

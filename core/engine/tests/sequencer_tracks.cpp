@@ -3,7 +3,7 @@
 #include "oscairn/transport.h"
 #include "../../clap-host/tests/AllocationGuard.h"
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 #include <oscairn-clap/param-target.h>
 #include <map>
 #include <algorithm>
@@ -33,17 +33,17 @@ static kick::clap::Event parameter(uint32_t id, double value, uint32_t time = 0)
 }
 static std::vector<Note> render(const kick::clap::Descriptor &plugin, uint32_t block, int beats = 4)
 {
-    kick::clap::Host host;
-    check(host.load(plugin, 48000, 512), "load");
-    check(host.setParameter(ids::mute(1), 0), "unmute second track");
-    check(host.setParameter(ids::lockScope(0), 1), "channel-scoped first-track locks");
-    check(host.setParameter(ids::lockScope(1), 0), "explicit global second-track locks");
+    const auto host = loaded(plugin, 48000, 512);
+    check(host != nullptr, "load");
+    check(host->setParameter(ids::mute(1), 0), "unmute second track");
+    check(host->setParameter(ids::lockScope(0), 1), "channel-scoped first-track locks");
+    check(host->setParameter(ids::lockScope(1), 0), "explicit global second-track locks");
     for (uint32_t p = 0; p < 2; ++p)
         for (uint32_t t = 0; t < 2; ++t)
         {
-            check(host.setParameter(ids::length(p, t), p ? (t ? 4 : 2) : (t ? 5 : 3)), "length");
+            check(host->setParameter(ids::length(p, t), p ? (t ? 4 : 2) : (t ? 5 : 3)), "length");
             for (uint32_t i = 0; i < 16; ++i)
-                check(host.setParameter(ids::step(p, t, ids::Note, i), 40 + p * 20 + t * 10 + i), "note");
+                check(host->setParameter(ids::step(p, t, ids::Note, i), 40 + p * 20 + t * 10 + i), "note");
         }
     std::multimap<int64_t, kick::clap::Event> changes{{1000, parameter(ids::step(1, 0, ids::Note, 0), 99)}, // editing B must not change A
                                                       {7000, parameter(ids::mute(1), 1)},
@@ -71,11 +71,11 @@ static std::vector<Note> render(const kick::clap::Descriptor &plugin, uint32_t b
         t.tsig_denom = 4;
         t.bar_start = int64_t((now / boundary) * beats) * CLAP_BEATTIME_FACTOR;
         forbidAllocation = true;
-        const bool ok = host.process(nullptr, 0, nullptr, 0, frames, input.data(), uint32_t(input.size()), &t);
+        const bool ok = host->process(nullptr, 0, nullptr, 0, frames, input.data(), uint32_t(input.size()), &t);
         forbidAllocation = false;
         check(ok, "render");
         uint32_t count;
-        const auto *events = host.outputEvents(count);
+        const auto *events = host->outputEvents(count);
         for (uint32_t i = 0; i < count; ++i)
         {
             const auto *h = events[i].header();
@@ -124,7 +124,7 @@ static std::vector<Note> render(const kick::clap::Descriptor &plugin, uint32_t b
         now += frames;
     }
     check(held.empty(), "all notes released");
-    check(host.parameterValue(ids::activePattern) == 1, "playing pattern readback");
+    check(host->parameterValue(ids::activePattern) == 1, "playing pattern readback");
     check(std::count_if(result.begin(), result.end(),
                         [](const auto &n) { return n.time == 7000 && n.type == CLAP_EVENT_NOTE_OFF && n.channel == 1; }) == 1,
           "mute releases immediately");
@@ -132,26 +132,26 @@ static std::vector<Note> render(const kick::clap::Descriptor &plugin, uint32_t b
                         [](const auto &n) { return n.time == 13000 && n.type == CLAP_EVENT_NOTE_OFF && n.channel == 0; }) == 1,
           "channel edit releases on old channel");
     transport.setPlaying(false);
-    host.setParameter(ids::requestedPattern, 0);
+    host->setParameter(ids::requestedPattern, 0);
     auto t = transport.current();
-    check(host.process(nullptr, 0, nullptr, 0, block, nullptr, 0, &t), "stopped processing");
-    check(host.parameterValue(ids::activePattern) == 0 && host.parameterValue(ids::playhead(0)) == -1, "stopped selection is immediate");
+    check(host->process(nullptr, 0, nullptr, 0, block, nullptr, 0, &t), "stopped processing");
+    check(host->parameterValue(ids::activePattern) == 0 && host->parameterValue(ids::playhead(0)) == -1, "stopped selection is immediate");
     return result;
 }
 static void sameKey(const kick::clap::Descriptor &plugin)
 {
-    kick::clap::Host host;
-    check(host.load(plugin, 48000, 512), "same-key load");
-    host.setParameter(ids::mute(1), 0);
-    host.setParameter(ids::channel(1), 0);
+    const auto host = loaded(plugin, 48000, 512);
+    check(host != nullptr, "same-key load");
+    host->setParameter(ids::mute(1), 0);
+    host->setParameter(ids::channel(1), 0);
     for (uint32_t track = 0; track < 2; ++track)
-        host.setParameter(ids::step(0, track, ids::Note, 0), 60);
+        host->setParameter(ids::step(0, track, ids::Note, 0), 60);
     Transport transport(48000, 120);
     auto t = transport.current();
-    check(host.process(nullptr, 0, nullptr, 0, 512, nullptr, 0, &t), "same-key start");
+    check(host->process(nullptr, 0, nullptr, 0, 512, nullptr, 0, &t), "same-key start");
     std::vector<int32_t> voices;
     uint32_t count = 0;
-    auto *events = host.outputEvents(count);
+    auto *events = host->outputEvents(count);
     for (uint32_t i = 0; i < count; ++i)
         if (events[i].header()->space_id == CLAP_CORE_EVENT_SPACE_ID && events[i].header()->type == CLAP_EVENT_NOTE_ON)
             voices.push_back(reinterpret_cast<const clap_event_note_t *>(events[i].header())->note_id);
@@ -159,8 +159,8 @@ static void sameKey(const kick::clap::Descriptor &plugin)
     transport.advance(512);
     t = transport.current();
     const auto mute = parameter(ids::mute(1), 1, 88);
-    check(host.process(nullptr, 0, nullptr, 0, 512, &mute, 1, &t), "same-key mute");
-    events = host.outputEvents(count);
+    check(host->process(nullptr, 0, nullptr, 0, 512, &mute, 1, &t), "same-key mute");
+    events = host->outputEvents(count);
     int offs = 0;
     for (uint32_t i = 0; i < count; ++i)
         if (events[i].header()->space_id == CLAP_CORE_EVENT_SPACE_ID && events[i].header()->type == CLAP_EVENT_NOTE_OFF)
@@ -173,8 +173,8 @@ static void sameKey(const kick::clap::Descriptor &plugin)
     check(offs == 1, "one track release");
     transport.setPlaying(false);
     t = transport.current();
-    check(host.process(nullptr, 0, nullptr, 0, 512, nullptr, 0, &t), "same-key stop");
-    events = host.outputEvents(count);
+    check(host->process(nullptr, 0, nullptr, 0, 512, nullptr, 0, &t), "same-key stop");
+    events = host->outputEvents(count);
     offs = 0;
     for (uint32_t i = 0; i < count; ++i)
         if (events[i].header()->space_id == CLAP_CORE_EVENT_SPACE_ID && events[i].header()->type == CLAP_EVENT_NOTE_OFF)

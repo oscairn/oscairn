@@ -197,15 +197,10 @@ struct HardwareAccess {
     virtual int32_t collect(const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t&) noexcept = 0;
 };
 
-// Control API belongs to ONE main/UI thread. process(), enqueue() and atomic
-// telemetry are the only cross-thread API. Control operations exclude rendering
-// with a gate: the callback NEVER waits and returns silence during a change.
-// Native sound-context operations instead use the extension's concurrent contract;
-// preparing/selecting an unused context does not gate the playing instance.
-// CLAP permits the exclusively held main thread to act as the symbolic audio
-// thread for stop/reset/flush; thread-check reports this scope accurately.
-class Host {
-public:
+// The CLAP host's limits and event spaces (the Rust host's, core/clap-host/rust, which a test checks against these), and
+// the process-wide settings every host in the process reads, which tell the Rust host (plugin-host/src/kick_clap.cpp).
+// One plugin instance is a PluginHost (oscairn/plugin_host.h, oscairn::loadPlugin).
+struct Host {
     static constexpr uint32_t maxEvents = 2048;     // capacity of the control-thread queues
     static constexpr uint32_t maxAudioChannels = 64; // in each direction, across all buses
     static constexpr uint32_t maxBlockEvents = 512; // direct graph events per process() call; queued commands have a separate budget
@@ -229,175 +224,17 @@ public:
     static constexpr uint16_t harmonySpace = 1002;
     static constexpr uint32_t maxStateBytes = 64 * 1024 * 1024;
     static constexpr size_t maxPatchBytes = 1024 * 1024;
-    Host();
-    ~Host();
-    Host(const Host&) = delete;
-    Host& operator=(const Host&) = delete;
-
-    bool load(const Descriptor&, double sampleRate, uint32_t maxFrames,
-              const std::vector<uint8_t>& state = {});
-    bool loadEffectContext(const Host& source);
-    bool effectResources(oscairn_effect_resources_t&) const;
-    // oscairn.memory (RFC 0025). Main thread. The bytes the plugin may declare when it next
-    // activates (a load, a state load, an effect context made from this one, which inherits it):
-    // one declaring more is refused before it activates; 0, the default, sets no limit. An effect
-    // context counts its context and asset bytes, an instance its shared bytes too.
-    void setMemoryRoom(uint64_t bytes) noexcept;
-    // clap.audio-ports-activation. Main thread. The output ports the host takes sound from, bit i
-    // for port index i (the rest deactivated); until it is called the plugin is told nothing. A
-    // plugin that can activate ports while processing is told at the start of its next block; any
-    // other is restarted (service() deactivates and activates it, telling it meanwhile).
-    void setActiveOutputs(uint64_t ports) noexcept;
-    // CLAP render (clap.render). Main thread, before a load: true tells a plugin with the extension
-    // CLAP_RENDER_OFFLINE when it next initializes (an effect context made from this one inherits
-    // it), unless it has a hard realtime requirement; otherwise it is told CLAP_RENDER_REALTIME.
-    void setOfflineRendering(bool offline) noexcept;
-    // What the plugin declared at its last activation; false where it declares nothing.
-    bool declaredMemory(oscairn_memory_t&) const;
-    // What it holds now, as it says; false where it does not say or is not active.
-    bool currentMemory(oscairn_memory_t&) const;
     // oscairn.memory (RFC 0025). Called on the main thread at every activation (a load, a state
     // load, a reconfigure, an effect context, a restart the plugin asked for), after the plugin
     // declares and before it activates and allocates, with what it declared (nullptr: nothing),
     // so the process hosting it can make room first: a worker's engine refits its limit. Throwing
-    // refuses the activation. Process-wide; set once, before any plugin loads. Null: none.
+    // refuses the activation, its text the reason. Process-wide; set once, before any plugin loads. Null: none.
     using ActivationObserver = void (*)(void* context, const oscairn_memory_t* declared);
     static void observeActivations(ActivationObserver, void* context) noexcept;
     // oscairn.hardware (RFC 0004): the accelerators plugins are offered. Process-wide; set once,
     // before any plugin loads, and kept until after the last is unloaded. Null, the default:
     // none, so count() is 0 and every reservation is refused as unavailable.
     static void setHardware(HardwareAccess*) noexcept;
-    static HardwareAccess* hardware() noexcept;
-    void unload();
-    bool reconfigure(double sampleRate, uint32_t maxFrames);
-    // Main thread: reject later port ID/order/channel-count changes under the render gate.
-    void lockAudioLayout();
-    void service(); // main-loop callbacks, restart, timers, fd polling, rescans
-    bool saveState(std::vector<uint8_t>& destination);
-    bool loadState(const std::vector<uint8_t>& source);
-    bool supportsState() const noexcept;
-    // Main thread. The presets this plugin's library offers for it (CLAP preset discovery):
-    // those inside the plugin, and preset files of the declared types in the declared folders,
-    // within indexPresets' limits (Discovery.h). The provider runs in this process, on this
-    // thread, as the plugin does; a host with a scan helper lists through it instead
-    // (oscairn::scanPluginPresets, RFC 0005).
-    std::vector<Preset> presets();
-    // Main thread. Loads a preset (CLAP preset-load), never during process(); false with error().
-    bool loadPreset(const Preset&);
-    bool supportsSoundSnapshot() const noexcept;
-    // CLAP gui: the plugin's own window. Main thread. Embedded in a window of the host's own where
-    // the host makes them (macOS), else floating where the plugin floats one (RFC 0019).
-    bool hasGui() const noexcept;
-    bool showGui(const std::string& title); // opens it, or titles and raises it; false with error()
-    void closeGui();                        // destroys the editor and its window; also on unload
-    bool guiOpen() const noexcept;
-    // Main thread. Where plugins resolve sound assets; null rejects every resolution.
-    void setAssets(AssetResolver*) noexcept;
-    // The assets the plugin's state uses (oscairn.asset-dependencies); empty if not declared.
-    std::vector<AssetReference> assetDependencies() const;
-    bool declaresAssets() const noexcept;
-    uint32_t soundContextCapacity() const noexcept;
-    std::vector<oscairn_sound_context_info_t> soundContexts() const;
-    // patch: instrument-defined text (SFZ for the Legacy Sampler) whose files are in directory of asset library.
-    uint32_t prepareSound(const std::string& name,const std::vector<oscairn_sound_parameter_t>& parameters,const std::string& patch={},const std::string& library={},const std::string& directory={});
-    // A native context from one of presets() (draft 5's prepare_preset).
-    uint32_t prepareSound(const std::string& name,const Preset& preset);
-    bool selectSound(uint32_t id,int16_t channel=-1);
-    bool discardSound(uint32_t id);
-    // oscairn.sound-snapshots: a whole snapshot's sounds prepared beside the playing ones, returning
-    // the new ID each MIDI channel selects in it; nothing is selected. Main thread, while playing.
-    bool preparesSoundSnapshots() const noexcept;
-    std::array<uint32_t,16> prepareSoundSnapshot(const std::vector<uint8_t>& bytes);
-    // Draft 4 (RFC 0021): one sound as a whole snapshot of its own, in the state's bytes (rendering
-    // excluded, as a native engine's state save is); and a sound no channel selects, its values.
-    bool savesSounds() const noexcept;
-    std::vector<uint8_t> saveSoundState(uint32_t id);
-    std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const;
-    // sound-snapshots' ring_out (RFC 0005): process() given four output channels after the ports'
-    // passes them to the plugin as its ring-out buffer, where it renders its retiring sounds.
-    bool ringsOut() const noexcept;
-    // The events the plugin asked for through event-registry (once it is loaded): bit 0 oscairn.beat's, bit 1
-    // oscairn.harmony's. process() drops the others' as they come, so a caller need not send them.
-    uint32_t wantsEvents() const noexcept;
-    // Its choke_retiring, queued before the selections made after it: the sounds retiring then fade
-    // out into the buffer's last two channels. False when the plugin does not ring out or its queue is full.
-    bool chokeRetiringSounds();
-    // oscairn.voice-budget (RFC 0018): the plugin gives up its own voices within a limit; and
-    // whether it said every voice follows CLAP's volume expression. Any thread.
-    bool voiceBudget() const noexcept;
-    bool honorsVolume() const noexcept;
-    // Audio thread, between process() calls: the limit and contexts the next process() gives the
-    // plugin first (set_limits), copied; up to OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS.
-    void setVoiceLimits(uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count) noexcept;
-    // Audio thread, after process(): the voices the plugin said were sounding, its estimate of one
-    // voice's cost, and its notes' loudness, as its last process() left them; 0 without the extension.
-    uint32_t voiceReport(double& voiceCost, const oscairn_voice_budget_note_t*& notes, uint32_t& count) const noexcept;
-    bool loaded() const noexcept;
-    bool faulted() const noexcept;
-    const std::string& error() const noexcept;
-    const Descriptor& descriptor() const noexcept;
-    const std::vector<Parameter>& parameters() const noexcept;
-    uint64_t metadataRevision() const noexcept;
-    const std::vector<Port>& inputPorts() const noexcept;
-    const std::vector<Port>& outputPorts() const noexcept;
-    uint32_t noteInputPorts() const noexcept;
-    bool usesClapNotes(uint32_t port) const noexcept;
-    uint32_t noteOutputPorts() const noexcept;
-    // SysEx (CLAP_EVENT_MIDI_SYSEX) goes only through note ports that take MIDI (CLAP_NOTE_DIALECT_MIDI):
-    // whether one of the plugin's inputs, or outputs, does. A plugin with none can neither receive nor send
-    // SysEx, and its SysEx pools are not made (here and in a worker's shared block).
-    bool takesSysex() const noexcept;
-    bool emitsSysex() const noexcept;
-    double parameterValue(clap_id) const noexcept;
-    std::string parameterText(clap_id, double value) const;
-    bool setParameter(clap_id, double plainValue) noexcept;
-    bool parameterGesture(clap_id, bool begin) noexcept;
-    bool stateDirty() const noexcept;
-    // Counts parameter values the plugin reported while processing; any thread.
-    uint64_t parameterReports() const noexcept;
-    // Counts the times the host read the plugin's values again with no output events (a values
-    // rescan, a preset loaded); any thread.
-    uint64_t valueRescans() const noexcept;
-    uint32_t latency() const noexcept;
-    Statistics statistics() const noexcept;
-    // Audio thread: the plugin's last process() asked to sleep (CLAP_PROCESS_SLEEP): it makes no
-    // sound until it gets input or events.
-    bool asleep() const noexcept;
-    // Asleep with nothing waiting to wake it but audio, notes, parameters or the transport: no request_process
-    // or request_flush, host command, select, choke or panic pending, and nothing carried. The beat and harmony
-    // wake no plugin asleep (they come with the block that does). Its caller may then leave it uncalled for a block it would sleep through.
-    bool restful() const noexcept;
-    // Blocks its caller left it asleep without calling it, and their frames: its steady time goes on by them.
-    void rested(uint32_t frames, uint32_t blocks) noexcept;
-    // `mirror` is set to 1 whenever something wakes the plugin (request_process, a command, a select, a choke, a
-    // panic) and to 0 when a block takes it, so a caller in another process can see a wake pending (RFC 0010 workers).
-    void mirrorWake(std::atomic<uint32_t>* mirror) noexcept;
-    // Audio thread, after process(): it reset the plugin (a panic, or events it could not take),
-    // ending every note it was sent, this call's too; CLAP's reset sends no NOTE_END for them.
-    bool wasReset() const noexcept;
-
-    bool enqueue(const Event&) noexcept; // bounded multi-producer queue
-    bool popOutput(Event&) noexcept; // main/control-thread consumer of parameter output
-    uint64_t outputEventDrops() const noexcept; // detects gaps in plugin control output
-    // Note, MIDI and expression events the plugin emitted during the last
-    // process() call, sorted as emitted, with times relative to the start of that
-    // call. Audio thread only; valid until the next process() on this host.
-    const Event* outputEvents(uint32_t& count) const noexcept;
-    void panic() noexcept;
-    void reset(); // main-thread, exclusive audio scope
-
-    // Planar channels are flattened in port order. Missing inputs are silent;
-    // surplus plugin outputs render into preallocated scratch storage. All
-    // supplied outputs are overwritten. Frames may exceed negotiated maxFrames:
-    // the host splits them and rebases event and transport timestamps.
-    bool process(const float* const* inputs, uint32_t inputChannels,
-                 float* const* outputs, uint32_t outputChannels, uint32_t frames,
-                 const Event* events = nullptr, uint32_t count = 0,
-                 const clap_event_transport_t* transport = nullptr) noexcept;
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> impl;
 };
 
 // For a process with no event loop of its own (a plugin worker) once a plugin window is open:

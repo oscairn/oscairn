@@ -5,7 +5,7 @@
 // - queued events beyond what one block takes are delivered in the next block.
 
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 
 #include <algorithm>
 #include <array>
@@ -32,8 +32,8 @@ int main( int argc, char** argv )
     if( scan.plugins.empty() )
         return fail( "synth not found" ), 1;
 
-    kick::clap::Host host;
-    if( !host.load( scan.plugins.front(), 48000, 256 ) )
+    const auto host = loaded( scan.plugins.front(), 48000, 256 );
+    if( !host )
         return fail( "load" ), 1;
 
     std::array<float, 256> left{}, right{};
@@ -44,13 +44,13 @@ int main( int argc, char** argv )
         kick::clap::Event::note( true, 57, 1.0, 0 ),
         kick::clap::Event::note( true, 60, 1.0, 300 ), // late: the block is 256 frames
     };
-    if( !host.process( nullptr, 0, out, 2, 256, events, 2 ) )
+    if( !host->process( nullptr, 0, out, 2, 256, events, 2 , nullptr) )
         return fail( "process" ), 1;
-    if( host.statistics().droppedEvents != 1 )
+    if( host->statistics().droppedEvents != 1 )
         return fail( "the late event should be dropped and counted" ), 1;
 
     // The first note must still be sounding in the next block: no reset happened.
-    if( !host.process( nullptr, 0, out, 2, 256 ) )
+    if( !host->process( nullptr, 0, out, 2, 256 , nullptr, 0, nullptr) )
         return fail( "second process" ), 1;
     float peak = 0;
     for( float s : left )
@@ -60,35 +60,35 @@ int main( int argc, char** argv )
 
     // More queued events than one block takes (Host::maxBlockEvents) wait for the
     // next block instead of being dropped.
-    const auto droppedBefore = host.statistics().droppedEvents;
+    const auto droppedBefore = host->statistics().droppedEvents;
     for( int i = 0; i < 600; ++i )
-        if( !host.enqueue( kick::clap::Event::note( false, 40 + i % 40, 0.0 ) ) )
+        if( !host->sendEvent( kick::clap::Event::note( false, 40 + i % 40, 0.0 ) ) )
             return fail( "enqueue" ), 1;
     for( int b = 0; b < 2; ++b )
-        if( !host.process( nullptr, 0, out, 2, 256 ) )
+        if( !host->process( nullptr, 0, out, 2, 256 , nullptr, 0, nullptr) )
             return fail( "process queued events" ), 1;
-    if( host.statistics().droppedEvents != droppedBefore )
+    if( host->statistics().droppedEvents != droppedBefore )
         return fail( "queued events beyond one block were dropped" ), 1;
 
-    host.reset();
+    host->reset();
     using kick::clap::Event;
     const Event unisons[]{Event::note(true,60,1,0,0,0,101),Event::note(true,60,1,0,0,0,102)};
-    if(!host.process(nullptr,0,out,2,256,unisons,2) || host.soundContexts()[0].active_voices!=2)
+    if(!host->process(nullptr,0,out,2,256,unisons,2, nullptr) || host->soundContexts()[0].active_voices!=2)
         return fail("two CLAP voices on the same key"),1;
     const auto wildcard=Event::note(false,60,0);
-    if(!host.process(nullptr,0,out,2,256,&wildcard,1))return fail("CLAP wildcard release"),1;
-    for(int i=0;i<240;++i)if(!host.process(nullptr,0,out,2,256))return fail("release tail"),1;
-    if(host.soundContexts()[0].active_voices!=0)return fail("wildcard ID must release both CLAP voices"),1;
+    if(!host->process(nullptr,0,out,2,256,&wildcard,1, nullptr))return fail("CLAP wildcard release"),1;
+    for(int i=0;i<240;++i)if(!host->process(nullptr,0,out,2,256, nullptr, 0, nullptr))return fail("release tail"),1;
+    if(host->soundContexts()[0].active_voices!=0)return fail("wildcard ID must release both CLAP voices"),1;
     const auto silentOn=Event::note(true,60,0);
-    if(!host.process(nullptr,0,out,2,256,&silentOn,1) || host.soundContexts()[0].active_voices!=1)
+    if(!host->process(nullptr,0,out,2,256,&silentOn,1, nullptr) || host->soundContexts()[0].active_voices!=1)
         return fail("zero velocity CLAP note-on remains a note-on"),1;
-    host.reset();
+    host->reset();
     const Event midiPresses[]{Event::midi(0x90,60,127),Event::midi(0x90,60,127)};
-    host.process(nullptr,0,out,2,256,midiPresses,2);
+    host->process(nullptr,0,out,2,256,midiPresses,2, nullptr);
     const auto midiRelease=Event::midi(0x80,60,0);
-    host.process(nullptr,0,out,2,256,&midiRelease,1);
-    for(int i=0;i<240;++i)host.process(nullptr,0,out,2,256);
-    if(host.soundContexts()[0].active_voices!=1)return fail("raw MIDI releases just the oldest press"),1;
+    host->process(nullptr,0,out,2,256,&midiRelease,1, nullptr);
+    for(int i=0;i<240;++i)host->process(nullptr,0,out,2,256, nullptr, 0, nullptr);
+    if(host->soundContexts()[0].active_voices!=1)return fail("raw MIDI releases just the oldest press"),1;
 
     std::printf( "ok: late event dropped (%llu), valid note still playing (peak %.3f), 600 queued events delivered\n",
                  (unsigned long long)droppedBefore, peak );

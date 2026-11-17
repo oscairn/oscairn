@@ -51,7 +51,7 @@ Run from the repository root, with CMake 3.21+, Ninja and a C++20 compiler:
 cmake -S . -B build-dev -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-dev
 ctest --test-dir build-dev --output-on-failure
-build-dev/core/clap-host/kick-clap-scan build-dev/plugins/oscairn-basic-synth.clap
+build-dev/core/kick-clap-scan build-dev/plugins/oscairn-basic-synth.clap
 build-dev/hosts/oscairn-render reference.wav --seconds 4 \
     build-dev/plugins/oscairn-step-sequencer.clap \
     build-dev/plugins/oscairn-basic-synth.clap \
@@ -73,11 +73,14 @@ Every configuration needs Rust 1.95.0 through rustup (`tools/install-rust.sh`): 
 library and the engine core are built with cargo. The engine core, which holds the engine thread's
 note routing and voice budget and the graph's audio and run loop, is Rust by default; its C++
 reference is always compiled for the differential tests, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the
-engine use the reference instead. The CLAP host is Rust by default (`core/clap-host/rust`); its C++ reference
-(`kick::clap::Host`) is always compiled for the comparison tests, and `-DOSCAIRN_CLAP_HOST=cpp` makes the engine and the
-plugin worker use it. What the reference does with the test's fixtures is also kept as recorded vectors, one file per
-target in `core/clap-host/tests/vectors`, which `clap-host-rust-replay` holds the Rust host to; a change to either host's
-behavior or to a fixture records them again with `cmake --build BUILD --target clap-host-vectors` (then reconfigure). The plugin worker's process is C++. Other options:
+engine use the reference instead. The CLAP host is Rust (`core/clap-host/rust`); C++ callers reach it through
+`kick_clap/Host.h` and `Discovery.h` (`core/plugin-host`) and the C interface `plugin-host/src/clap_host.h`. What its C++
+reference (`kick::clap::Host`, deleted on 2026-11-17) did with the test's fixtures is kept as recorded vectors, one file
+per target in `core/clap-host/tests/vectors`, which `clap-host-rust-replay` holds the Rust host to (skipped on a target
+with no file: Linux's must still be recorded, by building commit 22c0484c, the last with the C++ host, there and running
+`cmake --build BUILD --target clap-host-vectors`). A deliberate change in the host's behavior, or to a fixture, records
+them again from the Rust host with the same target (then reconfigure), and the change in the file is reviewed as the
+change in behavior it is. The plugin worker's process is C++. Other options:
 `-DOSCAIRN_UI=ON` builds the Rust UI, `oscairn-ui` ([Rust UI](rust-ui.md)), with cargo;
 `-DOSCAIRN_AUDIO_O3=ON` compiles the audio path at `-O3` (the device image sets it);
 `-DOSCAIRN_ENGINE=ON` builds the separate engine helper, `oscairn-engine`.
@@ -146,7 +149,7 @@ Programs in `tools/`, and the ones built beside the tests, for plugin work:
 
 | Program | Built as | Use |
 | --- | --- | --- |
-| `kick-clap-scan` | `build-dev/core/clap-host/kick-clap-scan` | List a CLAP module's plugins and why any fails |
+| `kick-clap-scan` | `build-dev/core/kick-clap-scan` | List a CLAP module's plugins and why any fails |
 | `oscairn-render` | `build-dev/hosts/oscairn-render` | Render a chain of plugins offline to a WAV |
 | `oscairn-plugin-worker` | `build-dev/core/oscairn-plugin-worker` | The worker process that runs a plugin outside the engine |
 | `oscairn-plugin-check` | `build-dev/core/control/oscairn-plugin-check` | Check a plugin through the library, an archive and the plugin store ([below](#test-before-publishing-a-plugin)) |

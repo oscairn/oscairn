@@ -10,7 +10,7 @@
 #include "oscairn/transport.h"
 
 #include <kick_clap/Discovery.h>
-#include <kick_clap/Host.h>
+#include "loaded.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,8 +46,8 @@ int main( int argc, char** argv )
     const auto scan = kick::clap::inspect( argv[1] );
     if( scan.plugins.empty() )
         return fail( "sequencer not found" );
-    kick::clap::Host host;
-    if( !host.load( scan.plugins.front(), rate, block ) )
+    const auto host = loaded( scan.plugins.front(), rate, block );
+    if( !host )
         return fail( "load" );
 
     oscairn::Transport transport( rate, 120.0 );
@@ -79,10 +79,10 @@ int main( int argc, char** argv )
         if( nextPulse > 48 ) // after two beats
             settledTempo = t.tempo;
 
-        if( !host.process( nullptr, 0, nullptr, 0, block, nullptr, 0, &t ) )
+        if( !host->process( nullptr, 0, nullptr, 0, block, nullptr, 0, &t ) )
             return fail( "process" );
         uint32_t    count  = 0;
-        const auto* events = host.outputEvents( count );
+        const auto* events = host->outputEvents( count );
         for( uint32_t i = 0; i < count; ++i )
             if( events[i].header()->space_id == CLAP_CORE_EVENT_SPACE_ID && events[i].header()->type == CLAP_EVENT_NOTE_ON )
                 noteOns.push_back( now + events[i].header()->time );

@@ -1,15 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// kick_clap/Discovery.h for C++ callers, over the Rust host's discovery (core/clap-host/rust/src/discovery.rs, through
-// clap_host.h's rust_clap_* calls): a scan crosses as the scan wire format, which this file reads and writes for the
-// scan helpers as the Rust side does. And oscairn_clap_assets_of, an AssetResolver as the table the Rust host calls.
+// kick_clap/Host.h's and Discovery.h's functions for C++ callers, over the Rust CLAP host (core/clap-host/rust, through
+// clap_host.h's rust_clap_* calls): its process-wide hardware and activation observer, and its discovery, where a scan
+// crosses as the scan wire format, which this file reads and writes for the scan helpers as the Rust side does. And
+// oscairn_clap_assets_of, an AssetResolver as the table the Rust host calls.
 #include "clap_host.h"
 #include <kick_clap/Discovery.h>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
 namespace kick::clap {
 namespace {
+// The process's hardware and observer, as the table and the call the Rust host takes (services.rs).
+std::atomic<HardwareAccess*> hardwareAccess{nullptr};
+Host::ActivationObserver activationObserver = nullptr;
+void* activationContext = nullptr;
+HardwareAccess* access() noexcept { return hardwareAccess.load(); }
+const oscairn_clap_hardware hardwareTable{nullptr,
+    [](void*) { return access()->count(); },
+    [](void*, uint32_t index, oscairn_hardware_accelerator_t* out) { return access()->get(index, *out); },
+    [](void*, uint32_t index, const char* operation) { return access()->supports(index, operation); },
+    [](void*, const void* owner, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease) { return access()->reserve(owner, index, *request, *lease); },
+    [](void*, const void* owner, uint32_t lease) { access()->release(owner, lease); },
+    [](void*, const void* owner) { access()->releaseAll(owner); },
+    [](void*, const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t* job) { return access()->submit(owner, epoch, lease, *job); },
+    [](void*, const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t* result) { return access()->collect(owner, epoch, lease, *result); }};
+// The observer called inside a try: what it throws is the refusal's text, kept until this thread's next activation.
+const char* activating(void*, const oscairn_memory_t* declared) {
+    static thread_local std::string refused;
+    try { activationObserver(activationContext, declared); return nullptr; }
+    catch (const std::exception& e) { refused = e.what(); }
+    catch (...) { refused = "Activation refused"; }
+    return refused.c_str();
+}
 constexpr size_t maxWireBytes = 4 * 1024 * 1024;
 constexpr const char* magic = "KICKCLAP1\n";
 void number(std::string& out, uint32_t n) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<char>((n >> (8 * i)) & 255)); }
@@ -45,6 +69,12 @@ struct Strings {
     }
 };
 }
+
+void Host::observeActivations(ActivationObserver observer, void* context) noexcept {
+    activationObserver = observer; activationContext = context;
+    rust_clap_observe_activations(observer ? activating : nullptr, nullptr);
+}
+void Host::setHardware(HardwareAccess* hardware) noexcept { hardwareAccess.store(hardware); rust_clap_set_hardware(hardware ? &hardwareTable : nullptr); }
 
 std::vector<std::filesystem::path> defaultSearchPaths() {
     std::vector<std::filesystem::path> paths;

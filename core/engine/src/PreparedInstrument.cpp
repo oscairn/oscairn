@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PreparedInstrument.h"
 #include "NoteRoute.h"
-#include "../../clap-host/src/Internal.h"
+#include <oscairn/bounded_queue.h>
 #include <algorithm>
 #include <cmath>
 #include "../../plugin-host/src/StateFiles.h"
@@ -46,7 +46,7 @@ class PreparedInstrument final:public PluginHost {
     Plan desired_;
     Plan* current_=nullptr;
     std::atomic<Plan*> pending_{nullptr};
-    kick::clap::detail::Queue<Plan*,32> retired_;
+    oscairn::BoundedQueue<Plan*,32> retired_;
     std::atomic<unsigned> retiredCount_{0};
     std::atomic<uint64_t> applied_{0};
     std::atomic<bool> panic_{false};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <kick_clap/Host.h>
+#include "../../plugin-host/include/oscairn/bounded_queue.h"
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -102,40 +103,8 @@ inline Descriptor describe(const std::string& path, const clap_plugin_descriptor
     return result;
 }
 
-// Bounded Vyukov queue. Producers claim independent slots; the audio consumer
-// never spins on an unfinished producer. No allocation, locks or reclamation.
-template<class T, size_t Capacity> class Queue {
-    struct Slot { std::atomic<size_t> sequence{0}; T value{}; };
-    std::array<Slot, Capacity> slots;
-    alignas(64) std::atomic<size_t> write{0};
-    alignas(64) size_t read = 0;
-public:
-    Queue() { for (size_t i = 0; i < Capacity; ++i) slots[i].sequence.store(i); }
-    bool push(const T& value) noexcept {
-        auto position = write.load(std::memory_order_relaxed);
-        for (;;) {
-            auto& slot = slots[position % Capacity];
-            const auto seq = slot.sequence.load(std::memory_order_acquire);
-            const auto difference = static_cast<intptr_t>(seq - position);
-            if (difference == 0) {
-                if (write.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
-                    slot.value = value;
-                    slot.sequence.store(position + 1, std::memory_order_release);
-                    return true;
-                }
-            } else if (difference < 0) return false;
-            else position = write.load(std::memory_order_relaxed);
-        }
-    }
-    bool pop(T& value) noexcept {
-        auto& slot = slots[read % Capacity];
-        if (slot.sequence.load(std::memory_order_acquire) != read + 1) return false;
-        value = slot.value;
-        slot.sequence.store(read + Capacity, std::memory_order_release);
-        ++read;
-        return true;
-    }
-};
+// The bounded queue the C++ host's command and output queues are.
+template<class T, size_t Capacity> using Queue = oscairn::BoundedQueue<T, Capacity>;
 // oscairn.assets' library_root, for the host and the preset indexer: the plugin's strings bounded,
 // the folder written whole with its NUL or not at all.
 inline bool writeLibraryRoot(const AssetResolver& assets, const char* library, const char* minVersion, char* path, uint32_t capacity) {

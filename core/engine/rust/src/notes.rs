@@ -42,6 +42,7 @@ pub struct Step {
     recent_at: usize,
     recent_n: usize,
     limit_before: u32, // the voice limit in force a block earlier, which it has had a block and a fade to keep to
+    live_before: u32,  // the notes live a block earlier: those of the block a late lane's plugin renders now
     cost: f32,         // its last block's usual time; an effect asleep, its cost awake
     awake: f32,        // an effect's usual time when it last ran awake
 }
@@ -70,6 +71,7 @@ impl Step {
             recent_at: 0,
             recent_n: 0,
             limit_before: 0,
+            live_before: 0,
             cost: 0.0,
             awake: 0.0,
         }
@@ -372,6 +374,9 @@ impl Notes {
             }
             if let (true, Some(a)) = (step.budgeted, &step.activity) {
                 let live: u32 = step.sources.iter().map(|s| rs[s.route].live()).sum();
+                // RFC 0045: a plugin a block late took this block's time on the block handed a call earlier, so its cost
+                // per note is measured against the notes live then; counted with this block's, a first note costs nothing.
+                let rendered = if step.late_lane { std::mem::replace(&mut step.live_before, live) } else { live };
                 // A plugin that reports no voices while notes live, or whose block was not rendered, is counted by
                 // its notes; one giving up its own voices is judged against its limit so even when its blocks are lost.
                 let voices = if r.voices == 0 || !r.processed { live } else { r.voices };
@@ -382,10 +387,10 @@ impl Notes {
                     a.honors_volume.store(r.honors_volume, Relaxed);
                     // A block past twice both the usual and what its notes are estimated to cost now is held
                     // up from outside (new notes raise the estimate with them): the larger is taken.
-                    let expected = usual.max(a.rest_now() + a.note_now() / a.per_note_scale.get() * (if r.own_voices { voices } else { live }) as f32);
+                    let expected = usual.max(a.rest_now() + a.note_now() / a.per_note_scale.get() * (if r.own_voices { voices } else { rendered }) as f32);
                     let took = if a.per_note.get() >= 0.0 && r.took > 2.0 * expected { expected } else { r.took };
                     if !r.own_voices {
-                        a.observe(took, live);
+                        a.observe(took, rendered);
                     } else {
                         // Its voices, each costed alike, a note at its share of them, and each note's loudness
                         // in place of its velocity.

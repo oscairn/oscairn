@@ -58,6 +58,7 @@ class PreparedInstrument final:public PluginHost {
     uint32_t frames_,notePorts_;
     ProcessingMode mode_;
     Lv2BufferLimits limits_;
+    bool late_; // its first instance's oneBlockLate, fixed for that host's life as for this node's
     uint64_t room_=0; // setMemoryRoom: what the next instance may declare (RFC 0025)
     kick::clap::AssetResolver* assets_=nullptr; // setAssets: where every instance resolves sound assets (RFC 0009)
 
@@ -122,7 +123,7 @@ class PreparedInstrument final:public PluginHost {
     }
 public:
     PreparedInstrument(std::shared_ptr<PluginHost> h,double rate,uint32_t frames,ProcessingMode mode,Lv2BufferLimits limits):
-        rate_(rate),frames_(frames),notePorts_(h->noteInputPorts()),mode_(mode),limits_(limits) {
+        rate_(rate),frames_(frames),notePorts_(h->noteInputPorts()),mode_(mode),limits_(limits),late_(h->oneBlockLate()) {
         desired_.instances[0]=std::make_shared<Instance>(std::move(h),0,"Default",frames);
         desired_.instances[0]->selected.store(0xffff);current_=new Plan(desired_);
     }
@@ -371,6 +372,8 @@ public:
     // shortcut: a pool reports its first instance's round trips only; merge the instances' if pooled instruments need watching.
     WorkerTiming* workerTiming() noexcept override {return base().workerTiming();}
     const void* lane() const noexcept override {return base().lane();}
+    // RFC 0045's extra block: its instances render a block late, so its lane has a period's time, not a worker's allowance.
+    bool oneBlockLate() const noexcept override {return late_;}
     std::vector<PluginHost*> workers() override {std::vector<PluginHost*> all;for(const auto& s:desired_.instances)if(s)for(auto* w:s->host->workers())all.push_back(w);return all;}
 };
 }

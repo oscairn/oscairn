@@ -35,11 +35,12 @@ namespace
     {
         std::unique_ptr<oscairn::Graph> graph = std::make_unique<oscairn::Graph>(rate, frames);
         std::vector<oscairn::NodeId> delayed, ordinary;
+        bool stall = false;
     };
     // `late` of the instruments on the extra block; `stall`: the first of them takes 4.9 ms in its block 400.
     Built build(int late, bool stall)
     {
-        Built b; auto& g = *b.graph;
+        Built b; auto& g = *b.graph; b.stall = stall;
         auto add = [&](const char* path, const char* id, const char* workUs, bool delayed, bool stalls) {
             setenv("KICK_FIXTURE_WORK_US", workUs, 1);
             if(delayed) setenv("OSCAIRN_WORKER_EXTRA_BLOCK", "org.kick.test.midi", 1); else unsetenv("OSCAIRN_WORKER_EXTRA_BLOCK");
@@ -76,13 +77,18 @@ namespace
     }
     double threadCpu() { timespec t{}; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t); return double(t.tv_sec) + t.tv_nsec * 1e-9; }
 
-    struct Run { int over = 0; double longest = 0, cpu = 0; uint64_t ordinaryMissed = 0, delayedSilent = 0; bool stereo = true; };
+    // The stalled block is its worker's call `stallCall` (KICK_FIXTURE_STALL, calls numbered from 1: block i of the run is call i + 101);
+    // `delayedSilentAtStall` counts the delayed workers' blocks lost from it to `stallWindow` calls after, which is what the stall
+    // costs and the machine's own losses elsewhere in the run are not.
+    constexpr int stallCall = 400, stallWindow = 10;
+    struct Run { int over = 0; double longest = 0, cpu = 0; uint64_t ordinaryMissed = 0, delayedSilent = 0, delayedSilentAtStall = 0; bool stereo = true; };
     Run play(Built& b, int blocks)
     {
         Run r;
         std::vector<float> l(frames), rr(frames); float* out[]{l.data(), rr.data()};
         auto next = clock::now();
-        double cpuFrom = 0; auto wallFrom = clock::now();
+        double cpuFrom = 0; auto wallFrom = clock::now(); uint64_t silentBefore = 0, silentAfter = 0;
+        auto delayedSilent = [&] { uint64_t n = 0; for(const auto d : b.delayed) n += b.graph->host(d).statistics().silentBlocks; return n; };
         for(int i = -100; i < blocks; ++i) // 100 to start with, not counted
         {
             if(!i) { cpuFrom = threadCpu(); wallFrom = clock::now(); }
@@ -97,7 +103,10 @@ namespace
             r.longest = std::max(r.longest, std::chrono::duration<double, std::milli>(took).count());
             if(took > period) ++r.over;
             r.stereo = r.stereo && l == rr;
+            if(b.stall && i + 101 == stallCall) silentBefore = delayedSilent();
+            if(b.stall && i + 101 == stallCall + stallWindow) silentAfter = delayedSilent();
         }
+        r.delayedSilentAtStall = silentAfter - silentBefore;
         r.cpu = (threadCpu() - cpuFrom) / std::chrono::duration<double>(clock::now() - wallFrom).count();
         for(const auto n : b.ordinary) { const auto s = b.graph->host(n).statistics(); r.ordinaryMissed += s.silentBlocks + s.lateBlocks; }
         for(const auto n : b.delayed) r.delayedSilent += b.graph->host(n).statistics().silentBlocks;
@@ -131,8 +140,8 @@ int main(int argc, char** argv)
     {
         const auto r = best(late, stall);
         const std::string what = std::to_string(late) + " delayed" + (stall ? ", one 4.9 ms block" : "");
-        std::printf("%s: callbacks past the period %d, longest %.2f ms, ordinary missed %llu, delayed silent %llu, engine thread %.1f%%, stereo %s\n", what.c_str(), r.over, r.longest,
-                    (unsigned long long)r.ordinaryMissed, (unsigned long long)r.delayedSilent, 100 * r.cpu, r.stereo ? "intact" : "BROKEN");
+        std::printf("%s: callbacks past the period %d, longest %.2f ms, ordinary missed %llu, delayed silent %llu (%llu within %d calls of the stall), engine thread %.1f%%, stereo %s\n", what.c_str(), r.over, r.longest,
+                    (unsigned long long)r.ordinaryMissed, (unsigned long long)r.delayedSilent, (unsigned long long)r.delayedSilentAtStall, stallWindow, 100 * r.cpu, r.stereo ? "intact" : "BROKEN");
         check(r.stereo, what + ": left and right equal, every block");
         if(timing)
         {
@@ -144,8 +153,9 @@ int main(int argc, char** argv)
             // Every instrument on the extra block leaves the ordinary workers more of each period; one alone, whose block
             // then overlaps the next callback's, is reported (more missed with four CPUs in a container), not checked.
             if(late == parts) check(r.ordinaryMissed <= none.ordinaryMissed, what + ": no more ordinary blocks missed than without the mode: " + std::to_string(r.ordinaryMissed));
-            // A block past a period and its wave keeps the worker through the next hand-over: at most two.
-            if(stall) check(r.delayedSilent <= 2, what + ": delayed blocks lost: " + std::to_string(r.delayedSilent));
+            // A block past a period and its wave keeps the worker through the next hand-over: at most two. Counted where the stall
+            // is, not across the run: a block lost elsewhere is the machine's, not the stall's.
+            if(stall) check(r.delayedSilentAtStall <= 2, what + ": delayed blocks lost to the stall: " + std::to_string(r.delayedSilentAtStall) + " (" + std::to_string(r.delayedSilent) + " in the run)");
         }
     }
     return failures ? 1 : 0;

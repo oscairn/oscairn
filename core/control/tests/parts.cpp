@@ -1861,6 +1861,68 @@ namespace
         check(g.plugins.size() == 1 && g.memory == 9 * MiB, "a Performance not open counts what its plugin declared when it last played here: " + std::to_string(g.memory >> 20) + " MiB");
     }
 
+    // RFC 0025, a Performance not open: each part at its own sound's figures where its saved state was measured here, else at
+    // the median of the plugin's sounds, not at the busiest of them. On the unit two Sampler sounds measured stacked (24 voices,
+    // half a block each) priced every Sampler part of every Performance at half a block, and ten opened with "may not fit". The
+    // memory fixture's sounds are its modes (its gain sets what it declares, so the measurement key): an outlier in the loud mode,
+    // three ordinary figures in others; a Performance of the default mode, never opened here, opens without the notice; one of
+    // the loud mode, opened here once (which ties its state to that key), still gets it; and the outlier unused for four weeks
+    // has worn off to its voices' cost.
+    void outlierSound(const char* fixture, const fs::path& root)
+    {
+        constexpr uint64_t MiB = 1ull << 20;
+        const auto home = root / "outlier-home";
+        fs::create_directories(home);
+        ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
+        const auto ordinary = root / "outlier-ordinary", loud = root / "outlier-loud";
+        {
+            Session s(48000, frames);
+            for(int i = 0; i < 3; ++i) { const auto n = s.add("m" + std::to_string(i), fixture, "org.kick.test.memory"); const auto p = s.addPart("M" + std::to_string(i)); s.insertIntoPart(p, 0, n); }
+            s.commit();
+            s.savePerformance(ordinary.string());
+        }
+        {
+            Session s(48000, frames);
+            const auto n = s.add("loud", fixture, "org.kick.test.memory"); const auto p = s.addPart("Loud"); s.insertIntoPart(p, 0, n); s.commit();
+            s.setParameter(n, 7, .75);
+            Audio x; for(int i = 0; i < 4; ++i) x.run(s);
+            s.savePerformance(loud.string());
+        }
+        { Session s(48000, frames); s.setBudget({.9, 0}); s.loadPerformance(loud.string()); Audio x; for(int i = 0; i < 400; ++i) x.run(s); s.saveMeasurementsNow(); }
+        std::string text;
+        { std::ifstream in(home / "measurements.json"); text.assign(std::istreambuf_iterator<char>(in), {}); }
+        std::smatch tied;
+        check(std::regex_search(text, tied, std::regex("\"states\":\\{\"[0-9a-f]+\":\"([^\"]+#" + std::to_string(13 * MiB) + ")\"\\}")), "the loud Performance's state tied to its key: " + text);
+        if(tied.empty()) return;
+        const auto build = "org.kick.test.memory@1 " + bundleDigest(fixture) + "#";
+        const auto today = uint32_t(std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now().time_since_epoch()).count() / 24);
+        auto write = [&](uint32_t outlierDay) {
+            auto record = [&](const std::string& key, double cpu, uint32_t day) {
+                return "\"" + key + "\":{\"cpu\":" + std::to_string(cpu) + ",\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" + std::to_string(10 * MiB) + ",\"samples\":100000,\"day\":" + std::to_string(day) + "}";
+            };
+            std::ofstream(home / "measurements.json") << "{\"version\":6,\"plugins\":{" << record(build + std::to_string(5 * MiB), .02, today) << "," << record(build + std::to_string(7 * MiB), .025, today) << ","
+                << record(build + std::to_string(9 * MiB), .03, today) << "," << record(tied[1].str(), .51, outlierDay) << "},\"states\":{" << tied[0].str().substr(10) << "}";
+        };
+        auto opened = [&](const fs::path& performance, std::string& notices) {
+            Session s(48000, frames);
+            s.setBudget({.3, 0});
+            const auto e = s.estimate(performance.string());
+            s.loadPerformance(performance.string());
+            for(const auto& n : s.sessionStatus().notices) notices += n;
+            std::printf("%s: costliest part %.4g, uncertain %d\n", performance.filename().string().c_str(), e.longest, int(e.uncertain));
+            return e;
+        };
+        write(today);
+        std::string said;
+        auto e = opened(ordinary, said);
+        check(e.fits && !e.uncertain && e.longest < .1 && said.find("may not fit") == std::string::npos, "ordinary parts of the plugin open without the notice, at its sounds' median: " + std::to_string(e.longest) + " " + said);
+        said.clear(); e = opened(loud, said);
+        check(e.uncertain && e.longest > .5 && said.find("may not fit") != std::string::npos, "the outlier's own sound still gets it: " + std::to_string(e.longest) + " " + said);
+        write(today - 28);
+        said.clear(); e = opened(loud, said);
+        check(!e.uncertain && e.longest < .1 && said.find("may not fit") == std::string::npos, "unused four weeks, its busiest figure has worn off: " + std::to_string(e.longest) + " " + said);
+    }
+
     void declaredMemory(const char* fixture, const char* delay, const fs::path& root)
     {
         constexpr uint64_t MiB = 1ull << 20;
@@ -2865,6 +2927,7 @@ int main(int argc, char** argv)
         rebuilt(argv[1], temp.path);
         declaredMemory(argv[1], argv[3], temp.path);
         memoryGuess(argv[1], temp.path);
+        outlierSound(argv[1], temp.path);
         memoryClasses(argv[1], temp.path);
         controls(argv[1], temp.path);
         summing(argv[1]);

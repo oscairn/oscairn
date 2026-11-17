@@ -109,6 +109,8 @@ impl Browser {
         self.info_cursor = fit(self.info_cursor, info.len(), per);
         state.set_info_more(info.len() > per);
         update(&self.info, info.into_iter().skip(self.info_cursor.first).take(per).collect());
+        state.set_total(self.count as i32);
+        state.set_first(first as i32);
         state.set_name(name.into());
         state.set_title(title.into());
         state.set_view(if self.count == 0 { String::new() } else { format!("{noun} {}–{} of {}", first + 1, end, self.count) }.into());
@@ -118,6 +120,14 @@ impl Browser {
         if let Some(ui) = self.ui.upgrade().filter(|_| self.active) {
             ui.global::<PartState>().set_message(text.into());
         }
+    }
+
+    /// The scroll bar asked for the view starting at row `first` (a touch only: it selects nothing, so the cursor drops).
+    pub fn scroll_to(&mut self, first: usize) {
+        let per = self.cursor.per_page.max(1);
+        let last = self.count.saturating_sub(1) / per * per;
+        self.cursor = Cursor { at: None, first: (first / per * per).min(last), ..self.cursor };
+        self.editing = false;
     }
 
     /// The panel's own cursor moved: its view turns.

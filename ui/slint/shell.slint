@@ -52,6 +52,10 @@ export component Shell inherits Window {
     out property <bool> title-cut: bar.title-cut;
     out property <length> rec-width: bar.rec-width;
     out property <length> loading-width: bar.loading-width;
+    out property <length> thumb-y: list.thumb-y;
+    out property <length> thumb-h: list.thumb-h;
+    out property <length> track-h: list.list-height;
+    out property <length> lane-x: list.lane-x;
     out property <length> library-rail: library.rail;
     out property <length> library-rail-need: library.rail-need;
     out property <float> library-rail-fit: library.rail-fit;
@@ -107,7 +111,7 @@ export component Shell inherits Window {
         height: parent.height - root.content-top;
         visible: root.screen == 14;
     }
-    Part {
+    list := Part {
         x: root.screen == 14 ? settings.content-x - Theme.margin : root.screen == 13 ? library.content-x - Theme.margin : 0px;
         y: root.content-top + (root.screen == 14 ? settings.content-y - Theme.margin : root.screen == 13 ? library.content-y - Theme.margin : 0px);
         width: root.screen == 14 ? settings.content-width + 2 * Theme.margin : root.screen == 13 ? library.content-width + 2 * Theme.margin : parent.width;

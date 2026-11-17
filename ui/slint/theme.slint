@@ -131,6 +131,14 @@ export global Theme {
     // and one and a half tight paddings across (71 at the touch scale), never more than a share of the screen's width.
     out property <length> rail-width: 5 * small + 1.5 * pad-tight;
     out property <float> side-share: 0.12;
+    // How much of the width a rail may take to hold its longest label on one line (the rail is the theme's width, more only
+    // for that).
+    out property <float> rail-label-share: 0.16;
+    // A list's scroll bar (touch aid only): the visible bar, its own lane (the touch target, wider than the bar) and the
+    // thumb's least length.
+    out property <length> scroll-bar: 6px;
+    out property <length> scroll-lane: 24px;
+    out property <length> scroll-thumb-min: touch;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;

@@ -384,6 +384,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     });
     let part = ui.global::<PartState>();
     part.on_tapped(|i| with_app(|a| a.list_tap(i)));
+    part.on_scrolled(|first| with_app(|a| a.list_scroll_to(first)));
     part.on_step(|i, by| with_app(|a| a.list_step(i, by)));
     part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
     part.on_resized(|| with_app(|a| a.refit()));
@@ -2048,6 +2049,18 @@ impl App {
             Screen::Scene => self.on_scene(|c| c.step_row(i, by)),
             Screen::Library => self.on_library(|c| c.step_row(i, by)),
             Screen::Settings => self.on_settings(|c| c.step_row(i, by)),
+            _ => {}
+        }
+    }
+
+    /// The scroll bar's request: the list's view starts at row `first`.
+    fn list_scroll_to(&mut self, first: i32) {
+        match self.screen {
+            Screen::Chain => self.on_chain(|c| c.scroll_to(first)),
+            Screen::Sounds => self.on_sounds(|c| c.scroll_to(first)),
+            Screen::Scene => self.on_scene(|c| c.scroll_to(first)),
+            Screen::Library => self.on_library(|c| c.scroll_to(first)),
+            Screen::Settings => self.on_settings(|c| c.scroll_to(first)),
             _ => {}
         }
     }

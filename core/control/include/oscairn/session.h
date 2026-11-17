@@ -3,6 +3,7 @@
 
 #include "oscairn/control.h"
 #include "oscairn/assets.h"
+#include "oscairn/busiest_load.h"
 #include "oscairn/parts.h"
 #include "oscairn/physical_controls.h" // ControlInput
 #include "oscairn/library.h"
@@ -458,8 +459,9 @@ namespace oscairn
             uint64_t blocks = 0, seen = 0; // the plugin's blocks at the last tick (0: none yet); blocks since it joined
             double cpu = 0;                 // its statistics().cpuMicroseconds at the last tick
             uint64_t misses = 0, restarts = 0; // its statistics()' deadlineMisses and restarts at the last tick
+            uint64_t settle = 0;            // blocks not measured after its worker restarted (0: warmupBlocks)
             uint32_t restN = 0, voiceN = 0;
-            double fast = 0;
+            BusiestLoad busiest;
         };
         std::map<NodeId, Learning> learning_;
         std::map<NodeId, uint64_t> loadedBytes_;               // this process's growth as an in-process plugin loaded

@@ -6,9 +6,13 @@
 // them; a part with two in a chain (80 % in one block) is refused, saying so; the same from figures
 // of too few blocks opens, with a notice. And a part sending to a bus counts the bus's chain after its own (RFC 0045's
 // guard, 12e): a part of one at 40 % sending at 40 % to a bus of one at 40 % needs 80 % of one block, and is refused.
+// A busiest figure of a load played before (40 %, certain) whose rest fits (5 %) opens it, with a notice: CPU refuses only
+// past the plugins' cost at rest (the unit's fm2 at 0.339 refused Sick tines, 232 %). An impossible figure (above the block)
+// is dropped as the file is read. The busiest load does not move for a spike shorter than half its window of ticks.
 //   oscairn-admission-test FIXTURE.clap
 #include "oscairn/session.h"
 #include "oscairn/realtime.h"
+#include "oscairn/busiest_load.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <cstdio>
 #include <cstdlib>
@@ -68,8 +72,8 @@ int main(int argc, char** argv)
     }
     check(!key.empty(), "the fixture's measurement key");
     const auto cores = std::max(1u, worker::usableCores() - 1);
-    auto figures = [&](int samples) {
-        std::ofstream(home / "measurements.json") << "{\"version\":5,\"plugins\":{\"" << key << "\":{\"cpu\":0.4,\"rest\":0.4,\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":" << samples << "}}}";
+    auto figures = [&](int samples, double cpu = .4, double rest = .4) {
+        std::ofstream(home / "measurements.json") << "{\"version\":5,\"plugins\":{\"" << key << "\":{\"cpu\":" << cpu << ",\"rest\":" << rest << ",\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":" << samples << "}}}";
     };
     auto open = [&](const fs::path& performance, std::string& notices) {
         Session s(rate, frames);
@@ -102,5 +106,39 @@ int main(int argc, char** argv)
     const auto opened = open(chained, notices);
     check(opened.empty(), "from figures of too few blocks it opens: " + opened);
     check(notices.find("too few blocks") != std::string::npos, "with a notice: " + notices);
+
+    // A busiest figure of 40 % from many blocks (certain) whose rest is 5 %: it opens, said; the load guard sheds voices.
+    figures(100000, .4, .05);
+    notices.clear();
+    const auto busy = open(chained, notices);
+    check(busy.empty(), "a chain fitting at rest opens past its busiest figures: " + busy);
+    check(notices.find("may not fit") != std::string::npos && notices.find("at rest") != std::string::npos, "with a notice: " + notices);
+    // Its rest past one block's budget (2 x 40 %) is refused as before.
+    figures(100000, .4, .4);
+    check(open(chained, notices).find("costliest part") != std::string::npos, "a chain past the budget at rest is refused");
+    // An impossible figure (a share above the block, which a block on time cannot cost) is dropped as it is read: the guess.
+    figures(100000, 1.5, .05);
+    {
+        Session s(rate, frames);
+        s.setBudget({.75, 0});
+        const auto c = s.estimate(chained.string());
+        check(c.fits && !c.uncertain && c.longest < .1, "an impossible figure is dropped as the file is read: longest " + std::to_string(c.longest));
+    }
+
+    // The busiest load (BusiestLoad), ticks of 8 blocks at 5 %: a spike of two ticks at the whole block moves it not at
+    // all; one of three by at most its blocks over fastBlocks (24 / 400 of the difference).
+    {
+        BusiestLoad b;
+        for(int i = 0; i < 2000; ++i) b.add(.05, 8);
+        const double steady = b.fast;
+        double most = 0;
+        for(int i = 0; i < 2; ++i) b.add(1, 8);
+        for(int i = 0; i < 500; ++i) { b.add(.05, 8); most = std::max(most, b.fast); }
+        check(std::abs(steady - .05) < 1e-9 && most <= steady + 1e-12, "a spike of two ticks leaves the busiest load at " + std::to_string(steady) + ": " + std::to_string(most));
+        for(int i = 0; i < 3; ++i) b.add(1, 8);
+        most = 0;
+        for(int i = 0; i < 500; ++i) { b.add(.05, 8); most = std::max(most, b.fast); }
+        check(most <= .05 + .95 * 24 / BusiestLoad::fastBlocks + 1e-9, "a spike of three ticks moves it by at most their blocks' weight: " + std::to_string(most));
+    }
     return failures ? 1 : 0;
 }

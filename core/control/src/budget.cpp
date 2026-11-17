@@ -48,14 +48,18 @@ namespace oscairn
         // The measured cost (Session::measure), a share of the block period (frames / sample rate): at rest
         // and per voice, a running mean of the plugin's CPU time per block over each service tick's blocks,
         // each tick weighing its blocks over restBlocks (about 10 s of blocks at 128 frames and 48 kHz, and at
-        // least 1/n while n is small); cpu, the busiest sustained load, a maximum of a short mean (fastBlocks,
-        // about a second) falling with a time constant of fallBlocks (a few minutes). A share is at most 1 (a
-        // block taking longer than itself is a miss). enoughSamples at rest before the rest is taken off a
-        // voiced sample; a value loaded from the file counts as seedSamples, so what is played now outweighs it
-        // quickly. At rest: no note held and the output silent for quietSeconds (a release tail is not at
-        // rest). A node's first warmupBlocks blocks are not measured (its load's first blocks). A figure is
-        // certain (admission takes it as it is) once certainBlocks blocks were measured.
-        constexpr double restBlocks = 4000, fastBlocks = 400, fallBlocks = 60000, quietSeconds = .5;
+        // least 1/n while n is small); cpu, the busiest sustained load, a maximum of a short mean of the median
+        // of the last few ticks (BusiestLoad: a spike shorter than half its window moves it not at all) falling
+        // with a time constant of fallBlocks (a few minutes). Not recorded: a tick whose blocks took longer than
+        // the block period on average (the audio missed, or the time was not the plugin's work: a share above 1
+        // cannot be true of a block that was on time), a tick spanning more than longTickSeconds (the control
+        // thread held by a load, so its blocks are the load's), a node's first warmupBlocks blocks (its load's
+        // first blocks) and the first restartSeconds after its worker restarted. enoughSamples at rest before
+        // the rest is taken off a voiced sample; a value loaded from the file counts as seedSamples, so what is
+        // played now outweighs it quickly. At rest: no note held and the output silent for quietSeconds (a
+        // release tail is not at rest). A figure is certain (admission takes it as it is) once certainBlocks
+        // blocks were measured.
+        constexpr double restBlocks = 4000, fallBlocks = 60000, quietSeconds = .5, longTickSeconds = .25, restartSeconds = 2;
         constexpr uint32_t enoughSamples = 100, seedSamples = 4, warmupBlocks = 32, certainBlocks = 8000;
         constexpr int measurementsVersion = 6; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops; 3: a shared instance's CPU all its sounds'; 4: one block's wall time a tick, a shared instance's unbounded and rest taken during release tails (2 to 4's CPU discarded); 5: a worker's memory its whole resident memory on Linux, the code every worker shares counted in each (memory discarded, CPU kept)
         fs::path measurementsFile() { return dataHome() / "measurements.json"; }
@@ -118,7 +122,7 @@ namespace oscairn
                             return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : -1.0;
                         };
                         const double cpu = number("cpu"), memory = number("memory");
-                        if(cpu >= 0 && cpu <= 64 && memory >= 0 && memory <= double(1ull << 40)) return {name, plugin, cpu, declared ? declared : uint64_t(memory), false};
+                        if(cpu >= 0 && cpu <= 64 && memory >= 0 && memory <= double(1ull << 40)) return {name, plugin, cpu, declared ? declared : uint64_t(memory), false, {}, true, cpu}; // its package's figure, rest and all
                     }
                     catch(const std::exception&) {} // none for that format
             }
@@ -170,11 +174,11 @@ namespace oscairn
         if(m.cpu <= 0 && m.rest <= 0 && m.voice <= 0)
         {
             const auto guess = declaredCost(key, name, plugin, path, m.declared);
-            return {name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0};
+            return {name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0, {}, true, guess.rest};
         }
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
         // Its memory not measured (only an instance playing one sound records it): the guess, not 0.
-        return {name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks};
+        return {name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks, m.rest > 0 ? std::min(m.rest, cpu) : cpu}; // rest not measured: all of it
     }
 
     // Memory: the larger of the measurement and the declaration (RFC 0025: never the plugin's word
@@ -576,7 +580,12 @@ namespace oscairn
             auto& L = learning_[node];
             const double was = m.cpu, wasRest = m.rest, wasVoice = m.voice;
             // Restarted, or its instances changed: measured from here, its first blocks again its start's.
-            if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu || st.restarts != L.restarts) { L.blocks = 0; L.seen = 0; L.restarts = st.restarts; }
+            if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu || st.restarts != L.restarts)
+            {
+                const bool restarted = st.restarts != L.restarts && L.blocks;
+                L.blocks = 0; L.seen = 0; L.restarts = st.restarts; L.busiest = {};
+                L.settle = restarted ? uint64_t(restartSeconds * sampleRate_ / frames) : 0;
+            }
             // Blocks missed in its first two seconds are its load's (a failure storm while it starts): that tick is not recorded.
             const bool starting = st.deadlineMisses != std::exchange(L.misses, st.deadlineMisses) && double(L.seen) * frames < 2 * sampleRate_;
             const uint64_t blocks = L.blocks ? st.blocks - L.blocks : 0;
@@ -602,12 +611,11 @@ namespace oscairn
             }
             // A node's first blocks are its load's. shortcut: a prepared instrument whose instances change mid-tick gives one sample
             // of their sum's jump (at most the period, as any); keep a base per instance if that is seen to move a figure.
-            if(blocks && L.seen >= warmupBlocks + blocks && !starting)
+            if(blocks && L.seen >= std::max<uint64_t>(warmupBlocks, L.settle) + blocks && !starting && each <= blockMicroseconds && double(blocks) * frames <= longTickSeconds * sampleRate_)
             {
-                const double share = std::min(1.0, each / blockMicroseconds) / sounds; // a sound's
+                const double share = each / blockMicroseconds / sounds; // a sound's
                 auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, blocks / restBlocks)); };
-                L.fast += (share - L.fast) * std::min(1.0, blocks / fastBlocks); // from 0: one block, a first touch among them, is not a second's load
-                m.cpu = std::max(L.fast, m.cpu * std::exp(-double(blocks) / fallBlocks));
+                if(L.busiest.add(share, blocks)) m.cpu = std::max(L.busiest.fast, m.cpu * std::exp(-double(blocks) / fallBlocks));
                 m.samples = uint32_t(std::min<uint64_t>(uint64_t(m.samples) + blocks, 1'000'000'000));
                 if(voices == 0 && silent)
                 {
@@ -738,6 +746,16 @@ namespace oscairn
                 total += x; if(c.part.empty()) longest = std::max(longest, x); else known[c.part] += x;
             }
             e.uncertain = total <= budget_.cpu * e.cores && longestOf(known, longest) <= budget_.cpu;
+        }
+        // CPU refuses a Performance only past what its plugins cost at rest (measured means, which voices given way cannot
+        // lower): one whose rest fits opens, said, and the load guard sheds voices under a real load (RFC 0025, 2026-11-17).
+        // Its busiest figures and its voices' are estimates of a load not yet played, and a false refusal on stage costs
+        // more than voices shed; memory still refuses (what does not fit ends in killed workers).
+        if(memoryFits && !cpuFits && !e.uncertain)
+        {
+            double total = 0, longest = 0; std::map<std::string, double> resting;
+            for(const auto& c : plugins) { total += c.rest; if(c.part.empty()) longest = std::max(longest, c.rest); else resting[c.part] += c.rest; }
+            e.uncertain = total <= budget_.cpu * e.cores && longestOf(resting, longest) <= budget_.cpu;
         }
         e.fits = (memoryFits && cpuFits) || e.uncertain;
         // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the

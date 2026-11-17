@@ -155,6 +155,19 @@ voices. Now:
   those at a quarter, opens, with a notice saying so; adding a plugin past the budget is refused all
   the same. So a Performance that opened unmeasured is not refused on its next load by its own first
   seconds of figures.
+- **CPU refuses only past the rest** (2026-11-17): a Performance whose CPU does not fit, but whose
+  plugins' measured costs at rest do (the total and the costliest chain, each plugin at its rest, or
+  at its whole figure where no rest was measured or a package's estimate stands for it), opens, with
+  the same notice. Its busiest figures and its voices' are estimates of a load not played yet, which
+  the load guard (RFC 0045) meets by shedding voices as it comes; the guard cannot take away a
+  plugin's cost at rest. A false refusal on stage costs more than voices shed. Memory keeps erring
+  high and refusing: what does not fit there ends in killed workers. Found on the FANTOM-07: after
+  the owner had played a while on 87a49934, `measurements.json` held the FM plugin's `cpu` at 0.339
+  (0.053 to 0.069 in other copies), and Sick tines, five parts of it with
+  no note limit, was refused ("needs 232%"). The uncertain rule did not apply: a refusal means the figure came from
+  many blocks; it was the busiest load (a maximum) of a stretch played before, not a figure from too
+  few blocks. The impossible-figure check did not apply either: 0.339 is a possible share. Whether a
+  heavy passage or a spike made it is not known (that file was not kept).
 
 Tested: control-admission (three parts at 40 % each fit on the cores where the sum refused them; a
 chain of two at 40 % is refused for its 80 %; from figures of five samples it opens with a notice);
@@ -233,8 +246,14 @@ never write the user's data folder.
     time above rest divided by the notes, taking the rest off once 100 samples at rest are known (before
     that the whole sample is the voices', an upper bound), and the most notes seen at once.
   - `cpu`, the cost with no note limit, is the busiest sustained load: the largest of a one-second
-    mean of the samples, falling with a time constant of 60000 blocks (a few minutes at 128 frames),
-    so one bad session wears off.
+    mean of the median of the last five ticks' samples (since 2026-11-17: a spike shorter than three
+    ticks, 60 ms at a device's 20 ms service, moves it not at all; one of k ticks by at most their
+    blocks over 400), falling with a time constant of 60000 blocks (a few minutes at 128 frames), so
+    one bad session wears off. Not sampled at all: a tick whose blocks averaged more than the block
+    period (the audio missed, or the time was not the plugin's: no block on time costs more than
+    itself; before, such a tick entered as a share of 1), a tick spanning more than a quarter of a
+    second (the control thread held by a load, so its blocks are the load's), a node's first 32
+    blocks and the first two seconds after its worker restarted.
   - A figure read from the file counts as 4 samples, so what is played now outweighs it quickly. A
     figure that is impossible (a share above 1, negative, not a number) is dropped when the file is
     read and measured again, its memory kept; a file without `"version":2`, written by the first

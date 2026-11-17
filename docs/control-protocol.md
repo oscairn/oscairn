@@ -1270,7 +1270,7 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   `name`, `plugin`, `cpu`, `memory` and `measured`. CPU is checked per core (RFC 0025's
   [model](rfcs/0025-resource-budgets.md#the-cpu-model-per-core)): `cpu`, the total, must fit the budget's share of each of `cores`
   audio cores, and `longest`, the costliest part's chain (its plugins one after another in a block), the budget's share of one block;
-  `uncertain`: it would not fit, but only by figures from too few blocks, so it counts as fitting and opening it adds a notice. For the open Performance, `fits` counts it
+  `uncertain`: it would not fit, but only by figures from too few blocks, by plugins not yet measured, or by more than its plugins cost at rest (RFC 0025: CPU refuses only past the rest), so it counts as fitting and opening it adds a notice. For the open Performance, `fits` counts it
   alone and `seamless` adds the last Performance still ringing out. With a budget, opening a Performance over it,
   or adding a plugin that would take the open one over it, fails saying what does not fit; one
   that fits only alone opens as a cut, without the last ringing out. A plugin whose

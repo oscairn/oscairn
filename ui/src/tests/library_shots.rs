@@ -292,10 +292,11 @@ fn pictures_of_the_second_cut() {
     }
 }
 
-// A rail label too wide for the rail even at 70% of the type goes across two lines before it is cut: the Library's selected
-// tab reads "Performances" in two lines (the pixels of its fill read for lines of ink), and a short name stays in one.
+// A rail label too wide for the rail even at 70% of the type is cut with an ellipsis on one line, never broken
+// mid-word: the Library's selected tab reads "Performances" on one line (the pixels of its fill read for lines of
+// ink), and a short name stays in one.
 #[test]
-fn a_rail_label_that_does_not_fit_at_seventy_percent_wraps_to_two_lines() {
+fn a_rail_label_that_does_not_fit_at_seventy_percent_is_cut_on_one_line() {
     fit_to_window();
     let mut s = Shelf::new("rail-wrap");
     let ui = s.ui();
@@ -324,5 +325,5 @@ fn a_rail_label_that_does_not_fit_at_seventy_percent_wraps_to_two_lines() {
         }
         in_band = has_ink;
     }
-    assert_eq!(bands, 2, "the selected tab's label is in two lines");
+    assert_eq!(bands, 1, "the selected tab's label is on one line, cut, not broken mid-word");
 }

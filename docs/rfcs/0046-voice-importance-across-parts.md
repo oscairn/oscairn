@@ -13,9 +13,11 @@ voices. Oscairn is not affiliated with or endorsed by any of them.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. `oscairn.voice-budget` draft 2: the importance report (`importance`, a fixed list of a
+- [x] 1. `oscairn.voice-budget` draft 2: the importance report (`importance`, a fixed list of a
       context's 16 least important voices), carried in the worker's shared block beside today's
-      note report ([the report](#a-what-an-engine-reports))
+      note report ([the report](#a-what-an-engine-reports)); both CLAP hosts ask for draft 2, then
+      draft 1; the worker bounds the lists and names their contexts by the engine's IDs; tested by
+      `clap-host-rust` (both hosts' reports alike) and `voice-extension-hostile` (bounded)
 - [ ] 2. The shared helper in oscairn-clap: one key function used both for the report and for
       `victim()`, so an engine gives up exactly what it reported; a validator check
       ([the scale](#b-one-scale-for-every-engine))

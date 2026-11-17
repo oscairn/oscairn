@@ -246,6 +246,7 @@ const oscairn_plugins plugins{nullptr,
         Model::log(c,14,s);static thread_local oscairn_voice_budget_note_t list[4];auto r=Model::rng(c,s,14);
         for(uint32_t i=0;i<4;++i)list[i]={int32_t(r.below(30))-1,0,int16_t(r.below(2)),int16_t(40+r.below(30)),1+r.below(3),float(r.unit())};
         *cost=10+r.below(40);*notes=list;*n=r.below(5);return r.below(20);},
+    [](void*,uint32_t,const oscairn_voice_budget_importance_t** lists){*lists=nullptr;return 0u;}, // none reported
     [](void* c,uint32_t s,uint32_t limit,const oscairn_voice_budget_context_t* p,uint32_t n){Model::log(c,15,s,p,n*sizeof *p);Model::log(c,15,s,&limit,4);},
     [](void* c,uint32_t s,uint32_t k){Model::log(c,16,s,&k,4);return 7+k;},
     [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){Model::log(c,17,s,&k,4);auto r=Model::rng(c,s,17+k);for(uint32_t i=0,m=r.below(3);i<m;++i){const uint32_t id=r.below(5);const double v=r.unit();const auto p=param(0,id,v);emit(e,&p);}},

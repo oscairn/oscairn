@@ -53,20 +53,32 @@ extern "C" {
  *   returns how many it wrote. The host compares these across plugins to give up the least
  *   audible notes first.
  *
+ *   importance [audio-thread, after process()] (draft 2; RFC 0046): for each context sounding, its
+ *   OSCAIRN_VOICE_BUDGET_LEAST least important voices in the order below, least important first,
+ *   and how many voices it sounds; at most `capacity` contexts, returns how many it wrote. A voice
+ *   rule 1 keeps is not listed. When the host then lowers a context's limit by n, the plugin gives
+ *   up the n voices it listed first, at the start of its next block: the host checks it.
+ *
  * The order a plugin gives up voices in, which the Oscairn SDK's helper (voice-budget-plugin.hpp)
- * implements:
+ * implements (RFC 0046's scale, the same in every plugin):
  *   1. never a held voice of a context marked OSCAIRN_VOICE_BUDGET_MONO or _LEGATO (its one key,
  *      a legato line's included), nor a held voice of a context at or under its reserve, unless
  *      the new voice is for that same context;
- *   2. released voices (key up, pedal or not) before held ones;
+ *   2. by tier: released (key up, no pedal holding it) or inaudible (below -60 dBFS at the
+ *      plugin's output), then held only by a pedal, then key held, then struck under 50 ms ago;
  *   3. the new voice's own context before others;
  *   4. the context of lower priority before higher;
- *   5. the quietest, then the oldest.
+ *   5. the least audible: its level in dBFS less a decibel per second of age (at most ten), then
+ *      the oldest.
  * A plugin may refine this (one element of a layered note before a whole note) but should not
  * break rule 1.
+ *
+ * Draft 2 adds `importance` to the table; a host asks for draft 2 first and treats a plugin
+ * answering only draft 1 as reporting no importance.
  */
 
-static const char OSCAIRN_EXT_VOICE_BUDGET[] = "oscairn.voice-budget/draft-1";
+static const char OSCAIRN_EXT_VOICE_BUDGET[] = "oscairn.voice-budget/draft-2";
+static const char OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1[] = "oscairn.voice-budget/draft-1";
 
 enum
 {
@@ -96,12 +108,38 @@ typedef struct oscairn_voice_budget_note
     float    loudness; // linear, the largest of its voices' gains now
 } oscairn_voice_budget_note_t;
 
+enum
+{
+    OSCAIRN_VOICE_BUDGET_LEAST = 16, // the voices a context's importance report lists
+};
+
+// A voice in an importance report (draft 2).
+typedef struct oscairn_voice_budget_least
+{
+    uint8_t  tier;     // 0 released or inaudible, 1 held by a pedal, 2 key held, 3 struck under 50 ms ago
+    uint8_t  flags;    // 0
+    uint16_t age_ms;   // since its note-on, at most 65,535
+    float    level_db; // its gain now at the plugin's output, dBFS (envelope, velocity, volume expression and
+                       // the sound's own output level); -120 for silence
+} oscairn_voice_budget_least_t;
+
+// A context's importance report (draft 2).
+typedef struct oscairn_voice_budget_importance
+{
+    uint32_t context; // a sound context's ID, or OSCAIRN_VOICE_BUDGET_SELECTED for a plugin without contexts
+    uint16_t voices;  // its voices sounding, those fading out not counted
+    uint16_t count;   // entries in least
+    oscairn_voice_budget_least_t least[OSCAIRN_VOICE_BUDGET_LEAST]; // least important first
+} oscairn_voice_budget_importance_t;
+
 typedef struct oscairn_plugin_voice_budget
 {
     bool (CLAP_ABI* honors_volume)(const clap_plugin_t* plugin);
     void (CLAP_ABI* set_limits)(const clap_plugin_t* plugin, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count);
     uint32_t (CLAP_ABI* active_voices)(const clap_plugin_t* plugin, double* voice_cost);
     uint32_t (CLAP_ABI* notes)(const clap_plugin_t* plugin, oscairn_voice_budget_note_t* notes, uint32_t capacity);
+    // Draft 2 only: absent from a draft-1 table.
+    uint32_t (CLAP_ABI* importance)(const clap_plugin_t* plugin, oscairn_voice_budget_importance_t* contexts, uint32_t capacity);
 } oscairn_plugin_voice_budget_t;
 
 #ifdef __cplusplus

@@ -246,7 +246,18 @@ namespace
         for(uint32_t i = 0; i < n; ++i) notes[i] = {int32_t(i), 0, int16_t(i), int16_t(60 + i), i + 1, 0.25f * float(i)};
         return n;
     }
-    const oscairn_plugin_voice_budget_t voiceBudget{honorsVolume, setLimits, activeVoices, voiceNotes};
+    // Draft 2: a list per context from its hash, so both hosts' reports can be compared.
+    uint32_t importance(const clap_plugin_t* p, oscairn_voice_budget_importance_t* lists, uint32_t capacity)
+    {
+        const auto h = self(p).hash; const uint32_t n = uint32_t(h % 3) < capacity ? uint32_t(h % 3) : capacity;
+        for(uint32_t i = 0; i < n; ++i)
+        {
+            auto& c = lists[i]; c = {}; c.context = i; c.voices = uint16_t(h % 17 + i); c.count = uint16_t((h >> 8) % (OSCAIRN_VOICE_BUDGET_LEAST + 1));
+            for(uint32_t v = 0; v < c.count; ++v) c.least[v] = {uint8_t(v % 4), 0, uint16_t(v * 10), -60.f + float(v)};
+        }
+        return n;
+    }
+    const oscairn_plugin_voice_budget_t voiceBudget{honorsVolume, setLimits, activeVoices, voiceNotes, importance};
 
     const void* extension(const clap_plugin_t*, const char* id)
     {

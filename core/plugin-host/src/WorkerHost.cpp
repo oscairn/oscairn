@@ -854,6 +854,10 @@ namespace oscairn
             {
                 voiceCost = voiceCost_; notes = voiceNotes_.data(); count = voiceNoteCount_; return activeVoices_;
             }
+            uint32_t importanceReport(const oscairn_voice_budget_importance_t*& lists) const noexcept override
+            {
+                lists = importance_.data(); return importanceCount_;
+            }
             bool preparesSnapshots() const noexcept override { return snapshots_; }
             bool savesSounds() const noexcept override { return savesSounds_; }
             void saveSound(uint32_t id, const std::string& directory) override
@@ -1462,6 +1466,30 @@ namespace oscairn
                         auto& n = voiceNotes_[i] = s.voiceNotes[i];
                         if(!(std::isfinite(n.loudness) && n.loudness > 0)) n.loudness = 0;
                     }
+                    // Each list under the engine's ID for its context (unknown: OSCAIRN_VOICE_BUDGET_SELECTED); none while
+                    // the IDs are being republished.
+                    const auto version = idVersion_.load(std::memory_order_acquire);
+                    const auto known = std::min<uint32_t>(idCount_.load(std::memory_order_relaxed), maxIds);
+                    importanceCount_ = version & 1 ? 0 : std::min<uint32_t>(s.importanceCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS);
+                    for(uint32_t i = 0; i < importanceCount_; ++i)
+                    {
+                        auto& c = importance_[i] = s.importance[i];
+                        if(contexts_)
+                        {
+                            uint32_t j = 0;
+                            while(j < known && uint32_t(idTable_[j].load(std::memory_order_relaxed)) != c.context) ++j;
+                            c.context = j < known ? uint32_t(idTable_[j].load(std::memory_order_relaxed) >> 32) : OSCAIRN_VOICE_BUDGET_SELECTED;
+                        }
+                        c.voices = uint16_t(std::min<uint32_t>(c.voices, maxVoices));
+                        c.count = uint16_t(std::min<uint32_t>(c.count, OSCAIRN_VOICE_BUDGET_LEAST));
+                        for(auto& v : c.least)
+                        {
+                            v.tier = std::min<uint8_t>(v.tier, 3);
+                            v.level_db = std::isfinite(v.level_db) ? std::clamp(v.level_db, -120.f, 24.f) : -120.f;
+                        }
+                    }
+                    std::atomic_thread_fence(std::memory_order_acquire);
+                    if(idVersion_.load(std::memory_order_relaxed) != version) importanceCount_ = 0;
                 }
                 reset_ = reset_ || s.reset != 0;
                 if(!s.ok) kept_ = false; // not rendered in the worker (its control gate busy): events lost there
@@ -1937,6 +1965,8 @@ namespace oscairn
             std::array<oscairn_voice_budget_context_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceContexts_{};
             double voiceCost_ = 0;
             std::array<oscairn_voice_budget_note_t, maxVoiceNotes> voiceNotes_{};
+            uint32_t importanceCount_ = 0;
+            std::array<oscairn_voice_budget_importance_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> importance_{};
             // Engine sound ID << 32 | the worker's, as ids_ last had them (publishIds).
             // shortcut: sounds past maxIds are left out of voice limits; raise it if an instance holds more.
             static constexpr uint32_t maxIds = 64;

@@ -1188,6 +1188,7 @@ namespace oscairn
             [](void* c,uint32_t s){return C::host(c,s).missedBlocks();},
             [](void* c,uint32_t s){return C::host(c,s).blockMicroseconds();},
             [](void* c,uint32_t s,double* cost,const oscairn_voice_budget_note_t** notes,uint32_t* n){return C::host(c,s).voiceReport(*cost,*notes,*n);},
+            [](void* c,uint32_t s,const oscairn_voice_budget_importance_t** lists){return C::host(c,s).importanceReport(*lists);},
             [](void* c,uint32_t s,uint32_t limit,const oscairn_voice_budget_context_t* parts,uint32_t n){C::host(c,s).setVoiceLimits(limit,parts,n);},
             [](void* c,uint32_t s,uint32_t k){return C::step(c,s).contexts[k].sound->sound();},
             [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){C::step(c,s).contexts[k].sound->takeParameters([&](const kick::clap::Event& x){emit(e,coreEvents(&x));});},

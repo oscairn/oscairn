@@ -42,6 +42,7 @@ struct Recording final : PluginHost
     bool voiceBudget() const noexcept override {return p->voiceBudget();}
     bool honorsVolume() const noexcept override {return p->honorsVolume();}
     uint32_t voiceReport(double& c,const oscairn_voice_budget_note_t*& n,uint32_t& k) const noexcept override {return p->voiceReport(c,n,k);}
+    uint32_t importanceReport(const oscairn_voice_budget_importance_t*& l) const noexcept override {return p->importanceReport(l);}
     bool supportsState() const noexcept override {return p->supportsState();}
     bool savesSounds() const noexcept override {return p->savesSounds();}
     std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const override {return p->soundValues(id);}

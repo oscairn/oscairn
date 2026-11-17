@@ -458,7 +458,7 @@ namespace
         s->plugin.get_extension    = []( const clap_plugin_t*, const char* id ) -> const void* {
             if(std::strcmp(id,OSCAIRN_EXT_SOUND_CONTEXTS)==0)return &soundContexts;
             if(std::strcmp(id,OSCAIRN_EXT_SOUND_SNAPSHOTS)==0)return &soundSnapshots;
-            if(std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET)==0)return &voiceBudget;
+            if(std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1)==0)return &voiceBudget;
             if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS ) == 0 )
                 return &audioPorts;
             if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS_ACTIVATION ) == 0 )

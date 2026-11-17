@@ -202,6 +202,7 @@ namespace oscairn
             bool honorsVolume() const noexcept override {return OSCAIRN_CLAP(honors_volume)(host);}
             void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {OSCAIRN_CLAP(set_voice_limits)(host,limit,contexts,count);}
             uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return OSCAIRN_CLAP(voice_report)(host,&voiceCost,&notes,&count);}
+            uint32_t importanceReport(const oscairn_voice_budget_importance_t*& lists) const noexcept override {return OSCAIRN_CLAP(importance_report)(host,&lists);}
             std::array<uint32_t,16> prepareSnapshot(const std::string& directory) override {
                 std::array<uint32_t,16> ids{};checked(OSCAIRN_CLAP(prepare_snapshot)(host,directory.c_str(),ids.data()));return ids;
             }

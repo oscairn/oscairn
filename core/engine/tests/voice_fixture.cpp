@@ -200,7 +200,7 @@ struct Plugin {
                     for(const auto& v:s.voices)if(v.active)report.add(v.id,0,v.channel,v.key,s.loudness(v));
                     return report.write(out,capacity);}};
             if(!std::strcmp(id,CLAP_EXT_NOTE_PORTS))return &notes;
-            if(!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET) && std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET"))return &budget;
+            if(!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1) && std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET"))return &budget;
             return nullptr;
         };
     }

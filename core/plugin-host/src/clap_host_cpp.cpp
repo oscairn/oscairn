@@ -301,4 +301,8 @@ uint32_t cpp_clap_voice_report(const oscairn_clap_host* h, double* cost, const o
 {
     return h->host.voiceReport(*cost, *notes, *count);
 }
+uint32_t cpp_clap_importance_report(const oscairn_clap_host* h, const oscairn_voice_budget_importance_t** lists)
+{
+    return h->host.importanceReport(*lists);
+}
 }

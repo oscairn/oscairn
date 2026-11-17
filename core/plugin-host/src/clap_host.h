@@ -173,7 +173,8 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
     void p##clap_mirror_wake(oscairn_clap_host* host, oscairn_clap_wake* mirror); \
     bool p##clap_was_reset(const oscairn_clap_host* host); \
     void p##clap_set_voice_limits(oscairn_clap_host* host, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count); \
-    uint32_t p##clap_voice_report(const oscairn_clap_host* host, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count);
+    uint32_t p##clap_voice_report(const oscairn_clap_host* host, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count); \
+    uint32_t p##clap_importance_report(const oscairn_clap_host* host, const oscairn_voice_budget_importance_t** lists);
 
 /* new: null when it cannot load, saying why. sound_contexts, sound_values, asset_dependencies, presets: false only
  * when they fail; nothing given then. int returns: 1 true, 0 false, -1 failed. prepare_snapshot: what saveSnapshot

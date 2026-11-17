@@ -56,6 +56,10 @@ int main(int argc,char** argv){try{
             check(voices<=(1u<<16) && count<=kick::clap::Host::maxBlockEvents,"counts bounded: "+std::to_string(voices)+" voices, "+std::to_string(count)+" notes");
             check(std::isfinite(cost) && cost>=0 && cost<=1e6,"a cost in range: "+std::to_string(cost));
             for(uint32_t n=0;n<count;++n)check(std::isfinite(notes[n].loudness) && notes[n].loudness>=0,"a level in range: "+std::to_string(notes[n].loudness));
+            const oscairn_voice_budget_importance_t* lists=nullptr;const uint32_t listed=synth.importanceReport(lists);
+            check(listed<=OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS,"contexts bounded: "+std::to_string(listed));
+            for(uint32_t c=0;c<listed;++c){check(lists[c].voices<=(1u<<16) && lists[c].count<=OSCAIRN_VOICE_BUDGET_LEAST,"a list bounded");
+                for(const auto& v:lists[c].least)check(v.tier<=3 && std::isfinite(v.level_db) && v.level_db>=-120 && v.level_db<=24,"an entry in range");}
             clamped=clamped || (voices==(1u<<16) && count==kick::clap::Host::maxBlockEvents);
         }
         check(clamped,"the worker's out-of-range report arrived, bounded");

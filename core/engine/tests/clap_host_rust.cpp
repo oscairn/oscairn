@@ -85,7 +85,7 @@ namespace
         decltype(&cpp_clap_save_sound) saveSound; decltype(&cpp_clap_sound_values) soundValues; decltype(&cpp_clap_choke_retiring) chokeRetiring;
         decltype(&cpp_clap_asset_dependencies) assetDependencies; decltype(&cpp_clap_load_preset) loadPreset;
         decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
-        decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
+        decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_importance_report) importanceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
         decltype(&cpp_clap_wants_events) wantsEvents; decltype(&cpp_clap_value_rescans) valueRescans;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
@@ -96,7 +96,7 @@ namespace
     p##clap_rings_out, p##clap_process, p##clap_output_events, p##clap_panic, p##clap_asleep, p##clap_restful, p##clap_rested, p##clap_was_reset, \
     p##clap_save_state, p##clap_load_state, p##clap_effect_context, p##clap_sound_contexts, p##clap_prepare_sound, p##clap_prepare_preset, \
     p##clap_select_sound, p##clap_discard_sound, p##clap_prepare_snapshot, p##clap_save_sound, p##clap_sound_values, p##clap_choke_retiring, \
-    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events, p##clap_value_rescans}
+    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_importance_report, p##clap_mirror_wake, p##clap_wants_events, p##clap_value_rescans}
 
     // A transcript: labeled items, each its bytes.
     struct Transcript
@@ -351,6 +351,8 @@ namespace
             uint32_t count = 0; const auto* events = a.outputEvents(h, &count);
             double cost = 0; const oscairn_voice_budget_note_t* voiceNotes = nullptr; uint32_t voiceCount = 0;
             const auto voices = a.voiceReport(h, &cost, &voiceNotes, &voiceCount);
+            const oscairn_voice_budget_importance_t* lists = nullptr;
+            const auto listed = a.importanceReport(h, &lists);
             const bool asleep = a.asleep(h), reset = a.wasReset(h), restful = a.restful(h);
             const auto reports = a.reports(h);
             forbidAllocation = false; counting = false;
@@ -362,6 +364,7 @@ namespace
             t.item(b + " events", events, count * sizeof(oscairn_clap_event));
             t.put(b + " voices", voices); t.put(b + " voice cost", cost); t.put(b + " wake after", wake.load());
             for(uint32_t i = 0; i < voiceCount; ++i) { const auto& v = voiceNotes[i]; t.put(b + " voice note", v.note_id); for(const int x : {v.port_index, v.channel, v.key}) t.put(b + " voice address", x); t.put(b + " voice count", v.voices); t.put(b + " loudness", v.loudness); }
+            for(uint32_t i = 0; i < listed; ++i) t.item(b + " importance", &lists[i], sizeof(oscairn_voice_budget_importance_t));
             t.put(b + " asleep", asleep); t.put(b + " reset", reset); t.put(b + " restful", restful); t.put(b + " reports", reports);
             for(const auto id : ids) t.put(b + " value", a.value(h, id));
             if(block % 50 == 0)

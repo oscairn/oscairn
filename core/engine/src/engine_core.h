@@ -146,7 +146,8 @@ typedef struct
 /* What a step's plugin made of its block: the microseconds it took; whether it rendered, whether its
  * notes are gone (a lost block, or its host reset it), and whether its block was late or silenced (a
  * worker past its allowance); its oscairn.voice-budget report
- * (read when the budget counts its notes and it rendered); the events it sent (its NOTE_ENDs). */
+ * (read when the budget counts its notes and it rendered); the events it sent (its NOTE_ENDs); draft 2's
+ * importance report, a list per context (RFC 0046). */
 typedef struct
 {
     float took;
@@ -157,6 +158,8 @@ typedef struct
     uint32_t note_count;
     const oscairn_event* sent;
     uint32_t sent_count;
+    const oscairn_voice_budget_importance_t* importance;
+    uint32_t importance_count;
 } oscairn_finish;
 
 /* A plan's audio (oscairn_audio): its buffers, the audio connections into its steps and the graph's
@@ -218,6 +221,7 @@ typedef struct
     uint64_t (*missed)(void* context, uint32_t step);
     double (*took)(void* context, uint32_t step);
     uint32_t (*voices)(void* context, uint32_t step, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count);
+    uint32_t (*importance)(void* context, uint32_t step, const oscairn_voice_budget_importance_t** lists); /* PluginHost::importanceReport */
     void (*set_limits)(void* context, uint32_t step, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count);
     uint32_t (*sound)(void* context, uint32_t step, uint32_t context_index);
     void (*parameters)(void* context, uint32_t step, uint32_t context_index, oscairn_emit emit, void* emit_context);

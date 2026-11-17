@@ -724,10 +724,12 @@ impl Run {
             voice_cost: 0.0,
             notes: &[],
             sent: &[],
+            importance: &[],
         };
         step.missed = missed;
         if budgeting && step.budgeted && processed {
             (r.voices, r.voice_cost, r.notes) = p.voices(s);
+            r.importance = p.importance(s);
             (r.own_voices, r.honors_volume) = (p.own_voices(s), p.honors_volume(s));
         }
         r.sent = p.sent(s);
@@ -849,6 +851,9 @@ mod tests {
         unsafe { (*cost, *n) = (10.0, 0) };
         3
     }
+    extern "C" fn importance(_: *mut c_void, _: u32, _: *mut *const crate::bindings::oscairn_voice_budget_importance_t) -> u32 {
+        0
+    }
     extern "C" fn limits(_: *mut c_void, _: u32, _: u32, _: *const VoiceContext, _: u32) {}
     extern "C" fn sound(_: *mut c_void, _: u32, c: u32) -> u32 {
         c
@@ -947,6 +952,7 @@ mod tests {
             missed: Some(zero),
             took: Some(took),
             voices: Some(voices),
+            importance: Some(importance),
             set_limits: Some(limits),
             sound: Some(sound),
             parameters: Some(parameters),

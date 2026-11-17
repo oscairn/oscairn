@@ -310,6 +310,9 @@ public:
     // Audio thread, after process(): the voices the plugin said were sounding, its estimate of one
     // voice's cost, and its notes' loudness, as its last process() left them; 0 without the extension.
     uint32_t voiceReport(double& voiceCost, const oscairn_voice_budget_note_t*& notes, uint32_t& count) const noexcept;
+    // Audio thread, after process(): draft 2's importance report (RFC 0046), one entry per context the plugin
+    // listed, as its last process() left them; 0 without it.
+    uint32_t importanceReport(const oscairn_voice_budget_importance_t*& contexts) const noexcept;
     bool loaded() const noexcept;
     bool faulted() const noexcept;
     const std::string& error() const noexcept;

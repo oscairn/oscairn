@@ -18,5 +18,11 @@ namespace oscairn::worker
         s.voiceCost = odd ? nan : -inf;
         for(auto& n : s.voiceNotes) { n.voices = UINT32_MAX; n.loudness = float(odd ? nan : -1.0); }
         s.voiceNotes[0].loudness = float(inf);
+        s.importanceCount = odd ? UINT32_MAX : OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS + 1;
+        for(auto& c : s.importance)
+        {
+            c.voices = UINT16_MAX; c.count = UINT16_MAX;
+            for(auto& v : c.least) { v.tier = 200; v.level_db = float(odd ? nan : inf); }
+        }
     }
 }

@@ -462,6 +462,9 @@ pub struct Host {
     voice_contexts: Owned<[oscairn_voice_budget_context_t; OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS as usize]>,
     voice_cost: Owned<f64>,
     voice_notes: Owned<Box<[oscairn_voice_budget_note_t; MAX_BLOCK_EVENTS]>>,
+    reports_importance: Owned<bool>, // draft 2 (RFC 0046)
+    importance_count: Owned<u32>,
+    importance: Owned<Box<[oscairn_voice_budget_importance_t; OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS as usize]>>,
     applied_outputs: Owned<u64>,
     applied_told: Owned<bool>,
     input_pointers: Owned<Vec<*mut f32>>,
@@ -650,6 +653,7 @@ impl Host {
             ordered: Owned::new(zeroed_box()), chunk_events: Owned::new(zeroed_box()),
             carry_events: Owned::new(zeroed_box()), block_output: Owned::new(zeroed_box()),
             voice_notes: Owned::new(zeroed_box()), // plain old data
+            importance: Owned::new(zeroed_box()), // plain old data
             sample_rate: Owned::new(48000.0), max_frames: Owned::new(512), current_process_frames: Owned::new(1), next_timer: Owned::new(1),
         }
         // SAFETY: every field is set (above, or valid as zeros).
@@ -1391,10 +1395,15 @@ pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
             return Err("Invalid sound-snapshot interface".into());
         }
     }
+    // Draft 2's table ends with importance; draft 1's does not.
     s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET));
+    s.reports_importance.set(!s.voice_budget.is_null());
+    if s.voice_budget.is_null() {
+        s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1));
+    }
     let budget = s.voice_budget.get();
     if let Some(x) = budget {
-        if x.honors_volume.is_none() || x.set_limits.is_none() || x.active_voices.is_none() || x.notes.is_none() {
+        if x.honors_volume.is_none() || x.set_limits.is_none() || x.active_voices.is_none() || x.notes.is_none() || (s.reports_importance.get() && x.importance.is_none()) {
             return Err("Invalid voice-budget interface".into());
         }
     }
@@ -2461,6 +2470,15 @@ pub unsafe fn set_voice_limits(s: &Host, limit: u32, contexts: *const oscairn_vo
     }
     s.limits_waiting.set(true);
 }
+/// The audio thread's, after process(): draft 2's importance report, a list per context; 0 without it.
+pub fn importance_report(s: &Host, lists: &mut *const oscairn_voice_budget_importance_t) -> u32 {
+    *lists = s.importance.with(|n| n.as_ptr());
+    if !s.voice_budget.is_null() && s.reports_importance.get() {
+        s.importance_count.get()
+    } else {
+        0
+    }
+}
 /// The audio thread's, after process().
 pub fn voice_report(s: &Host, cost: &mut f64, notes: &mut *const oscairn_voice_budget_note_t, count: &mut u32) -> u32 {
     *cost = s.voice_cost.get();
@@ -2960,6 +2978,10 @@ unsafe fn render(
         s.active_voices.set(p.call(v.active_voices, (s.voice_cost.as_ptr(),)));
         let (notes, capacity) = s.voice_notes.with(|n| (n.as_mut_ptr(), n.len() as u32));
         s.voice_note_count.set(p.call(v.notes, (notes, capacity)).min(capacity));
+        if s.reports_importance.get() {
+            let (lists, capacity) = s.importance.with(|n| (n.as_mut_ptr(), n.len() as u32));
+            s.importance_count.set(p.call(v.importance, (lists, capacity)).min(capacity));
+        }
     }
     s.blocks.fetch_add(1, SeqCst);
     let us = start.elapsed().as_secs_f64() * 1e6;

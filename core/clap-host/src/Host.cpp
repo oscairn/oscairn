@@ -211,6 +211,9 @@ struct Host::Impl {
     std::array<oscairn_voice_budget_context_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceContexts{};
     double voiceCost = 0;
     std::array<oscairn_voice_budget_note_t, Host::maxBlockEvents> voiceNotes{};
+    bool reportsImportance = false; // draft 2 (RFC 0046)
+    uint32_t importanceCount = 0;
+    std::array<oscairn_voice_budget_importance_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> importance{};
     const oscairn_plugin_asset_dependencies_t* assetDependencies = nullptr;
     bool assetOptional = false; // draft 2: it says which assets are optional
     AssetResolver* assets = nullptr;
@@ -673,7 +676,9 @@ struct Host::Impl {
         if(s.exclusiveState)s.soundSnapshots = static_cast<const oscairn_plugin_sound_snapshots_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_SOUND_SNAPSHOTS));
         if(s.soundSnapshots && (!s.soundSnapshots->prepare || !s.soundSnapshots->ring_out!=!s.soundSnapshots->choke_retiring))throw std::runtime_error("Invalid sound-snapshot interface");
         s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET));
-        if(s.voiceBudget && (!s.voiceBudget->honors_volume || !s.voiceBudget->set_limits || !s.voiceBudget->active_voices || !s.voiceBudget->notes))throw std::runtime_error("Invalid voice-budget interface");
+        s.reportsImportance = s.voiceBudget != nullptr; // draft 2's table ends with importance; draft 1's does not
+        if(!s.voiceBudget)s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1));
+        if(s.voiceBudget && (!s.voiceBudget->honors_volume || !s.voiceBudget->set_limits || !s.voiceBudget->active_voices || !s.voiceBudget->notes || (s.reportsImportance && !s.voiceBudget->importance)))throw std::runtime_error("Invalid voice-budget interface");
         s.honorsVolume = s.voiceBudget && s.voiceBudget->honors_volume(s.plugin);
         if(s.state && (!s.state->save || !s.state->load))throw std::runtime_error("Incomplete plugin state interface");
         s.assetDependencies = static_cast<const oscairn_plugin_asset_dependencies_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_ASSET_DEPENDENCIES));
@@ -1573,6 +1578,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         if (s.voiceBudget) {
             s.activeVoices = s.voiceBudget->active_voices(s.plugin, &s.voiceCost);
             s.voiceNoteCount = std::min<uint32_t>(s.voiceBudget->notes(s.plugin, s.voiceNotes.data(), uint32_t(s.voiceNotes.size())), uint32_t(s.voiceNotes.size()));
+            if (s.reportsImportance) s.importanceCount = std::min<uint32_t>(s.voiceBudget->importance(s.plugin, s.importance.data(), uint32_t(s.importance.size())), uint32_t(s.importance.size()));
         }
         s.blocks.fetch_add(1);
         const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
@@ -1651,6 +1657,9 @@ void Host::setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* c
 }
 uint32_t Host::voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept {
     const auto& s=*impl;voiceCost=s.voiceCost;notes=s.voiceNotes.data();count=s.voiceBudget?s.voiceNoteCount:0;return s.voiceBudget?s.activeVoices:0;
+}
+uint32_t Host::importanceReport(const oscairn_voice_budget_importance_t*& contexts) const noexcept {
+    const auto& s=*impl;contexts=s.importance.data();return s.reportsImportance?s.importanceCount:0;
 }
 bool Host::chokeRetiringSounds() {
     if(!impl->ringOutChannels)return false;

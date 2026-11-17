@@ -288,6 +288,10 @@ exports! {
         // SAFETY: the caller's.
         unsafe { voice_report(&h, &mut *cost, &mut *notes, &mut *count) }
     }
+    fn rust_clap_importance_report(h, lists: *mut *const oscairn_clap_sys::oscairn_voice_budget_importance_t) -> u32 {
+        // SAFETY: the caller's.
+        unsafe { importance_report(&h, &mut *lists) }
+    }
     // The descriptor, its lists, the ports and the parameters, one by one.
     fn rust_clap_describe(h, to: *const oscairn_clap_description) -> () {
         // SAFETY: the caller's description, its callbacks callable.
@@ -433,7 +437,7 @@ mod tests {
         names.sort();
         let fnv = names.iter().flat_map(|p| std::fs::read(p).unwrap()).fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
         assert_eq!(
-            fnv, 0xf60b_9d0f_4000_3e94,
+            fnv, 0xad4a_e44b_c481_b9e5,
             "core/clap-ext/include/oscairn-clap changed: re-vendor oscairn-clap-sys (vendor/README.md) and update this hash"
         );
     }

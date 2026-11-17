@@ -540,6 +540,10 @@ namespace oscairn::worker
                 s.activeVoices = host.voiceReport(cost, notes, noteCount); s.voiceCost = cost;
                 s.voiceNoteCount = notes ? std::min(noteCount, maxVoiceNotes) : 0;
                 std::copy_n(notes, s.voiceNoteCount, s.voiceNotes);
+                const oscairn_voice_budget_importance_t* lists = nullptr;
+                const uint32_t contexts = host.importanceReport(lists);
+                s.importanceCount = lists ? std::min<uint32_t>(contexts, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS) : 0;
+                std::copy_n(lists, s.importanceCount, s.importance);
             }
 #ifdef OSCAIRN_HOSTILE_WORKER
             hostileReport(s);

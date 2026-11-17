@@ -1205,7 +1205,8 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_plugin_ui, value_icon) - 48usize];
 };
 pub type oscairn_plugin_ui_t = oscairn_plugin_ui;
-pub const OSCAIRN_EXT_VOICE_BUDGET: &[u8; 29] = b"oscairn.voice-budget/draft-1\0";
+pub const OSCAIRN_EXT_VOICE_BUDGET: &[u8; 29] = b"oscairn.voice-budget/draft-2\0";
+pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1: &[u8; 29] = b"oscairn.voice-budget/draft-1\0";
 pub const OSCAIRN_VOICE_BUDGET_MONO: _bindgen_ty_24 = 1;
 pub const OSCAIRN_VOICE_BUDGET_LEGATO: _bindgen_ty_24 = 2;
 pub type _bindgen_ty_24 = ::std::os::raw::c_uint;
@@ -1268,6 +1269,56 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_voice_budget_note, loudness) - 16usize];
 };
 pub type oscairn_voice_budget_note_t = oscairn_voice_budget_note;
+pub const OSCAIRN_VOICE_BUDGET_LEAST: _bindgen_ty_25 = 16;
+pub type _bindgen_ty_25 = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct oscairn_voice_budget_least {
+    pub tier: u8,
+    pub flags: u8,
+    pub age_ms: u16,
+    pub level_db: f32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of oscairn_voice_budget_least"]
+        [::std::mem::size_of::<oscairn_voice_budget_least>() - 8usize];
+    ["Alignment of oscairn_voice_budget_least"]
+        [::std::mem::align_of::<oscairn_voice_budget_least>() - 4usize];
+    ["Offset of field: oscairn_voice_budget_least::tier"]
+        [::std::mem::offset_of!(oscairn_voice_budget_least, tier) - 0usize];
+    ["Offset of field: oscairn_voice_budget_least::flags"]
+        [::std::mem::offset_of!(oscairn_voice_budget_least, flags) - 1usize];
+    ["Offset of field: oscairn_voice_budget_least::age_ms"]
+        [::std::mem::offset_of!(oscairn_voice_budget_least, age_ms) - 2usize];
+    ["Offset of field: oscairn_voice_budget_least::level_db"]
+        [::std::mem::offset_of!(oscairn_voice_budget_least, level_db) - 4usize];
+};
+pub type oscairn_voice_budget_least_t = oscairn_voice_budget_least;
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct oscairn_voice_budget_importance {
+    pub context: u32,
+    pub voices: u16,
+    pub count: u16,
+    pub least: [oscairn_voice_budget_least_t; 16usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of oscairn_voice_budget_importance"]
+        [::std::mem::size_of::<oscairn_voice_budget_importance>() - 136usize];
+    ["Alignment of oscairn_voice_budget_importance"]
+        [::std::mem::align_of::<oscairn_voice_budget_importance>() - 4usize];
+    ["Offset of field: oscairn_voice_budget_importance::context"]
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, context) - 0usize];
+    ["Offset of field: oscairn_voice_budget_importance::voices"]
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, voices) - 4usize];
+    ["Offset of field: oscairn_voice_budget_importance::count"]
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, count) - 6usize];
+    ["Offset of field: oscairn_voice_budget_importance::least"]
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, least) - 8usize];
+};
+pub type oscairn_voice_budget_importance_t = oscairn_voice_budget_importance;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct oscairn_plugin_voice_budget {
@@ -1291,11 +1342,18 @@ pub struct oscairn_plugin_voice_budget {
             capacity: u32,
         ) -> u32,
     >,
+    pub importance: ::std::option::Option<
+        unsafe extern "C" fn(
+            plugin: *const clap_plugin_t,
+            contexts: *mut oscairn_voice_budget_importance_t,
+            capacity: u32,
+        ) -> u32,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of oscairn_plugin_voice_budget"]
-        [::std::mem::size_of::<oscairn_plugin_voice_budget>() - 32usize];
+        [::std::mem::size_of::<oscairn_plugin_voice_budget>() - 40usize];
     ["Alignment of oscairn_plugin_voice_budget"]
         [::std::mem::align_of::<oscairn_plugin_voice_budget>() - 8usize];
     ["Offset of field: oscairn_plugin_voice_budget::honors_volume"]
@@ -1306,6 +1364,8 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_plugin_voice_budget, active_voices) - 16usize];
     ["Offset of field: oscairn_plugin_voice_budget::notes"]
         [::std::mem::offset_of!(oscairn_plugin_voice_budget, notes) - 24usize];
+    ["Offset of field: oscairn_plugin_voice_budget::importance"]
+        [::std::mem::offset_of!(oscairn_plugin_voice_budget, importance) - 32usize];
 };
 pub type oscairn_plugin_voice_budget_t = oscairn_plugin_voice_budget;
 pub mod ids {
@@ -1331,4 +1391,5 @@ pub mod ids {
     pub const OSCAIRN_EXT_UI_DRAFT_4: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_4);
     pub const OSCAIRN_EXT_UI_DRAFT_3: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_3);
     pub const OSCAIRN_EXT_VOICE_BUDGET: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET);
+    pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1);
 }

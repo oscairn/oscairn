@@ -347,8 +347,15 @@ pub unsafe extern "C" fn rust_core_notes_route(
 #[no_mangle]
 pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, finish: *const oscairn_finish) {
     // SAFETY: the caller's contract: live notes used by nothing else, a readable finish and arrays.
-    let (notes, f, voice_notes, sent) =
-        unsafe { (&mut *notes, &*finish, slice((*finish).notes, (*finish).note_count), slice((*finish).sent, (*finish).sent_count)) };
+    let (notes, f, voice_notes, sent, importance) = unsafe {
+        (
+            &mut *notes,
+            &*finish,
+            slice((*finish).notes, (*finish).note_count),
+            slice((*finish).sent, (*finish).sent_count),
+            slice((*finish).importance, (*finish).importance_count),
+        )
+    };
     let rendered = Rendered {
         took: f.took,
         processed: f.processed,
@@ -360,6 +367,7 @@ pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, fi
         voice_cost: f.voice_cost,
         notes: voice_notes,
         sent,
+        importance,
     };
     notes.finish(&mut Routes(()), step as usize, &rendered);
 }
@@ -496,6 +504,12 @@ impl oscairn_plugins {
         let (mut cost, mut notes, mut n) = (0.0, std::ptr::null(), 0);
         // SAFETY: as `sent`.
         unsafe { ((self.voices.expect("voices"))(self.context, s as u32, &mut cost, &mut notes, &mut n), cost, slice(notes, n)) }
+    }
+    /// Draft 2's importance report: a list per context (RFC 0046).
+    pub fn importance(&self, s: usize) -> &[oscairn_voice_budget_importance_t] {
+        let mut lists = std::ptr::null();
+        // SAFETY: as `sent`.
+        unsafe { slice(lists, (self.importance.expect("importance"))(self.context, s as u32, &mut lists)) }
     }
     /// A shared engine's context `c`'s parameters set since its last block, each to `emit`.
     pub fn parameters(&self, s: usize, c: usize, mut emit: &mut dyn FnMut(&Event) -> bool) {
@@ -780,6 +794,8 @@ mod tests {
                 note_count: 0,
                 sent: &end,
                 sent_count: u32::from(b % 5 == 0),
+                importance: std::ptr::null(),
+                importance_count: 0,
             };
             // SAFETY: live notes and buffers of the sizes given, for these calls.
             unsafe {

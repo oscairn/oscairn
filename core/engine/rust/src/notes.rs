@@ -3,6 +3,7 @@
 //! plugin rendered, its notes counted and costed and its NOTE_ENDs taken; per block, the budget's
 //! lanes. Everything is sized when the plan is built: a block allocates nothing.
 
+use crate::bindings::oscairn_voice_budget_importance_t as Listed;
 use crate::budget::{Activity, Budget, Entry};
 use crate::event::*;
 use crate::route::{self, Context, Zones, UNTAGGED};
@@ -138,6 +139,7 @@ pub struct Rendered<'a> {
     pub voice_cost: f64,
     pub notes: &'a [VoiceNote],
     pub sent: &'a [Event],
+    pub importance: &'a [Listed],
 }
 
 pub struct Notes {

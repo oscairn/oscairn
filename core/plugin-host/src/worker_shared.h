@@ -85,6 +85,8 @@ typedef struct oscairn_worker_shared
     uint32_t activeVoices, voiceNoteCount;
     double voiceCost;
     oscairn_voice_budget_note_t voiceNotes[OSCAIRN_WORKER_MAX_VOICE_NOTES];
+    uint32_t importanceCount; /* draft 2's importance report (RFC 0046): a list per context */
+    oscairn_voice_budget_importance_t importance[OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS];
     oscairn_atomic_u64 outputDrops, blocks, droppedEvents, processErrors, deadlineMisses, controlSilences, idleBlocks;
     oscairn_atomic_f64 lastMicroseconds, maximumMicroseconds, cpuMicroseconds; /* cpuMicroseconds: the audio thread's CPU time for its blocks so far */
     /* The worker's, for the timing report: when its audio thread ran for the last block and when it was done with

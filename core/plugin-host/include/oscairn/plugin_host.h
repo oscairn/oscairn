@@ -94,6 +94,8 @@ namespace oscairn
         virtual bool honorsVolume() const noexcept { return false; }
         virtual void setVoiceLimits(uint32_t, const oscairn_voice_budget_context_t*, uint32_t) noexcept {}
         virtual uint32_t voiceReport(double& voiceCost, const oscairn_voice_budget_note_t*& notes, uint32_t& count) const noexcept { voiceCost = 0; notes = nullptr; count = 0; return 0; }
+        // Draft 2's importance report (RFC 0046): a list per context, 0 for a plugin without it.
+        virtual uint32_t importanceReport(const oscairn_voice_budget_importance_t*& lists) const noexcept { lists = nullptr; return 0; }
         virtual bool supportsState() const noexcept { return false; }
         // The plugin's own window (CLAP gui, RFC 0019), shown by the process hosting the plugin.
         // Control thread. showWindow opens it titled `title`, or titles and raises it; false closes

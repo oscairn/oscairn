@@ -344,6 +344,7 @@ public:
     bool honorsVolume() const noexcept override {return playing().honorsVolume();}
     void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {playing().setVoiceLimits(limit,contexts,count);}
     uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return playing().voiceReport(voiceCost,notes,count);}
+    uint32_t importanceReport(const oscairn_voice_budget_importance_t*& lists) const noexcept override {return playing().importanceReport(lists);}
     // Its instances' declarations together (RFC 0025); empty when none declares.
     std::optional<oscairn_memory_t> declaredMemory() const override {
         std::optional<oscairn_memory_t> sum;

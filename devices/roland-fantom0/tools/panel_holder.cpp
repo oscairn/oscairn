@@ -5,7 +5,11 @@
 // oscairn-panel-dump (holdPanel in panel_reader.h; docs/fantom-0.md, "The panel holder"). One
 // runs at a time; SIGTERM stops it. It leaves the session it was started in, so the shell that
 // started it can go.
-//   oscairn-panel-holder DEVICE [--socket NAME]
+//   oscairn-panel-holder DEVICE [--socket NAME] [--takeover]
+// --takeover: when a holder runs, ask it to hand over the open device, its socket and its readers
+// (nothing is closed or reopened), and take the panel from it; ends with 3 when the holder refuses
+// (it is the same version or newer) and 4 when it does not answer (it predates the handover); both
+// leave it holding the panel. When none runs it starts as usual.
 #include "oscairn/panel_reader.h"
 #include "oscairn/plugin_host.h"
 
@@ -32,17 +36,26 @@ namespace
 int main(int argc, char** argv)
 {
     oscairn::ignoreTickSignal();
-    if(!(argc == 2 || (argc == 4 && std::string(argv[2]) == "--socket")))
+    std::string socket = oscairn::panelHolderSocket;
+    oscairn::PanelDevice device;
+    for(int i = 2; i < argc; ++i)
     {
-        std::fprintf(stderr, "usage: oscairn-panel-holder DEVICE [--socket NAME]\n");
+        const std::string a = argv[i];
+        if(a == "--takeover") device.takeover = true;
+        else if(a == "--socket" && i + 1 < argc) socket = argv[++i];
+        else { argc = 0; break; }
+    }
+    if(argc < 2)
+    {
+        std::fprintf(stderr, "usage: oscairn-panel-holder DEVICE [--socket NAME] [--takeover]\n");
         return 2;
     }
     ::setsid();
-    return oscairn::holdPanel(argv[1], argc == 4 ? argv[3] : oscairn::panelHolderSocket, [](const std::string& line) {
+    return oscairn::holdPanel(argv[1], socket, [](const std::string& line) {
         emptyLogIfFull();
         char when[32];
         const auto now = std::time(nullptr);
         std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
         std::fprintf(stderr, "%s oscairn-panel-holder: %s\n", when, line.c_str());
-    });
+    }, device);
 }

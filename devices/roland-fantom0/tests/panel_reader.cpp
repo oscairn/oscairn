@@ -33,6 +33,7 @@
 #include <sstream>
 #include <string>
 #include <sys/socket.h>
+#include <termios.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <thread>
@@ -465,6 +466,158 @@ namespace
         check(ended(pid, 2000) == 0, "the holder ends");
     }
 
+    // A pseudo-terminal standing in for the panel device: bytes written to its master are what the
+    // panel sent, and its master sees a hang-up if every open of the slave side is closed.
+    struct Pty
+    {
+        int master = -1;
+        std::string slave;
+        Pty()
+        {
+            master = ::posix_openpt(O_RDWR | O_NOCTTY);
+            check(master >= 0 && ::grantpt(master) == 0 && ::unlockpt(master) == 0, "a pty");
+            slave = ::ptsname(master);
+        }
+        ~Pty() { ::close(master); }
+        void send(const std::array<uint8_t, 4>& m) { check(::write(master, m.data(), m.size()) == 4, "the panel sends"); }
+        bool hungUp() const { pollfd p{master, POLLIN, 0}; // macOS reports it only when asked for POLLIN
+             return ::poll(&p, 1, 0) == 1 && (p.revents & POLLHUP); }
+    };
+    // A holder's seam over a pty: the open of the slave is traced (the handover must never open
+    // the device a second time), the wait is a poll on the device.
+    PanelDevice ptySeam(const Pty& pty, Bench& bench, int version, bool takeover)
+    {
+        PanelDevice d;
+        const int t = bench.trace[1];
+        const std::string slave = pty.slave;
+        d.open = [t, slave](const std::string&, int) { if(::write(t, "seam: open read-write\n", 22) < 0) {} 
+            const int fd = ::open(slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+            termios raw{}; // as a line is not wanted: 4 bytes are a message (the master's own cannot be set on macOS)
+            if(fd >= 0 && ::tcgetattr(fd, &raw) == 0) { ::cfmakeraw(&raw); ::tcsetattr(fd, TCSANOW, &raw); }
+            return fd; };
+        d.wait = [](int fd) { pollfd p{fd, POLLIN, 0}; return ::poll(&p, 1, -1) >= 0 ? 0 : -1; };
+        d.version = version;
+        d.takeover = takeover;
+        return d;
+    }
+    bool gets(int reader, const std::array<uint8_t, 4>& m, int ms = 3000)
+    {
+        pollfd p{reader, POLLIN, 0};
+        std::array<uint8_t, 4> got{};
+        return ::poll(&p, 1, ms) == 1 && ::recv(reader, got.data(), 4, 0) == 4 && got == m;
+    }
+    void sendRaw(int fd, const std::string& text) { if(::send(fd, text.data(), text.size(), 0) < 0) {} }
+
+    // The handover: a holder of a higher version asks the running one for the open device, its
+    // socket and its readers. Readers stay attached without reconnecting (they hold the same
+    // connections), the device is opened once and never hung up, and messages flow across it. A
+    // holder of the same or a lower version is refused and the running one serves on; malformed
+    // requests cost the sender its connection and nothing more; a holder that predates the handover
+    // (it reads the request as junk and answers nothing) is left holding the panel.
+    void handover()
+    {
+        {
+            // The detector itself: a pty whose slave was opened and closed reads as hung up.
+            Pty probe;
+            const int slave = ::open(probe.slave.c_str(), O_RDWR | O_NOCTTY);
+            check(slave >= 0 && !probe.hungUp(), "a pty with its slave open is not hung up");
+            ::close(slave);
+            check(probe.hungUp(), "and is, once the slave is closed");
+        }
+        Pty pty;
+        Bench bench;
+        const auto a = message(1, 3, 100), b = message(1, 3, 200), c = message(1, 3, 300), d = message(1, 3, 400), e = message(1, 3, 500);
+        const pid_t old = bench.start(ptySeam(pty, bench, 1, false));
+        check(bench.saw("holding "), "the old holder holds the pty:\n" + bench.read());
+        const int r1 = connectPanelHolder(bench.socket);
+        check(r1 >= 0 && bench.saw("a reader attached (1 now)"), "a reader attaches");
+        pty.send(a);
+        check(gets(r1, a), "a message reaches the reader through the old holder");
+
+        const pid_t fresh = bench.start(ptySeam(pty, bench, 2, true));
+        check(ended(old, 8000) == 0 && bench.saw("handed the panel over; ending"), "the old holder ends, cleanly, once it has handed over:\n" + bench.read());
+        check(bench.saw("took the panel over") && bench.saw("and 1 readers"), "the new holder took it, and the reader:\n" + bench.read());
+        check(bench.count("seam: open") == 1, "the device was opened once, by the old holder, never by the new one:\n" + bench.read());
+        check(!pty.hungUp(), "the device never hung up");
+        pty.send(b);
+        check(gets(r1, b), "the reader, never reconnected, hears the new holder");
+        check(stays(r1, 100), "and its connection is still open");
+        const int r2 = connectPanelHolder(bench.socket);
+        check(r2 >= 0 && bench.saw("a reader attached (2 now)"), "a reader attaches to the new holder, beside the carried one");
+        pty.send(c);
+        check(gets(r1, c) && gets(r2, c), "both hear the next message");
+
+        // The same version and an older one are refused; the running holder serves on.
+        const pid_t same = bench.start(ptySeam(pty, bench, 2, true));
+        check(ended(same, 4000) == panelHolderRefused, "a holder of the same version is refused");
+        const pid_t older = bench.start(ptySeam(pty, bench, 1, true));
+        check(ended(older, 4000) == panelHolderRefused, "a holder of a lower version is refused");
+        check(bench.count("seam: open") == 1 && !pty.hungUp(), "neither opened the device");
+        pty.send(d);
+        check(gets(r1, d) && gets(r2, d), "the running holder serves on");
+
+        // Malformed requests, from readers of a local socket: the sender is dropped, bounded reads, no crash.
+        const std::vector<std::string> bad = {
+            "OSCAIRN-PANEL-HANDOVER abc\n", "OSCAIRN-PANEL-HANDOVER \n", "OSCAIRN-PANEL-HANDOVER 99999999999\n", "OSCAIRN-PANEL-HANDOVER -3\n",
+            "OSCAIRN-PANEL-HANDOVER 5\nmore", std::string("OSCAIRN-PANEL-HANDOVER 5\0\n", 26), "OSCAIRN-PANEL-HANDOVER " + std::string(200, '9')};
+        for(const auto& request : bad)
+        {
+            const int x = connectPanelHolder(bench.socket);
+            sendRaw(x, request);
+            check(x >= 0 && closedByHolder(x, 3000), "a malformed request ends its connection: " + request.substr(0, 40));
+            ::close(x);
+        }
+        const int junk = connectPanelHolder(bench.socket);
+        sendRaw(junk, "hello");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        pty.send(e);
+        check(gets(r1, e) && gets(r2, e) && gets(junk, e), "after them all, the holder serves, and a reader that sent junk stays as it always did");
+        ::close(junk);
+        check(bench.count("seam: open") == 1 && !pty.hungUp(), "the device still open once, never hung up");
+
+        ::kill(fresh, SIGTERM);
+        check(ended(fresh, 2000) == 0, "the new holder stops on SIGTERM");
+        ::close(r1);
+        ::close(r2);
+
+        // A holder that predates the handover: it takes the request as junk and says nothing. The
+        // new one gives up after a second and a half and opens nothing; the old keeps the panel.
+        Bench plain;
+        const std::string path = plain.socket;
+        const pid_t stand = ::fork();
+        if(stand == 0)
+        {
+            sockaddr_un addr{};
+            addr.sun_family = AF_UNIX;
+            std::memcpy(addr.sun_path, path.c_str(), path.size() + 1);
+            const int l = ::socket(AF_UNIX, SOCK_STREAM, 0);
+            if(::bind(l, reinterpret_cast<const sockaddr*>(&addr), sizeof addr) != 0 || ::listen(l, 4) != 0) ::_exit(2);
+            std::vector<int> held;
+            for(int i = 0; i < 600; ++i) // six seconds
+            {
+                pollfd p{l, POLLIN, 0};
+                if(::poll(&p, 1, 10) == 1) held.push_back(::accept(l, nullptr, nullptr));
+                for(const int h : held) { char buf[64]; ::recv(h, buf, sizeof buf, MSG_DONTWAIT); }
+            }
+            ::_exit(0);
+        }
+        for(int i = 0; i < 300 && ::access(path.c_str(), F_OK) != 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        const auto asked = std::chrono::steady_clock::now();
+        const pid_t newer = plain.start(ptySeam(pty, plain, 5, true));
+        check(ended(newer, 5000) == panelHolderSilent, "a holder that does not answer is reported as one that predates the handover");
+        check(std::chrono::steady_clock::now() - asked < std::chrono::seconds(4) && plain.count("seam: open") == 0, "within seconds, and without opening the device:\n" + plain.read());
+        check(plain.saw("older than the handover"), "and says why:\n" + plain.read());
+        ::kill(stand, SIGKILL);
+        ::waitpid(stand, nullptr, 0);
+
+        // With no holder at all, a takeover starts one as usual.
+        Bench none;
+        const pid_t lone = none.start(ptySeam(pty, none, 1, true));
+        check(none.saw("no panel holder runs") && none.saw("holding "), "a takeover with no holder running starts one:\n" + none.read());
+        ::kill(lone, SIGTERM);
+        check(ended(lone, 2000) == 0, "it stops");
+    }
+
     // The takeover guard: while another process has the device open the holder does not open it.
     // Linux: it reads /proc.
     void guard()
@@ -687,6 +840,7 @@ int main(int argc, char** argv)
     if(argc != 4) { std::fprintf(stderr, "usage: oscairn-panel-reader-test FIXTURE MAP PANEL_DUMP\n"); return 2; }
     holder(); // forks: first, before any thread
     readerLimit();
+    handover();
     guard();
     dump(argv[3]);
     maps(argv[2]);

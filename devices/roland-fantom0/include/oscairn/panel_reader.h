@@ -97,11 +97,23 @@ namespace oscairn
     std::vector<int> processesHolding(const std::string& path);
     // How the holder opens the device and waits on it; empty: ::open and ioctl(fd, 0, 0). A test's
     // seam: a driver's ioctl cannot be had without its kernel module.
+    // The first holder that can hand the panel over. A holder of an earlier build (the unit's
+    // before this existed) has no version and never answers a request.
+    inline constexpr int panelHolderVersion = 1;
+    // What holdPanel returns besides 0 (stopped, or handed over) and 1 (failed): a takeover
+    // refused by a holder of the same or a higher version (it keeps the panel), and one the
+    // running holder did not answer (it predates the handover; it keeps the panel too).
+    inline constexpr int panelHolderRefused = 3, panelHolderSilent = 4;
     struct PanelDevice
     {
         std::function<int(const std::string& path, int flags)> open;
         std::function<int(int fd)> wait; // the driver's returns 0 for a message and for a signal alike
         int patience = 2000;             // milliseconds to wait for another holder of the device to let go
+        // The handover (docs/fantom-0.md, "The panel holder"): this holder's version, and whether
+        // it asks the holder that runs to pass it the open device and its readers (takeover)
+        // instead of refusing beside it. A holder hands over only to a higher version.
+        int version = panelHolderVersion;
+        bool takeover = false;
     };
     // The holder: binds `socket` first, as its lock, and refuses (1) if another holder has it; then
     // opens `path` once for reading and writing, only while no other process has it open, retrying
@@ -110,8 +122,10 @@ namespace oscairn
     // to every attached reader (none attached: dropped). It never writes to the device, polls it or
     // opens it again. A reader attaching raises SIGIO, which wakes the wait to take it in (or the
     // next message does); a reader going raises SIGIO too, and the holder drops it at once (or, if
-    // it went just before a wait began, at the next message). Returns 0 when stopped, 1 when
-    // refused or failed; logs each step.
+    // it went just before a wait began, at the next message). A reader that hangs up is dropped at
+    // once, and at every accept; the ninth reader is turned away once, counted, not logged each time.
+    // Returns 0 when stopped or when the panel was handed over, 1 when refused or failed, 3 and 4
+    // for a takeover that was not granted; logs each step.
     int holdPanel(const std::string& path, const std::string& socket, const std::function<void(const std::string&)>& log, PanelDevice device = {});
 
     // Reads a panel on a thread of its own, so it never blocks anything else; frames its bytes into

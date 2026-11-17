@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <set>
+#include <string_view>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/time.h>
@@ -115,6 +116,108 @@ namespace oscairn
         void stopHolder(int) { holderStop = 1; }
         volatile std::sig_atomic_t woken = 0;
         void wakeHolder(int) { woken = 1; } // a reader attaching or going: the wait ends, and the holder takes it in or drops it
+
+        // A reader's connection to the holder: what it has sent (a handover request is the only
+        // thing read), and whether it has sent something that is not one.
+        struct Reader
+        {
+            int fd;
+            std::string in;
+            bool plain;
+        };
+        constexpr std::string_view handoverTag = "OSCAIRN-PANEL-HANDOVER ";
+        constexpr size_t handoverMost = 64; // bytes of a request kept; a longer one is malformed
+
+        // `text` and descriptors, in one message (SCM_RIGHTS: the receiver gets its own descriptors
+        // for the same open files).
+        bool sendWithFds(int sock, const std::string& text, const std::vector<int>& fds)
+        {
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 16)] = {};
+            if(fds.size() > 16) { errno = E2BIG; return false; }
+            iovec v{const_cast<char*>(text.data()), text.size()};
+            msghdr m{};
+            m.msg_iov = &v;
+            m.msg_iovlen = 1;
+            m.msg_control = control;
+            m.msg_controllen = CMSG_SPACE(sizeof(int) * fds.size());
+            cmsghdr* c = CMSG_FIRSTHDR(&m);
+            c->cmsg_level = SOL_SOCKET;
+            c->cmsg_type = SCM_RIGHTS;
+            c->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+            std::memcpy(CMSG_DATA(c), fds.data(), sizeof(int) * fds.size());
+            return ::sendmsg(sock, &m, MSG_NOSIGNAL) == ssize_t(text.size());
+        }
+        // Up to `size` bytes and the descriptors that came with them (at most 16; more or a cut-off
+        // list closes them all and fails). Every descriptor is close-on-exec.
+        ssize_t receiveWithFds(int sock, char* buffer, size_t size, std::vector<int>& fds)
+        {
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 16)];
+            iovec v{buffer, size};
+            msghdr m{};
+            m.msg_iov = &v;
+            m.msg_iovlen = 1;
+            m.msg_control = control;
+            m.msg_controllen = sizeof control;
+            const ssize_t n = ::recvmsg(sock, &m, 0);
+            if(n < 0) return n;
+            for(cmsghdr* c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c))
+            {
+                if(c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS) continue;
+                const size_t count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                for(size_t i = 0; i < count; ++i)
+                {
+                    int one;
+                    std::memcpy(&one, CMSG_DATA(c) + i * sizeof(int), sizeof one);
+                    ::fcntl(one, F_SETFD, FD_CLOEXEC);
+                    fds.push_back(one);
+                }
+            }
+            if(m.msg_flags & MSG_CTRUNC) { for(const int f : fds) ::close(f); fds.clear(); errno = EMSGSIZE; return -1; }
+            return n;
+        }
+        // True when the other end closed within `ms` (anything it sends meanwhile is read and dropped).
+        bool endOfStream(int sock, int ms)
+        {
+            for(const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms); std::chrono::steady_clock::now() < end;)
+            {
+                pollfd p{sock, POLLIN, 0};
+                if(::poll(&p, 1, 50) != 1) continue;
+                char junk[16];
+                const ssize_t n = ::recv(sock, junk, sizeof junk, 0);
+                if(n == 0 || (n < 0 && errno != EINTR && errno != EAGAIN)) return true;
+            }
+            return false;
+        }
+        // The new holder's side of a handover: asks the holder on `conn` for the panel and, if it
+        // answers "OK <version>\n" with descriptors (device, socket, then readers), leaves them in
+        // `fds` and returns 0. Returns panelHolderRefused when the holder refused (the same or a
+        // newer version), panelHolderSilent when it did not answer in 1.5 seconds (a holder that
+        // predates the handover reads the request as junk and says nothing), 1 for anything else.
+        int requestHandover(int conn, int version, std::vector<int>& fds, const std::function<void(const std::string&)>& say)
+        {
+            const std::string request = std::string(handoverTag) + std::to_string(version) + "\n";
+            if(::send(conn, request.data(), request.size(), MSG_NOSIGNAL) != ssize_t(request.size())) { say(std::string("the handover request was not sent: ") + std::strerror(errno)); return 1; }
+            pollfd p{conn, POLLIN, 0};
+            int ready;
+            while((ready = ::poll(&p, 1, 1500)) < 0 && errno == EINTR) {}
+            if(ready == 0) { say("the panel holder that runs did not answer a handover request: it is older than the handover; it keeps the panel"); return panelHolderSilent; }
+            char reply[handoverMost];
+            const ssize_t n = ready > 0 ? receiveWithFds(conn, reply, sizeof reply, fds) : -1;
+            if(n == 0) { say("the panel holder that runs closed the connection at the handover request: it is older than the handover; it keeps the panel"); return panelHolderSilent; }
+            if(n < 0) { say(std::string("the handover reply was not read: ") + std::strerror(errno)); return 1; }
+            const std::string_view said(reply, size_t(n));
+            auto closeAll = [&] { for(const int f : fds) ::close(f); fds.clear(); };
+            if(said.substr(0, 8) == "REFUSED ") { closeAll(); say("the panel holder that runs refused the handover (its version is not below " + std::to_string(version) + "); it keeps the panel"); return panelHolderRefused; }
+            // Device, socket, and up to eight readers; nothing else is accepted, and each must be what it should.
+            struct stat sd{}, sl{};
+            if(said.substr(0, 3) != "OK " || fds.size() < 2 || fds.size() > 10 || ::fstat(fds[0], &sd) != 0 || ::fstat(fds[1], &sl) != 0 || !S_ISSOCK(sl.st_mode))
+            {
+                closeAll();
+                say("the handover reply was not understood");
+                return 1;
+            }
+            return 0;
+        }
 
     }
 
@@ -318,35 +421,68 @@ namespace oscairn
         sigemptyset(&none);
         ::sigprocmask(SIG_SETMASK, &none, nullptr);
 
+        // The handover first, when asked for: the holder that runs is asked to pass on the open
+        // device, its socket and its readers. No socket is bound and the device is not opened here,
+        // so it is never opened twice and never left unheld.
+        int fd = -1, listener = -1;
+        std::vector<Reader> readers;
+        bool took = false;
+        if(device.takeover)
+        {
+            const int conn = connectPanelHolder(socket);
+            if(conn >= 0)
+            {
+                std::vector<int> fds;
+                const int answer = requestHandover(conn, device.version, fds, say);
+                if(answer != 0) { ::close(conn); return answer; }
+                fd = fds[0];
+                listener = fds[1];
+                for(size_t i = 2; i < fds.size(); ++i) readers.push_back({fds[i], {}, false});
+                ::fcntl(listener, F_SETOWN, ::getpid());
+                ::fcntl(listener, F_SETFL, ::fcntl(listener, F_GETFL) | O_NONBLOCK | O_ASYNC);
+                for(const auto& r : readers) { ::fcntl(r.fd, F_SETOWN, ::getpid()); ::fcntl(r.fd, F_SETFL, ::fcntl(r.fd, F_GETFL) | O_NONBLOCK | O_ASYNC); }
+                // Told only now, when everything is held here; then the old holder ends, and its end
+                // of this connection with it. Until it has, it still holds everything too.
+                if(::send(conn, "TAKEN\n", 6, MSG_NOSIGNAL) != 6) say("the holder that handed over was not told so (" + std::string(std::strerror(errno)) + ")");
+                else if(!endOfStream(conn, 5000)) say("the holder that handed over has not ended after five seconds");
+                ::close(conn);
+                took = true;
+                say("took the panel over: " + path + " (open, never closed), the socket " + socket + " and " + std::to_string(readers.size()) + " readers");
+            }
+            else say("no panel holder runs at " + socket + ": starting one");
+        }
+
         // The lock, before the device is touched: one holder per socket, so the device is never
         // opened twice.
         sockaddr_un a;
         const auto size = address(socket, a);
-        const int listener = size ? ::socket(AF_UNIX, SOCK_STREAM, 0) : -1;
-        if(listener < 0) { say("cannot make the socket " + socket + ": " + std::strerror(errno)); return 1; }
-        ::fcntl(listener, F_SETFD, FD_CLOEXEC);
-        auto bound = [&] { return ::bind(listener, reinterpret_cast<const sockaddr*>(&a), size) == 0; };
-        bool ok = bound();
-        if(!ok && errno == EADDRINUSE && socket[0] != '@')
+        if(!took)
         {
-            // shortcut: a path's socket left by a holder that died is taken over, and two holders starting at the same moment could both do it; paths are for tests: the unit's abstract name is freed by the kernel with its holder
-            const int other = connectPanelHolder(socket);
-            if(other >= 0) { ::close(other); errno = EADDRINUSE; }
-            else ok = ::unlink(socket.c_str()) == 0 && bound();
-        }
-        if(!ok)
-        {
-            say(errno == EADDRINUSE ? "another panel holder runs (" + socket + " is taken); not opening " + path : "cannot bind " + socket + ": " + std::strerror(errno));
-            ::close(listener);
-            return 1;
+            listener = size ? ::socket(AF_UNIX, SOCK_STREAM, 0) : -1;
+            if(listener < 0) { say("cannot make the socket " + socket + ": " + std::strerror(errno)); return 1; }
+            ::fcntl(listener, F_SETFD, FD_CLOEXEC);
+            auto bound = [&] { return ::bind(listener, reinterpret_cast<const sockaddr*>(&a), size) == 0; };
+            bool ok = bound();
+            if(!ok && errno == EADDRINUSE && socket[0] != '@')
+            {
+                // shortcut: a path's socket left by a holder that died is taken over, and two holders starting at the same moment could both do it; paths are for tests: the unit's abstract name is freed by the kernel with its holder
+                const int other = connectPanelHolder(socket);
+                if(other >= 0) { ::close(other); errno = EADDRINUSE; }
+                else ok = ::unlink(socket.c_str()) == 0 && bound();
+            }
+            if(!ok)
+            {
+                say(errno == EADDRINUSE ? "another panel holder runs (" + socket + " is taken); not opening " + path : "cannot bind " + socket + ": " + std::strerror(errno));
+                ::close(listener);
+                return 1;
+            }
         }
         auto unbind = [&] { ::close(listener); if(socket[0] != '@') ::unlink(socket.c_str()); };
 
         // Opened only while no other process has it: a second open while another holds it fails
         // and, by Roland's driver, leaves the panel's next byte to crash the kernel.
-        int fd = -1;
         const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(device.patience);
-        for(;;)
+        while(!took)
         {
             const bool late = std::chrono::steady_clock::now() >= until;
             const auto others = processesHolding(path);
@@ -370,28 +506,90 @@ namespace oscairn
             if(holderStop) { unbind(); return 0; }
             ::usleep(50000);
         }
-        ::listen(listener, 8);
-        ::fcntl(listener, F_SETOWN, ::getpid());
-        ::fcntl(listener, F_SETFL, O_NONBLOCK | O_ASYNC);
+        if(!took)
+        {
+            ::listen(listener, 8);
+            ::fcntl(listener, F_SETOWN, ::getpid());
+            ::fcntl(listener, F_SETFL, O_NONBLOCK | O_ASYNC);
+        }
         say("holding " + path + "; readers attach at " + socket);
 
-        std::vector<int> readers;
         uint64_t dropped = 0, turnedAway = 0;
+        bool handedOver = false;
         auto drop = [&](size_t i) {
-            ::close(readers[i]);
+            ::close(readers[i].fd);
             readers.erase(readers.begin() + ptrdiff_t(i));
             say("a reader detached (" + std::to_string(readers.size()) + " left)");
         };
-        // Readers that have gone: their end of the socket closed. Readers send nothing; anything
-        // they do send is read and dropped.
-        auto reap = [&] {
-            for(size_t i = 0; i < readers.size();)
+        // A newer holder's request, from the reader at `i`: granted to a higher version only. The
+        // device, the socket and every other reader go to it in one message; this holder goes on
+        // holding them, reading nothing from the device, until the new one says it has them (or
+        // five seconds pass, and then it simply goes on). The device is not closed here: what is
+        // handed over is the same open file, which stays open in the new holder when this one ends.
+        auto handover = [&](size_t i, int version) {
+            const int conn = readers[i].fd;
+            if(version <= device.version)
             {
-                pollfd p{readers[i], POLLIN, 0};
-                uint8_t junk[64];
-                const ssize_t n = ::poll(&p, 1, 0) == 1 ? ::recv(readers[i], junk, sizeof junk, 0) : 1;
-                if(n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) drop(i);
-                else ++i;
+                say("a handover was asked for by a holder of version " + std::to_string(version) + ", not above this one's " + std::to_string(device.version) + ": refused");
+                const auto no = "REFUSED " + std::to_string(device.version) + "\n";
+                if(::send(conn, no.data(), no.size(), MSG_NOSIGNAL) < 0) {}
+                drop(i);
+                return;
+            }
+            std::vector<int> fds{fd, listener};
+            for(size_t j = 0; j < readers.size(); ++j) if(j != i) fds.push_back(readers[j].fd);
+            say("handing the panel over to a holder of version " + std::to_string(version));
+            if(!sendWithFds(conn, "OK " + std::to_string(device.version) + "\n", fds)) { say(std::string("the handover could not be sent: ") + std::strerror(errno)); drop(i); return; }
+            char said[16];
+            ssize_t n = -1;
+            for(const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5); std::chrono::steady_clock::now() < end;)
+            {
+                pollfd p{conn, POLLIN, 0};
+                if(::poll(&p, 1, 100) != 1) continue;
+                n = ::recv(conn, said, sizeof said, 0);
+                if(n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
+                break;
+            }
+            if(n == 6 && std::memcmp(said, "TAKEN\n", 6) == 0) { handedOver = true; return; }
+            say("the handover was not completed: this holder goes on holding the panel");
+            drop(i);
+        };
+        // What a reader sends: nothing, in practice, and it is read and dropped; or a handover
+        // request, "OSCAIRN-PANEL-HANDOVER <version>\n", the only thing read as one. At most 64 bytes
+        // are kept; anything else, malformed or too long, ends that connection.
+        auto heard = [&](size_t i, const char* data, size_t count) {
+            auto& r = readers[i];
+            if(r.plain) return;
+            r.in.append(data, count);
+            const std::string_view in = r.in, tag = handoverTag;
+            if(in.substr(0, tag.size()) != tag.substr(0, in.size())) { r.plain = true; r.in.clear(); return; } // not a request: junk, as before
+            const auto end = in.find('\n');
+            if(end == std::string_view::npos && in.size() < handoverMost) return; // the rest is on its way
+            int64_t version = -1;
+            if(end != std::string_view::npos && end == in.size() - 1 && end > tag.size() && end - tag.size() <= 6)
+            {
+                version = 0;
+                for(size_t k = tag.size(); k < end; ++k)
+                {
+                    if(in[k] < '0' || in[k] > '9') { version = -1; break; }
+                    version = version * 10 + (in[k] - '0');
+                }
+            }
+            if(version < 0) { say("a malformed handover request refused"); drop(i); return; }
+            handover(i, int(version));
+        };
+        // Readers that have gone: their end of the socket closed. Readers send nothing; anything
+        // they do send is read and dropped, a handover request apart.
+        auto reap = [&] {
+            for(size_t i = 0; i < readers.size() && !handedOver;)
+            {
+                pollfd p{readers[i].fd, POLLIN, 0};
+                char junk[64];
+                const ssize_t n = ::poll(&p, 1, 0) == 1 ? ::recv(readers[i].fd, junk, sizeof junk, 0) : 1;
+                if(n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) { drop(i); continue; }
+                const size_t before = readers.size();
+                if(n > 0 && p.revents) heard(i, junk, size_t(n));
+                if(readers.size() == before) ++i; // not dropped by what it sent
             }
         };
         // Every accept first clears the readers that have gone, so dead ones never fill the eight.
@@ -400,6 +598,7 @@ namespace oscairn
             for(int c; (c = ::accept(listener, nullptr, nullptr)) >= 0;)
             {
                 reap();
+                if(handedOver) { ::close(c); return; }
                 if(readers.size() >= 8)
                 {
                     ::close(c);
@@ -409,7 +608,7 @@ namespace oscairn
                 ::fcntl(c, F_SETFD, FD_CLOEXEC);
                 ::fcntl(c, F_SETOWN, ::getpid());
                 ::fcntl(c, F_SETFL, O_NONBLOCK | O_ASYNC); // its hang-up raises SIGIO, as an attach does
-                readers.push_back(c);
+                readers.push_back({c, {}, false});
                 say("a reader attached (" + std::to_string(readers.size()) + " now)" + (turnedAway ? "; " + std::to_string(turnedAway) + " turned away meanwhile" : ""));
                 turnedAway = 0;
             }
@@ -417,21 +616,23 @@ namespace oscairn
         int status = 0;
         const itimerval second{{1, 0}, {1, 0}};
         ::setitimer(ITIMER_REAL, &second, nullptr);
-        while(!holderStop)
+        while(!holderStop && !handedOver)
         {
             woken = 0;
             attach();
             reap();
+            if(handedOver) break;
             if(woken) continue; // a reader came or went meanwhile: look again before waiting
             if(device.wait(fd) < 0 && errno != EINTR) { say(std::string("waiting on ") + path + ": " + std::strerror(errno)); status = 1; break; }
             if(holderStop) break;
             attach();
             reap();
+            if(handedOver) break;
             uint8_t message[4]; // the driver copies 4 bytes whatever the count asks
             while(::read(fd, message, sizeof message) == 4) // one message a read; 0 once none is queued
                 for(size_t i = 0; i < readers.size();)
                 {
-                    const auto n = ::send(readers[i], message, sizeof message, 0);
+                    const auto n = ::send(readers[i].fd, message, sizeof message, 0);
                     if(n == ssize_t(sizeof message)) { ++i; continue; }
                     if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { if(!dropped++) say("a reader is not keeping up; its messages are dropped"); ++i; continue; }
                     drop(i);
@@ -439,7 +640,19 @@ namespace oscairn
         }
         const itimerval off{};
         ::setitimer(ITIMER_REAL, &off, nullptr);
-        for(const int r : readers) ::close(r);
+        if(handedOver)
+        {
+            // Nothing is released: the device is an open file the new holder has too, and the socket
+            // is still bound there. Closing this process's descriptors only drops this process's
+            // references; the file is closed when the last one goes, and one is held. No termios, no
+            // ioctl, no write, and no unlink of the socket's path.
+            for(const auto& r : readers) ::close(r.fd);
+            ::close(listener);
+            ::close(fd);
+            say("handed the panel over; ending");
+            return 0;
+        }
+        for(const auto& r : readers) ::close(r.fd);
         ::close(fd);
         unbind();
         say("released " + path);

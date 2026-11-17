@@ -2,9 +2,10 @@
 //
 // RFC 0021 slice 3: parts sharing one engine, through the Session. Usage: shared-parts basic-synth [fixture].
 //
-// Parts whose instruments are Basic Synths share one instance on their own. Three parts saved with
-// an instance each open on one instance and sound as the three instances did; saved again they keep
-// the shared layout and reopen the same. Nine such parts open on two instances (the ninth spills),
+// With sharing asked for (OSCAIRN_SHARING=memory), parts whose instruments are Basic Synths share one
+// instance on their own. Three parts saved with an instance each open on one instance and sound as the
+// three instances did; saved again they keep the shared layout and reopen the same; apart (the default)
+// that Performance is split as it opens, an instance each, and sounds the same. Nine such parts open on two instances (the ninth spills),
 // and so do nine added one by one. Adding a Basic Synth joins the instance one plays; undoing and
 // redoing it, and removing a sharing part, sound as before. A sharing part saves as a Sound of its
 // own, which joins an instance where it is loaded. Changes between the layouts put the incoming
@@ -196,6 +197,7 @@ int main(int argc, char** argv)
     // Performances are compared sample for sample, which tests rendering, not load; on a machine too slow for real time (a sanitizer build,
     // a shared runner) the load guard gives notes up unevenly.
     ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);
+    ::setenv("OSCAIRN_SHARING", "memory", 1); // RFC 0045: sharing asked for; apart is the default since 2026-11-17
     const auto separate = temp.path / "separate", shared = temp.path / "shared", again = temp.path / "again", nine = temp.path / "nine";
 
     // Saved with an instance per part, and what those instances play.
@@ -240,6 +242,29 @@ int main(int argc, char** argv)
         quiet(s);
         s.savePerformance(again.string());
         check(count(slurp(again / "performance.json"), "\"sound\":{\"channel\":") == 3, "saved again, still one engine");
+    }
+    // Apart (OSCAIRN_SHARING unset, the default since 2026-11-17): the Performance saved shared is split as it opens, each part
+    // an instance of its own given its sound saved on its own from the engine's state, each showing its own values, and it
+    // sounds as the shared and the separate instances did; saved again, an instance each.
+    {
+        ::unsetenv("OSCAIRN_SHARING");
+        const auto split = temp.path / "split";
+        {
+            Session s(48000, frames);
+            const auto before = pluginInstancesLoaded();
+            s.loadPerformance(shared.string()); block(s);
+            check(pluginInstancesLoaded() - before == 3 && s.graphState().shared.empty(), "saved shared, opened apart on three instances: " + std::to_string(pluginInstancesLoaded() - before));
+            const auto second = s.parts()[1].chain.front();
+            check(std::abs(s.parameter(second, 1) - .7) < 1e-9 && std::abs(s.parameter(second, 5) - 4) < 1e-9, "a split part shows its own sound's values: " + std::to_string(s.parameter(second, 1)));
+            const auto heard = play(s);
+            std::printf("split parts: largest difference from separate instances %.3g\n", difference(reference, heard));
+            check(difference(reference, heard) < 1e-6, "split, it sounds as the shared instance did");
+            quiet(s);
+            s.savePerformance(split.string());
+            check(count(slurp(split / "performance.json"), "\"sound\":null") == 3, "split and saved again: an instance each");
+        }
+        { Session s(48000, frames); s.loadPerformance(split.string()); block(s); check(difference(reference, play(s)) < 1e-6, "split, saved and reopened, the same"); }
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
     }
 
     // Spilling as it is read: an instance holds eight sounds, so the ninth part opens on a second one.
@@ -329,6 +354,13 @@ int main(int argc, char** argv)
         Session u(48000, frames);
         u.partFromSound(saved.id); block(u);
         check(u.graphState().shared.empty(), "alone, it has an instance of its own");
+        // Apart (the default): loaded beside the three, it has an instance of its own, showing its own values.
+        ::unsetenv("OSCAIRN_SHARING");
+        Session v(48000, frames); v.loadPerformance(separate.string()); block(v);
+        const auto loaded = pluginInstancesLoaded();
+        v.partFromSound(saved.id); block(v);
+        check(pluginInstancesLoaded() == loaded + 1 && v.graphState().shared.empty() && std::abs(v.parameter(v.parts().back().chain.front(), 1) - .7) < 1e-9, "apart, loaded beside other parts, it has an instance of its own");
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
     }
 
     // Performance changes between the layouts: the incoming sounds go into the playing instance.
@@ -457,7 +489,7 @@ int main(int argc, char** argv)
                 const auto b = s.addPart("B"); s.insertIntoPart(b, 0, s.add("b", synth)); s.setPartLevel(b, .25, false); s.commit(); block(s);
                 two = heard(s);
             }
-            ::unsetenv("OSCAIRN_SHARING");
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
             Session s(48000, frames);
             const auto a = s.addPart("A"); s.insertIntoPart(a, 0, s.add("a", synth)); s.setPartLevel(a, .5, false); s.commit(); block(s);
             const auto solo = heard(s); quiet(s);
@@ -474,7 +506,7 @@ int main(int argc, char** argv)
         Peaks added;
         ::setenv("OSCAIRN_SHARING", "cpu", 1);
         { Session s(48000, frames); build(s, false); check(s.graphState().shared.empty(), "cpu: an instance each"); dress(s, fixture); added = heard(s); }
-        ::unsetenv("OSCAIRN_SHARING");
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
         for(const bool asked : {false, true})
         {
             Session s(48000, frames); build(s, asked); dress(s, fixture);
@@ -562,7 +594,7 @@ int main(int argc, char** argv)
                 s.loadPerformance(five.string()); block(s);
                 check(layout(s) == fresh, bias + "the same layout in a new Session:\n" + layout(s));
             }
-            ::unsetenv("OSCAIRN_SHARING");
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
         }
     }
 

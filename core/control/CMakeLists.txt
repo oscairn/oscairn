@@ -388,9 +388,9 @@ set_tests_properties(control-shared-parts PROPERTIES TIMEOUT ${switch_timeout})
 # RFC 0045's `chain` placement through a Session: a part's inserts in one worker process, as the engine opens a Performance.
 add_executable(oscairn-chain-placement-test tests/chain_placement.cpp)
 target_link_libraries(oscairn-chain-placement-test PRIVATE oscairn_control)
-add_test(NAME control-chain-placement COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay>)
+add_test(NAME control-chain-placement COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-chain-placement PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=chain")
-add_test(NAME control-chain-placement-plugin COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay>)
+add_test(NAME control-chain-placement-plugin COMMAND oscairn-chain-placement-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-chain-placement-plugin PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_WORKERS=plugin")
 # RFC 0045: a runaway mixed from one plugin into another in their worker is guarded there.
 add_executable(oscairn-group-guard-test tests/group_guard.cpp)

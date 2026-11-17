@@ -4,19 +4,22 @@
 // The shape of a stage Performance: four sampler parts, a fifth sampler (an organ's), a synth part and
 // twelve effects, all on synthetic data: one pack made by samplepack from generated audio, which a
 // sampler instance reads and holds a decoded copy of in its worker's private memory (the fixture reads
-// the file; nothing is mapped, as the Oscairn Sampler reads its packs). Parts of one sampler share an
-// instance, so one worker and one copy; the estimate of the Performance, which is not open, counts that
-// instance in full and each further part at what its sound declares, not an instance each. With the
-// parts kept in instances of their own (OSCAIRN_SHARING=cpu) each worker holds a copy and each counts
-// in full: a private copy is never counted once for several. Checks that each opens in workers; the
-// estimates just said; that neither is below the memory its workers hold; that an allowance under the
-// shared one refuses the Performance, saying so, and one above it opens it. In a sanitizer build only these: the
+// the file; nothing is mapped, as the Oscairn Sampler reads its packs). With sharing asked for
+// (OSCAIRN_SHARING=memory) parts of one sampler share an instance, so one worker and one copy; the
+// estimate of the Performance, which is not open, counts that instance in full and each further part at
+// what its sound declares, not an instance each. With the parts kept in instances of their own (the
+// default) each worker holds a copy and each counts in full: a private copy is never counted once for
+// several. Checks that each opens in workers; the estimates just said; that neither is below the memory
+// its workers hold; that an allowance under the shared one refuses the Performance, saying so, and one
+// above it opens it; and that an allowance between the two opens the Performance saved apart with its
+// sampler parts sharing an instance, said, rather than refusing it. In a sanitizer build only these: the
 // under-declaring sampler's cases after them would be stopped by its worker's limit (oscairn::test::sanitized).
 //   oscairn-multi-sampler-load-test WORKER HOLDER.clap SYNTH.clap EFFECT.clap SAMPLEPACK_CLI
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include "../../engine/tests/sample_source.h"
 #include "../../test-support/relaxed.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -112,6 +115,7 @@ int main(int argc, char** argv)
         };
 
         // Parts sharing an instance: one worker, one copy.
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
         const auto shared = temp.path / "shared";
         uint64_t held = 0;
         {
@@ -138,8 +142,8 @@ int main(int argc, char** argv)
         const auto opened = open(shared, e.memory + 128 * mib);
         check(opened.empty(), "an allowance above the estimate opens it: " + opened);
 
-        // The same parts each in an instance of their own: five copies in five workers, each counted.
-        ::setenv("OSCAIRN_SHARING", "cpu", 1);
+        // The same parts each in an instance of their own (the default): five copies in five workers, each counted.
+        ::unsetenv("OSCAIRN_SHARING");
         const auto apart = temp.path / "apart";
         uint64_t heldApart = 0;
         {
@@ -161,6 +165,27 @@ int main(int argc, char** argv)
         check(f.memory >= heldApart, "the estimate is not below what the workers hold: " + megabytes(f.memory) + " against " + megabytes(heldApart));
         check(f.memory > e.memory, "private copies cost more than a shared instance");
         check(open(apart, f.memory + 128 * mib).empty(), "and opens within its estimate");
+        // An allowance between the two: apart it would not fit the memory, sharing it does, so it opens with its sampler parts on
+        // one instance, said (a Performance must load), and its estimate is the shared one's.
+        {
+            const auto between = (e.memory + f.memory) / 2;
+            Session t(rate, frames);
+            t.setBudget({.9, between});
+            const auto g = t.estimate(apart.string());
+            check(g.fits && g.memory <= between, "between the two, its estimate is the shared layout's: " + megabytes(g.memory) + " within " + megabytes(between));
+            std::string refused;
+            try { t.loadPerformance(apart.string()); } catch(const std::exception& x) { refused = x.what(); }
+            check(refused.empty(), "between the two, it opens: " + refused);
+            const auto notices = t.sessionStatus().notices;
+            check(std::any_of(notices.begin(), notices.end(), [](const std::string& n) { return n.find("share an instance") != std::string::npos; }), "and says its parts share an instance");
+            size_t instances = 0; for(const auto& i : t.engineTiming(false).instances) instances += i.plugin == holderId;
+            check(instances == 1, "its five sampler parts on one instance: " + std::to_string(instances));
+            std::string over;
+            Session u(rate, frames);
+            u.setBudget({.9, e.memory / 2});
+            try { u.loadPerformance(apart.string()); } catch(const std::exception& x) { over = x.what(); }
+            check(over.find("of memory") != std::string::npos, "under the shared layout's estimate it is still refused, saying so: " + over);
+        }
         // The rest load a sampler that declares 1 MiB: its worker's limit (its declaration and 64 MiB) is under what a worker
         // holds in a sanitizer build before any sample, which stops it (118 MB against 65 under ThreadSanitizer on CI).
         if(oscairn::test::sanitized())
@@ -173,7 +198,7 @@ int main(int argc, char** argv)
         // at what a context was measured to add once that is known, and before at 2.5 times its word (with its 1 MiB of samples:
         // 1.3 MiB), which covers `perContext` 2 MiB (a context then adds about 3 MB, 2.3 times its word) but not 6 MiB. At its
         // word alone, as before, four further parts came in about 7 MB low.
-        ::unsetenv("OSCAIRN_SHARING");
+        ::setenv("OSCAIRN_SHARING", "memory", 1);
         ::setenv("OSCAIRN_HOLDER_BYTES", std::to_string(mib).c_str(), 1);
         ::setenv("OSCAIRN_HOLDER_CONTEXT_DECLARED", std::to_string(256 * 1024).c_str(), 1);
         for(const uint64_t perContext : {2 * mib, 6 * mib})

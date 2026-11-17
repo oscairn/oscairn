@@ -43,6 +43,9 @@ Checked when built and tested; the sections below say how.
 - [x] 9b. The same layout on every load: which parts share an instance is the Performance's
       alone, whatever played before or is loaded already
       ([status](#the-same-layout-on-every-load-2026-11-13))
+- [x] 9c. Parts apart by default: each part's instrument an instance of its own, a Performance
+      saved sharing split as it opens; sharing where apart would not fit the memory, said;
+      `OSCAIRN_SHARING=memory` shares as before ([status](#parts-apart-by-default-2026-11-17))
 - [ ] 10. Readiness: a Sound not playable until prepared and warmed up, shown as loading
       ([first-use stalls](#start-up-and-first-use-stalls))
 - [ ] 11. The timing report: each part's latency state, misses by cause, panics caused by misses
@@ -492,6 +495,56 @@ part's instrument gets its own instance and worker. A Performance saved with par
 opens shared, and a Sound loaded into a part can still join a playing instance. Cost: a process
 per part (about 34 MB a Sampler worker before samples on the unit). Not a profile field yet.
 Why the two opens differed is fixed since: [the same layout on every load](#the-same-layout-on-every-load-2026-11-13).
+Apart is the default since 2026-11-17: [parts apart by default](#parts-apart-by-default-2026-11-17).
+
+### Parts apart by default (2026-11-17)
+
+The owner's decision, on the unit's figures (3e022c57, the reconverted library, `chain` placement):
+stacked Sampler parts sharing one instance ran its worker at about 1,600 us a block (TSO Carol
+Bells, Hopeless and Slow burn 1 with every piano part's note wire on), a time-bound limit that gave
+each part an equal share far below the keys held (Carol Bells: 12 voices each at 24 keys, 2 misses);
+an instance each played every held key on the pianos (24, 24, 20 and 16) for about 70 MB and 1.4
+times the CPU, and switched within about 0.12 s of shared (one instance starts in 0.025 s and loads a
+piano in 0.28 s, about 45 MB). Sharing existed to hold a plugin's fixed memory and its samples once
+(RFC 0021, and `compute.sharing` `memory` for 1 GB devices above); the unit showed the samples are
+not shared between instances anyway beyond the kernel's file cache (the Sampler reads its pack
+through a file descriptor into each worker's own memory), so what apart costs is each instance's own
+copy, which the estimate already counts (an instance each, at its measured memory).
+
+The rule now (`Session::sharing` in `core/control/src/budget.cpp`, `Session::read` in
+`core/control/src/performance.cpp`, `Session::sharingSource`):
+
+- Unset or `cpu` (every profile): no shared instance forms on its own. Each part's instrument
+  opens, is added or loads a Sound (`Session::addNodes`) on an instance of its own, under any
+  placement: with `chain` an instrument is alone in its worker, so three stacked Sampler parts are
+  three instances in three workers (their inserts beside them as before). `instruments.share` still
+  shares on request, and a saved engine brought in by an import (`addNodes`) is kept as saved.
+- A Performance saved with parts sharing is split as it opens: the engine's first node's instance
+  loads the engine's state, each other node an instance of its own given its channel's sound saved
+  on its own from it (sound-snapshots draft 4's `save_sound`, which every plugin that can share
+  implements: the same as a part saved as a Sound), and last the first node's instance keeps its
+  own sound alone. Each part's sound and values are the ones it played (`control-shared-parts`:
+  sample for sample the same as shared). While it opens the first instance holds every sound of
+  the engine, so the open briefly needs the engine's samples twice; not counted by the estimate.
+- Memory first: when the Performance apart would not fit the memory allowance and shared it would,
+  it opens shared as before (saved sharing kept, nodes formed into instances) with the notice
+  "Opened with its parts of one plugin share an instance: each in an instance of its own it needs
+  N MiB of memory where this device allows M, so stacked parts share one instance's voices", and
+  the library's fit and `budget.estimate` say it fits by that layout. A Performance must load: voices
+  are shed under load, it is not refused for want of a layout. Only memory brings the fallback
+  (sharing never frees CPU), and without a budget nothing is estimated, so apart.
+- `OSCAIRN_SHARING=memory` (or `balanced`) shares as before for every Performance.
+
+Tested by `control-chain-placement` (three stacked Basic Synth parts saved apart: three instances
+in three workers by default under `chain` and `plugin` placement, one in one worker with `memory`),
+`control-shared-parts` (the three parts saved sharing, opened apart: three instances, the second
+part's values its own, sample for sample the reference, saved again an instance each and the same
+reopened; a part's Sound loaded beside the three: an instance of its own), `control-multi-sampler-load` (an allowance between the shared and the apart estimates:
+the Performance saved apart opens, said, its five sampler parts on one instance; under the shared
+estimate still refused) and `control-worker-timing` (a second Basic Synth added: two workers unset
+and `cpu`, one with `memory`). The tests about sharing itself ask for it (`OSCAIRN_SHARING=memory`).
+`SoundContext::sharesOnItsOwn` (`core/engine`) is no longer what decides; its comment still says
+unset shares.
 
 ### The same layout on every load (2026-11-13)
 

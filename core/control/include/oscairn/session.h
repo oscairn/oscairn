@@ -498,6 +498,15 @@ namespace oscairn
         // A shared instance's further part (`rank` 1 its second) by its plugin's measurement and declared total: nothing where none applies.
         static std::optional<uint64_t> furtherPart(const std::optional<Measurement>& m, uint32_t rank, uint64_t declared);
         Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}) const;
+        // RFC 0045's sharing: OSCAIRN_SHARING "memory" or "balanced" forms shared instances of a plugin's parts on their own; unset or
+        // "cpu" (the owner, 2026-11-17), each part's instrument an instance of its own, a Performance saved sharing split as it opens.
+        static bool sharesParts() noexcept;
+        // How a Performance not open opens: its estimate, whether its parts share instances (sharesParts, or apart they would not fit
+        // the memory and shared they would), and the notice that says it fell back.
+        struct Sharing { Estimate estimate; bool share = false; std::string notice; };
+        Sharing sharing(const std::string& directory);
+        Estimate estimate(const std::string& directory, bool share);
+        bool memoryFits(const Estimate& e) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
 
@@ -808,7 +817,7 @@ namespace oscairn
         // of the playing graph (its node), whose state is loaded last.
         struct Free { NodeId node = 0; std::shared_ptr<PluginHost> host; Loaded loaded; bool keep = false; std::chrono::steady_clock::time_point idle{}; }; // keep: a playing one to keep warm, not take, unless it holds the node's state; idle: since when it was kept warm
         std::vector<Free> freeInstances(bool all) const; // all: every one that could be (a cut cuts them anyway)
-        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming = 0); // read with what it may take over; incoming: its memory estimate
+        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming, const Sharing& sharing); // read with what it may take over; incoming: its memory estimate
         void keepWarm(NodeId node);                       // ringOut: a node rung out kept loaded, or removed
         uint64_t warmMemory() const;
         // RFC 0045: instances kept warm let go, those `which` picks: one in a worker is destroyed on a
@@ -845,7 +854,7 @@ namespace oscairn
         uint64_t beside_ = 0;                             // besideSounds()
         static constexpr size_t warmLimit = 32; // without memory classes; with them, memory bounds them (evictOpportunistic)
         bool keepInstances_ = false;                      // an audition opening a Performance: take over nothing set aside
-        std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free = {});
+        std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free, const Sharing& sharing);
         void open(Prepared& prepared, bool seamless);
         std::unique_ptr<Prepared> prepared_; // the next one, prepared ahead; after graph_, so it goes first
         std::set<NodeId> nodesOf(const Part& part) const;

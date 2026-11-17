@@ -239,7 +239,7 @@ fi
 # measuring), OSCAIRN_CPU_LATENCY (keep: no CPU wake-up latency request, for measuring) and
 # OSCAIRN_WORKER_SPIN_US (the profile's compute.workerSpin; 0: none) are handed over the same way,
 # and OSCAIRN_WORKER_DEADLINE (1: each worker waits to its wave's deadline, RFC 0045 step 6),
-# and OSCAIRN_SHARING (cpu: parts' instruments not shared on their own),
+# and OSCAIRN_SHARING (memory: parts' instruments shared on their own, as before 2026-11-17; unset or cpu: apart),
 # and OSCAIRN_PLUGIN_HOSTS (the profile's compute.pluginHosts; 0: a worker per plugin instance, RFC 0045)
 # and OSCAIRN_OWN_HOST (plugin IDs given workers of their own),
 # and OSCAIRN_UI_PAINT_LOG (1: the app and its apps log what their windows draw each second),

@@ -59,6 +59,8 @@ int main()
               "the FANTOM-07: a 1280 x 720 touch screen showing the KICK's layout, its I2C panel and its keys over Roland's link; the KICK has neither");
         std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
         check(refused(replaced(fantomJson, "\"roland-i2c-slave\"", "\"korg-serial\"")), "a panel of a protocol with no reader");
+        check(refused(replaced(fantomJson, "\"functions\": [\"pitchBend\"]", "\"functions\": [\"pitchBender\"]")), "a function the engine cannot play is an error in the profile, not a silent drop");
+        check(fantom.controls[1].functions == std::vector<std::string>{"pitchBend"} && fantom.controls[2].functions == std::vector<std::string>{"modulation"}, "the FANTOM-07's lever: pitchBend, then modulation");
         check(refused(replaced(fantomJson, "\"/dev/i2c-slave-2\"", "\"i2c-slave-2\"")), "a panel device outside /dev");
         check(refused(replaced(fantomJson, "\"roland-bmc-stock\"", "\"roland-bmc\"")), "a keyboard of a protocol with no reader");
         check(refused(replaced(fantomJson, "\"/dev/ttyGS0\"", "\"ttyGS0\"")), "a keyboard device outside /dev");

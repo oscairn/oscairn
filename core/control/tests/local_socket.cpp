@@ -963,10 +963,11 @@ void partsClient(const char* plugin,const char* delay)
          check(remote.graphState().parts[0].input.zones.size()==1,"selecting it over the socket puts the zones back");
          remote.removeScene(memo);}
         check(remote.graphState().parts[0].input.devices==devices,"a part's device selector set and read back over the socket");
-        {PartInput limited=remote.graphState().parts[0].input;limited.maxNotes=6;limited.reserve=2;limited.priority=9;limited.pedals=withPedalReceive(0,Pedal::Sustain,PedalReceive::None);remote.setPartInput(part,limited);}
+        {PartInput limited=remote.graphState().parts[0].input;limited.maxNotes=6;limited.reserve=2;limited.priority=9;limited.pedals=withPedalReceive(0,Pedal::Sustain,PedalReceive::None);limited.functions=withFunctionReceive(withFunctionReceive(0,Function::PitchBend,PedalReceive::None),Function::Modulation,PedalReceive::Own);remote.setPartInput(part,limited);}
         check(remote.graphState().parts[0].input.maxNotes==6,"a part's note limit set and read back over the socket");
         check(remote.graphState().parts[0].input.reserve==2 && remote.graphState().parts[0].input.priority==9,"its reserve and priority too");
         check(remote.graphState().parts[0].input.pedals==withPedalReceive(0,Pedal::Sustain,PedalReceive::None),"and whose pedals it takes");
+        check(remote.graphState().parts[0].input.functions==withFunctionReceive(withFunctionReceive(0,Function::PitchBend,PedalReceive::None),Function::Modulation,PedalReceive::Own),"and whether it takes pitch bend and the mod wheel, by the same receive object");
         check(remote.controller(64,127) && remote.controller(64,0,3),"a sustain pedal sent over the socket (notes.controller)");
         {bool refused=false;try{remote.controller(123,0);}catch(const std::exception&){refused=true;}check(refused,"all notes off is notes.panic's, not notes.controller's");}
         // Splits over the socket: a split at the end, a lane's Mix and zones, a third lane.

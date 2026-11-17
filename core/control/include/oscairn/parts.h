@@ -105,14 +105,17 @@ namespace oscairn
         uint16_t maxNotes = 0;                                     // notes at once (RFC 0018), 0..128; 0: no limit
         uint16_t reserve = 0;                                      // notes the shared budget leaves it (RFC 0018), 0..128, within maxNotes
         uint8_t priority = 0;                                      // 0..10: under the shared budget, lower gives way first
+        uint16_t functions = 0;                                    // notes: whether it takes pitch bend, the mod wheel, breath, foot, expression, portamento and aftertouch, as pedals (note_zone.h Function); 0: all
         uint8_t pedals = 0;                                        // notes: whose pedals it takes, per class (note_zone.h); 0: every device's
         bool operator==(const PartInput&) const = default;
     };
     // A part's `receive`, as files and the protocol write it: an object naming a pedal class
     // ("sustain", "sostenuto", "soft") with "all", "none" or "own"; a class left out is "all".
     // pedalsFrom refuses an unknown name or value; pedalsJson leaves out the classes at "all".
+    // The same object also names pitchBend, modulation, breath, foot, expression, portamento and aftertouch (functionsFrom); pedalsFrom skips those and functionsFrom the pedals.
     uint8_t pedalsFrom(const std::vector<std::pair<std::string, std::string>>& classes);
-    std::string pedalsJson(uint8_t pedals);
+    uint16_t functionsFrom(const std::vector<std::pair<std::string, std::string>>& classes);
+    std::string pedalsJson(uint8_t pedals, uint16_t functions = 0);
     // The zones a part's input wire carries: its own, each hearing only its selected devices,
     // with its note limit, counted across the part's (`part`) lanes, and its reserve and priority.
     std::vector<NoteZone> inputZones(const PartInput& input, const std::vector<MidiEndpoint>& endpoints, uint32_t part = 0);
@@ -288,7 +291,7 @@ namespace oscairn
     };
     inline constexpr std::array<const char*, 7> assignmentKinds{"none", "parameter", "control", "partLevel", "partMute", "scene", "panic"};
     inline bool pressControl(const std::string& control) { return control.starts_with("button:") || control.starts_with("footswitch:"); } // what Panic may be assigned to
-    struct AssignmentOverride { std::string control; Assignment target; uint32_t part = 0; bool operator==(const AssignmentOverride&) const = default; }; // part: a part's Sound's own; 0 the Performance's
+    struct AssignmentOverride { std::string control; Assignment target; uint32_t part = 0; bool passes = false; bool operator==(const AssignmentOverride&) const = default; }; // part: a part's Sound's own; 0 the Performance's; passes (a part's only): the control's own function (pitch bend, CC 1...) also reaches that part's instruments, else this assignment replaces it for the part
     bool validPhysicalControl(const std::string& control); // knob, fader, button, wheel, strip, jog, pedal or footswitch, then a colon and 1 to 999
 
     // A scene: a state of the Performance for a section of a song (RFC 0011's full model). Storing

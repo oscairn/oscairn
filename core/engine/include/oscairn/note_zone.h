@@ -41,6 +41,8 @@ namespace oscairn
         // Which devices' pedals the part takes (its input's `receive`), the first zone's: two bits
         // per Pedal class, a PedalReceive each (pedalReceive, below); 0: every pedal from every device.
         uint8_t pedals = 0;
+        // The same for the other standard controllers (Function, below): two bits per class, a PedalReceive each; 0: every device's.
+        uint16_t functions = 0;
         bool operator==(const NoteZone&) const = default;
 
         bool valid() const
@@ -66,6 +68,22 @@ namespace oscairn
     inline uint8_t withPedalReceive(uint8_t pedals, Pedal p, PedalReceive r) noexcept { const int s = 2 * int(p); return uint8_t((pedals & ~(3 << s)) | int(r) << s); }
     inline int pedalOf(uint8_t controller) noexcept { return controller == 64 ? 0 : controller == 66 ? 1 : controller == 67 ? 2 : -1; } // its Pedal, or -1
 
+    /// The other standard controllers a part takes by its receive setting, as a pedal is (PartInput::functions,
+    /// NoteZone::functions): pitch bend (0xE0), the mod wheel (CC 1), breath (CC 2), foot (CC 4), expression (CC 11),
+    /// portamento (CC 65) and channel pressure (0xD0). A part not taking one gets none of that message, from any device.
+    enum class Function : uint8_t { PitchBend, Modulation, Breath, Foot, Expression, Portamento, Aftertouch };
+    inline constexpr size_t functionClasses = 7;
+    inline PedalReceive functionReceive(uint16_t functions, Function f) noexcept { return PedalReceive(functions >> (2 * int(f)) & 3); }
+    inline uint16_t withFunctionReceive(uint16_t functions, Function f, PedalReceive r) noexcept { const int s = 2 * int(f); return uint16_t((functions & ~(3 << s)) | int(r) << s); }
+    /// The Function a MIDI message (status kind 0xB0 with controller `d1`, 0xD0 or 0xE0) is, or -1.
+    inline int functionOf(uint8_t kind, uint8_t d1) noexcept
+    {
+        if(kind == 0xE0) return 0;
+        if(kind == 0xD0) return 6;
+        if(kind != 0xB0) return -1;
+        return d1 == 1 ? 1 : d1 == 2 ? 2 : d1 == 4 ? 3 : d1 == 11 ? 4 : d1 == 65 ? 5 : -1;
+    }
+
     /// The zones of one note connection, fixed in size so the audio thread never allocates.
     /// None: every note passes unchanged.
     struct NoteZones
@@ -86,6 +104,16 @@ namespace oscairn
         // Whether the pedal `controller` (CC 64, 66 or 67) from `source` is one the part takes, by the
         // first zone's `pedals`: any source's (All, whatever the zones' devices), none, or a source its
         // zones hear (Own). No zones: every one.
+        bool takesFunction(int function, uint8_t source) const noexcept
+        {
+            if(!count || function < 0) return true;
+            switch(functionReceive(zones[0].functions, Function(function)))
+            {
+                case PedalReceive::None: return false;
+                case PedalReceive::Own: return hears(source);
+                default: return true;
+            }
+        }
         bool takesPedal(uint8_t controller, uint8_t source) const noexcept
         {
             const int p = pedalOf(controller);

@@ -36,6 +36,8 @@ namespace oscairn
 
         // Control thread.
         void set(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports);
+        // Each control with a function and the function's name ("modulation"), from the groups as set.
+        std::map<std::string, std::string> functions() const;
         void view(const Control::ControlView& view);
         Control::ControllerState state() const;
         void setWake(std::function<void()> wake) { std::lock_guard lock(lock_); wake_ = std::move(wake); }

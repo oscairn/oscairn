@@ -4,6 +4,7 @@
 // Performance's overrides.
 #include "oscairn/physical_controls.h"
 #include "oscairn/session.h"
+#include "oscairn/controller_input.h"
 
 #include <algorithm>
 #include <cctype>
@@ -353,8 +354,29 @@ namespace oscairn
 
     std::vector<AssignmentOverride> Session::assignments() const { return assignments_; }
 
-    void Session::assign(const std::string& control, const Assignment& target, uint32_t part)
+    PartInput Session::inputFor(const Part& part, const std::vector<AssignmentOverride>& assignments) const
     {
+        auto in = part.input;
+        if(std::none_of(assignments.begin(), assignments.end(), [&](const AssignmentOverride& o) { return o.part == part.id && !o.passes; })) return in;
+        const auto functions = controllers_->functions();
+        static const std::map<std::string, Function> kinds{{"pitchBend", Function::PitchBend}, {"modulation", Function::Modulation}, {"breath", Function::Breath}, {"foot", Function::Foot},
+                                                           {"expression", Function::Expression}, {"portamento", Function::Portamento}, {"aftertouch", Function::Aftertouch}};
+        for(const auto& o : assignments)
+        {
+            if(o.part != part.id || o.passes) continue;
+            const auto f = functions.find(o.control);
+            if(f == functions.end()) continue;
+            if(const auto k = kinds.find(f->second); k != kinds.end()) in.functions = withFunctionReceive(in.functions, k->second, PedalReceive::None);
+            else if(f->second == "sustain") in.pedals = withPedalReceive(in.pedals, Pedal::Sustain, PedalReceive::None);
+            else if(f->second == "sostenuto") in.pedals = withPedalReceive(in.pedals, Pedal::Sostenuto, PedalReceive::None);
+            else if(f->second == "soft") in.pedals = withPedalReceive(in.pedals, Pedal::Soft, PedalReceive::None);
+        }
+        return in;
+    }
+
+    void Session::assign(const std::string& control, const Assignment& target, uint32_t part, bool passes)
+    {
+        if(passes && !part) throw std::invalid_argument("only a part's own assignment passes the control's function on");
         if(!validPhysicalControl(control)) throw std::invalid_argument("a physical control is knob:N, fader:N, button:N, wheel:N, strip:N, jog:N, pedal:N, footswitch:N, aftertouch:N or breath:N");
         if(part)
         {
@@ -379,7 +401,9 @@ namespace oscairn
         case Assignment::Kind::Scene: if(std::none_of(scenes_.begin(), scenes_.end(), [&](const Scene& s) { return s.id == target.id; })) throw std::invalid_argument("unknown scene"); break;
         case Assignment::Kind::Panic: if(!pressControl(control)) throw std::invalid_argument("panic is a button's or footswitch's"); break;
         }
+        const auto before = part ? inputFor(findPart(part), assignments_) : PartInput{};
         std::erase_if(assignments_, [&](const AssignmentOverride& o) { return o.control == control && o.part == part; });
-        if(target.kind != Assignment::Kind::None) assignments_.push_back({control, target, part});
+        if(target.kind != Assignment::Kind::None) assignments_.push_back({control, target, part, passes});
+        if(part && !(inputFor(findPart(part), assignments_) == before)) { buildParts(); syncWires(); } // the part's zones follow which controllers a Sound's assignment replaces
     }
 }

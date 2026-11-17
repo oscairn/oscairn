@@ -70,6 +70,12 @@ An `oscairn.ui` extension without `param_hint` is ignored, not refused.
   not reach plugins; physical-control mapping routes them. Clock, start, continue, stop and
   song position drive the transport. To hear pitch bend and the mod wheel, a plugin offers
   the MIDI dialect on its note port.
+- **Wheels:** pitch bend and the mod wheel reach a plugin as CLAP_EVENT_MIDI only (status 0xE0, 14 bits,
+  8192 at rest; CC 1), never as a note expression, from an external keyboard's wheels and from a
+  device's own (a FANTOM's lever), even for a plugin that prefers the CLAP dialect and declares MIDI
+  too. The host does not scale the bend: full travel is 0 to 16383 and the bend range is the
+  plugin's. A part whose Sound assigns the wheel itself (the converter's wheel assignments) gets no
+  CC 1 from it unless the assignment says `passes`; a part can also ignore either (its `receive`).
 - **Pedals:** the sustain pedal (CC 64) and the others reach a plugin as MIDI, unchanged and
   per channel, half-pedal values included; the host holds no note for a CLAP-dialect plugin, so
   an instrument sustains its own voices (a note-off with CC 64 at 64 or more keeps the voice;

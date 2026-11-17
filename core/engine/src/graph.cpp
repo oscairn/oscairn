@@ -27,7 +27,7 @@ static_assert(sizeof(oscairn_zones)==sizeof(oscairn::NoteZones) && offsetof(osca
 #define OSCAIRN_SAME(a,b) static_assert(offsetof(oscairn::NoteZone,a)==offsetof(oscairn_zone,b));
 OSCAIRN_SAME(lowVelocity,low_velocity) OSCAIRN_SAME(channels,channels) OSCAIRN_SAME(transpose,transpose) OSCAIRN_SAME(curve,curve)
 OSCAIRN_SAME(fixedVelocity,fixed_velocity) OSCAIRN_SAME(sources,sources) OSCAIRN_SAME(maxNotes,max_notes) OSCAIRN_SAME(part,part)
-OSCAIRN_SAME(reserve,reserve) OSCAIRN_SAME(priority,priority) OSCAIRN_SAME(pedals,pedals)
+OSCAIRN_SAME(reserve,reserve) OSCAIRN_SAME(priority,priority) OSCAIRN_SAME(pedals,pedals) OSCAIRN_SAME(functions,functions)
 #undef OSCAIRN_SAME
 static_assert(sizeof(oscairn::NoteZone)==sizeof(oscairn_zone));
 #define OSCAIRN_SAME(a,b) static_assert(offsetof(oscairn::Graph::Activity,a)==offsetof(oscairn_activity,b));

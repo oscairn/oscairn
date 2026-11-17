@@ -306,6 +306,18 @@ namespace oscairn
         return enqueue( kick::clap::Event::midi( uint8_t( 0xb0 | channel ), uint8_t( controller ), uint8_t( value ) ), source );
     }
 
+    bool Session::pitchBend( int value, int channel )
+    {
+        if( value < 0 || value > 16383 || channel < 0 || channel > 15 ) throw std::invalid_argument( "invalid pitch bend or channel" );
+        return enqueue( kick::clap::Event::midi( uint8_t( 0xe0 | channel ), uint8_t( value & 0x7f ), uint8_t( value >> 7 ) ), builtInSource );
+    }
+
+    bool Session::channelPressure( int value, int channel )
+    {
+        if( value < 0 || value > 127 || channel < 0 || channel > 15 ) throw std::invalid_argument( "invalid pressure or channel" );
+        return enqueue( kick::clap::Event::midi( uint8_t( 0xd0 | channel ), uint8_t( value ), 0 ), builtInSource );
+    }
+
     bool Session::enqueue( const kick::clap::Event& event, uint8_t source )
     {
         const std::lock_guard lock( enqueueLock_ ); // one producer at a time: the UI, the protocol, a panel's pedal
@@ -680,7 +692,12 @@ namespace oscairn
         hostGroups_ = std::move( groups ); hostPorts_ = std::move( ports );
         auto allGroups = groups_; allGroups.insert( allGroups.end(), hostGroups_.begin(), hostGroups_.end() );
         auto allPorts = ports_; allPorts.insert( allPorts.end(), hostPorts_.begin(), hostPorts_.end() );
+        std::vector<PartInput> heard;
+        for( const auto& p : parts_ ) heard.push_back( inputFor( p, assignments_ ) );
         controllers_->set( std::move( allGroups ), std::move( allPorts ) );
+        bool changed = false; // which controllers a Sound's assignment replaces follows the groups' functions
+        for( size_t i = 0; i < parts_.size(); ++i ) changed = changed || !( inputFor( parts_[i], assignments_ ) == heard[i] );
+        if( changed ) { buildParts(); syncWires(); }
         if( ignored != hostIgnored_ ) { hostIgnored_ = std::move( ignored ); applyIgnored(); }
     }
     void Session::setControlView( const ControlView& view ) { controllers_->view( view ); }

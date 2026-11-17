@@ -858,7 +858,7 @@ namespace oscairn
         // Physical controls (RFC 0011, physical_controls.h): the Performance's overrides, by
         // the control's logical identity. Assigning Kind::None removes one; saved with it.
         virtual std::vector<AssignmentOverride> assignments() const = 0;
-        virtual void assign( const std::string& control, const Assignment& target, uint32_t part = 0 ) = 0; // part: that part's Sound's own assignment
+        virtual void assign( const std::string& control, const Assignment& target, uint32_t part = 0, bool passes = false ) = 0; // part: that part's Sound's own assignment, which replaces the control's function (pitch bend, CC 1...) for that part's instruments unless passes
 
         // Physical controls played by the engine (RFC 0011's instant controls): the joined control
         // groups and which MIDI input (by name, as the session status lists it) is which

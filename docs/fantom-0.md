@@ -1402,9 +1402,23 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   CC 64 with the keys (Roland's app takes one from that link), which would arrive twice. CTRL1 and
   CTRL2 (`pedal:1`, `pedal:2`) have no function in the profile: they play what a Performance or
   Sound assigns them. A pedal or footswitch with a standard controller's function (sustain,
-  sostenuto, soft, foot, expression and so on) sends that controller; the lever and wheels do not:
-  a MIDI controller's wheel reaches the parts as its own MIDI message, a panel message has none,
-  so `wheel:1` and `wheel:2` play only what a Performance or Sound assigns them.
+  sostenuto, soft, foot, expression and so on) sends that controller. So do the lever and wheels:
+  `wheel:1` (function `pitchBend`) sends a real pitch bend, the same MIDI message an external
+  keyboard's pitch wheel sends, from the built-in source; `wheel:2` (`modulation`) sends CC 1.
+  The panel gives the lever 0 to 1023 and it rests at 512 (not the exact middle, 511.5), so the
+  bend is 8192 (0 to 16383, the instrument's whole travel, no scaling by the host) within 1% of the
+  throw either side of the middle, and runs linearly from there to both ends: the lever springing
+  back is exactly 8192. (The panel map has no centre or dead zone field; this is the engine's.)
+  The rule, one for every control with a function: a control sends its function to every part, unless
+  the Performance has assigned the control to something else (a control moved by learn, `part` 0: the
+  control no longer plays its function) or a part's Sound has its own assignment of the control (the
+  mod wheel to a filter, say, `part` the part's): then that part's instruments get no CC 1 (or
+  bend...), the control drives its target, and other parts still get the function. An assignment
+  with `"passes": true` does both for its part. A part's `receive` object can also turn a function
+  off for the part whatever sent it (`pitchBend`, `modulation` and so on: `"none"`); an external
+  keyboard's wheel goes through the same filter. The lever's side-to-side and push, and WHEEL1 and
+  WHEEL2 (`wheel:3`, `wheel:4`), have no link to each other yet: only `wheel:1` and `wheel:2` have
+  functions, and WHEEL1 and WHEEL2 play only what a Performance or Sound assigns them.
 
 ## The key reader
 

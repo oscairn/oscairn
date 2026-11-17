@@ -514,6 +514,134 @@ namespace
         std::error_code e; std::filesystem::remove_all(home, e);
     }
 
+    // The pitch/mod lever as the unit sends it (analog 7 and 8, 0 to 1023, 512 at rest): the shipped FANTOM-07 map through a
+    // reader into a Session whose wheel groups are the profile's (pitchBend, modulation, two plain). The MIDI fixture
+    // (KICK_FIXTURE_WHEELS) plays the bend it hears on its left channel and CC 1 on its right, so each part is heard alone
+    // (the others at level 0). The lever's ends are 0 and 16383, its rest exactly 8192, and it returns there; CC 1 follows
+    // the mod axis. A part with a Sound's own assignment of the control (part A) is driven by it and its instruments get
+    // no CC 1; a part without one (B) gets it; one whose assignment passes (C) gets both. A part's receive setting and
+    // a raw CC 1 follow the same filter. A wheel the Performance assigned plays that and does not also bend. Moves are
+    // counted for learn. Flags and receive settings are undone, saved and read back.
+    void lever(const char* fixture, const char* shipped)
+    {
+        char home[] = "/tmp/oscairn-lever-XXXXXX";
+        if(!::mkdtemp(home)) { check(false, "a data folder for the test"); return; }
+        const char* kept = std::getenv("OSCAIRN_DATA_HOME"); const std::string was = kept ? kept : "";
+        ::setenv("OSCAIRN_DATA_HOME", home, 1);
+        ::setenv("KICK_FIXTURE_WHEELS", "1", 1);
+        constexpr uint32_t frames = 64;
+        Session s(48000, frames);
+        std::array<float, 2> heard2{};
+        auto render = [&] {
+            std::array<float, frames> l{}, r{};
+            float* out[2]{l.data(), r.data()};
+            check(s.process(nullptr, 0, out, 2, frames), "render");
+            heard2 = {l[frames - 1], r[frames - 1]};
+        };
+        const auto a = s.add("a", fixture, "org.kick.test.midi"), b = s.add("b", fixture, "org.kick.test.midi"), c = s.add("c", fixture, "org.kick.test.midi");
+        const auto pa = s.addPart("A"), pb = s.addPart("B"), pc = s.addPart("C"), pd = s.addPart("D");
+        s.insertIntoPart(pa, 0, a); s.insertIntoPart(pb, 0, b); s.insertIntoPart(pc, 0, c); s.commit();
+        std::array<uint32_t, 3> parts{pa, pb, pc};
+        auto solo = [&](size_t which) { for(size_t i = 0; i < 3; ++i) s.setPartLevel(parts[i], i == which ? 1 : 0, false); s.service(); render(); render(); };
+        auto wheels = [](uint32_t count, std::vector<std::string> functions) { ControlGroup g; g.role = ControlGroup::Role::Assign; g.kind = "wheels"; g.count = count; g.functions = std::move(functions); return g; };
+        s.setControllers({wheels(1, {"pitchBend"}), wheels(1, {"modulation"}), wheels(2, {})}, {}); s.service();
+        std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
+        int fds[2]; check(::pipe(fds) == 0, "a pipe");
+        Heard heard;
+        {
+            PanelReader reader(fds[0], PanelMap::parse(text.str()), [&](const PanelEvent& e) {
+                if(!e.control.empty()) s.controllerControl(e.control, e.input);
+                std::lock_guard g(heard.lock); heard.events.push_back(e);
+            }, {});
+            size_t sent = 0;
+            auto move = [&](int id, int value, size_t who = 0) {
+                put(fds[1], std::array<uint8_t, 4>{0x84, uint8_t(id), uint8_t((value >> 7) << 2), uint8_t(value & 0x7F)});
+                check(heard.wait(++sent), "the move heard"); s.service(); solo(who);
+            };
+            const float center = 8192 / 16383.f;
+            solo(0);
+            check(near(heard2[0], center), "no bend heard before the lever moves");
+            move(7, 512);
+            check(near(heard2[0], center), "the lever at rest (512 of 1023) is a bend of exactly 8192: " + std::to_string(heard2[0] * 16383));
+            move(7, 0);
+            check(near(heard2[0], 0), "the lever left is a bend of 0: " + std::to_string(heard2[0] * 16383));
+            move(7, 512);
+            check(near(heard2[0], center), "and it springs back to exactly 8192");
+            move(7, 1023);
+            check(near(heard2[0], 1), "the lever right is a bend of 16383: " + std::to_string(heard2[0] * 16383));
+            move(7, 509);
+            check(near(heard2[0], center), "a rest a few steps off the middle is still 8192");
+            move(7, 512);
+            move(7, 800);
+            check(heard2[0] > center && heard2[0] < 1, "between rest and the end it bends partway");
+            move(7, 512);
+            check(near(heard2[1], 0), "the mod axis is still at 0");
+            move(8, 1023);
+            check(near(heard2[1], 1) && near(heard2[0], center), "pushed away, the lever is CC 1 at 127 and no bend");
+            move(8, 0);
+            check(near(heard2[1], 0), "and CC 1 back to 0");
+            const auto touches = s.controllerState().touches;
+            check(s.controllerState().touched == "wheel:2" && touches >= 10, "lever moves are counted, the control moved last kept for learn: " + std::to_string(touches));
+
+            // A Sound's own assignment of the mod axis replaces CC 1 for its part unless it passes.
+            s.setParameter(a, 7, 0); s.setParameter(c, 7, 0);
+            Assignment ga; ga.kind = Assignment::Kind::Parameter; ga.node = a; ga.param = 7;
+            Assignment gc = ga; gc.node = c;
+            s.assign("wheel:2", ga, pa); s.assign("wheel:2", gc, pc, true); s.commit(); s.service();
+            move(8, 5); // picked up: the lever near the values
+            move(8, 1023);
+            check(s.parameter(a, 7) > .9 && s.parameter(c, 7) > .9, "a part's own assignment of the mod axis moves its target");
+            solo(0); check(near(heard2[1], 0), "and that part's instruments get no CC 1: " + std::to_string(heard2[1] * 127));
+            solo(1); check(near(heard2[1], 1), "a part without one still gets it");
+            solo(2); check(near(heard2[1], 1), "a part whose assignment passes gets both");
+            solo(0); check(near(heard2[0], center), "pitch bend is not touched by it");
+            move(8, 5);
+            check(s.assignments().size() == 2 && s.assignments()[1].passes && !s.assignments()[0].passes, "the flag is reported with the assignments");
+
+            // A part's receive setting, and the same filter for a raw CC 1 and a bend through notes.controller.
+            auto input = s.parts()[1].input; input.functions = withFunctionReceive(0, Function::Modulation, PedalReceive::None); s.setPartInput(pb, input); s.commit(); s.service();
+            s.controller(1, 100); solo(1);
+            check(heard2[1] * 127 < 50, "a part that does not receive the mod wheel gets no CC 1, whatever sent it: " + std::to_string(heard2[1] * 127));
+            input.functions = withFunctionReceive(0, Function::PitchBend, PedalReceive::None); s.setPartInput(pb, input); s.commit(); s.service();
+            s.controller(1, 100); solo(1);
+            check(near(heard2[1], 100 / 127.), "and a part that does not receive pitch bend still gets CC 1");
+            s.pitchBend(0); solo(1);
+            check(near(heard2[0], center), "but not the bend");
+            solo(2); check(near(heard2[0], 0), "while a part that receives it gets it");
+            input.functions = 0; s.setPartInput(pb, input); s.commit();
+            s.pitchBend(8192);
+
+            // A wheel the Performance assigned plays that and does not also bend.
+            Assignment level; level.kind = Assignment::Kind::PartLevel; level.id = pd;
+            s.setPartLevel(pd, .5, false);
+            s.assign("wheel:1", level); s.commit(); s.service();
+            move(7, 515); // picked up
+            move(7, 0);
+            check(near(heard2[0], center) && s.controllerState().touched == "wheel:1" && s.parts()[3].level < .1, "(" + std::to_string(heard2[0] * 16383) + " " + s.controllerState().touched + ") a wheel assigned to something else plays that and does not also bend");
+
+            // Undone, saved, read back.
+            s.undo(); s.undo(); // the receive settings
+            s.assign("wheel:2", gc, pc, false); s.commit();
+            check(!s.assignments()[1].passes, "the flag taken off");
+            check(s.undo() && s.assignments()[1].passes, "undone");
+            const auto saved = std::filesystem::path(home) / "saved";
+            s.savePerformance(saved.string());
+            s.assign("wheel:2", gc, pc, false); s.commit();
+            s.loadPerformance(saved.string()); s.service();
+            for(size_t i = 0; i < 3; ++i) parts[i] = s.parts()[i].id;
+            bool flagged = false, plain = false;
+            for(const auto& o : s.assignments()) { if(o.part == s.parts()[2].id) flagged = o.passes; if(o.part == s.parts()[0].id) plain = !o.passes; }
+            check(flagged && plain, "the flag is saved with the Performance and read back");
+            size_t withheld = 0; for(const auto& w : s.graphState().wires) if(w.kind == WireKind::Notes && !w.zones.empty() && w.zones[0].functions != 0) ++withheld;
+            check(withheld == 1, "and a Performance opened again still replaces CC 1 on its one part: " + std::to_string(withheld));
+
+        }
+        ::close(fds[1]); ::close(fds[0]);
+        ::unsetenv("KICK_FIXTURE_WHEELS");
+        ::setenv("OSCAIRN_DATA_HOME", was.c_str(), 1);
+        std::error_code e; std::filesystem::remove_all(home, e);
+    }
+
     // oscairn-panel-dump attached to a holder: each message on a line, with the control or "-",
     // then the table. Without a holder it refuses.
     void dump(const char* tool)
@@ -615,6 +743,7 @@ int main(int argc, char** argv)
     turnedAway();
     session(argv[1]);
     holdJack(argv[1], argv[2]);
+    lever(argv[1], argv[2]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("panel reader: ok");
     return 0;

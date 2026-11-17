@@ -584,6 +584,7 @@ Control::PackageJob Session::packageJob(uint64_t id){
                 const bool dependency=&package!=&packages.back().first; // a package the package needs, installed first
                 const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency,w.replace && !dependency);
                 recordPackage(package,true,w.versions[package.id],w.source,w.manifests[package.id],installed.otherBuild); // each at its own version
+                if(dependency)done.installed.dependencies.push_back({package.id,w.versions[package.id]});
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

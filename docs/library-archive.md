@@ -614,7 +614,13 @@ that. A pulled drive or a bad hash leaves nothing behind.
   is installed, each plugin build that would go into the store is judged against the device's
   trust store. One unsigned or signed by an unknown key refuses the install, listing them, until
   the user says yes (`acceptUnsignedCode`); one signed by a revoked key is never installed, and
-  is noted. Sounds, Performances and samples install whether signed or not.
+  is noted. A plugin version already in the store is its signers' (RFC 0031): a build the
+  archive would add beside it, for any platform (an export carries every platform's,
+  so a build that cannot run here would still be passed on inside that package), must be signed
+  by a key that signed a build installed here; another key's, or an unsigned one where those
+  are signed, is not installed whatever the user said, and is noted naming the plugin, the
+  platform and both signers. The rest of the archive installs and nothing in the store is
+  replaced. Sounds, Performances and samples install whether signed or not.
 
 ## The plugin store
 

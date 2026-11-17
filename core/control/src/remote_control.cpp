@@ -732,6 +732,7 @@ namespace oscairn
         }
         const auto installed=field(r,"installed");
         j.installed={static_cast<uint32_t>(integer(field(installed,"added"))),static_cast<uint32_t>(integer(field(installed,"skipped"))),strings(field(installed,"notes")),signers(field(installed,"code"))};
+        for(auto d:array(field(installed,"dependencies")))j.installed.dependencies.push_back({string(field(d,"id")),string(field(d,"version"))});
         return j;
     }
     void RemoteControl::uninstallLibrary(const std::string& id) { impl_->call("library.uninstall","{\"library\":"+quote(id)+'}',30000); }

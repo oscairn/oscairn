@@ -141,6 +141,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-dependencies-') as temporary:
         state = job({'source': str(site), 'id': 'org.kick.keys'})
         check(state['state'] == 'done' and installed() == ['org.kick.types', 'org.kick.content', 'org.kick.keys'],
               'a chain of three packages installs, each after what it needs: ' + json.dumps(state)[:300] + ' ' + json.dumps(installed()))
+        check(state['installed']['dependencies'] == [{'id': 'org.kick.types', 'version': '1.0.0'}, {'id': 'org.kick.content', 'version': '1.0.0'}],
+              'and its answer lists the packages it installed first: ' + json.dumps(state['installed']))
         before = installed()
         state = job({'source': str(site), 'id': 'org.kick.loop-a'})
         check(state['state'] == 'failed' and 'org.kick.loop-a -> org.kick.loop-b -> org.kick.loop-a' in state['error'] and installed() == before,

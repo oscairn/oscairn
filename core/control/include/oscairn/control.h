@@ -461,8 +461,9 @@ namespace oscairn
         // seen archiveContents' code); a build by a revoked key is never installed (what uses it
         // opens with a stand-in) and is noted. Data installs whether signed or not. code: the
         // signer of each build installed or refused. otherBuild: a different build of one of its
-        // plugins was here already and kept (said in notes; not sent on its own).
-        struct Installed { uint32_t added = 0, skipped = 0; std::vector<std::string> notes; std::vector<Signer> code; bool otherBuild = false; };
+        // plugins was here already and kept (said in notes; not sent on its own). dependencies: a
+        // repository install's packages it installed first because the package needs them, each ID and version.
+        struct Installed { uint32_t added = 0, skipped = 0; std::vector<std::string> notes; std::vector<Signer> code; bool otherBuild = false; std::vector<std::pair<std::string, std::string>> dependencies = {}; };
         virtual Installed installArchive(const std::string& file, bool asLibrary, const std::vector<std::string>& items = {}, bool acceptUnsignedCode = false) = 0;
         struct InstalledLibrary { std::string id, name; uint32_t items = 0; };
         virtual std::vector<InstalledLibrary> libraries() = 0;

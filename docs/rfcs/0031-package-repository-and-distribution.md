@@ -1876,7 +1876,10 @@ Accepted by Jacob on 2026-11-01 ([decided](#decided-2026-11-01)).
   does. Yes adds that key to the trust store for `plugins`. Later builds from that publisher
   install without asking. Only that key is accepted for that publisher: a build under the same
   publisher ID with another key is refused unless the old key signed the new one (RFC 0006's
-  key replacement). A product may skip the question for its own manufacturer's repository by
+  key replacement). Built so far for a plugin version already installed (2026-11-17): a build
+  of it from an archive, for any platform, must be signed by a key that signed a build of it
+  here, or it is refused and noted, naming both signers (`control-archives`); key replacement
+  and a publisher ID's key across versions are not built. A product may skip the question for its own manufacturer's repository by
   shipping its publishers' keys in the image's trust store, as RFC 0006 already allows.
 - **Human review** of a publisher's first submission, and whenever a package newly adds code: a
   first plugin or app, or a plugin ID the package did not have before. Everything else, code

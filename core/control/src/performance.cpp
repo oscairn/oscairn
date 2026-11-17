@@ -2295,12 +2295,22 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
             for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");used.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
         }
-        std::set<std::pair<std::string,std::string>> revoked; // builds not installed, by plugin ID and path (a bundle holding several plugins is listed for each)
+        std::set<std::pair<std::string,std::string>> revoked; // builds not installed (a revoked key's, another signer's), by plugin ID and path (a bundle holding several plugins is listed for each)
         std::set<std::pair<std::string,std::string>> replaced; // builds here, by plugin ID and platform, that `replace` puts the archive's over
         std::string unknown;
+        // A signer as the user sees it: its key's ID, and the name the trust store gives it.
+        auto signer=[&](const std::vector<signing::Signature>& signatures){
+            if(signatures.empty())return std::string("no one (unsigned)");
+            const auto s=judge("plugin",signatures);return s.key+(s.keyName.empty()?"":" ("+s.keyName+")");};
         for(const auto& plugin:p.plugins){
             if(!used.count({plugin.format,plugin.id,plugin.version}))continue;
             const auto there=storedBuilds(plugin.format,plugin.id,plugin.version);
+            // RFC 0031: a plugin version installed here is its signers'. A build added beside it, for any platform (exports
+            // carry every platform's), must be signed by a key that signed what is installed; another key's is refused, the
+            // rest of the archive installing. A version installed unsigned pins no one; `replace` (a repository's build over
+            // this platform's, the user's choice) is not held to it.
+            std::vector<signing::Signature> pinned;
+            for(const auto& b:there)try{for(const auto& s:signing::readSignatures(b.second.string()+".sig"))pinned.push_back(s);}catch(const std::exception&){}
             for(const auto& build:plugin.builds){
                 if(thisPlatformOnly && build.platform!=platform())continue;
                 if(const auto at=there.find(build.platform);at!=there.end()){
@@ -2311,8 +2321,12 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                         bad("the open Performance plays "+plugin.name+" "+plugin.version+"; remove it from the Performance or open another before replacing its build");
                     replaced.insert({plugin.id,build.platform});
                 }
-                auto s=judge("plugin",build.signatures);s.name=plugin.name;s.version=plugin.version;s.platform=build.platform;
                 const auto what=plugin.name+" "+plugin.version+" ("+build.platform+")";
+                if(!pinned.empty() && !replaced.count({plugin.id,build.platform}) && std::none_of(build.signatures.begin(),build.signatures.end(),[&](const auto& b){return std::any_of(pinned.begin(),pinned.end(),[&](const auto& k){return k.key==b.key;});})){
+                    revoked.insert({plugin.id,build.path});
+                    out.notes.push_back(what+" is signed by "+signer(build.signatures)+", not by "+signer(pinned)+", who signed the "+plugin.name+" "+plugin.version+" installed here; it was not installed");
+                    continue;}
+                auto s=judge("plugin",build.signatures);s.name=plugin.name;s.version=plugin.version;s.platform=build.platform;
                 if(s.status=="revoked"){revoked.insert({plugin.id,build.path});out.notes.push_back(what+" is signed by a revoked key ("+s.key+"); it was not installed");}
                 else if(s.status!="trusted")unknown+=(unknown.empty()?"":", ")+what+(s.status=="unsigned"?" unsigned":" by an unknown key "+s.key);
                 out.code.push_back(s);

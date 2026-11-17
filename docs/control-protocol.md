@@ -1404,7 +1404,12 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   samples they use go into the user's sample library, and the builds of the plugins they use,
   every platform's, into the plugin store; `notes` names any sample that is in neither the
   archive nor the device, a plugin with no build for this device, and a different build of one
-  already installed (kept). A plugin package installs every build of each of its plugins, takes
+  already installed (kept). A plugin version already in the store is its signers': a build of
+  it the archive would add, for any platform, signed by another key (or unsigned, where what is
+  here is signed) is not installed, and `notes` names the plugin, the platform and both signers
+  ("<name> <version> (<platform>) is signed by <key>, not by <key> (<name>), who signed the
+  <name> <version> installed here; it was not installed"); the rest of the archive installs,
+  nothing in the store is replaced, and such a build is not in `code` nor asked about. A plugin package installs every build of each of its plugins, takes
   no `items` and adds none (`added` is 0), whatever `asLibrary` says.
 - `library.libraries` (`{}`) returns `{libraries}`, each `{id,name,items}`.
 - `library.types` (`{}`) returns `{types}`, each item type the device knows
@@ -1474,8 +1479,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   the next tried when one does not verify, and a download cut short is resumed by the next
   install with a range request. A server error (5xx) is asked again once, a second later; when
   every place fails, the error names each one and its reason. On macOS this is the system's HTTPS, in a session that keeps
-  no cache, cookies or HSTS store on disk; on Linux this build
-  fetches `http://` only. A `source` that is a known repository's address (`packages.repositories`,
+  no cache, cookies or HSTS store on disk; on Linux, JUCE's URL streams over libcurl, which
+  verify certificates against the system's CA bundle (`https://` and `http://`). A `source` that is a known repository's address (`packages.repositories`,
   enabled or not) is read only with the root key recorded for it: a root with any other key, even
   one trusted for another repository, fails naming both keys' IDs ("its root key is …, not the one
   this device has for it (…)"), and nothing of it is listed, installed or kept, its serial
@@ -1537,7 +1542,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   when the version has none, or listed from a folder whose web address the device does not know
   (a copy of a known repository uses that repository's address). An install's
   `package` and `version` say what it chose and `installed` is what `library.install`
-  returns. An install refused for code from an unknown source has `installed.code` too: each
+  returns, for it and the packages it needs together, with `dependencies`: each package it
+  installed first because the package needs it, `{id,version}`, in the order installed. An install refused for code from an unknown source has `installed.code` too: each
   build's signer, with the `publicKey` to show the user and trust with `trust.set`. A listing's
   `publisherKey` is the key's ID only, as the index carries no public keys; the public key is
   in the package's signatures, which a listing does not fetch. An install unpacks off the

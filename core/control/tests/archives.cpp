@@ -1232,6 +1232,48 @@ int main(int argc, char** argv)
             const auto twice = o.installArchive((temp.path / "Pack2.olib").string(), true);
             check(twice.added == 0 && twice.skipped == 4 && inode(library / "Sounds" / "changed") == revised, "version 2 again replaces nothing");
         }
+        // Device Q (RFC 0031): a plugin version installed here is its signers'. An archive carrying the same plugin ID and
+        // version signed by another key adds no build of it to the store, for no platform (exports carry every platform's):
+        // refused and noted, naming the plugin, the platform and both signers, the rest of the archive installed and
+        // nothing here replaced; the same key's build for the other platform is added. On the unit an archive's macOS build
+        // of the official Sampler, signed by a testing key, was added into the official package beside its Linux build.
+        {
+            const auto otherKey = temp.path / "other.key";
+            run(tool + " key " + shell(otherKey));
+            const auto foreignKey = signing::loadKey(otherKey).publicKey;
+            // A packer's export of a part playing the fixture: this platform's build, and with `both` the other platform's, signed by `key`.
+            auto pack = [&](const fs::path& home, const fs::path& key, bool both, const fs::path& to) {
+                device(home);
+                const auto build = home / "Synth.clap", otherBuild = home / "other" / "Synth.clap";
+                fs::create_directories(otherBuild.parent_path()); fs::copy_file(fixture, build); fs::copy_file(fixture, otherBuild);
+                check(run(tool + " build " + shell(key) + " clap org.kick.test.synth " + shell(version) + " " + platform() + " " + shell(build)).first == 0 &&
+                      run(tool + " build " + shell(key) + " clap org.kick.test.synth " + shell(version) + " " + other + " " + shell(otherBuild)).first == 0, "the packer signs its builds");
+                Session s(48000, 64);
+                const auto part = s.addPart("Synth"); s.insertIntoPart(part, 0, s.add("synth", build.string(), "org.kick.test.synth")); s.commit();
+                if(both) s.addPluginBuild("clap", "org.kick.test.synth", version, other, otherBuild.string());
+                s.savePerformanceToLibrary("Synth");
+                check(s.exportPerformance(to.string()).empty(), "a packer's export leaves nothing out");
+            };
+            const auto officialHere = temp.path / "OfficialHere.olib", officialBoth = temp.path / "OfficialBoth.olib", foreignBoth = temp.path / "ForeignBoth.olib";
+            pack(temp.path / "q1", temp.path / "author.key", false, officialHere);
+            pack(temp.path / "q2", temp.path / "author.key", true, officialBoth);
+            pack(temp.path / "q3", otherKey, true, foreignBoth);
+            device(temp.path / "q");
+            Session q(48000, 64);
+            q.setTrustedKey({"", authorKey, "Author", {"plugins"}});
+            const auto store = temp.path / "q" / "Plugins" / "clap" / ("org.kick.test.synth@" + version);
+            check(q.installArchive(officialHere.string(), false).notes.empty() && fs::exists(store / platform()) && !fs::exists(store / other), "the publisher's build for this device installs");
+            const auto foreign = q.installArchive(foreignBoth.string(), false, {}, true);
+            const std::string note = "(" + other + ") is signed by " + signing::keyId(foreignKey) + ", not by " + signing::keyId(authorKey) + " (Author), who signed the";
+            check(foreign.notes.size() == 1 && foreign.notes[0].find(note) != std::string::npos && foreign.notes[0].ends_with("installed here; it was not installed"),
+                  "another key's build of the version here, for another platform, is refused, naming it and both signers: " + (foreign.notes.empty() ? std::string() : foreign.notes[0]));
+            check(!fs::exists(store / other) && signing::readSignatures(store / platform() / "Synth.clap.sig").at(0).key == authorKey, "nothing of it goes into the store, nothing there replaced");
+            check(foreign.added == 1 && std::none_of(foreign.code.begin(), foreign.code.end(), [&](const auto& c) { return c.key == signing::keyId(foreignKey); }),
+                  "the rest of the archive installs, the refused build not among its code: " + std::to_string(foreign.added));
+            const auto same = q.installArchive(officialBoth.string(), false);
+            check(same.notes.empty() && fs::exists(store / other) && signing::readSignatures(store / other / "Synth.clap.sig").at(0).key == authorKey,
+                  "the same key's build for the other platform is added: " + (same.notes.empty() ? std::string() : same.notes[0]));
+        }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); ++failures; }
     if(!failures) std::puts("ok: export, install as the user's own and as a library, reinstall, uninstall, chosen items and plugins from the store");

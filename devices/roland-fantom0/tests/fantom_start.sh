@@ -354,4 +354,71 @@ check "the handover: X before the app, X gone before the Rust UI, the rule off f
 check "the keeper waited on the X server serving (0.5 s in the stand-in), not a fixed time" "[ \$(lapms 'X ready') -ge 500 ] && [ \$(lapms 'X ready') -lt 3000 ]"
 check "each phase logged with milliseconds, in order" "[ \"\$(sed -n 's/.*timing \\([A-Za-z]* [A-Za-z]*\\).*/\\1/p' '$klog' | tr '\\n' ',')\" = 'handover requested,X ready,app started,app exited,X gone,shell started,' ]"
 check "the X server waited for to end (its 0.3 s), not given up on" "[ \$(( \$(lapms 'X gone') - \$(lapms 'app exited') )) -ge 280 ]"
+# The stop: the touch rule left by a start that did not finish is removed; --panel warns that the
+# panel stays silent; without it the holder is kept and nothing warns (dry runs: nothing is signaled).
+stp=$bundle/stopper
+mkdir -p "$stp/proc/5800" "$stp/rules" "$stp/var"
+echo oscairn-panel-h > "$stp/proc/5800/comm"
+echo rule > "$stp/rules/99-oscairn-touch.rules"
+out=$(OSCAIRN_PROC=$stp/proc OSCAIRN_UDEV_RULES=$stp/rules "$bundle/oscairn-fantom-stop" --dry-run --panel 2>&1)
+check "stop --panel warns that the panel stays silent until power-on" "echo \"\$out\" | grep -q 'WARNING: stopping the panel holder (pid 5800): the panel stays silent until the instrument is powered on again'"
+check "and would remove the touch rule it finds" "echo \"\$out\" | grep -q 'would remove $stp/rules/99-oscairn-touch.rules'"
+out=$(OSCAIRN_PROC=$stp/proc OSCAIRN_UDEV_RULES=$stp/rules "$bundle/oscairn-fantom-stop" --dry-run 2>&1)
+check "stop without --panel keeps the holder and does not warn" "echo \"\$out\" | grep -q 'the panel holder keeps running (pid 5800)' && ! echo \"\$out\" | grep -q WARNING"
+# a real stop of the rule only: no process of ours in the stand-in /proc but the holder, which stays
+mkdir -p "$stp/gone"
+: > "$stp/gone/placeholder"
+out=$(OSCAIRN_PROC=$stp/gone OSCAIRN_SYS=$bundle/nosys OSCAIRN_UDEV_RULES=$stp/rules "$bundle/oscairn-fantom-stop" 2>&1)
+check "a stop removes a touch rule a start left" "[ ! -e '$stp/rules/99-oscairn-touch.rules' ]"
+
+# The start's panel step on a stand-in /proc: a holder of this bundle's own program is kept; one of
+# another build is asked to hand over (its answer decides the line said); one that does not answer
+# (the unit's, older than the handover) is kept with the one clear line; no holder: one is started.
+tk=$bundle/taker
+mkdir -p "$tk/usr/bin" "$tk/proc/net" "$tk/var/oscairn/log" "$tk/old"
+echo holder-new > "$tk/usr/bin/oscairn-panel-holder"
+echo holder-old > "$tk/old/oscairn-panel-holder"
+: > "$tk/panel"
+cat > "$tk/start-chroot.sh" <<'EOF'
+#!/bin/sh
+k=$(dirname "$0")
+case "$*" in
+*--takeover*)
+	echo takeover >> "$k/ran"
+	rc=$(cat "$k/rc")
+	[ "$rc" != 0 ] || echo "2026-11-16 00:00:00 oscairn-panel-holder: took the panel over: $k/panel (open, never closed)"
+	exit "$rc" ;;
+*oscairn-panel-holder*) echo fresh >> "$k/ran"; echo "holding $k/panel; readers attach at @oscairn-panel" ;;
+esac
+EOF
+chmod +x "$tk/start-chroot.sh"
+taking() { # exe of the running holder ("" for none, "-" for one whose process is not found)
+	rm -f "$tk/ran"; rm -rf "$tk/proc/5800"; : > "$tk/proc/net/unix"
+	[ -z "$1" ] || echo '0: 00000002 0 0 0001 01 1 @oscairn-panel' > "$tk/proc/net/unix"
+	case "$1" in ""|-) ;; *) mkdir -p "$tk/proc/5800"; echo oscairn-panel-h > "$tk/proc/5800/comm"; ln -s "$1" "$tk/proc/5800/exe" ;; esac
+	(
+		root=$tk state=$tk/var/oscairn proc=$tk/proc panel=$tk/panel dry= holder_log=$tk/var/oscairn/log/oscairn-panel-holder.log holder_bin=$tk/usr/bin/oscairn-panel-holder
+		for f in say holding take_panel; do eval "$(sed -n "/^$f()/,/^}/p" "$scripts/oscairn-fantom-start")"; done
+		for f in fail named holder_running nap; do eval "$(grep "^$f()" "$scripts/oscairn-fantom-start")"; done
+		take_panel
+	) 2>&1
+}
+echo 0 > "$tk/rc"
+out=$(taking "$tk/usr/bin/oscairn-panel-holder")
+check "a holder of this bundle's own program is kept, no handover asked" "echo \"\$out\" | grep -q \"this bundle's own program): kept\" && [ ! -e '$tk/ran' ]"
+out=$(taking "$tk/old/oscairn-panel-holder")
+check "a holder of another build that hands over: said so, the device never closed" "echo \"\$out\" | grep -q 'handed the panel over to this bundle.s (the device was never closed)' && [ \"\$(cat '$tk/ran')\" = takeover ]"
+echo 3 > "$tk/rc"
+out=$(taking "$tk/old/oscairn-panel-holder")
+check "one that refuses (the same version or newer) is kept, and it says so" "echo \"\$out\" | grep -q \"this bundle's version or a newer one: kept\""
+echo 4 > "$tk/rc"
+out=$(taking "$tk/old/oscairn-panel-holder")
+check "one that does not answer: the one clear line, with where it is from" "echo \"\$out\" | grep -q \"panel holder is an older version (from $tk/old/oscairn-panel-holder): it will be replaced at the next power-on; until then stale readers clear when a panel control is touched\" && [ \"\$(cat '$tk/ran')\" = takeover ]"
+echo 1 > "$tk/rc"
+out=$(taking "$tk/old/oscairn-panel-holder")
+check "a handover that fails is not a failed start: the holder is kept" "echo \"\$out\" | grep -q 'the handover failed' && echo \"\$out\" | grep -q 'is kept'"
+out=$(taking -)
+check "a holder whose process cannot be found is kept, nothing asked" "echo \"\$out\" | grep -q 'its process was not found here): kept' && [ ! -e '$tk/ran' ]"
+out=$(taking "")
+check "no holder: this bundle's is started" "echo \"\$out\" | grep -q 'the panel is held' && [ \"\$(cat '$tk/ran')\" = fresh ]"
 exit $fail

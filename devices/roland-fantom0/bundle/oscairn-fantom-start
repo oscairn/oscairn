@@ -13,7 +13,8 @@
 #      oscairn-panel-holder, which holds it until the system goes down. The panel only keeps
 #      reporting while something holds the device: left unheld for about a minute it went
 #      silent until the next power-on, so the gap between Roland's application letting go and
-#      the holder taking over must stay under about a second. A holder already running is kept.
+#      the holder taking over must stay under about a second. A holder already running is kept, or,
+#      when it is of another build, asked to hand the panel over (take_panel below).
 #      Then it clears the stale pids Roland's tickgen module sends signal 42 to
 #      (oscairn-tickgen-reset), logging a failure and going on;
 #   5. holds every CPU at its top frequency (the performance governor) and keeps the kernel's
@@ -158,21 +159,66 @@ fi
 say "Roland's application is not running"
 
 # 4. The panel, at once.
-if holder_running; then
-	say "the panel holder already runs: kept"
-else
+#
+# A holder runs from an earlier start, and the panel is silent for good if the device is ever
+# closed (docs/fantom-0.md, "The panel holder"), so it is never stopped here:
+#   none runs                                 start this bundle's;
+#   it is this bundle's own program           keep it;
+#   it differs and can hand over (version 1+) this bundle's holder asks it for the open device, its
+#                                             socket and its readers; it ends, the device stays open;
+#   it differs and cannot (it answered nothing, as holders of before the handover) or refuses (the
+#   same version or newer)                    keep it, and say which, once.
+# A holder of an earlier bundle that cannot hand over is replaced at the next power-on.
+holder_log=$state/log/oscairn-panel-holder.log
+holder_bin=$root/usr/bin/oscairn-panel-holder
+take_panel() {
+	if holder_running; then
+		hpid=$(named oscairn-panel-h | head -n 1)
+		hexe=$(readlink "$proc/$hpid/exe" 2>/dev/null)
+		if [ -z "$hpid" ]; then
+			say "the panel holder already runs (its process was not found here): kept"
+		elif cmp -s "$proc/$hpid/exe" "$holder_bin" 2>/dev/null; then
+			say "the panel holder already runs (pid $hpid, this bundle's own program): kept"
+		elif [ -n "$dry" ]; then
+			say "the panel holder runs (pid $hpid, ${hexe:-from an unknown path}): would run: $root/start-chroot.sh /usr/bin/oscairn-panel-holder $panel --takeover"
+		else
+			say "the panel holder runs (pid $hpid, ${hexe:-from an unknown path}) and is not this bundle's program: asking it to hand the panel over"
+			lines=$(wc -l < "$holder_log" 2>/dev/null || echo 0)
+			"$root/start-chroot.sh" /usr/bin/oscairn-panel-holder "$panel" --takeover >> "$holder_log" 2>&1 &
+			tpid=$!
+			i=0
+			until tail -n +$((lines + 1)) "$holder_log" 2>/dev/null | grep -q "took the panel over"; do
+				i=$((i + 1))
+				kill -0 $tpid 2>/dev/null && [ $i -le 150 ] || break
+				nap
+			done
+			if tail -n +$((lines + 1)) "$holder_log" 2>/dev/null | grep -q "took the panel over"; then
+				say "the panel holder handed the panel over to this bundle's (the device was never closed): the panel is held (var/oscairn/log/oscairn-panel-holder.log)"
+			elif kill -0 $tpid 2>/dev/null; then
+				say "the handover has not finished after 15 seconds (var/oscairn/log/oscairn-panel-holder.log); the panel holder that runs is kept"
+			else
+				wait $tpid
+				case $? in
+				4) say "panel holder is an older version (from ${hexe:-an unknown path}): it will be replaced at the next power-on; until then stale readers clear when a panel control is touched" ;;
+				3) say "the panel holder that runs is this bundle's version or a newer one: kept" ;;
+				*) say "the handover failed (var/oscairn/log/oscairn-panel-holder.log); the panel holder that runs is kept" ;;
+				esac
+			fi
+		fi
+		return 0
+	fi
 	[ -e "$panel" ] || say "the panel device $panel is not here: the panel will not be read"
 	others=$(holding "$panel")
 	[ -z "$others" ] || fail "process $(echo $others) holds $panel; not opening it (a second open can crash the kernel)"
 	say "taking the panel: oscairn-panel-holder $panel"
 	if [ -z "$dry" ]; then
-		: > "$state/log/oscairn-panel-holder.log"
-		"$root/start-chroot.sh" /usr/bin/oscairn-panel-holder "$panel" >> "$state/log/oscairn-panel-holder.log" 2>&1 &
+		: > "$holder_log"
+		"$root/start-chroot.sh" /usr/bin/oscairn-panel-holder "$panel" >> "$holder_log" 2>&1 &
 		i=0
-		until grep -q "holding $panel" "$state/log/oscairn-panel-holder.log"; do
+		until grep -q "holding $panel" "$holder_log"; do
 			i=$((i + 1))
 			if [ $i -gt 50 ] || ! kill -0 $! 2>/dev/null; then
-				tail -n 5 "$state/log/oscairn-panel-holder.log"
+				tail -n 5 "$holder_log"
 				fail "the panel holder did not take $panel"
 			fi
 			nap
@@ -181,7 +227,8 @@ else
 	else
 		say "would run: $root/start-chroot.sh /usr/bin/oscairn-panel-holder $panel"
 	fi
-fi
+}
+take_panel
 
 # Roland's tickgen module still holds Roland's application's pid and sends it signal 42 every
 # millisecond (docs/fantom-0.md, "Signal 42"): set back to -1, as at power-on, now that the

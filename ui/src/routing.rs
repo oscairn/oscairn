@@ -625,8 +625,10 @@ impl Screen {
             (Request::Status, Ok(r)) => self.status(&r),
             (Request::List(node), r) => {
                 self.asked.retain(|n| *n != node);
-                let list = r.ok().map(|r| r["parameters"].as_array().into_iter().flatten().map(|p| Param { id: p["id"].as_u64().unwrap_or(0), name: p["name"].as_str().unwrap_or_default().into(), flags: p["flags"].as_u64().unwrap_or(0) }).collect()).unwrap_or_default();
-                self.params.insert(node, list);
+                if let Ok(r) = r {
+                    let list = r["parameters"].as_array().into_iter().flatten().map(|p| Param { id: p["id"].as_u64().unwrap_or(0), name: p["name"].as_str().unwrap_or_default().into(), flags: p["flags"].as_u64().unwrap_or(0) }).collect();
+                    self.params.insert(node, list);
+                } // refused: not cached, asked again the next time the menu needs it
                 if let Some(lane) = self.waiting_lane.filter(|_| self.asked.is_empty()) {
                     self.waiting_lane = None;
                     self.said.clear();

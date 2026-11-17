@@ -121,6 +121,9 @@ int main()
               Profile::parse(replaced(json, cores, cores + ", \"ownHost\": [\"org.example.a\"]")).compute.ownHost == std::vector<std::string>{"org.example.a"} &&
               Profile::parse(json).compute.pluginHosts == 0 && refused(replaced(json, cores, cores + ", \"pluginHosts\": 65")) && refused(replaced(json, cores, cores + ", \"ownHost\": \"a\"")),
               "the plugin hosts, 0 to 64, and the plugins given workers of their own; none named, a worker per instance");
+        // RFC 0045's placement: the FANTOM-07's chain, decided on the unit; none named, the engine's default (plugin).
+        check(loadProfile("fantom-07").compute.workers == "chain" && Profile::parse(json).compute.workers.empty() && refused(replaced(json, cores, cores + ", \"workers\": \"group\"")),
+              "workers: plugin, chain or pool; chain on the FANTOM-07; none named, the engine's default");
         check(refused(replaced(json, "\"width\": 1024", "\"width\": 0")), "a screen with no size");
         check(refused("[1, 2]"), "not an object");
         // Control groups: a role each; rows or paging for an assign group of knobs; modes for faders only.

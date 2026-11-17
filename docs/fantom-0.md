@@ -1682,7 +1682,15 @@ on the display; `--engine-only` the engine alone.
    ([RFC 0045 step 6](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-from-the-deadline-step-6-status)),
    off in the profile until measured.
 
-   The profile gives each plugin instance a worker of its own (no `compute.pluginHosts`). Three
+   The profile places plugins by group (`compute.workers` `chain`,
+   [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#placement-by-group-2026-11-15)): a
+   part's instrument in a worker of its own, its inserts together in one, each bus and the master
+   their own. The owner's decision (2026-11-17), on the unit's figures for a pedalled passage in
+   Sick tines (blocks lost, late or silent): a worker per plugin 26 to 31, `chain` 0 to 1, a pool
+   of 3 hosts unstable (0 to 21 from run to run). A crash now takes down
+   one part's chain (its plugins come back with their state; the other parts keep sounding).
+   `OSCAIRN_WORKERS=plugin ./oscairn-fantom-start` gives each plugin instance a worker of its own
+   again, for comparing. Three
    plugin hosts, worker processes holding any plugins each, placed by measured cost
    ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)),
    measured worse on the unit (2026-11-14, ST Final in the app, 41 s played and recorded): 3,608

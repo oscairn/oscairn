@@ -372,17 +372,23 @@ namespace
               "two on a bus, chain: each part's inserts one process and round trip, the bus its own, entered from both parts");
     }
 
-    // chain: one part's chain process killed mid-play: only that part goes silent, and it comes back.
+    // chain: one part's chain process killed mid-play: only that part goes silent, and it comes back, every plugin of the
+    // chain with its state (each insert's own gain, so a plugin restored at its defaults sounds louder).
     void killOneChain(Policy policy = Policy::chain)
     {
         place(policy);
         Tines tines;
-        Wide w; w.paced = true; tines.build(w); w.graph.commit();
+        Wide w; w.paced = true; tines.build(w);
+        const auto chain = tines.chain(2);
+        for(size_t k = 0; k < chain.size(); ++k) w.graph.host(w.nodes[chain[k]]).setParameter(7, .9 - .1 * double(k));
+        w.graph.commit();
         const auto pid = w.graph.host(w.nodes["p2chorus"]).workerPid();
         const auto period = std::chrono::nanoseconds(int64_t(1e9 * frames / rate));
         auto next = std::chrono::steady_clock::now();
         bool othersSilent = false, silent = false, back = false; std::string quiet; uint32_t silentAt = 0;
-        for(uint32_t b = 0; b < 2000 && !back; ++b)
+        float before = 0, after = 0; // part 3's loudest held block before the kill, and in the first whole stretch after it came back
+        uint32_t again = UINT32_MAX; // that stretch's first block
+        for(uint32_t b = 0; b < 2000 && !(back && b == again + 90); ++b)
         {
             std::this_thread::sleep_until(next += period);
             std::vector<Event> e; // struck again every 100 blocks: a restart replays controllers, not notes
@@ -393,11 +399,17 @@ namespace
             const bool held = b % 100 > 10 && b % 100 < 90;
             if(b > 350 && held) for(const uint32_t port : {1u, 2u, 4u, 5u}) if(w.peak(port) < 1e-6f && !othersSilent) { othersSilent = true; quiet = "port " + std::to_string(port) + " at block " + std::to_string(b) + " peak " + std::to_string(w.peak(port)); }
             if(b > 350 && held && w.peak(3) < 1e-6f && !silent) { silent = true; silentAt = b; }
-            if(b > 350 && silent && held && w.peak(3) > 1e-4f) back = true;
+            if(b > 350 && silent && held && w.peak(3) > 1e-4f && !back) { back = true; again = (b / 100 + 1) * 100; }
+            if(b < 300 && held) before = std::max(before, w.peak(3));
+            if(b >= again && held) after = std::max(after, w.peak(3));
         }
         check(pid > 0 && silent, std::string(name(policy)) + " kill: part 3's chain process killed, and part 3 went silent");
         check(back, std::string(name(policy)) + " kill: part 3 came back (silent from block " + std::to_string(silentAt) + "; " + w.graph.host(w.nodes["p2chorus"]).failure() + ")");
         check(!othersSilent, std::string(name(policy)) + " kill: the other four parts never went silent (" + quiet + ")");
+        bool restored = true;
+        for(size_t k = 0; k < chain.size(); ++k) restored = restored && std::abs(w.graph.host(w.nodes[chain[k]]).parameterValue(7) - (.9 - .1 * double(k))) < 1e-6;
+        check(restored && w.graph.host(w.nodes["p2chorus"]).statistics().restarts > 0, std::string(name(policy)) + " kill: every plugin of part 3's chain restarted with its own gain");
+        check(back && std::abs(after - before) <= .02f * before, std::string(name(policy)) + " kill: part 3 as loud as before the kill, its chain's state restored (" + std::to_string(before) + " before, " + std::to_string(after) + " after)");
     }
 }
 

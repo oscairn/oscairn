@@ -69,7 +69,7 @@ Checked when built and tested; the sections below say how.
   - [x] 13c. `compute.workers` `chain`: a part's chain placed in one process as it loads
   - [x] 13d. Pool placement by group (a part's instrument alone while hosts allow, a group never split); `pool` 1 tested
   - [x] 13e. The engine's audio thread and the workers' their own core lists; with `chain` or `pool` a core per process
-  - [ ] 13f. Measured on the unit (Sick tines under each policy and core layout)
+  - [x] 13f. Measured on the unit (Sick tines under each policy and core layout); `chain` the FANTOM-07's default
 
 ## Problem
 
@@ -1499,12 +1499,17 @@ container). Instances reused from the Performance playing or kept warm stay wher
 
 The policy, `compute.workers` (`OSCAIRN_WORKERS`), engine-independent of the device:
 
-- `plugin` (the default where the profile says nothing, and `compute.pluginHosts` 0): a worker per
-  plugin instance, as before; nothing groups.
+- `plugin` (the engine's default where the profile says nothing, and `compute.pluginHosts` 0): a
+  worker per plugin instance, as before; nothing groups. Desktops and the other profiles keep it:
+  the choice of `chain` was made on the FANTOM-07's four cores, and a desktop with many cores may
+  render better with a worker per plugin; nothing measured there says otherwise yet.
 - `chain`: a worker per group, made with its first plugin and gone with its last. A part's
   instrument alone, its inserts one process and one round trip, each bus and the master their own;
   parts stay isolated from each other and instruments from effects. Sick tines: 7 processes and 3
-  waves in place of 22 workers.
+  waves in place of 22 workers. The FANTOM-07's profile sets it (the owner, 2026-11-17, on the
+  unit's lost blocks in a pedalled passage in Sick tines: a worker per plugin 26 to 31, `chain` 0
+  to 1, a pool of 3 unstable); a crash there takes down one part's chain, which comes back with
+  each plugin's state while the other parts sound (`plugin-groups`' chain kill).
 - `pool` with `compute.pluginHosts` N (3 if absent; `pluginHosts` alone still means `pool`): at most
   N hosts, a group never split over them, placed by measured cost, a group placed alone (an
   instrument) taking a host of its own while there are hosts enough.

@@ -177,7 +177,9 @@ Performance's name and scene in a field on Play, where a tap is Save As New; "Ke
 "Parts › Mixer" below it), shortened from the left (`… › `), then its last part shrunk to 70% of the type, then cut. Then
 the screen's own actions (the parameter pages' Search, Routing's "+ Plugin", "Parts collapsed" and "Meters", the Mixer's
 strip and send pagers), then Undo, Redo, Save and the rest, then the recording mark, the tempo and the meters. A narrow bar
-folds all the actions to icons and then into one "More" before it cuts anything; Back and the recording mark stay.
+folds all the actions to icons and then into one "More" before it cuts anything; Back and the recording mark stay. "More" is
+an icon button (the three dots, `ellipsis-vertical.svg`, labeled "More" for accessibility) at the right end of the action
+area, directly left of the meters, in the cursor's same order (after the title); the room it gives up goes to the title.
 Without touch: Back is the bar's first cursor stop, and Cancel (Escape; a device's back button, `cancel` in its panel
 map, which the engine counts in `controllers`' `navigation`) is Back in one step from anywhere on a screen, whatever the
 screen's cursor or a value being changed is doing; a menu, a keyboard or a dropdown over the screen takes the Cancel
@@ -195,7 +197,8 @@ width, so a changing figure never moves anything.
 A narrow bar gives up, in this order, only as much as it must (`slint/topbar.slint`: the widths of the items are
 measured, the stage is chosen by what the Performance's name would be left with): the actions' words (Undo and Redo
 become icons, then all the actions fold into one "More", a menu of them: the cursor's one stop, a press or a tap
-opens it, a disabled action cannot be chosen) while the name keeps 16 small-type heights of room; then the name's
+opens it, a disabled action cannot be chosen; the icon button is `Columns.action` wide, at the bar's right end before the meters)
+while the name keeps 16 small-type heights of room; then the name's
 room goes down to 9 (its text shrinks to 70%, then is cut); then the meters lose their names (CPU, RAM), then half
 their bars' length; last, a slow disk's "disk slow" is shortened to "slow". The recording mark and the tempo are never
 dropped. In the roomy odd test theme (type 1.39, spacing 1.6) the parts that never give way are wider than 640 or 826

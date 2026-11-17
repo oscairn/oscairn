@@ -177,7 +177,7 @@ export struct BarAction {
     label: string,
     enabled: bool,
     cursor: bool,
-    icon: int, // 0 none, 1 undo, 2 redo: what a narrow bar draws in place of the words
+    icon: int, // 0 none, 1 undo, 2 redo, 3 record, 4 capture, 5 more: what a narrow bar draws in place of the words
     on: bool, // a toggle of the screen that is on (lit)
 }
 
@@ -188,6 +188,8 @@ component ActionButton inherits Rectangle {
     // Record (3) and Capture (4) are icons always; Undo and Redo only in a narrow bar.
     property <bool> icon-only: (root.compact && root.data.icon > 0) || root.data.icon >= 3;
     callback clicked();
+    accessible-role: button;
+    accessible-label: root.data.label;
     width: root.icon-only ? Columns.action : min(measure.preferred-width + 2 * Theme.pad-wide, root.cap);
     measure := Text {
         visible: false;
@@ -220,7 +222,7 @@ component ActionButton inherits Rectangle {
         y: (parent.height - self.height) / 2;
         width: Columns.icon * 0.85;
         height: Columns.icon * 0.85;
-        source: root.data.icon == 1 ? @image-url("../../hosts/standalone/icons/undo-2.svg") : root.data.icon == 2 ? @image-url("../../hosts/standalone/icons/redo-2.svg") : @image-url("../../hosts/standalone/icons/history.svg");
+        source: root.data.icon == 1 ? @image-url("../../hosts/standalone/icons/undo-2.svg") : root.data.icon == 2 ? @image-url("../../hosts/standalone/icons/redo-2.svg") : root.data.icon == 5 ? @image-url("../../hosts/standalone/icons/ellipsis-vertical.svg") : @image-url("../../hosts/standalone/icons/history.svg");
         colorize: Theme.text;
         opacity: root.data.enabled ? 1 : Theme.disabled;
     }
@@ -281,9 +283,14 @@ export global Bar {
 
 export component TopBar inherits Rectangle {
     // Where the resource section and the tempo are, for the tests of their fixed widths.
-    out property <length> resources-x: resources.x;
+    out property <length> resources-x: tail.x + resources.x;
     out property <length> resources-width: resources.width;
     out property <length> tempo-x: tempo.x;
+    out property <length> tempo-w: tempo.width;
+    // Where the folded actions' "More" is (the bar's last item but the meters), and the chip's whole width unelided.
+    out property <length> more-x: tail.x;
+    out property <length> more-width: actions-mode == 2 ? tail.width - gap - resources.width : 0px;
+    out property <length> loading-full: Bar.loading == "" ? 0px : chip-measure.preferred-width + 2 * Theme.pad-wide;
     out property <length> pill-x: pill.x;
     out property <length> pill-width: pill.width;
     // The title as drawn: which of the path's options, whether it is at 70% of the type, whether that is cut.
@@ -321,7 +328,7 @@ export component TopBar inherits Rectangle {
     property <length> res-now: any ? percent-at + (any-percent ? Columns.percent : 0px) : 0px;
     property <length> w-full: n-actions > 0 ? full.preferred-width : 0px;
     property <length> w-icons: n-actions > 0 ? icons.preferred-width : 0px;
-    property <length> w-more: n-actions > 0 ? more-measure.preferred-width + 2 * Theme.pad-wide : 0px;
+    property <length> w-more: n-actions > 0 ? Columns.action : 0px; // the icon button
     property <length> back-w: Bar.back ? back-measure.preferred-width + 2 * Theme.pad-wide : 0px;
     property <length> tempo-width: round(Theme.small * 5.8 / 1px) * 1px;
     // The items of the line: Home's button, Back, the title (the rest), the actions, the recording mark, the tempo, the meters.
@@ -354,12 +361,6 @@ export component TopBar inherits Rectangle {
         font-size: Theme.button;
         font-weight: 700;
         text: "Back";
-    }
-    more-measure := Text {
-        visible: false;
-        font-size: Theme.button;
-        font-weight: 700;
-        text: "More";
     }
     // The actions as they would be at full size and with icons, only to know how wide they come to.
     Rectangle {
@@ -452,10 +453,6 @@ export component TopBar inherits Rectangle {
                 clicked => { Bar.action(i); }
             }
         }
-        if root.n-actions > 0 && root.actions-mode == 2: ActionButton {
-            data: { label: "More", enabled: true, cursor: Bar.more-cursor, icon: 0, on: false };
-            clicked => { Bar.more-tapped(); }
-        }
         if Bar.recording: RecordingMark {
             short: root.rec-short;
         }
@@ -467,6 +464,13 @@ export component TopBar inherits Rectangle {
             color: Theme.muted;
             text: Bar.tempo;
         }
+        // Folded actions: one icon button at the right end of the action area, directly left of the meters.
+        tail := HorizontalLayout {
+            spacing: root.gap;
+            if root.n-actions > 0 && root.actions-mode == 2: ActionButton {
+                data: { label: "More", enabled: true, cursor: Bar.more-cursor, icon: 5, on: false };
+                clicked => { Bar.more-tapped(); }
+            }
         resources := Rectangle {
             width: root.res-now;
             VerticalLayout {
@@ -497,6 +501,7 @@ export component TopBar inherits Rectangle {
                     bar-width: root.bar-w;
                 }
             }
+        }
         }
     }
 }

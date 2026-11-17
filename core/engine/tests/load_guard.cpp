@@ -63,8 +63,10 @@ Result play(const char* plugin,double budget){
 // `machine`: by then the machine had done more than the test did: the guard had counted more lost blocks than
 // were held up, or gave the note up for the callback's own time (the engine's thread held up). The guard's rule is
 // by wall time (two lost blocks in eight, or a loss within two seconds of another, the median of five blocks), so a
-// note given up there is its rule at work on what the machine did, not a fault in it.
-struct Seen { uint32_t first=UINT32_MAX; bool machine=false; };
+// note given up there is its rule at work on what the machine did, not a fault in it. `gone`: the block in which a note
+// first went by any of the guard's rules, also for lost blocks or the callback's deadline: a machine that renders the
+// overloaded blocks past the worker's allowance loses them, and the losses' rule then acts before the lane's limit does.
+struct Seen { uint32_t first=UINT32_MAX,gone=UINT32_MAX; bool machine=false; };
 Seen firstGiveUp(const char* plugin,const char* spike,uint64_t injected){
     setenv("OSCAIRN_FIXTURE_SPIKE",spike,1);
     Graph g(48000,frames);
@@ -80,6 +82,7 @@ Seen firstGiveUp(const char* plugin,const char* spike,uint64_t injected){
         if((block>=20 && block<30 && block%2==0) || block==spikeBlock+1)events.push_back(Event::note(true,40+int(block%100),1,0,0)); // five notes, a sixth after the spike
         g.process(out,frames,nullptr,events.data(),uint32_t(events.size()));
         if(const auto c=g.noteCost(a);seen.first==UINT32_MAX && c.stolen+c.hardChokes){seen.first=block;seen.machine=c.lostBlocks>injected || c.stolenForDeadline>0;}
+        if(const auto c=g.noteCost(a);seen.gone==UINT32_MAX && c.stolen+c.hardChokes+c.stolenForDevice+c.stolenForLoss+c.stolenForDeadline)seen.gone=block;
         next+=period;std::this_thread::sleep_until(next);
     }
     return seen;
@@ -164,9 +167,9 @@ int main(int argc,char** argv){try{
     auto spikedUntil=[&](const char* spike,uint64_t injected,auto good){Seen r;for(int attempt=0;attempt<attempts;++attempt)if(good(r=spiked(spike,injected)))break;return r;};
     auto theTests=[](const Seen& r){return r.first==UINT32_MAX || !r.machine;}; // nothing given up, or given up with no more than the test held up
     const auto once=spikedUntil("201:1:2500",1,theTests),twice=spikedUntil("201:2:2500",2,theTests), // block 200's call, it and the next,
-               sustained=spikedUntil("201:1000:400",0,[&](const Seen& r){return timing?r.first>=spikeBlock && r.first<=spikeBlock+8:r.first!=UINT32_MAX;}); // and from it on
+               sustained=spikedUntil("201:1000:400",0,[&](const Seen& r){return timing?r.gone>=spikeBlock && r.gone<=spikeBlock+8:r.gone!=UINT32_MAX;}); // and from it on
     auto when=[](uint32_t b){return b==UINT32_MAX?std::string("none"):"block "+std::to_string(b);};
-    std::printf("2.5 ms more in block %u: first note given up %s; in it and the next: %s; 0.4 ms more from it on: %s\n",spikeBlock,when(once.first).c_str(),when(twice.first).c_str(),when(sustained.first).c_str());
+    std::printf("2.5 ms more in block %u: first note given up %s; in it and the next: %s; 0.4 ms more from it on: %s\n",spikeBlock,when(once.first).c_str(),when(twice.first).c_str(),when(sustained.gone).c_str());
     // Lost blocks the test did not hold up are the machine's, and the guard's rule is by wall time: a note given up with more lost blocks counted
     // than were held up (or for the callback's own time) is the rule at work on the machine, not what these two claims are about. It is said,
     // and not checked; with no more than were held up, or none given up, the claim stands as it is.
@@ -174,8 +177,8 @@ int main(int argc,char** argv){try{
         if(seen.first!=UINT32_MAX && seen.machine)std::printf("%s: a note was given up in %s after more lost blocks than were held up: not checked\n",what,when(seen.first).c_str());
         else check(seen.first==UINT32_MAX,std::string(what)+" give no note up: "+when(seen.first));
     }
-    if(timing)check(sustained.first>=spikeBlock && sustained.first<=spikeBlock+8,"a sustained overload gives notes up within eight blocks: "+when(sustained.first));
-    else check(sustained.first!=UINT32_MAX,"a sustained overload gives notes up: "+when(sustained.first));
+    if(timing)check(sustained.gone>=spikeBlock && sustained.gone<=spikeBlock+8,"a sustained overload gives notes up within eight blocks: "+when(sustained.gone));
+    else check(sustained.gone!=UINT32_MAX,"a sustained overload gives notes up: "+when(sustained.gone));
     {
         Shared r;std::exception_ptr error;
         for(int attempt=0;attempt<attempts;++attempt) // as the spikes above: a held-up runner adds losses, so one measurement that shows the rule stands

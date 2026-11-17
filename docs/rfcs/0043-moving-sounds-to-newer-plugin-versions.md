@@ -1,6 +1,6 @@
 # RFC 0043: Moving sounds to newer plugin versions, and removing unused ones
 
-Status: in progress (steps 1 and 2 built 2026-11-16); proposed 2026-11-11, from the owner's request of that day.
+Status: in progress (steps 1 and 2 built 2026-11-16, step 3's engine side); proposed 2026-11-11, from the owner's request of that day.
 Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
 sound assets' retention roots ([RFC 0009](0009-sound-assets-and-dependencies.md)), plugin workers
 ([RFC 0010](0010-plugin-worker-isolation.md)), the library and audition
@@ -48,6 +48,11 @@ Checked when built and tested; the sections below say how.
       a saved version not installed by a repository's index (RFC 0031 step 9's device side), so
       such an item moves only alone, `withoutClaim`; `checked` is false until step 5)
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line
+      (engine side built 2026-11-16: `parts.useVersion`, one edit undone by `edit.undo` with the old
+      version's state, and `session.status`'s `mixedVersions`; nodes sharing an instance move
+      together onto one instance of the new version, naming one moves them all;
+      `control-version-moves`, with the Basic Synth built again as 0.3.0 for a shared instance.
+      Not yet: the Parts view's line and its **Use 0.4.6 for all**, which are the Rust UI's)
 - [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import
       workflow's state check in oscairn/packages, then the repository's Loading check

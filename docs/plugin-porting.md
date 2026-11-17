@@ -1083,7 +1083,8 @@ What changes for the plugin:
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so
   installing the plugin later brings the sound back. A newer version brings it back only when
-  the user moves the sound to it (`versions.move`), which your claim (`--opens-state-from`)
+  the user moves the sound to it (`versions.move`, or `parts.useVersion` in the open
+  Performance), which your claim (`--opens-state-from`)
   offers; the move hands your new version the old version's saved state through `clap.state`'s
   `load`, unchanged.
 

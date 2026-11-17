@@ -106,6 +106,7 @@ namespace oscairn
         std::vector<VersionMove> versionMoves() override;
         std::vector<std::pair<std::string, std::string>> versionsUndo(const std::string& move) override;
         void versionsForget(const std::string& move) override;
+        UsedVersion useVersion(const PluginRef& plugin, const std::string& to, const std::vector<NodeId>& nodes = {}, bool withoutClaim = false) override;
         void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) override;
         void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) override;
         uint64_t listRepository(const std::string& source) override;
@@ -886,7 +887,8 @@ namespace oscairn
         // root) opened with `build` instead, in a graph that never plays, as opening restores them
         // (performance.cpp): by node key, each parameter's ID, name and value once restored. Throws
         // why one does not open: not this version, its state refused, other ports.
-        std::map<std::string, std::vector<std::tuple<uint32_t, std::string, double>>> openNodes(const std::filesystem::path& root, const std::string& document, const PluginRef& plugin, const std::string& build, const std::string& version);
+        // With `keep`, each node so opened, by key, its plugin the caller's (Graph::Node, to restore()).
+        std::map<std::string, std::vector<std::tuple<uint32_t, std::string, double>>> openNodes(const std::filesystem::path& root, const std::string& document, const PluginRef& plugin, const std::string& build, const std::string& version, std::map<std::string, Graph::Node>* keep = nullptr);
         std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
         void markWithdrawn(std::vector<InstalledPackage>& packages); // each one's withdrawal, by the revocation lists last read (packages.cpp)
         std::string revokedFile(const Package& package); // an archive from a file against those lists of the repositories on: the refusal, or empty (packages.cpp)

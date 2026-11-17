@@ -216,6 +216,8 @@ namespace oscairn
             status.graphEventDrops=integer(field(v,"graphEventDrops"));status.midiEventDrops=integer(field(v,"midiEventDrops"));
             status.deadlineMisses=integer(field(v,"deadlineMisses"));status.lateBlocks=integer(field(v,"lateBlocks"));status.silentBlocks=integer(field(v,"silentBlocks"));status.badOutputBlocks=integer(field(v,"badOutputBlocks"));status.audioUnderruns=integer(field(v,"audioUnderruns"));status.audioDeviceList=integer(field(v,"audioDeviceList"));status.midiPortList=integer(field(v,"midiPortList"));status.refusedLoads=uint64_t(integer(field(v,"refusedLoads")));status.refusal=string(field(v,"refusal"));status.midiInputs.clear();status.midiOutputs.clear();status.failures.clear();status.workers.clear();
             for(auto f:array(field(v,"failures")))status.failures.push_back({static_cast<NodeId>(integer(field(f,"node"))),string(field(f,"name")),string(field(f,"reason"))});
+            status.mixedVersions.clear();
+            if(const V mixed=detail::member(v,"mixedVersions"))for(auto m:array(mixed)){std::vector<std::string> versions;for(auto x:array(field(m,"versions")))versions.push_back(string(x));status.mixedVersions.push_back({string(field(m,"format")),string(field(m,"id")),versions});}
             status.notices.clear();for(auto n:array(field(v,"notices")))status.notices.push_back(string(n));
             for(auto w:array(field(v,"workers")))status.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),number(field(w,"cpu")),uint64_t(integer(field(w,"memory"))),number(field(w,"block")),number(field(w,"blockMax")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent")))});
             for(auto [list,key]:{std::pair{&status.midiInputs,"midiInputs"},{&status.midiOutputs,"midiOutputs"}})
@@ -704,6 +706,15 @@ namespace oscairn
     std::vector<std::pair<std::string,std::string>> RemoteControl::versionsUndo(const std::string& move) {
         auto d=impl_->call("versions.undo","{\"move\":"+quote(move)+'}');std::vector<std::pair<std::string,std::string>> out;
         for(auto x:array(field(field(d.get(),"result"),"items")))out.push_back({string(field(x,"id")),string(field(x,"result"))});
+        return out;
+    }
+    Control::UsedVersion RemoteControl::useVersion(const PluginRef& p,const std::string& to,const std::vector<NodeId>& nodes,bool withoutClaim) {
+        std::string list;for(const auto n:nodes)list+=(list.empty()?"":",")+std::to_string(n);
+        auto d=impl_->call("parts.useVersion","{\"plugin\":{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+"},\"to\":"+quote(to)+",\"nodes\":["+list+"],\"withoutClaim\":"+(withoutClaim?"true":"false")+'}',30000);
+        auto r=field(d.get(),"result");UsedVersion out;
+        for(auto n:array(field(r,"nodes")))out.nodes.push_back(NodeId(integer(n)));
+        for(auto c:array(field(r,"changes")))out.changes.push_back({string(field(c,"node")),string(field(c,"name")),uint32_t(integer(field(c,"param"))),orNone(field(c,"before")),orNone(field(c,"after"))});
+        impl_->refresh();
         return out;
     }
     void RemoteControl::versionsForget(const std::string& move) { impl_->call("versions.forget","{\"move\":"+quote(move)+'}'); }

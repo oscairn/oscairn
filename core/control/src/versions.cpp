@@ -111,6 +111,24 @@ namespace oscairn
             return "{\"format\":\"oscairn.move\",\"version\":1,\"plugin\":{\"format\":" + detail::quote(m.plugin.format) + ",\"id\":" + detail::quote(m.plugin.id) + ",\"version\":" + detail::quote(m.plugin.version) +
                    "},\"to\":" + detail::quote(m.to) + ",\"date\":" + detail::quote(m.date) + ",\"undone\":" + (undone ? "true" : "false") + ",\"items\":[" + list + "]}\n";
         }
+        // The new version's claim (RFC 0043), honored when its opensStateFrom covers the saved version
+        // and the saved version's build here is signed by the key the claim was kept under.
+        std::optional<Control::VersionClaim> honored(const Control::PluginRef& plugin, const std::string& to)
+        {
+            const auto target = store::identity(plugin.format, plugin.id, to);
+            if(target.opensStateFrom.empty() || assets::older(plugin.version, target.opensStateFrom)) return std::nullopt;
+            const auto old = store::build(plugin.format, plugin.id, plugin.version);
+            if(old.empty()) return std::nullopt;
+            const auto signatures = store::signatures(old, plugin.format, plugin.id, plugin.version, platform());
+            if(std::none_of(signatures.begin(), signatures.end(), [&](const auto& s) { return s.key == target.claimKey; })) return std::nullopt;
+            return Control::VersionClaim{target.opensStateFrom, target.soundChanges, target.claimKey, false};
+        }
+        void checkTarget(const Control::PluginRef& plugin, const std::string& to)
+        {
+            if((plugin.format != "clap" && plugin.format != "lv2") || plugin.id.empty() || plugin.version.empty()) bad("name the plugin by format, ID and version");
+            if(!assets::older(plugin.version, to)) bad("only a newer version than " + plugin.version + " can be moved to; going back is undoing the move");
+            if(store::build(plugin.format, plugin.id, to).empty()) bad(plugin.id + " " + to + " is not installed here");
+        }
         struct Kept { Control::VersionMove move; std::vector<std::pair<std::string, std::string>> items; bool undone = false; };
         Kept readMove(const std::string& move)
         {
@@ -151,20 +169,11 @@ namespace oscairn
     uint64_t Session::startVersions(const PluginRef& plugin, const std::string& to, const VersionScope& scope, const std::vector<std::string>& items, bool withoutClaim, bool move)
     {
         if(versionWork_ && versionWork_->job.state == "running") bad("busy: a plan or move is running");
-        if((plugin.format != "clap" && plugin.format != "lv2") || plugin.id.empty() || plugin.version.empty()) bad("name the plugin by format, ID and version");
-        if(!assets::older(plugin.version, to)) bad("only a newer version than " + plugin.version + " can be moved to; going back is undoing the move");
+        checkTarget(plugin, to);
         if(withoutClaim && (scope.items.size() != 1 || items.size() > 1)) bad("without the publisher's claim, one item moves at a time");
         auto w = std::make_shared<VersionWork>();
         w->plugin = plugin; w->to = to; w->build = store::build(plugin.format, plugin.id, to);
-        if(w->build.empty()) bad(plugin.id + " " + to + " is not installed here");
-        // The claim (RFC 0043): the new version opens this version's state, made by the publisher whose key signed the old build here.
-        const auto target = store::identity(plugin.format, plugin.id, to);
-        if(!target.opensStateFrom.empty() && !assets::older(plugin.version, target.opensStateFrom))
-            if(const auto old = store::build(plugin.format, plugin.id, plugin.version); !old.empty())
-            {
-                const auto signatures = store::signatures(old, plugin.format, plugin.id, plugin.version, platform());
-                if(std::any_of(signatures.begin(), signatures.end(), [&](const auto& s) { return s.key == target.claimKey; })) w->job.claim = VersionClaim{target.opensStateFrom, target.soundChanges, target.claimKey, false};
-            }
+        w->job.claim = honored(plugin, to);
         // The items: by ID, the user's own copied from a library, a Setlist's Performances, or every one using it.
         auto& l = library();
         std::vector<std::string> ids;
@@ -298,5 +307,70 @@ namespace oscairn
     {
         readMove(move);
         fs::remove_all(moves() / move);
+    }
+
+    Control::UsedVersion Session::useVersion(const PluginRef& plugin, const std::string& to, const std::vector<NodeId>& asked, bool withoutClaim)
+    {
+        if(staged_) bad("commit staged graph edits before moving to another version");
+        checkTarget(plugin, to);
+        if(!honored(plugin, to) && !withoutClaim) bad(plugin.id + " " + to + " does not say it opens what " + plugin.version + " saved; its settings may be lost or sound different (withoutClaim moves it all the same)");
+        // The nodes as writeDocument keys them, and those of the plugin at that version.
+        const auto graph = graph_.describe();
+        std::map<NodeId, std::string> keys;
+        { size_t i = 0; for(const auto& n : graph.nodes) if(!leaving_.count(n.id)) keys[n.id] = "node-" + std::to_string(++i); }
+        auto mine = [&](NodeId n) { const auto& d = graph_.host(n).descriptor(); return nodes_.count(n) && d.id == plugin.id && d.version == plugin.version && (fs::path(d.path).extension() == ".lv2") == (plugin.format == "lv2"); };
+        std::set<NodeId> chosen;
+        for(const auto n : asked) { if(!graph_.contains(n) || !mine(n)) bad("node " + std::to_string(n) + " is not " + plugin.id + " " + plugin.version + " in the open Performance"); chosen.insert(n); }
+        if(asked.empty()) for(const auto& [n, name] : nodes_) if(mine(n)) chosen.insert(n);
+        if(chosen.empty()) bad("the open Performance does not play " + plugin.id + " " + plugin.version);
+        // A shared instance moves whole: every node on it with those named.
+        for(bool grew = true; grew;)
+        {
+            grew = false;
+            for(const auto& [n, name] : nodes_)
+                if(mine(n) && !chosen.count(n))
+                    for(const auto c : chosen) if(graph_.effectSource(n, leaving_) == graph_.effectSource(c, leaving_)) { chosen.insert(n); grew = true; break; }
+        }
+        for(const auto& m : graph.mappings) if(chosen.count(m.source) || chosen.count(m.target)) bad("remove the parameter mappings on " + nodes_.at(chosen.count(m.source) ? m.source : m.target) + " first");
+        // Saved as it plays now, then opened from there with the new version, as the library's move does.
+        state_files::TemporaryDirectory folder(dataHome());
+        writeDocument((folder.path / "now").string(), info_, nullptr, nullptr);
+        std::map<std::string, Graph::Node> opened;
+        const auto after = openNodes(folder.path / "now", "performance.json", plugin, store::build(plugin.format, plugin.id, to).string(), to, &opened);
+        UsedVersion out;
+        for(const auto n : chosen)
+        {
+            const auto& key = keys.at(n);
+            if(!opened.count(key)) bad(nodes_.at(n) + " did not open with " + to);
+            const auto& was = graph_.host(n);
+            const auto& now = after.at(key);
+            for(const auto& [param, name, value] : now)
+            {
+                const auto old = std::find_if(was.parameters().begin(), was.parameters().end(), [&](const auto& p) { return p.id == param; });
+                if(old == was.parameters().end()) out.changes.push_back({nodes_.at(n), name, param, std::nullopt, value});
+                else if(std::fabs(was.parameterValue(param) - value) > 1e-9) out.changes.push_back({nodes_.at(n), name, param, was.parameterValue(param), value});
+            }
+            for(const auto& p : was.parameters())
+                if(std::none_of(now.begin(), now.end(), [&](const auto& v) { return std::get<0>(v) == p.id; })) out.changes.push_back({nodes_.at(n), p.name, p.id, was.parameterValue(p.id), std::nullopt});
+            out.nodes.push_back(n);
+        }
+        // One edit: each node's plugin in its place, as undo restores one; the old one held by the step.
+        {
+            const Together step(*this, "Use " + plugin.id + " " + to);
+            for(const auto n : chosen)
+            {
+                graph_.restore(n, opened.at(keys.at(n)));
+                const auto& host = graph_.host(n);
+                for(const auto& p : host.parameters()) observed_[{n, p.id}] = host.parameterValue(p.id);
+                for(auto it = pending_.begin(); it != pending_.end();) if(it->first.first == n) { commandCount_ -= it->second.size(); it = pending_.erase(it); } else ++it;
+                loaded_.erase(n); outputDrops_.erase(n); parameterRevisions_.erase(n); valueRevisions_.erase(n);
+                if(disabled_.count(n)) graph_.setRetiring(n, true);
+            }
+            buildParts();
+            syncWires();
+            commit();
+        }
+        ++revision_; publish(ChangeKind::Graph);
+        return out;
     }
 }

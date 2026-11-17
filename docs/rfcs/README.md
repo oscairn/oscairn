@@ -42,7 +42,7 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0031](0031-package-repository-and-distribution.md) | The package repository and distribution | in progress: the official repository is live at packages.oscairn.org |
 | [0032](0032-arpeggiator.md) | The arpeggiator | proposed; steps 1 and 3 built in the host, the plugin is in its own repository |
 | [0033](0033-script-block.md) | The script block | proposed; not implemented, the host side of step 5 is built |
-| [0034](0034-parallel-graph-rendering.md) | Parallel graph rendering | in progress: steps 1 and 2 built |
+| [0034](0034-parallel-graph-rendering.md) | Parallel graph rendering | in progress: steps 1 and 2 built, step 3's engine side |
 | [0035](0035-system-base.md) | The system base: real-time tuning, security, licenses, the SDK, time and services | proposed |
 | [0036](0036-bluetooth.md) | Bluetooth MIDI and audio | proposed |
 | [0037](0037-storage-and-file-transfer.md) | Storage and file transfer | proposed |

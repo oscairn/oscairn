@@ -754,7 +754,8 @@ Each starts as an RFC:
   listed with what keeps each one and removed from Settings' Installed content, never on their own.
   Built 2026-11-16: step 1, the claim, packed by `oscairn-sign`, kept in the plugin store from a
   package signed by the builds' key, shown by `plugins.list` and carried in the template's index;
-  step 2, library items planned and moved (`versions.plan`, `versions.move`), with undo
+  step 2, library items planned and moved (`versions.plan`, `versions.move`), with undo;
+  step 3's engine side, the open Performance's parts (`parts.useVersion`) and `mixedVersions`
 - [ ] **Keeping plugins loaded:** a memory budget, unloading the least recently used, setlist
   preparation options and a setlist check; CPU, memory and storage meters. Loaded items beyond
   the open Performance are opportunistic memory ([RFC 0025](rfcs/0025-resource-budgets.md#the-order-of-eviction)).

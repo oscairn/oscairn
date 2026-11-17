@@ -40,6 +40,9 @@ namespace
 
     const char* const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYNTHESIZER, CLAP_PLUGIN_FEATURE_STEREO, nullptr };
 
+#ifndef OSCAIRN_BASIC_SYNTH_VERSION
+#define OSCAIRN_BASIC_SYNTH_VERSION "0.2.0" // another only for tests: one build as a newer version of itself (RFC 0043)
+#endif
     const clap_plugin_descriptor_t descriptor = {
         CLAP_VERSION_INIT,
         "org.oscairn.basic-synth",
@@ -48,7 +51,7 @@ namespace
         "https://github.com/oscairn/oscairn",
         "",
         "",
-        "0.2.0",
+        OSCAIRN_BASIC_SYNTH_VERSION,
         "A small polyphonic subtractive synth for tests and demos",
         features,
     };

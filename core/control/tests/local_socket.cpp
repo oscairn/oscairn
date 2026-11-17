@@ -280,6 +280,8 @@ namespace
             check(has(app.call("graph.add", R"({"path":"/x.clap"})"), "graph.add needs the edit permission"), "graph.add refused");
             check(has(app.call("params.set", R"({"values":[{"node":1,"param":1,"value":0.5}]})"), "params.set needs the edit permission"), "params.set refused");
             check(has(app.call("library.query"), R"("items":[])"), "library.query allowed");
+            check(has(app.call("versions.moves"), R"("moves":[])"), "versions.moves allowed (RFC 0043: moving library items is the library's)");
+            check(has(app.call("parts.useVersion", R"({"plugin":{"format":"clap","id":"x","version":"1"},"to":"2"})"), "parts.useVersion needs the edit permission"), "parts.useVersion refused: it edits the open Performance");
             check(has(app.call("packages.install", R"({"source":"https://example.com","id":"x"})"), "packages.install needs the system permission"), "packages.install refused");
             check(has(app.call("trust.set", R"({"id":"x"})"), "trust.set needs the system permission"), "trust.set refused");
             check(has(app.call("subscribe", R"({"topics":["status","transport"]})"), "transport needs the play or edit permission"), "a topic outside the grant is not subscribed");

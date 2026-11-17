@@ -10,7 +10,11 @@
 // with other ports, refuse the item and change nothing; without the claim (none, or another
 // publisher's) items are noClaim and only one moves, with withoutClaim; an item whose 1.0.0 is not
 // installed opens as a stand-in, and moved it plays.
-//   oscairn-version-moves-test VERSIONED-1 VERSIONED-2 STRICT-2 MONO-2 OSCAIRN-SIGN
+// Step 3, the open Performance: one part of two moved (parts.useVersion) plays 2.0.0 beside the
+// other's 1.0.0 (mixedVersions), the other moved too aligns them, undo puts each back with its
+// state, and saving writes no stateSavedBy; a 2.0.0 refusing the state changes nothing; two parts
+// sharing one instance of the Basic Synth move together onto one instance of its next version.
+//   oscairn-version-moves-test VERSIONED-1 VERSIONED-2 STRICT-2 MONO-2 OSCAIRN-SIGN BASIC-SYNTH BASIC-SYNTH-0.3.0
 #include "oscairn/session.h"
 #include "oscairn/package.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -35,11 +39,11 @@ namespace
     std::string tool;
     fs::path temp;
     // A plugin package of one build at a version, signed by `key` (build and whole), with options (a claim).
-    fs::path package(const std::string& build, const std::string& version, const std::string& key, const std::string& name, const std::string& options = {})
+    fs::path package(const std::string& build, const std::string& version, const std::string& key, const std::string& name, const std::string& options = {}, const std::string& id = ::id)
     {
         const auto folder = temp / ("build-" + name);
         fs::create_directories(folder);
-        const auto copy = folder / "Versioned.clap";
+        const auto copy = folder / "Plugin.clap";
         fs::copy_file(build, copy, fs::copy_options::overwrite_existing);
         fs::remove(copy.string() + ".sig");
         const auto keyFile = temp / (key + ".key");
@@ -50,8 +54,8 @@ namespace
         check(run(tool + " plugin-package --license MIT --key " + shell(keyFile) + " " + options + " " + shell(archive) + " clap " + id + " " + version + " Versioned " + platform() + "=" + shell(copy)) == 0, "packed " + name);
         return archive;
     }
-    std::string claims(const std::string& from) { return "--opens-state-from " + id + " " + from + " --sound-changes " + id + " 'Drive added.'"; }
-    fs::path stored(const std::string& version) { for(const auto& f : pluginStoreFolders()) if(f.parent_path().filename() == id + "@" + version) return f / "Versioned.clap"; return {}; }
+    std::string claims(const std::string& from, const std::string& plugin = id) { return "--opens-state-from " + plugin + " " + from + " --sound-changes " + plugin + " 'Drive added.'"; }
+    fs::path stored(const std::string& version, const std::string& plugin = id) { for(const auto& f : pluginStoreFolders()) if(f.parent_path().filename() == plugin + "@" + version) return f / "Plugin.clap"; return {}; }
     // What one block plays with a key down, the left channel's first sample.
     double level(Session& s)
     {
@@ -98,7 +102,8 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc < 6) { std::fprintf(stderr, "usage: %s VERSIONED-1 VERSIONED-2 STRICT-2 MONO-2 OSCAIRN-SIGN\n", argv[0]); return 2; }
+    if(argc < 8) { std::fprintf(stderr, "usage: %s VERSIONED-1 VERSIONED-2 STRICT-2 MONO-2 OSCAIRN-SIGN BASIC-SYNTH BASIC-SYNTH-0.3.0\n", argv[0]); return 2; }
+    const std::string synth = argv[6], synthNext = argv[7];
     const std::string v1 = argv[1], v2 = argv[2], strict = argv[3], mono = argv[4];
     tool = shell(argv[5]);
     try
@@ -187,6 +192,11 @@ int main(int argc, char** argv)
             const auto j = finish(s, s.versionsMove(old, "2.0.0", {{set}, {}, {}, false}, {set}));
             check(j.items.size() == 1 && j.items[0].status == "refused" && !j.items[0].reason.empty() && read(path(s, set) / "performance.json") == before && s.versionMoves().empty(),
                   "a 2.0.0 refusing the item (" + why + ") moves nothing: " + (j.items.empty() ? std::string() : j.items[0].reason));
+            s.loadPerformanceFromLibrary(set);
+            const auto graph = s.graphState().topology.nodes;
+            bool refused = false; try { s.useVersion(old, "2.0.0"); } catch(const std::exception&) { refused = true; }
+            check(refused && s.graphState().topology.nodes.at(0).plugin.version == "1.0.0" && !s.performanceInfo().unsaved,
+                  "nor in the open Performance (" + why + ")");
         }
         // Device D: 2.0.0 claiming nothing, and device F: claimed by another publisher's key.
         for(const auto& [archive, what] : {std::pair{package(v2, "2.0.0", "publisher", "v2-plain"), std::string("no claim")}, std::pair{package(v2, "2.0.0", "other", "v2-other", claims("1.0.0")), std::string("another publisher's claim")}})
@@ -226,6 +236,63 @@ int main(int argc, char** argv)
             check(j.items.size() == 1 && j.items[0].status == "moved", "moved");
             s.loadPerformanceFromLibrary(set);
             check(s.sessionStatus().failures.empty() && std::abs(level(s) - played) < 1e-6, "it plays, as it did with 1.0.0");
+        }
+        // Device G, step 3: the open Performance's parts.
+        {
+            device(temp / "g");
+            Session s(48000, 64);
+            s.installArchive(one.string(), true, {}, true);
+            const auto played = makeItems(s);
+            s.installArchive(two.string(), true, {}, true);
+            s.loadPerformanceFromLibrary(ids(s, "Set"));
+            const auto lead = s.nodeId("Lead"), pad = s.nodeId("Pad");
+            auto version = [&](NodeId node) { for(const auto& n : s.graphState().topology.nodes) if(n.id == node) return n.plugin.version; return std::string(); };
+            bool refused = false; try { s.useVersion(old, "2.0.0", {lead}, false); s.useVersion({"clap", id, "2.0.0"}, "1.0.0"); } catch(const std::invalid_argument&) { refused = true; }
+            check(refused, "a move back to an older version is refused");
+            s.undo();
+            check(version(lead) == "1.0.0" && version(pad) == "1.0.0", "undone");
+            const auto used = s.useVersion(old, "2.0.0", {lead});
+            const auto mixed = s.sessionStatus().mixedVersions;
+            check(used.nodes == std::vector<NodeId>{lead} && used.changes.size() == 1 && used.changes[0].name == "Drive" && !used.changes[0].before, "one part moved; Drive is new in it");
+            check(version(lead) == "2.0.0" && version(pad) == "1.0.0" && s.nodeId("Lead") == lead && mixed.size() == 1 && mixed[0].id == id && mixed[0].versions == std::vector<std::string>{"1.0.0", "2.0.0"},
+                  "two versions play at once, said in mixedVersions");
+            check(std::abs(s.parameter(lead, 1) - .3) < 1e-9 && std::abs(level(s) - played) < 1e-6 && s.performanceInfo().unsaved, "with its state, sounding as before; an edit");
+            s.useVersion(old, "2.0.0");
+            check(version(pad) == "2.0.0" && s.sessionStatus().mixedVersions.empty() && std::abs(s.parameter(pad, 1) - .7) < 1e-9, "the other moved too: one version");
+            s.undo();
+            check(version(pad) == "1.0.0" && std::abs(s.parameter(pad, 1) - .7) < 1e-9, "undo puts 1.0.0 back with its state");
+            s.undo();
+            check(version(lead) == "1.0.0" && std::abs(s.parameter(lead, 1) - .3) < 1e-9 && std::abs(level(s) - played) < 1e-6, "and the first");
+            s.redo(); s.redo();
+            check(version(lead) == "2.0.0" && version(pad) == "2.0.0", "redo moves them again");
+            s.savePerformanceToLibrary("Set");
+            const auto saved = read(path(s, ids(s, "Set")) / "performance.json");
+            check(saved.find("stateSavedBy") == std::string::npos && saved.find("\"version\":\"1.0.0\"") == std::string::npos, "saved with 2.0.0's own state, no stateSavedBy");
+        }
+        // Device H: two parts sharing one instance of the Basic Synth move together.
+        {
+            device(temp / "h");
+            const auto basic = "org.oscairn.basic-synth";
+            Session s(48000, 64);
+            s.installArchive(package(synth, "0.2.0", "publisher", "synth", {}, basic).string(), true, {}, true);
+            s.installArchive(package(synthNext, "0.3.0", "publisher", "synth-next", claims("0.2.0", basic), basic).string(), true, {}, true);
+            const auto first = s.add("one", stored("0.2.0", basic).string(), basic);
+            const auto second = s.shareInstrument("two", first);
+            const auto a = s.addPart("A"), b = s.addPart("B");
+            s.insertIntoPart(a, 0, first); s.insertIntoPart(b, 0, second); s.commit();
+            s.setParameter(second, 1, .25);
+            level(s);
+            const auto before = s.parameter(second, 1);
+            check(s.graphState().shared.size() == 2, "two parts share one instance");
+            const auto used = s.useVersion({"clap", basic, "0.2.0"}, "0.3.0", {second});
+            const auto g = s.graphState();
+            check(used.nodes.size() == 2 && g.shared.size() == 2 && g.shared.at(first).engine == g.shared.at(second).engine && s.sessionStatus().mixedVersions.empty() &&
+                  std::all_of(g.topology.nodes.begin(), g.topology.nodes.end(), [](const auto& n) { return n.plugin.version == "0.3.0"; }),
+                  "naming one moves both, onto one instance of 0.3.0");
+            check(std::abs(s.parameter(second, 1) - before) < 1e-9, "each keeps its sound's settings");
+            s.undo();
+            const auto back = s.graphState();
+            check(back.shared.size() == 2 && std::all_of(back.topology.nodes.begin(), back.topology.nodes.end(), [](const auto& n) { return n.plugin.version == "0.2.0"; }), "undo puts the shared 0.2.0 instance back");
         }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); ++failures; }

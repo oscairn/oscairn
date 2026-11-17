@@ -395,7 +395,7 @@ Control::InstalledPlugin identity(const std::string& format,const std::string& i
 std::vector<signing::Signature> signatures(const fs::path& build,const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform){return buildSignatures(build,format,id,version,forPlatform,bundleDigest(build));}
 }
 
-std::map<std::string,std::vector<std::tuple<uint32_t,std::string,double>>> Session::openNodes(const fs::path& root,const std::string& document,const PluginRef& plugin,const std::string& build,const std::string& version) {
+std::map<std::string,std::vector<std::tuple<uint32_t,std::string,double>>> Session::openNodes(const fs::path& root,const std::string& document,const PluginRef& plugin,const std::string& build,const std::string& version,std::map<std::string,Graph::Node>* keep) {
     const auto bytes=state_files::read(root/document,4*1024*1024);
     if(const auto error=detail::jsonPreflight({reinterpret_cast<const char*>(bytes.data()),bytes.size()},32);!error.empty())bad(std::string(error));
     const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
@@ -432,6 +432,7 @@ std::map<std::string,std::vector<std::tuple<uint32_t,std::string,double>>> Sessi
         auto& values=out[key];for(const auto& q:h.parameters())values.emplace_back(q.id,q.name,h.parameterValue(q.id));
         ids.emplace(key,n);
     }
+    if(keep)for(const auto& [key,n]:ids){(*keep)[key]=scratch->node(n);scratch->release(n);}
     return out;
 }
 

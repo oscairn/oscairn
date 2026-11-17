@@ -4,6 +4,7 @@
 #include "oscairn/sound_context.h"
 
 #include "oscairn/library.h"
+#include "oscairn/assets.h"
 #include "sheredom/json.h"
 #include "JsonInput.h"
 
@@ -467,6 +468,22 @@ namespace oscairn
                 result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds, st.allowanceMicroseconds,
                                           st.lateBlocks - std::min(base.lateBlocks, st.lateBlocks), st.silentBlocks - std::min(base.silentBlocks, st.silentBlocks)});
             }
+        }
+        // RFC 0043: a plugin played in two or more versions at once.
+        {
+            std::map<std::pair<std::string, std::string>, std::set<std::string>> versions;
+            for(const auto& [node, name] : nodes_)
+            {
+                const auto& d = graph_.host(node).descriptor();
+                versions[{std::filesystem::path(d.path).extension() == ".lv2" ? "lv2" : "clap", d.id}].insert(d.version);
+            }
+            for(const auto& [plugin, set] : versions)
+                if(set.size() > 1)
+                {
+                    std::vector<std::string> list(set.begin(), set.end());
+                    std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return assets::older(a, b); });
+                    result.mixedVersions.push_back({plugin.first, plugin.second, std::move(list)});
+                }
         }
         result.notices.insert(result.notices.end(), notices_.begin(), notices_.end()); // the host's (the audio device's) first
         result.refusedLoads = refusedLoads_; result.refusal = refusal_;

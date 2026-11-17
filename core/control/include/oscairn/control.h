@@ -156,6 +156,10 @@ namespace oscairn
             // keyboard lights. Read from the last rendered block.
             struct HeldNotes { uint8_t source = 0; std::vector<uint8_t> keys; bool operator==(const HeldNotes&) const = default; };
             std::vector<HeldNotes> heldNotes;
+            // Plugins the open Performance plays in two or more versions at once (RFC 0043), each
+            // version once, in order: what a newer version's move (useVersion) would align.
+            struct MixedVersions { std::string format, id; std::vector<std::string> versions; bool operator==(const MixedVersions&) const = default; };
+            std::vector<MixedVersions> mixedVersions;
         };
         virtual SessionStatus sessionStatus() const = 0;
         // The host's audio device, for Settings (RFC 0024). Each output device, and each input device
@@ -512,6 +516,17 @@ namespace oscairn
         virtual std::vector<VersionMove> versionMoves() = 0;
         virtual std::vector<std::pair<std::string, std::string>> versionsUndo(const std::string& move) = 0;
         virtual void versionsForget(const std::string& move) = 0;
+        // The open Performance's nodes of a plugin at a version moved to an installed newer one
+        // (RFC 0043 step 3): `nodes` (empty: every node of it), each opened with the new version and
+        // given the state it holds now, as opening does, and put in its place; the nodes sharing an
+        // instance move together, onto one instance of the new version. One edit, undone by undo(),
+        // which puts the old version back with its state. Refused, changing nothing: a version not
+        // newer or not installed, a node of another plugin or version or with parameter mappings,
+        // staged edits, the new version refusing a node's state or with other ports, and without the
+        // publisher's claim unless withoutClaim. Returns the nodes moved and the settings that read
+        // differently (node: its name).
+        struct UsedVersion { std::vector<NodeId> nodes; std::vector<VersionChange> changes; };
+        virtual UsedVersion useVersion(const PluginRef& plugin, const std::string& to, const std::vector<NodeId>& nodes = {}, bool withoutClaim = false) = 0;
         // The trust store (RFC 0006), trust.json in the data folder: the keys whose signatures this
         // device trusts, each by its public key (64 hex digits) and ID (its fingerprint), with a
         // name, what it is trusted for (scope: any of "plugins", "apps" and "content") and whether

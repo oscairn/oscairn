@@ -148,7 +148,9 @@ bits of it per block and all 64 every 64th block). A mismatch names the plan and
 files hold the outputs of the C++ reference the core was ported from and proven against, recorded before it was
 deleted; each file's header names the reference's commit (`bd57eed7`), the seeds, the sizes and the
 floating-point conditions. That reference cannot be run again without checking out `271f6e9a`, the last commit with
-it and its record mode.
+it and its record mode. `engine-core.vec` and `engine-run.vec` were since recorded from the Rust core at `022702d9`,
+whose change is the only one from the reference: a plugin on a lane a block late has its cost per note measured
+against the notes of the block it rendered, the block before.
 
 The conditions record and replay share: the core is always built `cargo --release`; the tests and `vectors_math.c`
 are built `-ffp-contract=off`; and the test executables define `exp`, `log1p` and `pow` themselves

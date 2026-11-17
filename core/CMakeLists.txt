@@ -170,11 +170,24 @@ add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-v
 add_test(NAME clap-host-rust COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(clap-host-rust PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
-# The same check from a recording of the reference, as it will run once the C++ host is gone.
-add_test(NAME clap-host-rust-replay COMMAND sh -c "t=\"$0\" b=\"$1\"; shift; \"$b\" --record \"$t.transcript\" \"$@\" >/dev/null && \"$b\" --replay \"$t.transcript\" \"$@\""
-    "${CMAKE_CURRENT_BINARY_DIR}/clap-host" $<TARGET_FILE:oscairn-clap-host-rust-test> $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
-    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
+# The same check against the C++ host's recorded vectors for this target (clap-host/tests/vectors), as it runs once the C++
+# host is gone; the test's fixtures only. Where none is committed yet, the reference is recorded first. The clap-host-vectors
+# target records them again, from the C++ host, at the commit it last changed.
+set(clap_host_vectors ${CMAKE_CURRENT_SOURCE_DIR}/clap-host/tests/vectors/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}.vectors)
+set(clap_host_fixtures $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-voice-fixture>)
+execute_process(COMMAND git log -1 --format=%h -- clap-host/src clap-host/include plugin-host/src/clap_host_cpp.cpp WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE cpp_host_revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+target_compile_definitions(oscairn-clap-host-rust-test PRIVATE OSCAIRN_VECTORS_TARGET="${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
+    OSCAIRN_CPP_HOST_REVISION="$<IF:$<BOOL:${cpp_host_revision}>,${cpp_host_revision},unknown>")
+if(EXISTS ${clap_host_vectors})
+    add_test(NAME clap-host-rust-replay COMMAND oscairn-clap-host-rust-test --replay ${clap_host_vectors} ${clap_host_fixtures})
+else()
+    add_test(NAME clap-host-rust-replay COMMAND sh -c "t=\"$0\" b=\"$1\"; shift; \"$b\" --record \"$t.vectors\" \"$@\" >/dev/null && \"$b\" --replay \"$t.vectors\" \"$@\""
+        "${CMAKE_CURRENT_BINARY_DIR}/clap-host" $<TARGET_FILE:oscairn-clap-host-rust-test> ${clap_host_fixtures})
+endif()
 set_tests_properties(clap-host-rust-replay PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1")
+add_custom_target(clap-host-vectors COMMAND ${CMAKE_COMMAND} -E env OSCAIRN_FIXTURE_VOICE_BUDGET=1 $<TARGET_FILE:oscairn-clap-host-rust-test> --record ${clap_host_vectors} ${clap_host_fixtures}
+    DEPENDS oscairn-clap-host-rust-test kick-clap-fixture-normal VERBATIM)
 
 add_executable(oscairn-sequencer-timing-test engine/tests/sequencer_timing.cpp)
 target_link_libraries(oscairn-sequencer-timing-test PRIVATE oscairn_engine)

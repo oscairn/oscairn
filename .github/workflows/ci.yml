@@ -51,6 +51,18 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # Until the C++ CLAP host's vectors for Linux are committed (core/clap-host/tests/vectors), each run records them.
+      - name: Record the C++ CLAP host's vectors (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --build build --target clap-host-vectors
+
+      - name: Keep the C++ CLAP host's vectors (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clap-host-vectors-linux
+          path: core/clap-host/tests/vectors/
+
       - name: Check core/clap-ext against its pinned oscairn-clap commit
         env:
           OSCAIRN_REQUIRE_NETWORK: "1"

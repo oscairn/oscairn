@@ -266,7 +266,9 @@ namespace
     bool init(const clap_plugin_t* p)
     {
         auto& r = self(p); const auto* h = r.host;
-        fold(r.init, h->clap_version); for(const char* s : {h->name, h->vendor, h->url, h->version}) fold(r.init, s, std::strlen(s));
+        // The host's version is Oscairn's release, which would change a recording at every release: only whether it has one.
+        fold(r.init, h->clap_version); for(const char* s : {h->name, h->vendor, h->url}) fold(r.init, s, std::strlen(s));
+        fold(r.init, *h->version != 0);
         if(const auto* t = static_cast<const clap_host_thread_check_t*>(h->get_extension(h, CLAP_EXT_THREAD_CHECK))) { fold(r.init, t->is_main_thread(h)); fold(r.init, t->is_audio_thread(h)); }
         if(const auto* e = static_cast<const clap_host_event_registry_t*>(h->get_extension(h, CLAP_EXT_EVENT_REGISTRY)))
         {

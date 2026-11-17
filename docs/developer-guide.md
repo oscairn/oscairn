@@ -75,7 +75,9 @@ note routing and voice budget and the graph's audio and run loop, is Rust by def
 reference is always compiled for the differential tests, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the
 engine use the reference instead. The CLAP host is Rust by default (`core/clap-host/rust`); its C++ reference
 (`kick::clap::Host`) is always compiled for the comparison tests, and `-DOSCAIRN_CLAP_HOST=cpp` makes the engine and the
-plugin worker use it. The plugin worker's process is C++. Other options:
+plugin worker use it. What the reference does with the test's fixtures is also kept as recorded vectors, one file per
+target in `core/clap-host/tests/vectors`, which `clap-host-rust-replay` holds the Rust host to; a change to either host's
+behavior or to a fixture records them again with `cmake --build BUILD --target clap-host-vectors` (then reconfigure). The plugin worker's process is C++. Other options:
 `-DOSCAIRN_UI=ON` builds the Rust UI, `oscairn-ui` ([Rust UI](rust-ui.md)), with cargo;
 `-DOSCAIRN_AUDIO_O3=ON` compiles the audio path at `-O3` (the device image sets it);
 `-DOSCAIRN_ENGINE=ON` builds the separate engine helper, `oscairn-engine`.

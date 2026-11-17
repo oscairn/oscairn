@@ -6,10 +6,11 @@
 // description, flags, parameter texts, each block's audio bit for bit, its output events, parameter values and outputs,
 // sleep and reset, the counters, failures as kind and message. The two transcripts must be the same, item by item, and
 // the Rust host's blocks must allocate nothing (malloc and operator new counted while they run).
-// A transcript can be kept and replayed without the C++ host (for when the reference is deleted, the check surviving as
-// recorded vectors): --record FILE writes the reference's, --replay FILE compares the Rust host's with it. Paths in it
-// are written as $SCRATCH and $PLUGINS (the plugins' folder), so a recording replays from another checkout; its audio is
-// the fixtures' as built for one platform and compiler, so a recording is kept per target.
+// The C++ host's transcript is also kept as recorded vectors (core/clap-host/tests/vectors, one file per target, as
+// failure messages and the fixtures' builds differ between systems), so the check survives the reference's deletion:
+// --record FILE writes the reference's, --replay FILE compares the Rust host's with it and names the first item that
+// differs. Paths in it are written as $SCRATCH and $PLUGINS (the plugins' folder), so a recording replays from another
+// checkout. A recording holds the test's fixtures, not Oscairn's plugins, whose every release would change it.
 //   oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...
 #include "../../clap-host/tests/AllocationGuard.h"
 #include "../../plugin-host/src/clap_host.h"
@@ -87,6 +88,7 @@ namespace
         decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
         decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
         decltype(&cpp_clap_wants_events) wantsEvents; decltype(&cpp_clap_value_rescans) valueRescans;
+        decltype(&cpp_clap_reconfigure) reconfigure; decltype(&cpp_clap_set_active_outputs) setActiveOutputs; decltype(&cpp_clap_show_window) showWindow;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
     p##clap_uses_clap_notes, p##clap_takes_sysex, p##clap_emits_sysex, p##clap_supports_state, p##clap_supports_sound_snapshot, p##clap_has_window, \
@@ -96,7 +98,8 @@ namespace
     p##clap_rings_out, p##clap_process, p##clap_output_events, p##clap_panic, p##clap_asleep, p##clap_restful, p##clap_rested, p##clap_was_reset, \
     p##clap_save_state, p##clap_load_state, p##clap_effect_context, p##clap_sound_contexts, p##clap_prepare_sound, p##clap_prepare_preset, \
     p##clap_select_sound, p##clap_discard_sound, p##clap_prepare_snapshot, p##clap_save_sound, p##clap_sound_values, p##clap_choke_retiring, \
-    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events, p##clap_value_rescans}
+    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events, p##clap_value_rescans, \
+    p##clap_reconfigure, p##clap_set_active_outputs, p##clap_show_window}
 
     // A transcript: labeled items, each its bytes.
     struct Transcript
@@ -243,6 +246,63 @@ namespace
         t.put(n + "value rescans", a.valueRescans(h)); // a preset loaded reads the values again
     }
 
+    // The audio channels of its input and output ports.
+    void channels(const Api& a, oscairn_clap_host* h, uint32_t& ni, uint32_t& no)
+    {
+        struct P { uint32_t* ni; uint32_t* no; } c{&ni, &no};
+        const oscairn_clap_description ports{&c, [](void*, const oscairn_clap_descriptor*) {}, [](void*, const char*) {}, [](void*, const oscairn_clap_preset*) {},
+            [](void*, uint32_t, const char*) {}, [](void* c, bool input, const oscairn_clap_port* p) { auto& x = *static_cast<P*>(c); *(input ? x.ni : x.no) += p->channels; },
+            [](void*, const oscairn_clap_parameter*) {}};
+        a.describe(h, &ports);
+    }
+
+    // The limits and refusals: offline rendering, the command queue filled past its capacity, a block bringing more events
+    // than a process call takes, values and parameters it refuses, a rate change, its outputs activated, a window where
+    // there is none, and a load with no memory room.
+    void limits(Transcript& t, const Api& a, const std::string& path, const std::string& id)
+    {
+        const std::string n = id + " limits: ";
+        auto* h = a.make(path.c_str(), id.c_str(), rate, frames, true, 0);
+        t.put(n + "loaded offline", h != nullptr);
+        if(!h) { failure(t, a, n + "load"); return; }
+        uint32_t ni = 0, no = 0;
+        channels(a, h, ni, no);
+        std::vector<std::vector<float>> channel(ni + no, std::vector<float>(frames + 3, 0.25f));
+        std::vector<const float*> in; std::vector<float*> out;
+        for(uint32_t c = 0; c < ni + no; ++c) if(c < ni) in.push_back(channel[c].data()); else out.push_back(channel[c].data());
+        auto block = [&](const std::string& label, uint32_t count, const kick::clap::Event* events, uint32_t length) {
+            t.put(n + label, a.process(h, in.data(), ni, out.data(), no, length, reinterpret_cast<const oscairn_clap_event*>(events), count, nullptr));
+            for(uint32_t c = 0; c < no; ++c) t.item(n + label + " audio", out[c], length * sizeof(float));
+            uint32_t emitted = 0; const auto* e = a.outputEvents(h, &emitted); t.item(n + label + " events", e, emitted * sizeof(oscairn_clap_event));
+            t.put(n + label + " reset", a.wasReset(h));
+        };
+        uint32_t queued = 0;
+        for(uint32_t i = 0; i < kick::clap::Host::maxEvents + 8; ++i) { const auto e = kick::clap::Event::note(i % 2 == 0, 40 + int(i % 40), 0.5, 0, 0, 0, int(i)); queued += a.send(h, reinterpret_cast<const oscairn_clap_event*>(&e)); }
+        t.put(n + "queued", queued);
+        for(int b = 0; b < 6; ++b) block("queued block", 0, nullptr, frames);
+        const auto bad = kick::clap::Event::note(true, 200, 0.5); t.put(n + "queued bad note", a.send(h, reinterpret_cast<const oscairn_clap_event*>(&bad)));
+        const std::vector<kick::clap::Event> many(kick::clap::Host::maxProcessEvents + 1, kick::clap::Event::note(true, 60, 0.5, 1));
+        block("too many events", uint32_t(many.size()), many.data(), frames);
+        block("most events", kick::clap::Host::maxProcessEvents, many.data(), frames);
+        block("longer block", 1, many.data(), frames + 3); // split in two, events rebased
+        for(const auto& [param, value] : {std::pair{0u, std::nan("")}, std::pair{0u, HUGE_VAL}, std::pair{0xfffffff0u, 0.5}, std::pair{3u, 1.0}})
+            t.put(n + "set refused", a.set(h, param, value));
+        t.put(n + "gesture unknown", a.gesture(h, 0xfffffff0u, true));
+        { std::string s = "untouched"; t.put(n + "text unknown", a.text(h, 0xfffffff0u, 0.5, [](void* c, const char* p, size_t size) { static_cast<std::string*>(c)->assign(p, size); }, &s)); t.text(n + "text unknown is", s.c_str()); }
+        result(t, a, n + "reconfigure", a.reconfigure(h, 44100, frames / 2));
+        block("block at 44.1 kHz", 0, nullptr, frames / 2);
+        a.setActiveOutputs(h, 1);
+        t.put(n + "service with outputs", a.service(h));
+        block("block with outputs", 0, nullptr, frames / 2);
+        if(!a.hasWindow(h)) result(t, a, n + "window", a.showWindow(h, true, "None"));
+        oscairn_clap_statistics s{}; a.statistics(h, &s);
+        for(const uint64_t c : {s.blocks, s.droppedEvents, s.processErrors, s.controlSilences}) t.put(n + "counter", c);
+        a.free(h);
+        auto* tight = a.make(path.c_str(), id.c_str(), rate, frames, false, 1);
+        t.put(n + "loaded in a byte", tight != nullptr);
+        if(tight) a.free(tight); else failure(t, a, n + "loaded in a byte");
+    }
+
     void play(Transcript& t, const Api& a, const std::string& path, const std::string& id, bool& allocated)
     {
         const std::string n = id + ": ";
@@ -286,13 +346,7 @@ namespace
 
         // The same blocks: input, notes, a playing transport, a parameter change halfway, a gesture, events sent straight.
         uint32_t ni = 0, no = 0;
-        {
-            struct P { uint32_t* ni; uint32_t* no; } c{&ni, &no};
-            const oscairn_clap_description ports{&c, [](void*, const oscairn_clap_descriptor*) {}, [](void*, const char*) {}, [](void*, const oscairn_clap_preset*) {},
-                [](void*, uint32_t, const char*) {}, [](void* c, bool input, const oscairn_clap_port* p) { auto& x = *static_cast<P*>(c); *(input ? x.ni : x.no) += p->channels; },
-                [](void*, const oscairn_clap_parameter*) {}};
-            a.describe(h, &ports);
-        }
+        channels(a, h, ni, no);
         std::vector<std::vector<float>> input(ni, std::vector<float>(frames)), output(no, std::vector<float>(frames));
         std::vector<const float*> in; std::vector<float*> out;
         for(auto& c : input) in.push_back(c.data());
@@ -304,14 +358,15 @@ namespace
         a.mirrorWake(h, &wake); t.put(n + "wake mirrored", wake.load());
         for(uint32_t block = 0; block < blocks; ++block)
         {
-            for(uint32_t c = 0; c < ni; ++c) for(uint32_t f = 0; f < frames; ++f) input[c][f] = float(std::sin(0.01 * (block * frames + f) + c) * (block % 100 < 60));
+            // A sawtooth of exact values (no libm, whose last bits differ between systems), silent 40 blocks of 100.
+            for(uint32_t c = 0; c < ni; ++c) for(uint32_t f = 0; f < frames; ++f) input[c][f] = float(int((block * frames + f + 37 * c) % 199) - 99) / 128 * (block % 100 < 60);
             std::vector<kick::clap::Event> sent;
             if(block % 20 == 1) sent.push_back(kick::clap::Event::note(true, 48 + int(block % 24), 0.8, 7, 0, 0, int(block)));
             if(block % 20 == 9) sent.push_back(kick::clap::Event::note(false, 48 + int((block - 8) % 24), 0, 3, 0, 0, int(block - 8)));
             if(block % 37 == 5) sent.push_back(kick::clap::Event::midi(0x90, 60, 100, 11));
             if(block % 37 == 6) sent.push_back(kick::clap::Event::midi(0x80, 60, 0, 2));
             // The other note port: MIDI to a CLAP-only port and CLAP notes to a MIDI-only one, translated; offs fanned out.
-            if(block % 23 == 2) { sent.push_back(kick::clap::Event::midi(0x91, 62, 90, 5, 0)); sent.push_back(kick::clap::Event::note(true, 65, 0.7, 9, 3, 1, 77)); }
+            if(block % 23 == 2) { sent.push_back(kick::clap::Event::midi(0x91, 62, 90, 5, 0)); sent.push_back(kick::clap::Event::note(true, 65, 0.8, 9, 3, 1, 77)); } // 0.8: velocity 101 in MIDI, 100 at a scale of 126
             if(block % 23 == 4) { sent.push_back(kick::clap::Event::note(false, 65, 0.3, 1, 3, -1, -1)); sent.push_back(kick::clap::Event::midi(0x81, 62, 0, 0, 0)); }
             if(block % 23 == 6) { auto choke = kick::clap::Event::note(false, -1, 0, 4, -1, -1, -1); reinterpret_cast<clap_event_header_t*>(choke.bytes.data())->type = CLAP_EVENT_NOTE_CHOKE; sent.push_back(choke); }
             // The graph's beat every block, a part's harmony (the same again, then gone a while).
@@ -393,7 +448,13 @@ namespace
             Transcript t; bool any = false;
             for(int i = 1; i < argc; ++i)
             {
-                for(const auto& plugin : kick::clap::inspect(argv[i]).plugins) play(t, a, argv[i], plugin.id, any);
+                t.text("library", std::filesystem::path(argv[i]).filename().string().c_str());
+                for(const auto& plugin : kick::clap::inspect(argv[i]).plugins)
+                {
+                    t.text("plugin", (plugin.id + " " + plugin.version).c_str());
+                    play(t, a, argv[i], plugin.id, any);
+                    limits(t, a, argv[i], plugin.id);
+                }
                 auto* none = a.make(argv[i], "no.such.plugin", rate, frames, false, 0);
                 t.put("missing loaded", none != nullptr); if(!none) failure(t, a, "missing");
             }
@@ -445,6 +506,128 @@ std::string portable(const std::string& transcript, int argc, char** argv)
     return t.out;
 }
 
+// Recorded vectors (core/clap-host/tests/vectors): a text header, an empty line, then each item: its label (a count of the
+// bytes it shares with the last label, then the rest), a kind and bytes. Up to 64 bytes are kept as they are, more as their
+// FNV-1a digest and size; a plugin's audio other than the recorder's (whose audio is its hash of everything it was given)
+// as its size, nonzero samples, sum of magnitudes and peak, compared within a tolerance: its DSP calls libm, whose last
+// bits differ between systems. Live, every item is compared whole.
+namespace
+{
+    struct Entry { std::string label; char kind; std::string bytes; };
+    constexpr char raw = 'r', digest = 'd', audio = 'a';
+    template<class T> void append(std::string& s, const T& v) { s.append(reinterpret_cast<const char*>(&v), sizeof v); }
+    template<class T> T at(const std::string& s, size_t offset) { T v{}; std::memcpy(&v, s.data() + offset, sizeof v); return v; }
+    Entry entry(const std::string& label, const std::string& value, bool whole)
+    {
+        const bool sound = label.size() > 6 && !label.compare(label.size() - 6, 6, " audio");
+        if(whole || (value.size() <= 64 && !sound)) return {label, raw, value};
+        std::string b;
+        append(b, uint32_t(value.size()));
+        if(!sound || label.rfind("org.oscairn.test.recorder", 0) == 0)
+        {
+            uint64_t h = 0xcbf29ce484222325ull;
+            for(const unsigned char c : value) h = (h ^ c) * 0x100000001b3ull;
+            append(b, h);
+            return {label, digest, b};
+        }
+        uint32_t nonzero = 0; double sum = 0, peak = 0;
+        for(size_t i = 0; i + 4 <= value.size(); i += 4) { const double x = std::fabs(at<float>(value, i)); nonzero += x != 0; sum += x; peak = std::max(peak, x); }
+        append(b, nonzero); append(b, float(sum)); append(b, float(peak));
+        return {label, audio, b};
+    }
+    std::vector<Entry> entries(const std::string& transcript, bool whole)
+    {
+        std::vector<Entry> r;
+        for(const auto& [label, value] : items(transcript)) r.push_back(entry(label, value, whole));
+        return r;
+    }
+    // The same audio within a tolerance: a thousandth of its samples zero or not, sums and peaks within 1e-4 of each other.
+    bool near(const Entry& a, const Entry& b)
+    {
+        if(a.kind != audio || b.kind != audio || at<uint32_t>(a.bytes, 0) != at<uint32_t>(b.bytes, 0)) return false;
+        const auto close = [](double x, double y) { return std::fabs(x - y) <= 1e-4 * std::max(std::fabs(x), std::fabs(y)) + 1e-6; };
+        const int64_t na = at<uint32_t>(a.bytes, 4), nb = at<uint32_t>(b.bytes, 4);
+        return std::abs(na - nb) <= std::max<int64_t>(1, na / 1000) && close(at<float>(a.bytes, 8), at<float>(b.bytes, 8)) &&
+               close(at<float>(a.bytes, 12), at<float>(b.bytes, 12));
+    }
+    void varint(std::string& s, size_t v) { for(; v >= 0x80; v >>= 7) s += char(v | 0x80); s += char(v); }
+    size_t varint(const std::string& s, size_t& offset)
+    {
+        size_t v = 0;
+        for(int shift = 0; offset < s.size(); shift += 7) { const auto c = uint8_t(s[offset++]); v |= size_t(c & 0x7f) << shift; if(!(c & 0x80)) break; }
+        return v;
+    }
+    std::string vectors(const std::vector<Entry>& all)
+    {
+        std::string out, last;
+        for(const auto& e : all)
+        {
+            size_t shared = 0;
+            while(shared < last.size() && shared < e.label.size() && last[shared] == e.label[shared]) ++shared;
+            varint(out, shared); varint(out, e.label.size() - shared); out += e.label.substr(shared);
+            out += e.kind; varint(out, e.bytes.size()); out += e.bytes;
+            last = e.label;
+        }
+        return out;
+    }
+    std::vector<Entry> entries(const std::string& file, size_t offset, std::string& problem)
+    {
+        std::vector<Entry> r; std::string last;
+        while(offset < file.size())
+        {
+            const size_t shared = varint(file, offset), rest = varint(file, offset);
+            if(shared > last.size() || offset + rest + 1 > file.size()) { problem = "the recording is cut short"; break; }
+            Entry e{last.substr(0, shared) + file.substr(offset, rest), file[offset + rest], {}};
+            offset += rest + 1;
+            const size_t size = varint(file, offset);
+            if(offset + size > file.size()) { problem = "the recording is cut short"; break; }
+            e.bytes = file.substr(offset, size); offset += size;
+            last = e.label; r.push_back(std::move(e));
+        }
+        return r;
+    }
+    std::string shown(const Entry* e)
+    {
+        if(!e) return "nothing";
+        char text[160];
+        if(e->kind == digest) std::snprintf(text, sizeof text, "%u bytes, digest %016llx", at<uint32_t>(e->bytes, 0), (unsigned long long)at<uint64_t>(e->bytes, 4));
+        else if(e->kind == audio)
+            std::snprintf(text, sizeof text, "%u bytes of audio, %u samples nonzero, sum %.7g, peak %.7g", at<uint32_t>(e->bytes, 0), at<uint32_t>(e->bytes, 4),
+                          at<float>(e->bytes, 8), at<float>(e->bytes, 12));
+        else
+        {
+            std::string hex = std::to_string(e->bytes.size()) + " bytes";
+            for(size_t i = 0; i < e->bytes.size() && i < 64; ++i) { std::snprintf(text, sizeof text, "%s%02x", i ? " " : ": ", uint8_t(e->bytes[i])); hex += text; }
+            return hex;
+        }
+        return text;
+    }
+    // Both lists item by item: the first ten items that differ, the first with the item before it (the same in both), and
+    // where two items' bytes differ, the first byte that does.
+    int compare(const std::vector<Entry>& expected, const std::vector<Entry>& got, const char* what, const char* other, size_t& approximate)
+    {
+        int failures = 0;
+        for(size_t i = 0; i < std::max(expected.size(), got.size()) && failures < 10; ++i)
+        {
+            const Entry* a = i < expected.size() ? &expected[i] : nullptr;
+            const Entry* b = i < got.size() ? &got[i] : nullptr;
+            if(a && b && a->label == b->label && a->kind == b->kind)
+            {
+                if(a->bytes == b->bytes) continue;
+                if(near(*a, *b)) { ++approximate; continue; }
+            }
+            std::fprintf(stderr, "FAIL: item %zu differs: %s \"%s\" (%s) against %s \"%s\" (%s)\n", i, what, a ? a->label.c_str() : "(none)", shown(a).c_str(), other,
+                         b ? b->label.c_str() : "(none)", shown(b).c_str());
+            if(a && b && a->kind == raw && b->kind == raw)
+                for(size_t k = 0; k < std::min(a->bytes.size(), b->bytes.size()); ++k)
+                    if(a->bytes[k] != b->bytes[k]) { std::fprintf(stderr, "  first at byte %zu\n", k); break; }
+            if(!failures && i) std::fprintf(stderr, "  after item %zu \"%s\", the same in both\n", i - 1, expected[i - 1].label.c_str());
+            ++failures;
+        }
+        return failures;
+    }
+}
+
 int main(int argc, char** argv)
 {
     std::string record, replay;
@@ -456,38 +639,51 @@ int main(int argc, char** argv)
     if(argc < 2) { std::fprintf(stderr, "usage: oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...\n"); return 2; }
     bool cppAllocated = false, rustAllocated = false;
     scratch = (std::filesystem::temp_directory_path() / ("oscairn-clap-host-rust-" + std::to_string(getpid()))).string();
-    std::string cpp, rust;
-    if(!replay.empty()) { std::ifstream in(replay, std::ios::binary); cpp.assign(std::istreambuf_iterator<char>(in), {}); if(cpp.empty()) { std::fprintf(stderr, "FAIL: no recording in %s\n", replay.c_str()); return 1; } }
+    const std::string magic = "oscairn clap-host vectors 1\n", target = "target: " OSCAIRN_VECTORS_TARGET "\n";
+    std::vector<Entry> expected;
+    if(!replay.empty())
+    {
+        std::ifstream in(replay, std::ios::binary); const std::string file(std::istreambuf_iterator<char>(in), {});
+        const auto body = file.find("\n\n");
+        if(file.rfind(magic, 0) != 0 || body == std::string::npos) { std::fprintf(stderr, "FAIL: no recording in %s\n", replay.c_str()); return 1; }
+        if(file.find(target) > body) { std::fprintf(stderr, "FAIL: %s was recorded for another target than %s", replay.c_str(), target.c_str()); return 1; }
+        std::string problem; expected = entries(file, body + 2, problem);
+        if(!problem.empty()) { std::fprintf(stderr, "FAIL: %s: %s\n", replay.c_str(), problem.c_str()); return 1; }
+    }
     else
     {
         std::filesystem::create_directories(scratch);
-        cpp = portable(run(OSCAIRN_API(cpp_), argc, argv, cppAllocated), argc, argv);
+        const auto cpp = portable(run(OSCAIRN_API(cpp_), argc, argv, cppAllocated), argc, argv);
         std::filesystem::remove_all(scratch);
+        if(cpp.empty()) return 1;
+        expected = entries(cpp, record.empty());
         if(!record.empty())
         {
-            std::ofstream out(record, std::ios::binary); out << cpp;
+            std::string header = magic + "recorded from: the C++ CLAP host (kick::clap::Host through clap_host_cpp.cpp) at " OSCAIRN_CPP_HOST_REVISION "\n" + target;
+            header += "scenarios: per plugin, load and description; 400 blocks (audio in, notes, MIDI, both note dialects translated, a choke, the beat, "
+                      "a harmony, refused events, a gesture, a parameter set, an event sent, a panic, rests, voice limits); state saved and loaded with its refusals; "
+                      "effect contexts, one refused by the activation observer; native sounds, presets, snapshots, ring-out, assets; limits (offline, a full queue, "
+                      "too many events, refused values, a rate change, outputs activated, a missing window, no memory room); counters; a missing plugin and library\n";
+            for(const auto& e : expected) if(e.label == "library" || e.label == "plugin") header += e.label + ": " + e.bytes + "\n";
+            header += "items: " + std::to_string(expected.size()) + "\nreplay: oscairn-clap-host-rust-test --replay FILE LIBRARY... (ctest: clap-host-rust-replay); "
+                      "record: cmake --build BUILD --target clap-host-vectors\n\n";
+            std::ofstream out(record, std::ios::binary); out << header << vectors(expected);
             if(!out) { std::fprintf(stderr, "FAIL: cannot write %s\n", record.c_str()); return 1; }
-            std::printf("clap host: the C++ host's transcript recorded, %zu items\n", items(cpp).size());
+            std::printf("clap host: the C++ host's vectors recorded, %zu items\n", expected.size());
             return 0;
         }
     }
     std::filesystem::create_directories(scratch);
-    rust = portable(run(OSCAIRN_API(rust_), argc, argv, rustAllocated), argc, argv);
+    const auto rust = portable(run(OSCAIRN_API(rust_), argc, argv, rustAllocated), argc, argv);
     std::filesystem::remove_all(scratch);
-    if(cpp.empty() || rust.empty()) return 1;
-    const auto a = items(cpp), b = items(rust);
-    int failures = 0;
-    for(size_t i = 0; i < std::max(a.size(), b.size()) && failures < 10; ++i)
-    {
-        if(i < a.size() && i < b.size() && a[i] == b[i]) continue;
-        std::fprintf(stderr, "FAIL: item %zu differs: C++ \"%s\" (%zu bytes) against Rust \"%s\" (%zu bytes)\n", i, i < a.size() ? a[i].first.c_str() : "(none)",
-                     i < a.size() ? a[i].second.size() : 0, i < b.size() ? b[i].first.c_str() : "(none)", i < b.size() ? b[i].second.size() : 0);
-        if(i < a.size() && i < b.size() && a[i].first == b[i].first && a[i].second.size() < 200)
-            std::fprintf(stderr, "  C++ [%s]\n  Rust [%s]\n", a[i].second.c_str(), b[i].second.c_str());
-        ++failures;
-    }
+    if(rust.empty()) return 1;
+    size_t approximate = 0;
+    int failures = replay.empty() ? compare(expected, entries(rust, true), "C++", "Rust", approximate)
+                                  : compare(expected, entries(rust, false), "recorded", "Rust", approximate);
     if(rustAllocated) { std::fprintf(stderr, "FAIL: the Rust host's blocks allocated\n"); ++failures; }
     if(cppAllocated) std::fprintf(stderr, "note: the C++ host's blocks allocated\n");
     if(failures) return 1;
-    std::printf("clap host: Rust and C++ the same over %zu items, the Rust blocks allocating nothing\n", a.size());
+    if(replay.empty()) std::printf("clap host: Rust and C++ the same over %zu items, the Rust blocks allocating nothing\n", expected.size());
+    else std::printf("clap host: Rust the same as the C++ host's recording over %zu items (%zu audio within the tolerance), the Rust blocks allocating nothing\n",
+                     expected.size(), approximate);
 }

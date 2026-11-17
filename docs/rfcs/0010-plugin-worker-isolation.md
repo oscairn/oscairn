@@ -318,6 +318,20 @@ Implemented 2026-10-30 in `WorkerHost.cpp` (native engines followed in step 5):
   worker had stopped. A taken-over instance whose state check fails is let go for a fresh one, as
   one whose state does not load (`control-performance-switch-stress-workers` and `-hosts`: every
   worker killed and the next Performance opened at once, three rounds).
+  The check cannot see a worker still dying: on the unit a worker killed the instant the next
+  Performance was asked for had not exited when the open reached it, and the open was refused
+  3 of 3. So a read that fails while a worker failed during it is read again (2026-11-17): the
+  check also fails a worker whose connection broke under a request (killed and waited for, which
+  takes the moment it was dying anyway), and a worker that gave no reply in its timeout is failed
+  by that; the next pass skips their instances as any failed one's, their nodes load afresh with
+  the document's state, and the notice names them. A pass is read again only when a worker failed
+  during it, at most once for each instance offered, so it ends; a plugin whose fresh load fails
+  too stands in, as any plugin that does not load. What it costs: a dying worker, a moment and
+  one more read; a hung one, its reply timeout (`OSCAIRN_WORKER_REPLY_SECONDS`, 30 s; a load
+  into a hung plugin host waits 30 s whatever it is) for each hung worker, unless its supervisor
+  fails it first for missed blocks (a quarter second) while audio plays. Tested by every worker
+  stopped at the switch, its requests unanswered in a 1 s timeout, and stopped then killed while
+  the open waits on it (`control-performance-switch-stress-workers`; `-hosts` the second only).
 - **Fade-in:** the restarted plugin's output fades in over 10 ms.
 - **Bounded:** at most 3 restarts a minute; after that the node stays silent and `failure()`
   says so ("…; not restarted: 3 restarts within a minute"). `Statistics::restarts` counts

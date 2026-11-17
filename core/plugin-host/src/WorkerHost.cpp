@@ -48,6 +48,7 @@ namespace oscairn
         using namespace worker;
 
         std::atomic<uint64_t> requests{0}; // the requests made to any worker (workerRequests)
+        std::atomic<uint64_t> failures{0}; // worker processes failed (workerFailures)
 
         // OSCAIRN_WORKER_REST (realtime.h's workerRest), read as the engine starts: 0 calls every worker every block, as
         // before resting; which of the others may rest, the graph says (Graph's rest call).
@@ -312,7 +313,7 @@ namespace oscairn
                 const std::string why = std::string("Plugin worker stopped answering: ") + e.what();
                 blame(bell->serving);
                 { std::lock_guard lock(failureMutex); reason = why; failureText = why; }
-                failed.store(true);
+                failed.store(true); failures.fetch_add(1, std::memory_order_relaxed);
                 if(pid > 0) kill(pid, SIGKILL);
                 throw std::runtime_error(why);
             }
@@ -321,7 +322,7 @@ namespace oscairn
             Reader exchange(const std::string& message)
             {
                 requests.fetch_add(1, std::memory_order_relaxed);
-                send(socket, message);
+                try { send(socket, message); } catch(const std::exception&) { broken.store(true); throw; }
                 for(;;)
                 {
                     std::string reply;
@@ -381,7 +382,7 @@ namespace oscairn
             void fail(const std::string& why)
             {
                 { std::lock_guard lock(failureMutex); reason = why; failureText = why; }
-                failed.store(true);
+                failed.store(true); failures.fetch_add(1, std::memory_order_relaxed);
                 if(!reaped) { kill(pid, SIGKILL); int status = 0; waitpid(pid, &status, 0); reaped = true; }
             }
 
@@ -2066,14 +2067,19 @@ namespace oscairn
         }
 
         // A worker that exited, seen now rather than at its supervisor's next tick: failed as the tick would fail it, and the
-        // supervisor woken to restart it. Never waits: a supervisor in a tick or a restart, or a request under way, has it.
+        // supervisor woken to restart it. So is one whose connection broke under a request: it is dying, if not yet exited
+        // (a killed process takes milliseconds to end on the unit), so it is killed and waited for, which takes as long.
+        // Never waits on a worker otherwise: a supervisor in a tick or a restart, or a request under way, has it.
         bool Process::exitedNow()
         {
             std::unique_lock lock(superviseMutex, std::try_to_lock);
             if(!lock || stopping || gaveUp || failed.load()) return false;
             std::unique_lock requests(control, std::try_to_lock);
             int status = 0;
-            if(!requests || reaped || pid <= 0 || waitpid(pid, &status, WNOHANG) != pid) return false;
+            if(!requests || reaped || pid <= 0) return false;
+            auto seen = waitpid(pid, &status, WNOHANG);
+            if(seen == 0 && broken.load() && kill(pid, SIGKILL) == 0) seen = waitpid(pid, &status, 0); // dying: ended now
+            if(seen != pid) return false;
             reaped = true;
             if(WIFSIGNALED(status) && WTERMSIG(status) != SIGKILL) blame(bell->faulted);
             fail(WIFSIGNALED(status) ? "Plugin worker crashed (signal " + std::to_string(WTERMSIG(status)) + ")" : "Plugin worker exited (status " + std::to_string(WEXITSTATUS(status)) + ")");
@@ -2324,6 +2330,7 @@ namespace oscairn
 
     namespace { std::atomic<int64_t> serviceInterval{0}; }
     uint64_t workerRequests() noexcept { return requests.load(std::memory_order_relaxed); }
+    uint64_t workerFailures() noexcept { return failures.load(std::memory_order_relaxed); }
     void setWorkerServiceInterval(std::chrono::milliseconds interval) noexcept { serviceInterval.store(interval.count(), std::memory_order_relaxed); }
     std::chrono::milliseconds workerServiceInterval() noexcept
     {

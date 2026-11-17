@@ -317,6 +317,8 @@ namespace oscairn
     std::chrono::milliseconds workerServiceInterval() noexcept;
     // The requests made to workers since the engine started, a service's among them (any thread).
     uint64_t workerRequests() noexcept;
+    // Worker processes failed since the engine started (crashed, hung, too slow, over memory, a reply lost); any thread.
+    uint64_t workerFailures() noexcept;
     // RFC 0045, Linux only, false elsewhere: while the engine's audio device runs, a PM QoS request
     // for no CPU wake-up latency: `device` held open with a 32-bit 0 written, so idle cores stay out
     // of deep idle states (the FANTOM-07's cpu-sleep lists a 1.5 ms exit) and a thread woken for a
@@ -405,9 +407,10 @@ namespace oscairn
     // one of the plugin hosts, the plugin of each of its nodes, and their cost as placement counts it.
     struct PluginHostInfo { long pid = 0; bool pooled = false; std::vector<std::string> plugins; double cost = 0; };
     std::vector<PluginHostInfo> pluginHosts();
-    // Every worker process that has exited, failed now as its supervisor would at its next check (every 10 ms), so a
-    // Performance opening takes none of its instances over, as for any failed one; the supervisor restarts it. Returns how
-    // many. Never waits on a worker. Control thread.
+    // Every worker process that has exited, or whose connection broke under a request (dying: killed and waited for), failed
+    // now as its supervisor would at its next check (every 10 ms), so a Performance opening takes none of its instances
+    // over, as for any failed one; the supervisor restarts it. Returns how many. Never waits on a worker that is not
+    // ending. Control thread.
     size_t checkWorkers();
     // RFC 0005: one plugin's presets, read by the isolated scan helper the placement policy names
     // (its `scan`). The plugin's preset-provider code runs in that helper process (timeout, crash

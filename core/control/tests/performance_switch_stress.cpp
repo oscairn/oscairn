@@ -123,6 +123,54 @@ int main(int argc, char** argv)
                 for(int i = 0; i < 400 && peak < 1e-4f; ++i) { g.service(); g.process(out, frames); for(const float x : l) peak = std::max(peak, std::abs(x)); if(peak < 1e-4f) std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
                 check(peak >= 1e-4f, "and it sounds: peak " + std::to_string(peak));
             }
+        // Every worker STOPPED at the moment of a switch, alive and not answering: on the unit, a worker killed the instant
+        // the next Performance was asked for was still dying, not yet seen as exited, when the open reached it. The restore
+        // into its instance gets no reply in the reply timeout (round 0), or its connection drops as it is then killed while
+        // the open waits on it (round 1). The open fails that worker as its supervisor would, loads its plugins afresh with
+        // the document's state, and opens, with the notice, and sounds. Before, it was refused ("connection lost").
+        if(!placementPolicy().worker.empty())
+            for(int round = 0; round < 2; ++round)
+            {
+                // Not round 0 with plugin hosts: a fresh load picked into a stopped host waits out a load's full 30 s (no audio
+                // runs here to fail it for blocks missed), which is how any load into a hung host fares, not this case.
+                if(round == 0 && std::getenv("OSCAIRN_PLUGIN_HOSTS")) continue;
+                ::setenv("OSCAIRN_WORKER_REPLY_SECONDS", round == 0 ? "1" : "30", 1); // read as each worker process starts
+                Session g(48000, frames);
+                g.loadPerformance(performances[0].string());
+                render(g, 8);
+                std::vector<int> pids;
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    char line[32];
+                    while(std::fgets(line, sizeof line, list)) pids.push_back(std::atoi(line));
+                    pclose(list);
+                }
+                check(!pids.empty(), "the Performance plays in workers");
+                for(const int pid : pids) ::kill(pid, SIGSTOP);
+                std::thread killer; // round 1: killed while the open waits on them (or, should the open reach none in time, just before)
+                if(round == 1) killer = std::thread([&] { std::this_thread::sleep_for(std::chrono::milliseconds(300)); for(const int pid : pids) ::kill(pid, SIGKILL); });
+                std::string refused;
+                try { g.loadPerformance(performances[1].string()); } catch(const std::exception& e) { refused = e.what(); }
+                if(killer.joinable()) killer.join();
+                for(const int pid : pids) ::kill(pid, SIGCONT); // those the open did not fail answer again
+                check(refused.empty(), "a switch at a worker stopped (round " + std::to_string(round) + ") opens: " + refused);
+                if(!refused.empty()) break;
+                bool state = true; std::string names;
+                for(const auto& [id, name] : g.graphState().names)
+                {
+                    if(name.rfind("delay 1-", 0) == 0) state = state && std::abs(g.parameter(id, 1) - .13) < 1e-6;
+                    if(name == "instrument 1-1" || name == "instrument 1-3") state = state && std::abs(g.parameter(id, 7) - .4) < 1e-6;
+                    names += name + " ";
+                }
+                check(state, "its plugins hold the document's state: " + names);
+                bool notice = false; for(const auto& n : g.sessionStatus().notices) notice = notice || n.find("had stopped") != std::string::npos;
+                check(notice, "a notice says the plugins had stopped");
+                g.note(true, 40, .9);
+                std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; float peak = 0;
+                for(int i = 0; i < 400 && peak < 1e-4f; ++i) { g.service(); g.process(out, frames); for(const float x : l) peak = std::max(peak, std::abs(x)); if(peak < 1e-4f) std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+                check(peak >= 1e-4f, "and it sounds: peak " + std::to_string(peak));
+            }
+        ::unsetenv("OSCAIRN_WORKER_REPLY_SECONDS");
         if(!placementPolicy().worker.empty())
         {
             Session g(48000, frames);

@@ -817,7 +817,8 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
     // A worker that died a moment ago, not yet seen by its supervisor, reads as failed now: no instance of it is taken over
     // (it is loaded afresh, as for one known to have failed), and its supervisor restarts it.
     checkWorkers();
-    std::string stopped;for(const auto& [n,name]:nodes_)if(!graph_.host(n).failure().empty())stopped+=(stopped.empty()?"":", ")+name;
+    std::vector<NodeId> stopped;auto stoppedNow=[&]{for(const auto& [n,name]:nodes_)if(!graph_.host(n).failure().empty() && std::find(stopped.begin(),stopped.end(),n)==stopped.end())stopped.push_back(n);};
+    stoppedNow();
     auto free=warm_;
     if(playing){auto more=freeInstances(all);
         // The middle rule (RFC 0021): unless it cuts, a playing instance is kept warm instead of taken
@@ -835,10 +836,20 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
             for(auto& f:more){const auto b=f.host->residentBytes(); // as warmMemory counts it
                 if((memoryClasses() || count<warmLimit) && b<=room-bytes){f.keep=true;++count;bytes+=b;}}}
         free.insert(free.end(),more.begin(),more.end());}
+    // A worker still dying when the check ran (not yet exited), or dying or hanging during the read, fails the request into
+    // an instance of it ("connection lost", or no reply in its timeout). The check then fails it as its supervisor would,
+    // and the read starts again: its instances are skipped as any failed one's, its nodes loaded afresh with the
+    // document's state. A pass is tried again only when a worker failed during it, at most once for each instance offered.
     std::unique_ptr<Prepared> p;
-    // Instances kept warm it gave a state to before it failed hold that state now, not the one remembered.
-    try{p=read(root,std::move(free));}catch(...){for(auto& w:warm_)w.loaded.source.clear();throw;}
-    if(!stopped.empty()){p->notices.push_back("Plugins of the last Performance whose worker had stopped, loaded afresh where this one uses them: "+stopped);std::fprintf(stderr,"oscairn: %s\n",p->notices.back().c_str());}
+    for(size_t pass=0;;++pass){const auto failures=workerFailures();
+        try{p=read(root,free);break;}
+        catch(...){
+            // Instances kept warm it gave a state to before it failed hold that state now, not the one remembered.
+            for(auto& w:warm_)w.loaded.source.clear();for(auto& f:free)f.loaded.source.clear();
+            checkWorkers();stoppedNow();
+            if(workerFailures()==failures || pass>=free.size()+nodes_.size())throw;}}
+    if(!stopped.empty()){std::string names;for(const auto n:stopped)names+=(names.empty()?"":", ")+nodes_.at(n);
+        p->notices.push_back("Plugins of the last Performance whose worker had stopped, loaded afresh where this one uses them: "+names);std::fprintf(stderr,"oscairn: %s\n",p->notices.back().c_str());}
     std::erase_if(warm_,[&](const Free& w){return std::find(p->warm.begin(),p->warm.end(),w.host.get())!=p->warm.end();});
     return p;
 }

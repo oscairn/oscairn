@@ -210,7 +210,7 @@ fn a_sound_needs_a_part_and_nothing_is_tried_while_loading() {
     r.e.auditioning = None;
     r.c.changed();
     r.settle();
-    assert_eq!(value_of(r.ui(), "Soft Felt"), "muted piano".to_string().replace("muted piano", "keys  ·  warm   Muted piano"));
+    assert_eq!(value_of(r.ui(), "Soft Felt"), "keys  ·  warm".to_string());
     // While one loads: "Still loading".
     r.c.show_page(0);
     r.settle();

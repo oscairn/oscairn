@@ -169,7 +169,8 @@ fn a_row_is_the_library_panes() {
     let r = Rig::new(library());
     let ui = r.ui();
     assert_eq!(labels(ui), ["Filters", "Untitled", "Brass Corner", "Evening Strings", "Glass Choir"]);
-    assert_eq!(value_of(ui, "Evening Strings"), "strings  ·  warm   Slow and wide  ★");
+    assert_eq!(value_of(ui, "Evening Strings"), "strings  ·  warm  ★");
+    assert_eq!(rows(ui).iter().find(|r| r.label == "Evening Strings").map(|r| (r.detail.to_string(), r.fluid)), Some(("Slow and wide".to_string(), true)), "the description is the row's detail, apart from its tags");
     assert_eq!(value_of(ui, "Untitled"), "Locked");
     assert_eq!(value_of(ui, "Glass Choir"), "Does not fit this device  ·  choir  ·  pad");
     assert_eq!(value_of(ui, "Brass Corner"), "brass  ·  warm");

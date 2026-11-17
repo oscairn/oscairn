@@ -1,44 +1,14 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
-/* What the Rust CLAP host (core/clap-host/rust) reaches in kick_clap, which stays C++ behind these calls: the process's
- * hardware and activation observer (set through kick::clap::Host, as the C++ host reads them) and the host's own
- * plugin windows (Window.h). Each does what Host.cpp does there.
+/* What the Rust CLAP host (core/clap-host/rust) reaches in kick_clap, which stays C++ behind these calls: the host's own
+ * plugin windows (Window.h).
  * C, so bindgen reads it (core/clap-host/rust/src/bindings.rs, with clap_host.h). */
 #pragma once
-#include <oscairn-clap/assets.h>
-#include <oscairn-clap/hardware.h>
-#include <oscairn-clap/memory.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Where plugins resolve sound assets (kick::clap::AssetResolver, RFC 0009), as oscairn.assets answers a plugin
- * (oscairn-clap/assets.h) once the host checked the thread and the arguments: a failure's reason written into message. */
-typedef struct
-{
-    void* context;
-    bool (*resolve)(void* context, oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity, char* message, uint32_t message_capacity);
-    bool (*library_root)(void* context, const char* library, const char* min_version, char* path, uint32_t path_capacity);
-    bool (*create)(void* context, const char* file, oscairn_asset_ref_t* ref, char* message, uint32_t message_capacity);
-    bool (*resolve_sample)(void* context, const oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity, oscairn_sample_location_t* location,
-                           char* message, uint32_t message_capacity);
-} oscairn_clap_assets;
-
-/* oscairn.hardware through kick::clap::Host::hardware() (none: no accelerators); owner is the plugin's host. */
-uint32_t kick_clap_hardware_count(void);
-bool kick_clap_hardware_get(uint32_t index, oscairn_hardware_accelerator_t* accelerator);
-bool kick_clap_hardware_supports(uint32_t index, const char* operation);
-int32_t kick_clap_hardware_reserve(const void* owner, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease);
-void kick_clap_hardware_release(const void* owner, uint32_t lease);
-void kick_clap_hardware_release_all(const void* owner);
-int32_t kick_clap_hardware_submit(const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t* job);
-int32_t kick_clap_hardware_collect(const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t* result);
-
-/* kick::clap::Host::observeActivations' observer, if one is set, told of an activation: null to go on, else why it is
- * refused (valid until this thread's next call). */
-const char* kick_clap_activating(const oscairn_memory_t* declared);
 
 /* The host's own window holding a plugin's embedded view (detail::Window): null where this platform has none. */
 typedef struct kick_clap_window kick_clap_window;

@@ -17,7 +17,9 @@
 #pragma once
 #include <clap/entry.h>
 #include <clap/events.h>
-#include <kick_clap/bridge.h> /* oscairn_clap_assets */
+#include <kick_clap/bridge.h>
+#include <oscairn-clap/assets.h>
+#include <oscairn-clap/hardware.h>
 #include <oscairn-clap/effect-contexts.h>
 #include <oscairn-clap/memory.h>
 #include <oscairn-clap/sound-contexts.h>
@@ -54,6 +56,33 @@ typedef struct
 #endif
 
 typedef struct oscairn_clap_host oscairn_clap_host; /* one plugin instance */
+
+/* Where plugins resolve sound assets (kick::clap::AssetResolver, RFC 0009), as oscairn.assets answers a plugin
+ * (oscairn-clap/assets.h) once the host checked the thread and the arguments: a failure's reason written into message. */
+typedef struct
+{
+    void* context;
+    bool (*resolve)(void* context, oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity, char* message, uint32_t message_capacity);
+    bool (*library_root)(void* context, const char* library, const char* min_version, char* path, uint32_t path_capacity);
+    bool (*create)(void* context, const char* file, oscairn_asset_ref_t* ref, char* message, uint32_t message_capacity);
+    bool (*resolve_sample)(void* context, const oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity, oscairn_sample_location_t* location,
+                           char* message, uint32_t message_capacity);
+} oscairn_clap_assets;
+
+/* The process's accelerators (oscairn.hardware, RFC 0004), kick::clap::HardwareAccess's calls on its context: owner is
+ * the plugin's host, epoch its activation. */
+typedef struct
+{
+    void* context;
+    uint32_t (*count)(void* context);
+    bool (*get)(void* context, uint32_t index, oscairn_hardware_accelerator_t* accelerator);
+    bool (*supports)(void* context, uint32_t index, const char* operation);
+    int32_t (*reserve)(void* context, const void* owner, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease);
+    void (*release)(void* context, const void* owner, uint32_t lease);
+    void (*release_all)(void* context, const void* owner);
+    int32_t (*submit)(void* context, const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t* job);
+    int32_t (*collect)(void* context, const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t* result);
+} oscairn_clap_hardware;
 
 /* What oscairn_clap_error says a failure was, as the C++ exception ClapHost throws for it. */
 enum { OSCAIRN_CLAP_RUNTIME_ERROR = 1, OSCAIRN_CLAP_INVALID_ARGUMENT = 2, OSCAIRN_CLAP_LOGIC_ERROR = 3 };
@@ -207,6 +236,12 @@ int rust_clap_run_isolated(const char* const* arguments, uint32_t count, uint32_
 void rust_clap_search_paths(oscairn_clap_text each, void* context);
 void rust_clap_find_binaries(const char* const* roots, uint32_t count, const char* extension, oscairn_clap_text each, void* context);
 void rust_clap_watch_parent_pipe(void);
+
+/* What the process gives every host (core/clap-host/rust/src/services.rs), each set once, before any plugin loads: its
+ * accelerators (null: none; the table kept until after the last plugin is unloaded), and the observer told of each
+ * activation with what the plugin declared (null: nothing), which returns null to go on, else why it is refused. */
+void rust_clap_set_hardware(const oscairn_clap_hardware* hardware);
+void rust_clap_observe_activations(const char* (*activating)(void* context, const oscairn_memory_t* declared), void* context);
 
 #ifdef __cplusplus
 }

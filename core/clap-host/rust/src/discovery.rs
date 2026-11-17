@@ -68,12 +68,11 @@ const MAX_WIRE: usize = 4 * 1024 * 1024;
 const MAGIC: &[u8] = b"KICKCLAP1\n";
 
 fn string(p: *const c_char) -> String {
-    // SAFETY: a plugin's NUL-terminated string, or null.
     if p.is_null() {
-        String::new()
-    } else {
-        unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+        return String::new();
     }
+    // SAFETY: a plugin's NUL-terminated string.
+    unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 fn has_extension(path: &Path, extension: &str) -> bool {
     path.extension().is_some_and(|e| extension.strip_prefix('.') == Some(&*e.to_string_lossy()))

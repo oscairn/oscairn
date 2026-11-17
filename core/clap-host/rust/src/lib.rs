@@ -10,6 +10,7 @@ pub mod event;
 mod host;
 pub mod isolated;
 mod library;
+pub mod services;
 mod more;
 mod queue;
 mod state;

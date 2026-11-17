@@ -3,7 +3,7 @@
 #include <kick_clap/Discovery.h>
 #include "Internal.h"
 #include "Window.h"
-#include <kick_clap/bridge.h>
+#include "../../plugin-host/src/clap_host.h" // the Rust host's rust_clap_set_hardware and rust_clap_observe_activations
 #include <clap/ext/audio-ports.h>
 #include <clap/ext/audio-ports-activation.h>
 #include <clap/ext/note-ports.h>
@@ -1000,8 +1000,31 @@ bool Host::currentMemory(oscairn_memory_t& result) const {
     auto& s = *impl;
     return s.main() && s.plugin && s.memory && s.active && s.memory->current(s.plugin, &result);
 }
-void Host::observeActivations(ActivationObserver observer, void* context) noexcept { activationObserver = observer; activationContext = context; }
-void Host::setHardware(HardwareAccess* access) noexcept { hardwareAccess.store(access); }
+// The process's hardware and observer for the Rust host too (services.rs), as the table and the call it takes.
+namespace {
+HardwareAccess* access() noexcept { return hardwareAccess.load(); }
+const oscairn_clap_hardware hardwareTable{nullptr,
+    [](void*) { return access()->count(); },
+    [](void*, uint32_t index, oscairn_hardware_accelerator_t* out) { return access()->get(index, *out); },
+    [](void*, uint32_t index, const char* operation) { return access()->supports(index, operation); },
+    [](void*, const void* owner, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease) { return access()->reserve(owner, index, *request, *lease); },
+    [](void*, const void* owner, uint32_t lease) { access()->release(owner, lease); },
+    [](void*, const void* owner) { access()->releaseAll(owner); },
+    [](void*, const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t* job) { return access()->submit(owner, epoch, lease, *job); },
+    [](void*, const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t* result) { return access()->collect(owner, epoch, lease, *result); }};
+const char* activating(void*, const oscairn_memory_t* declared) {
+    static thread_local std::string refused;
+    try { activationObserver(activationContext, declared); return nullptr; }
+    catch (const std::exception& e) { refused = e.what(); }
+    catch (...) { refused = "Activation refused"; }
+    return refused.c_str();
+}
+}
+void Host::observeActivations(ActivationObserver observer, void* context) noexcept {
+    activationObserver = observer; activationContext = context;
+    rust_clap_observe_activations(observer ? activating : nullptr, nullptr);
+}
+void Host::setHardware(HardwareAccess* access) noexcept { hardwareAccess.store(access); rust_clap_set_hardware(access ? &hardwareTable : nullptr); }
 HardwareAccess* Host::hardware() noexcept { return hardwareAccess.load(); }
 bool Host::effectResources(oscairn_effect_resources_t& result) const {
     if(!impl->plugin)return false;
@@ -1555,38 +1578,4 @@ bool Host::discardSound(uint32_t id) {
     if(!impl->sounds)throw std::invalid_argument("Plugin has no native sound contexts");
     return impl->sounds->discard(impl->plugin,id);
 }
-
-
-// kick_clap/bridge.h: the process's hardware and activation observer for the Rust host, as Impl's calls read them.
 } // namespace kick::clap
-
-extern "C" {
-uint32_t kick_clap_hardware_count(void) { auto* h = kick::clap::Host::hardware(); return h ? h->count() : 0; }
-bool kick_clap_hardware_get(uint32_t index, oscairn_hardware_accelerator_t* out) { auto* h = kick::clap::Host::hardware(); return h && out && h->get(index, *out); }
-bool kick_clap_hardware_supports(uint32_t index, const char* operation) { auto* h = kick::clap::Host::hardware(); return h && operation && h->supports(index, operation); }
-int32_t kick_clap_hardware_reserve(const void* owner, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease)
-{
-    auto* h = kick::clap::Host::hardware();
-    if (!request || !lease || !request->operation) return OSCAIRN_HARDWARE_INVALID;
-    return h ? h->reserve(owner, index, *request, *lease) : OSCAIRN_HARDWARE_UNAVAILABLE;
-}
-void kick_clap_hardware_release(const void* owner, uint32_t lease) { if (auto* h = kick::clap::Host::hardware()) h->release(owner, lease); }
-void kick_clap_hardware_release_all(const void* owner) { if (auto* h = kick::clap::Host::hardware()) h->releaseAll(owner); }
-int32_t kick_clap_hardware_submit(const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t* job)
-{
-    auto* h = kick::clap::Host::hardware(); return h && job ? h->submit(owner, epoch, lease, *job) : OSCAIRN_HARDWARE_INVALID;
-}
-int32_t kick_clap_hardware_collect(const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t* result)
-{
-    auto* h = kick::clap::Host::hardware(); return h && result ? h->collect(owner, epoch, lease, *result) : OSCAIRN_HARDWARE_INVALID;
-}
-const char* kick_clap_activating(const oscairn_memory_t* declared)
-{
-    static thread_local std::string refused;
-    if (!kick::clap::activationObserver) return nullptr;
-    try { kick::clap::activationObserver(kick::clap::activationContext, declared); return nullptr; }
-    catch (const std::exception& e) { refused = e.what(); }
-    catch (...) { refused = "Activation refused"; }
-    return refused.c_str();
-}
-}

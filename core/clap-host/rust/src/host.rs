@@ -1029,19 +1029,23 @@ fn publish_harmony(s: &Host, h: Option<&oscairn_harmony_t>) {
     }
     s.harmony_sequence.store(n + 2, Release);
 }
-// oscairn.hardware: the process's, through kick_clap (bridge.h), with this host as the owner of its plugin's leases.
+// oscairn.hardware: the process's (services.rs), with this host as the owner of its plugin's leases.
 use crate::bindings as bridge;
+use crate::services::hardware;
+use oscairn_clap_sys::oscairn_hardware_status::{OSCAIRN_HARDWARE_INVALID, OSCAIRN_HARDWARE_UNAVAILABLE};
+const INVALID: i32 = OSCAIRN_HARDWARE_INVALID as i32;
+const UNAVAILABLE: i32 = OSCAIRN_HARDWARE_UNAVAILABLE as i32;
 unsafe extern "C" fn hardware_count(_: *const clap_host) -> u32 {
-    // SAFETY: a plain call.
-    unsafe { bridge::kick_clap_hardware_count() }
+    // SAFETY: the table's call.
+    hardware().map_or(0, |t| t.count.map_or(0, |f| unsafe { f(t.context) }))
 }
 unsafe extern "C" fn hardware_get(_: *const clap_host, index: u32, out: *mut oscairn_hardware_accelerator_t) -> bool {
-    // SAFETY: the plugin's pointer, checked there.
-    unsafe { bridge::kick_clap_hardware_get(index, out) }
+    // SAFETY: the table's call, given the plugin's pointer, checked.
+    !out.is_null() && hardware().is_some_and(|t| t.get.is_some_and(|f| unsafe { f(t.context, index, out) }))
 }
 unsafe extern "C" fn hardware_supports(_: *const clap_host, index: u32, operation: *const c_char) -> bool {
     // SAFETY: as hardware_get.
-    unsafe { bridge::kick_clap_hardware_supports(index, operation) }
+    !operation.is_null() && hardware().is_some_and(|t| t.supports.is_some_and(|f| unsafe { f(t.context, index, operation) }))
 }
 unsafe extern "C" fn hardware_reserve(
     h: *const clap_host,
@@ -1049,24 +1053,36 @@ unsafe extern "C" fn hardware_reserve(
     request: *const oscairn_hardware_request_t,
     lease: *mut oscairn_hardware_lease_t,
 ) -> i32 {
-    // SAFETY: as hardware_get; the plugin's own host.
-    unsafe { bridge::kick_clap_hardware_reserve(me(h).ptr().cast(), index, request, lease) }
+    // SAFETY: the plugin's request, or null.
+    if request.is_null() || lease.is_null() || unsafe { (*request).operation }.is_null() {
+        return INVALID;
+    }
+    // SAFETY: the plugin's own host.
+    let owner = unsafe { me(h) }.ptr().cast();
+    // SAFETY: the table's call, given the plugin's pointers.
+    hardware().and_then(|t| t.reserve.map(|f| unsafe { f(t.context, owner, index, request, lease) })).unwrap_or(UNAVAILABLE)
 }
 unsafe extern "C" fn hardware_release(h: *const clap_host, lease: u32) {
     // SAFETY: as hardware_reserve.
-    unsafe { bridge::kick_clap_hardware_release(me(h).ptr().cast(), lease) }
+    let owner = unsafe { me(h) }.ptr().cast();
+    if let Some((t, f)) = hardware().and_then(|t| Some((t, t.release?))) {
+        // SAFETY: the table's call.
+        unsafe { f(t.context, owner, lease) };
+    }
 }
 unsafe extern "C" fn hardware_submit(h: *const clap_host, lease: u32, job: *const oscairn_hardware_job_t) -> i32 {
     // SAFETY: as hardware_reserve.
     let s = unsafe { me(h) };
-    // SAFETY: as hardware_get.
-    unsafe { bridge::kick_clap_hardware_submit(s.ptr().cast(), s.hardware_epoch.load(Relaxed), lease, job) }
+    let epoch = s.hardware_epoch.load(Relaxed);
+    // SAFETY: the table's call, given the plugin's job, checked.
+    hardware().filter(|_| !job.is_null()).and_then(|t| t.submit.map(|f| unsafe { f(t.context, s.ptr().cast(), epoch, lease, job) })).unwrap_or(INVALID)
 }
 unsafe extern "C" fn hardware_collect(h: *const clap_host, lease: u32, result: *mut oscairn_hardware_result_t) -> i32 {
     // SAFETY: as hardware_reserve.
     let s = unsafe { me(h) };
-    // SAFETY: as hardware_get.
-    unsafe { bridge::kick_clap_hardware_collect(s.ptr().cast(), s.hardware_epoch.load(Relaxed), lease, result) }
+    let epoch = s.hardware_epoch.load(Relaxed);
+    // SAFETY: as hardware_submit.
+    hardware().filter(|_| !result.is_null()).and_then(|t| t.collect.map(|f| unsafe { f(t.context, s.ptr().cast(), epoch, lease, result) })).unwrap_or(INVALID)
 }
 
 pub(crate) struct Table<T>(pub T);
@@ -1214,7 +1230,10 @@ pub fn close(s: H) {
         }
     }
     // SAFETY: this host as the owner of its leases.
-    unsafe { bridge::kick_clap_hardware_release_all(s.ptr().cast()) }; // what the plugin did not release
+    if let Some((t, f)) = hardware().and_then(|t| Some((t, t.release_all?))) {
+        // SAFETY: the table's call.
+        unsafe { f(t.context, s.ptr().cast()) }; // what the plugin did not release
+    }
     s.plugin.set(null());
     s.params.set(null());
     s.state.set(null());
@@ -2002,12 +2021,7 @@ pub fn activate(s: H) -> R<()> {
             }
         }
     }
-    // SAFETY: the declaration the host's own, read during the call; the refusal kick_clap's NUL-terminated text.
-    let refused = unsafe { bridge::kick_clap_activating(if s.has_declared.get() { s.declared.as_ptr() } else { null() }) };
-    if !refused.is_null() {
-        // SAFETY: as above.
-        return Err(unsafe { CStr::from_ptr(refused) }.to_string_lossy().into_owned());
-    }
+    crate::services::activating(s.has_declared.get().then(|| s.declared.get()).as_ref())?;
     s.hardware_epoch.fetch_add(1, SeqCst); // jobs from an earlier activation collect as stale
     s.applied_told.set(false);
     apply_outputs(s); // deactivated: told every port again

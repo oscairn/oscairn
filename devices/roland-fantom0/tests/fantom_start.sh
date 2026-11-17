@@ -354,6 +354,40 @@ check "the handover: X before the app, X gone before the Rust UI, the rule off f
 check "the keeper waited on the X server serving (0.5 s in the stand-in), not a fixed time" "[ \$(lapms 'X ready') -ge 500 ] && [ \$(lapms 'X ready') -lt 3000 ]"
 check "each phase logged with milliseconds, in order" "[ \"\$(sed -n 's/.*timing \\([A-Za-z]* [A-Za-z]*\\).*/\\1/p' '$klog' | tr '\\n' ',')\" = 'handover requested,X ready,app started,app exited,X gone,shell started,' ]"
 check "the X server waited for to end (its 0.3 s), not given up on" "[ \$(( \$(lapms 'X gone') - \$(lapms 'app exited') )) -ge 280 ]"
+# A stop that comes during the handover between the JUCE app and the Rust UI (docs/fantom-0.md, "The
+# panel holder"): it marks itself and takes the touch rule away, and the keeper, when the app ends,
+# writes the rule back; seeing the mark it takes it away again, and starts no UI.
+keep2=$bundle/keeper2
+mkdir -p "$keep2/var/oscairn/log" "$keep2/var/oscairn/run" "$keep2/tmp" "$keep2/proc/net" "$keep2/rules"
+: > "$keep2/proc/net/unix"
+cat > "$keep2/start-chroot.sh" <<'EOF'
+#!/bin/sh
+k=$(dirname "$0")
+case "$*" in
+*xwininfo*) exit 0 ;;
+*/usr/bin/Xorg*)
+	mkdir -p "$k/proc/$$"; echo Xorg > "$k/proc/$$/comm"
+	trap 'rm -rf "$k/proc/$$"; : > "$k/proc/net/unix"; exit 0' TERM
+	echo '0: 00000002 0 0 0001 01 2 @/tmp/.X11-unix/X0' > "$k/proc/net/unix"
+	while :; do sleep 0.05; done ;;
+*/usr/bin/Oscairn*)
+	# oscairn-fantom-stop: marks itself, then takes the rule away; the app ends
+	: > "$k/var/oscairn/run/stopped"; rm -f "$k/rules/99-oscairn-touch.rules"; sleep 0.2; exit 0 ;;
+*/usr/bin/oscairn-ui*)
+	echo "ui" >> "$k/order"
+	echo settings > "$k/tmp/oscairn-handover"; exit 3 ;;
+esac
+EOF
+chmod +x "$keep2/start-chroot.sh"
+(
+	root=$keep2 state=$keep2/var/oscairn proc=$keep2/proc log=$keep2/var/oscairn/log/oscairn-fantom.log rotation=90 rules=$keep2/rules matrix="0 1 0 -1 0 1" dry= OSCAIRN_PROFILE=fantom-07
+	for f in say touch_rule keep_ui display_serves; do eval "$(sed -n "/^$f()/,/^}/p" "$scripts/oscairn-fantom-start")"; done
+	for f in fnap now_ms lap display_up named xorg_ours handed_over nap; do eval "$(grep "^$f()" "$scripts/oscairn-fantom-start")"; done
+	touch_rule
+	keep_ui
+) > "$keep2/keeper.out" 2>&1
+check "a stop during the handover: the rule is not left behind, and the Rust UI is not started again" "[ ! -e '$keep2/rules/99-oscairn-touch.rules' ] && [ \"\$(cat '$keep2/order')\" = ui ]"
+
 # The stop: the touch rule left by a start that did not finish is removed; --panel warns that the
 # panel stays silent; without it the holder is kept and nothing warns (dry runs: nothing is signaled).
 stp=$bundle/stopper

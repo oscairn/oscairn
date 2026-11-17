@@ -68,13 +68,18 @@ if [ -n "$ui" ]; then
 	end 50 $ui
 fi
 rules=${OSCAIRN_UDEV_RULES:-/run/udev/rules.d}
-if [ -e "$rules/99-oscairn-touch.rules" ]; then
+# The touch rule. Taken away here and once more below, after everything has ended: a start's keeper
+# that was between the JUCE app and the Rust UI when the stop came puts the rule back when the app
+# ends (and, seeing the mark, takes it away again), so the rule is looked for a second time.
+drop_touch_rule() {
+	[ -e "$rules/99-oscairn-touch.rules" ] || return 0
 	if [ -n "$dry" ]; then say "would remove $rules/99-oscairn-touch.rules and run udevadm trigger"
 	else
 		rm -f "$rules/99-oscairn-touch.rules" && say "the touch rule removed"
 		command -v udevadm > /dev/null 2>&1 && udevadm control --reload && udevadm trigger --subsystem-match=input --action=change
 	fi
-fi
+}
+drop_touch_rule
 if [ -n "$engine" ]; then
 	say "stopping the engine (pid $(echo $engine))"
 	end 100 $engine
@@ -110,6 +115,7 @@ elif command -v systemctl > /dev/null 2>&1 && ! systemctl is-active --quiet west
 	systemctl start weston.service || say "systemctl start weston.service failed; the display stays dark until it starts or a power cycle"
 fi
 
+drop_touch_rule
 holder=$(named oscairn-panel-h) # the kernel keeps 15 characters of a process's name
 if [ -n "$panel" ] && [ -n "$holder" ]; then
 	say "WARNING: stopping the panel holder (pid $(echo $holder)): the panel stays silent until the instrument is powered on again, and nothing else reopens it"

@@ -507,6 +507,9 @@ keep_ui() {
 			wait $xserver 2>/dev/null
 			lap "X gone"
 			touch_rule
+			# A stop that came during the handover marked itself and took the rule away before this put
+			# it back; written after the mark, it is taken away again (docs/fantom-0.md, "The panel holder").
+			ours || touch_rule off
 			fails=0
 			after_handover=1
 			continue

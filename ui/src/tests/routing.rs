@@ -486,6 +486,44 @@ fn a_lane_is_connected_to_a_control_or_a_parameter_and_disconnected() {
     assert_eq!(r.tap(2, 0), Outcome::Controls);
 }
 
+/// A `params.list` refused as busy is not cached: the lane menu builds without that plugin's parameters and
+/// asks for them again the next time it is opened, once.
+#[test]
+fn a_refused_params_list_is_asked_again_the_next_time_the_lane_menu_opens() {
+    let mut s = Screen::sized(1280, 900);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    r.tap(1, at(&ui, "LFO"));
+    r.reply(Request::List(4), Ok(json!({"parameters": [{"id": 2, "name": "Decay", "flags": 32}]})));
+    let _ = std::mem::take(&mut r.out);
+    press_cell(&mut r, &ui, "LFO", "Connect lane to...");
+    assert!(r.take_menu().is_none());
+    let asked: Vec<_> = std::mem::take(&mut r.out).iter().filter(|o| matches!(o.0, Request::List(_))).map(|o| o.0.clone()).collect();
+    assert_eq!(asked, [Request::List(1), Request::List(2), Request::List(3), Request::List(8)], "{asked:?}");
+    // Chorus's answer is refused while the engine is busy; the rest answer.
+    r.reply(Request::List(2), Err(crate::client::Error { code: -32009, message: "busy".into() }));
+    for n in [1, 3, 8] {
+        r.reply(Request::List(n), Ok(json!({"parameters": [{"id": 1, "name": "Level", "flags": 32}]})));
+    }
+    let _ = std::mem::take(&mut r.out);
+let mut m = menu_of(&mut r, &s);
+    m.act(Action::Confirm(None)); // the Wave lane's submenu
+    assert!(!m.labels().iter().any(|l| l.0 == "Chorus · Keys"), "no parameters read for Chorus: {:?}", m.labels());
+    m.act(Action::Cancel(None));
+    m.act(Action::Cancel(None));
+    // The menu is opened again: Chorus is asked once more, the others not.
+    press_cell(&mut r, &ui, "LFO", "Connect lane to...");
+    assert!(r.take_menu().is_none());
+    let asked: Vec<_> = std::mem::take(&mut r.out).iter().filter(|o| matches!(o.0, Request::List(_))).map(|o| o.0.clone()).collect();
+    assert_eq!(asked, [Request::List(2)], "{asked:?}");
+    r.reply(Request::List(2), Ok(json!({"parameters": [{"id": 1, "name": "Level", "flags": 32}]})));
+    let mut m = menu_of(&mut r, &s);
+    m.act(Action::Confirm(None));
+    assert!(m.labels().iter().any(|l| l.0 == "Chorus · Keys"), "{:?}", m.labels());
+    choose(&mut m, &mut r, &["Chorus · Keys", "Level"]);
+    m.act(Action::Cancel(None));
+}
+
 // Meters on: an audio wire that carries sound takes the color of its level (green, yellow from -12 dB, red from -3);
 // off or below -60 dB it keeps its own; the notes' wires never.
 #[test]

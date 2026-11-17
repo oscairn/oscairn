@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <map>
 
+// Plugin discovery for C++ callers: the Rust host's (core/clap-host/rust/src/discovery.rs and isolated.rs), through
+// core/plugin-host/src/clap_discovery.cpp; a scan crosses in the scan wire format (encodeScan).
 namespace kick::clap {
 struct ScanFailure { std::string path, message; };
 struct ScanResult { std::vector<Descriptor> plugins; std::vector<ScanFailure> failures; };

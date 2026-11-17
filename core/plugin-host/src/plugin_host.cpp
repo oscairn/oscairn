@@ -87,62 +87,12 @@ namespace oscairn
         template<class T> T checked(T result){if(!result)fail();return result;}
         bool checked(int result){if(result<0)fail();return result;}
         template<class T> void append(void* to,const T* item){static_cast<std::vector<T>*>(to)->push_back(*item);}
-
-        // An AssetResolver as clap_host.h's table: Host.cpp's oscairn.assets calls past their thread and argument checks.
-        bool report(char* message, uint32_t capacity, const std::string& text) { if(message && capacity) std::snprintf(message, capacity, "%s", text.c_str()); return false; }
     }
 }
-oscairn_clap_assets oscairn_clap_assets_of(kick::clap::AssetResolver* assets)
-        {
-            using R = kick::clap::AssetResolver;
-            return {assets,
-                [](void* c, oscairn_asset_ref_t* ref, char* path, uint32_t capacity, char* message, uint32_t size) {
-                    const std::string library(ref->library, strnlen(ref->library, sizeof(ref->library))), relative(ref->path, strnlen(ref->path, sizeof(ref->path)));
-                    std::string hash(ref->sha256, strnlen(ref->sha256, sizeof(ref->sha256)));
-                    try {
-                        const auto file = static_cast<R*>(c)->resolve(library, relative, hash);
-                        if (file.size() + 1 > capacity || hash.size() >= sizeof(ref->sha256)) return oscairn::report(message, size, "asset path too long");
-                        std::memcpy(path, file.c_str(), file.size() + 1);
-                        std::memcpy(ref->sha256, hash.c_str(), hash.size() + 1);
-                        return true;
-                    } catch (const std::exception& e) { return oscairn::report(message, size, e.what()); }
-                },
-                [](void* c, const char* library, const char* minVersion, char* path, uint32_t capacity) {
-                    try {
-                        const auto root = static_cast<R*>(c)->libraryRoot(std::string(library, strnlen(library, 256)), minVersion ? std::string(minVersion, strnlen(minVersion, 128)) : std::string());
-                        if (root.empty() || root.size() + 1 > capacity) return false;
-                        std::memcpy(path, root.c_str(), root.size() + 1);
-                        return true;
-                    } catch (...) { return false; }
-                },
-                [](void* c, const char* file, oscairn_asset_ref_t* ref, char* message, uint32_t size) {
-                    try {
-                        const auto made = static_cast<R*>(c)->create(std::string(file, strnlen(file, 4096)));
-                        if (made.library.size() >= sizeof(ref->library) || made.path.size() >= sizeof(ref->path) || made.sha256.size() >= sizeof(ref->sha256)) return oscairn::report(message, size, "asset reference too long");
-                        *ref = {};
-                        std::memcpy(ref->library, made.library.c_str(), made.library.size() + 1);
-                        std::memcpy(ref->path, made.path.c_str(), made.path.size() + 1);
-                        std::memcpy(ref->sha256, made.sha256.c_str(), made.sha256.size() + 1);
-                        return true;
-                    } catch (const std::exception& e) { return oscairn::report(message, size, e.what()); }
-                },
-                [](void* c, const oscairn_asset_ref_t* ref, char* path, uint32_t capacity, oscairn_sample_location_t* location, char* message, uint32_t size) {
-                    const std::string name(ref->path, strnlen(ref->path, sizeof(ref->path))), digest(ref->sha256, strnlen(ref->sha256, sizeof(ref->sha256)));
-                    if (name.rfind("sample:", 0) != 0 || (!digest.empty() && digest != name.substr(7))) return oscairn::report(message, size, "not a sample reference: " + name);
-                    try {
-                        const auto at = static_cast<R*>(c)->resolveSample(name.substr(7));
-                        if (at.pack.size() + 1 > capacity) return oscairn::report(message, size, "sample path too long");
-                        std::memcpy(path, at.pack.c_str(), at.pack.size() + 1);
-                        *location = {at.offset, at.length, at.preload};
-                        return true;
-                    } catch (const std::exception& e) { return oscairn::report(message, size, e.what()); }
-                }};
-        }
 namespace oscairn
 {
     namespace
     {
-
         // The CLAP host (clap_host.h) as a PluginHost: its description kept in the C++ types, again whenever it changes.
         class ClapHost final : public PluginHost
         {

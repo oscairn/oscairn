@@ -15,6 +15,7 @@
  * C, so bindgen reads it; C++ sees kick::clap::Event, kick::clap::Statistics and std::atomic<uint32_t> in the same
  * bytes (clap_host_cpp.cpp asserts their layout). */
 #pragma once
+#include <clap/entry.h>
 #include <clap/events.h>
 #include <kick_clap/bridge.h> /* oscairn_clap_assets */
 #include <oscairn-clap/effect-contexts.h>
@@ -31,10 +32,12 @@
 typedef kick::clap::Event oscairn_clap_event;
 typedef kick::clap::Statistics oscairn_clap_statistics;
 typedef std::atomic<uint32_t> oscairn_clap_wake;
+typedef std::atomic<bool> oscairn_clap_flag;
 extern "C" {
 #else
 typedef struct { _Alignas(8) uint8_t bytes[64]; } oscairn_clap_event; /* kick::clap::Event */
 typedef uint32_t oscairn_clap_wake;                                    /* an atomic word */
+typedef bool oscairn_clap_flag;                                        /* an atomic flag */
 /* kick::clap::Statistics, field for field (Host.h says what each counts). */
 typedef struct
 {
@@ -187,6 +190,23 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
 #endif
 OSCAIRN_CLAP_API(cpp_)
 OSCAIRN_CLAP_API(rust_) /* being written: the ones core/clap-host/rust defines so far, which clap-host-rust compares */
+
+/* Discovery (core/clap-host/rust/src/discovery.rs; Discovery.h's functions over these): a scan arrives as the scan wire
+ * format's bytes (encodeScan's), given once to out; paths one by one. Timeouts in milliseconds; canceled may be null. */
+void rust_clap_inspect(const char* binary, bool presets, const oscairn_clap_assets* assets, oscairn_clap_text out, void* context);
+void rust_clap_scan(const char* const* roots, uint32_t count, const char* helper, uint32_t timeout, const oscairn_clap_flag* canceled,
+                    const char* extension, uint32_t preset_timeout, oscairn_clap_text out, void* context);
+/* out: the wire bytes when true, the reason when false. */
+bool rust_clap_index_presets_with_helper(const char* helper, const char* binary, uint32_t timeout, oscairn_clap_text out, void* context);
+void rust_clap_index_presets(const clap_plugin_entry_t* entry, const char* const* ids, uint32_t count, uint32_t budget, const oscairn_clap_assets* assets,
+                             void (*preset)(void* context, const char* id, const oscairn_clap_preset* preset),
+                             void (*problem)(void* context, const char* text), void* context);
+/* runIsolated: its outcome (IsolatedRun::Outcome); its output, then its stderr's tail, given to the two callbacks. */
+int rust_clap_run_isolated(const char* const* arguments, uint32_t count, uint32_t timeout, size_t max_output, const oscairn_clap_flag* canceled,
+                           uint64_t memory_limit, uint64_t (*memory_of)(long pid), oscairn_clap_text output, oscairn_clap_text errors, void* context);
+void rust_clap_search_paths(oscairn_clap_text each, void* context);
+void rust_clap_find_binaries(const char* const* roots, uint32_t count, const char* extension, oscairn_clap_text each, void* context);
+void rust_clap_watch_parent_pipe(void);
 
 #ifdef __cplusplus
 }

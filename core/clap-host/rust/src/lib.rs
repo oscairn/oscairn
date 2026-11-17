@@ -5,8 +5,10 @@
 
 #[rustfmt::skip] // generated (core/engine/rust/bindgen), checked by clap_host_h_unchanged
 mod bindings;
+pub mod discovery;
 pub mod event;
 mod host;
+pub mod isolated;
 mod library;
 mod more;
 mod queue;
@@ -35,43 +37,15 @@ unsafe fn arg<'a>(p: *const c_char) -> &'a str {
     unsafe { CStr::from_ptr(p) }.to_str().unwrap_or_default()
 }
 
-/// kick::clap::inspect's part that loading uses: the binary's plugins, as its scan reads them.
-fn inspect(path: &str) -> Result<Vec<CString>, String> {
-    let library = library::open(path)?;
-    // SAFETY: an initialized entry; the factories it gives live as long as the library.
-    unsafe {
-        let get = (*library.entry).get_factory.unwrap();
-        let _discovery = !get(clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID.as_ptr()).is_null()
-            || !get(clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID_COMPAT.as_ptr()).is_null();
-        let factory = library.factory().ok_or("No plugin factory")?;
-        let count = factory.get_plugin_count.unwrap()(factory);
-        if count == 0 || count > 4096 {
-            return Err("Invalid factory descriptor count".into());
-        }
-        let mut ids: Vec<CString> = Vec::new();
-        for i in 0..count {
-            let d = factory.get_plugin_descriptor.unwrap()(factory, i);
-            let bad = |p: *const c_char| p.is_null() || *p == 0;
-            if d.is_null() || bad((*d).id) || bad((*d).name) || !clap_sys::version::clap_version_is_compatible((*d).clap_version) {
-                return Err("Invalid or incompatible plugin descriptor".into());
-            }
-            let id = CStr::from_ptr((*d).id).to_owned();
-            if ids.contains(&id) {
-                return Err("Duplicate plugin ID in factory".into());
-            }
-            ids.push(id);
-        }
-        Ok(ids)
-    }
-}
-
 /// What loading a CLAP plugin in this process did (clap_host_cpp.cpp's cpp_clap_new).
 fn new(path: String, id: &CStr, rate: f64, frames: u32, offline: bool, memory_room: u64) -> *mut Host {
-    let found = match inspect(&path) {
-        Ok(ids) => ids.into_iter().find(|p| id.is_empty() || p.as_c_str() == id),
-        Err(e) => return failed(e, null_mut()),
+    let scan = discovery::inspect(std::path::Path::new(&path), false, None);
+    let wanted = id.to_string_lossy();
+    let Some(found) = scan.plugins.into_iter().find(|p| wanted.is_empty() || p.id == wanted) else {
+        let why = scan.failures.into_iter().next().map_or_else(|| format!("No matching CLAP plugin in {path}"), |f| f.message);
+        return failed(why, null_mut());
     };
-    let Some(found) = found else { return failed(format!("No matching CLAP plugin in {path}"), null_mut()) };
+    let found = CString::new(found.id).unwrap_or_default();
     // A new host on this thread, its main one.
     let host = Host::create();
     host.memory_room.set(memory_room);
@@ -191,18 +165,16 @@ exports! {
     fn rust_clap_presets(h, each: Option<unsafe extern "C" fn(*mut c_void, *const oscairn_clap_preset)>, context: *mut c_void) -> bool {
         let Some(library) = h.library.with(|l| l.clone()) else { return true };
         if !main(&h) || library.entry.is_null() { return true }
-        struct To { each: unsafe extern "C" fn(*mut c_void, *const oscairn_clap_preset), context: *mut c_void }
-        unsafe extern "C" fn one(c: *mut c_void, name: *const c_char, kind: u32, location: *const c_char, key: *const c_char) {
-            // SAFETY: the To below, alive for the call; the strings kick_clap's.
-            unsafe { let t = &*c.cast::<To>(); (t.each)(t.context, &oscairn_clap_preset { name, kind, location, load_key: key }) }
+        let id = h.info.with(|i| i.id.to_string_lossy().into_owned());
+        // SAFETY: the library's initialized entry, alive as long as it.
+        let index = discovery::index_presets(unsafe { &*library.entry }, std::slice::from_ref(&id), std::time::Duration::from_secs(10), h.assets.get().as_ref());
+        let c = |s: &str| CString::new(s).unwrap_or_default();
+        for p in index.presets.get(&id).into_iter().flatten() {
+            let (name, location, key) = (c(&p.name), c(&p.location), c(&p.load_key));
+            // SAFETY: the caller's callback, given values alive for the call.
+            unsafe { each.unwrap()(context, &oscairn_clap_preset { name: name.as_ptr(), kind: p.kind, location: location.as_ptr(), load_key: key.as_ptr() }) }
         }
-        let mut to = To { each: each.unwrap(), context };
-        let assets = h.assets.get();
-        let id = h.info.with(|i| i.id.as_ptr());
-        // SAFETY: the library's initialized entry; the plugin's ID, kept by the host meanwhile; the table and To alive for the call.
-        let failure = unsafe { kick_clap_presets(library.entry.cast(), id, assets.as_ref().map_or(std::ptr::null(), |a| a), Some(one), std::ptr::from_mut(&mut to).cast()) };
-        // SAFETY: kick_clap's NUL-terminated message.
-        if failure.is_null() { true } else { failed(unsafe { CStr::from_ptr(failure) }.to_string_lossy().into_owned(), false) }
+        true
     }
     fn rust_clap_declared_memory(h, memory: *mut oscairn_clap_sys::oscairn_memory_t) -> c_int {
         if h.plugin.get().is_null() || !h.has_declared.get() { return 0 }

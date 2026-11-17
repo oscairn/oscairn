@@ -3,7 +3,9 @@ project(KickClapHost VERSION 0.1.0 LANGUAGES C CXX)
 
 option(KICK_CLAP_BUILD_TESTS "Build CLAP host conformance fixtures" ON)
 option(KICK_CLAP_SANITIZE "Enable address and undefined-behavior sanitizers" OFF)
-add_library(kick_clap_host STATIC src/Host.cpp src/Discovery.cpp src/Bridge.cpp src/WindowBridge.cpp)
+# Discovery is the Rust host's (rust/src/discovery.rs, in the engine core's static library); its C++ face is plugin-host's.
+add_library(kick_clap_host STATIC src/Host.cpp src/WindowBridge.cpp ../plugin-host/src/clap_discovery.cpp)
+target_link_libraries(kick_clap_host PUBLIC oscairn_engine_core)
 # The host's windows for plugin editors (CLAP gui): Cocoa on macOS, none elsewhere yet.
 if(APPLE)
     enable_language(OBJCXX)

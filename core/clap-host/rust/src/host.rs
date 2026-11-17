@@ -6,6 +6,7 @@
 //! the shared Host only; each field is an atomic, a queue, or an Owned that one thread at a time reads and writes, as
 //! the groups on Host say (the C++ Impl's main-thread, gated, audio-thread and atomic state), and no reference into a
 //! field lives across a call into the plugin.
+use crate::isolated::{poll, PollFd, POLLIN};
 use crate::event::{self, Event, BEAT_SPACE, HARMONY_SPACE, PARAM_TARGET_SPACE};
 use crate::library::{self, Library};
 use crate::queue::Queue;
@@ -1057,7 +1058,7 @@ unsafe extern "C" fn hardware_collect(h: *const clap_host, lease: u32, result: *
     unsafe { bridge::kick_clap_hardware_collect(s.ptr().cast(), s.hardware_epoch.load(Relaxed), lease, result) }
 }
 
-struct Table<T>(T);
+pub(crate) struct Table<T>(pub T);
 // SAFETY: tables of function pointers, never written.
 unsafe impl<T> Sync for Table<T> {}
 static THREADS: Table<clap_host_thread_check> = Table(clap_host_thread_check { is_main_thread: Some(is_main), is_audio_thread: Some(is_audio) });
@@ -2281,20 +2282,10 @@ fn service_inner(s: H) -> R<()> {
     }
     Ok(())
 }
-#[repr(C)]
-struct PollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
-}
-const POLLIN: i16 = 0x1;
 const POLLOUT: i16 = 0x4;
 const POLLERR: i16 = 0x8;
 const POLLHUP: i16 = 0x10;
 const POLLNVAL: i16 = 0x20;
-extern "C" {
-    fn poll(fds: *mut PollFd, n: u64, timeout: i32) -> i32;
-}
 
 /// Host::enqueue. Any thread.
 pub fn enqueue(s: &Host, e: &Event) -> bool {

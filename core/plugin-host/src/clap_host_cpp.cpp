@@ -3,7 +3,7 @@
 // moved here unchanged.
 #include "clap_host.h"
 #include "StateFiles.h"
-#include <kick_clap/Discovery.h>
+#include "../../clap-host/src/Internal.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -73,6 +73,23 @@ namespace
     }
     template<class F> bool guard(F&& f) noexcept { return guard([&]{ f(); return true; }, false); }
     template<class F> int guardInt(F&& f) noexcept { return guard([&]{ return f() ? 1 : 0; }, -1); }
+    // The plugins a binary offers, as Discovery.cpp's inspect checked them; what fails is thrown.
+    std::vector<kick::clap::Descriptor> plugins(const std::string& path)
+    {
+        const auto library=kick::clap::detail::openLibrary(path);
+        const auto* factory=library->factory();
+        if(!factory)throw std::runtime_error("No plugin factory");
+        const auto count=factory->get_plugin_count(factory);
+        if(!count || count>4096)throw std::runtime_error("Invalid factory descriptor count");
+        std::vector<kick::clap::Descriptor> all;
+        for(uint32_t i=0;i<count;++i){
+            const auto* d=factory->get_plugin_descriptor(factory,i);
+            if(!d || !d->id || !d->id[0] || !d->name || !d->name[0] || !clap_version_is_compatible(d->clap_version))throw std::runtime_error("Invalid or incompatible plugin descriptor");
+            if(std::any_of(all.begin(),all.end(),[&](const auto& p){return p.id==d->id;}))throw std::runtime_error("Duplicate plugin ID in factory");
+            all.push_back(kick::clap::detail::describe(library->path,*d));
+        }
+        return all;
+    }
     kick::clap::Preset preset(const oscairn_clap_preset& p) { return {p.name, p.kind, p.location, p.load_key}; }
     oscairn_clap_preset preset(const kick::clap::Preset& p) { return {p.name.c_str(), p.kind, p.location.c_str(), p.loadKey.c_str()}; }
 }
@@ -85,10 +102,9 @@ oscairn_clap_host* cpp_clap_new(const char* path, const char* id, double rate, u
 {
     return guard([&]{
         const std::string pluginId = id;
-        const auto scan=kick::clap::inspect(path);
-        const auto found=std::find_if(scan.plugins.begin(),scan.plugins.end(),[&](const auto& p){return pluginId.empty() || p.id==pluginId;});
-        if(found==scan.plugins.end())
-            throw std::runtime_error(scan.failures.empty()?"No matching CLAP plugin in "+std::string(path):scan.failures.front().message);
+        const auto scan=plugins(path); // through this host's own library registry, not the Rust host's discovery
+        const auto found=std::find_if(scan.begin(),scan.end(),[&](const auto& p){return pluginId.empty() || p.id==pluginId;});
+        if(found==scan.end())throw std::runtime_error("No matching CLAP plugin in "+std::string(path));
         auto host=std::make_unique<oscairn_clap_host>();
         host->host.setMemoryRoom(memoryRoom);
         host->host.setOfflineRendering(offline);

@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* What the Rust CLAP host (core/clap-host/rust) reaches in kick_clap, which stays C++ behind these calls: the process's
- * hardware and activation observer (set through kick::clap::Host, as the C++ host reads them), preset discovery
- * (Discovery.cpp, indexPresets) and the host's own plugin windows (Window.h). Each does what Host.cpp does there.
+ * hardware and activation observer (set through kick::clap::Host, as the C++ host reads them) and the host's own
+ * plugin windows (Window.h). Each does what Host.cpp does there.
  * C, so bindgen reads it (core/clap-host/rust/src/bindings.rs, with clap_host.h). */
 #pragma once
-#include <clap/entry.h>
 #include <oscairn-clap/assets.h>
 #include <oscairn-clap/hardware.h>
 #include <oscairn-clap/memory.h>
@@ -40,11 +39,6 @@ int32_t kick_clap_hardware_collect(const void* owner, uint32_t epoch, uint32_t l
 /* kick::clap::Host::observeActivations' observer, if one is set, told of an activation: null to go on, else why it is
  * refused (valid until this thread's next call). */
 const char* kick_clap_activating(const oscairn_memory_t* declared);
-
-/* indexPresets for one plugin of a loaded binary (10 s budget), each preset given in turn; assets may be null. Null,
- * else what it threw (valid until this thread's next call). */
-const char* kick_clap_presets(const clap_plugin_entry_t* entry, const char* id, const oscairn_clap_assets* assets,
-                       void (*each)(void* context, const char* name, uint32_t kind, const char* location, const char* load_key), void* context);
 
 /* The host's own window holding a plugin's embedded view (detail::Window): null where this platform has none. */
 typedef struct kick_clap_window kick_clap_window;

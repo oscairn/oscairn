@@ -146,23 +146,32 @@ namespace oscairn
 
     // Measured: at rest, plus its cost per voice for as many notes as its part may play at once;
     // with no limit, or before its voices are measured, the busiest block seen. A build asked for
-    // without a declaration (a Performance not open) counts at the most of what its declarations
-    // were measured at; one without a digest (not here), at the most of that version's builds.
+    // without a declaration (a Performance not open, its part's own sound not measured: estimate)
+    // counts its memory at the most of what its declarations were measured at, and its CPU at the
+    // median of theirs, figure by figure: one sound's extreme (pianos stacked, 24 voices each) does
+    // not price every other sound of the plugin; one without a digest (not here), over that version's builds.
     std::optional<Session::Measurement> Session::measurementFor(const std::string& key) const
     {
         if(const auto it = measured_.find(key); it != measured_.end()) return it->second;
         std::optional<Measurement> m;
+        std::vector<double> cpu, rest, voice, voices;
         if(key.find('#') == std::string::npos)
             for(auto it = measured_.lower_bound(key); it != measured_.end() && it->first.compare(0, key.size(), key) == 0; ++it)
             {
                 const char next = it->first.size() > key.size() ? it->first[key.size()] : 0;
                 if(next != '#' && (next != ' ' || key.find(' ') != std::string::npos)) continue;
                 const auto& x = it->second;
+                if(x.cpu > 0 || x.rest > 0 || x.voice > 0) { cpu.push_back(x.cpu); rest.push_back(x.rest); voice.push_back(x.voice); voices.push_back(x.voices); } // its CPU forgotten: not a figure
                 if(!m) { m = x; continue; }
                 const auto contexts = x.contexts && (!m->contexts || x.contexts < m->contexts) ? x.contexts : m->contexts; // the fewest seen: never more sharing than was
                 const auto sounds = x.sounds && (!m->sounds || x.sounds < m->sounds) ? x.sounds : m->sounds; // the fewest, with the most memory: never more in it than was
-                m = Measurement{std::max(m->cpu, x.cpu), std::max(m->rest, x.rest), std::max(m->voice, x.voice), std::max(m->voices, x.voices), std::max(m->memory, x.memory), std::max(m->samples, x.samples), std::max(m->declared, x.declared), contexts, std::max(m->perContext, x.perContext), sounds};
+                m = Measurement{0, 0, 0, 0, std::max(m->memory, x.memory), std::max(m->samples, x.samples), std::max(m->declared, x.declared), contexts, std::max(m->perContext, x.perContext), sounds, std::max(m->day, x.day)};
             }
+        if(m && key.find('#') == std::string::npos)
+        {
+            auto median = [](std::vector<double> v) { if(v.empty()) return 0.0; std::nth_element(v.begin(), v.begin() + (v.size() - 1) / 2, v.end()); return v[(v.size() - 1) / 2]; };
+            m->cpu = median(cpu); m->rest = median(rest); m->voice = median(voice); m->voices = uint32_t(median(voices));
+        }
         return m;
     }
 
@@ -177,7 +186,12 @@ namespace oscairn
             const auto guess = declaredCost(key, name, plugin, path, m.declared);
             return {name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0, {}, true, guess.rest};
         }
-        const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
+        // The busiest block seen wears off while the sound is not played (it falls only while an instance plays it: measure), halving
+        // each week unused, never below what its voices were measured to cost: one stacked test's figure does not live on for good.
+        double busiest = m.cpu;
+        if(const auto today = uint32_t(std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now().time_since_epoch()).count() / 24); m.day && today > m.day + 7)
+            busiest = std::max(m.rest + m.voice * m.voices, m.cpu * std::exp2(-double(today - m.day) / 7));
+        const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : busiest;
         // Its memory not measured (only an instance playing one sound records it): the guess, not 0.
         return {name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks, m.rest > 0 ? std::min(m.rest, cpu) : cpu}; // rest not measured: all of it
     }
@@ -271,7 +285,7 @@ namespace oscairn
                     const auto* v = detail::member(e->value, key);
                     return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0;
                 };
-                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared"), contexts = number("contexts"), perContext = number("perContext"), held = number("sounds");
+                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared"), contexts = number("contexts"), perContext = number("perContext"), held = number("sounds"), day = number("day");
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
                 const uint32_t shares = std::isfinite(contexts) && contexts >= 0 && contexts <= 32 ? uint32_t(contexts) : 0;
                 const auto said = std::isfinite(declared) && declared >= 0 && declared <= double(1ull << 40) ? uint64_t(declared) : 0;
@@ -283,9 +297,17 @@ namespace oscairn
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said, shares, added, holds} : Measurement{0, 0, 0, 0, kept, 0, said, shares, added, holds};
+                const uint32_t when = std::isfinite(day) && day >= 0 && day < 1e6 ? uint32_t(day) : 0;
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said, shares, added, holds, when} : Measurement{0, 0, 0, 0, kept, 0, said, shares, added, holds};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
+            if(const auto* states = detail::member(doc.get(), "states"); states && states->type == json_type_object)
+                for(auto* e = static_cast<const json_object_s*>(states->payload)->start; e; e = e->next)
+                    if(e->value->type == json_type_string)
+                    {
+                        const auto* v = static_cast<const json_string_s*>(e->value->payload);
+                        states_[std::string(e->name->string, e->name->string_size)] = std::string(v->string, v->string_size);
+                    }
         }
         catch(const std::exception&) {} // none yet, or unreadable: measured afresh
     }
@@ -297,9 +319,13 @@ namespace oscairn
         bool first = true;
         for(const auto& [key, m] : measured_)
         {
-            char numbers[340]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu,\"contexts\":%u,\"perContext\":%llu,\"sounds\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared), m.contexts, static_cast<unsigned long long>(m.perContext), m.sounds);
+            char numbers[360]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu,\"contexts\":%u,\"perContext\":%llu,\"sounds\":%u,\"day\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared), m.contexts, static_cast<unsigned long long>(m.perContext), m.sounds, m.day);
             text += std::string(first ? "" : ",") + detail::quote(key) + ":" + numbers; first = false;
         }
+        text += "},\"states\":{";
+        first = true;
+        for(const auto& [state, key] : states_)
+            if(measured_.count(key)) { text += std::string(first ? "" : ",") + detail::quote(state) + ":" + detail::quote(key); first = false; } // one whose figure is gone goes with it
         text += "}}\n";
         try
         {
@@ -581,8 +607,11 @@ namespace oscairn
             auto& host = graph_.host(node);
             if(!host.failure().empty()) { learning_.erase(node); return; } // a failed plugin, or a stand-in for one not here, costs nothing to learn from
             const auto st = host.statistics();
-            auto& m = measured_[pluginKey(node)];
+            const auto key = pluginKey(node);
+            auto& m = measured_[key];
             auto& L = learning_[node];
+            // The saved state it opened with is this key's sound, for a Performance not open (estimate); asked with its memory.
+            if(memoryNow) if(const auto s = stateOf_.find(node); s != stateOf_.end() && !s->second.empty()) if(auto& k = states_[s->second]; k != key) { k = key; measurementsChanged_ = true; }
             const double was = m.cpu, wasRest = m.rest, wasVoice = m.voice;
             // Restarted, or its instances changed: measured from here, its first blocks again its start's.
             if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu || st.restarts != L.restarts)
@@ -622,6 +651,7 @@ namespace oscairn
                 auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, blocks / restBlocks)); };
                 if(L.busiest.add(share, blocks)) m.cpu = std::max(L.busiest.fast, m.cpu * std::exp(-double(blocks) / fallBlocks));
                 m.samples = uint32_t(std::min<uint64_t>(uint64_t(m.samples) + blocks, 1'000'000'000));
+                if(const auto today = uint32_t(std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now().time_since_epoch()).count() / 24); today != m.day) { m.day = today; measurementsChanged_ = true; }
                 if(voices == 0 && silent)
                 {
                     if(!L.restN && m.rest > 0) L.restN = seedSamples;
@@ -817,6 +847,28 @@ namespace oscairn
         return result;
     }
 
+    // FNV-1a over the folder's files, their paths and bytes in path order; empty past 16 MiB or unreadable (no figure tied to it).
+    std::string Session::stateDigest(const fs::path& folder)
+    {
+        std::error_code e;
+        std::vector<fs::path> files;
+        for(fs::recursive_directory_iterator it(folder, e), end; !e && it != end; it.increment(e)) if(it->is_regular_file(e)) files.push_back(it->path());
+        if(e || files.empty()) return {};
+        std::sort(files.begin(), files.end());
+        uint64_t h = 1469598103934665603ull, bytes = 0;
+        auto add = [&](const char* p, size_t n) { for(size_t i = 0; i < n; ++i) { h ^= uint8_t(p[i]); h *= 1099511628211ull; } };
+        for(const auto& f : files)
+        {
+            const auto name = f.lexically_relative(folder).generic_string();
+            add(name.data(), name.size() + 1);
+            if((bytes += fs::file_size(f, e)) > 16 * 1024 * 1024 || e) return {};
+            try { const auto data = state_files::read(f, 16 * 1024 * 1024); add(reinterpret_cast<const char*>(data.data()), data.size()); }
+            catch(const std::exception&) { return {}; } // unreadable: no figure tied to it
+        }
+        char text[17]; std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(h));
+        return text;
+    }
+
     bool Session::sharesParts() noexcept
     {
         const char* bias = std::getenv("OSCAIRN_SHARING");
@@ -929,7 +981,11 @@ namespace oscairn
             const auto id = text(detail::member(plugin, "id")), key = text(detail::member(e->value, "key"));
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
             const auto measuredKey = id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest);
-            coming.push_back(costOf(measuredKey, text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0, text(detail::member(plugin, "pathHint"))));
+            // Its own sound's figures where its saved state was measured here (it opened from that state: states_), else the build's.
+            auto own = measuredKey;
+            if(const auto s = states_.find(stateDigest(fs::path(directory) / "nodes" / key)); s != states_.end() && measured_.count(s->second) && s->second.compare(0, measuredKey.size(), measuredKey) == 0 && s->second.size() > measuredKey.size() && (s->second[measuredKey.size()] == '#' || s->second[measuredKey.size()] == ' '))
+                own = s->second;
+            coming.push_back(costOf(own, text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0, text(detail::member(plugin, "pathHint"))));
             if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
             const auto engine = text(detail::member(e->value, "engine"));
             const auto* sound = detail::member(e->value, "sound");

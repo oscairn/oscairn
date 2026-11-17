@@ -1495,6 +1495,8 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto prepared=std::make_unique<Prepared>(Prepared{root,stamp(root),std::move(next),pads,info,std::move(lock),tempo,clock=="internal"?Transport::ClockSource::Internal:Transport::ClockSource::MidiClock,
         std::move(disabled),std::move(names),std::move(wires),std::move(parts),nextPart,nextWire,std::move(scenes),std::move(untouched),nextScene,selectedScene,mappingScene,std::move(macros),nextMacro,std::move(assignments),key,master.first,master.second,std::move(roles),std::move(notices),std::move(taken),std::move(warm),std::move(origins),reused,kept,{}});
     prepared->beside=std::move(beside);prepared->claimed.contexts.swap(onPlaying.contexts);prepared->claimed.sounds.swap(onPlaying.sounds);
+    // RFC 0025: the saved state each node opened with, which measure() ties to the key its figures are kept under (estimate).
+    if(budget_.cpu>0)for(const auto& [k,n]:ids)if(n!=graphInput && n!=graphOutput)prepared->states[n]=stateDigest(root/"nodes"/k);
     stats.name=info.name;stats.reused=reused;stats.kept=kept;stats.loaded=pluginInstancesLoaded()-loads;
     stats.read=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
     prepared->stats=stats;
@@ -1571,7 +1573,7 @@ void Session::open(Prepared& p,bool seamless) {
         for(auto& c:p.claimed.contexts)try{if(!c->select())std::fprintf(stderr,"oscairn: an incoming shared sound not selected: the plugin's queue is full\n");}
             catch(const std::exception& e){std::fprintf(stderr,"oscairn: an incoming shared sound not selected: %s\n",e.what());}
         p.claimed.sounds.clear();
-        nodes_.swap(p.names);observed_.swap(observed);parts_.swap(p.parts);wires_.swap(wires);disabled_.swap(disabled);rungOut_.swap(rungOut);leaving_.swap(leaving);nextPart_=p.nextPart;nextWire_=p.nextWire;padMap_=p.pads;key_=p.key;masterLevel_=p.masterLevel;masterPan_=p.masterPan;roles_.swap(p.roles);notices_.swap(p.notices);heldPads_={};scenes_.swap(p.scenes);untouched_.swap(p.untouched);scene_=p.selectedScene;mappingScene_=p.mappingScene;transition_.reset();pendingScene_.reset();nextScene_=p.nextScene;macros_.swap(p.macros);assignments_.swap(p.assignments);nextMacro_=p.nextMacro;pending_.clear();commandCount_=0;outputDrops_.clear();parameterRevisions_.clear();valueRevisions_.clear();staged_=false;
+        nodes_.swap(p.names);stateOf_.swap(p.states);observed_.swap(observed);parts_.swap(p.parts);wires_.swap(wires);disabled_.swap(disabled);rungOut_.swap(rungOut);leaving_.swap(leaving);nextPart_=p.nextPart;nextWire_=p.nextWire;padMap_=p.pads;key_=p.key;masterLevel_=p.masterLevel;masterPan_=p.masterPan;roles_.swap(p.roles);notices_.swap(p.notices);heldPads_={};scenes_.swap(p.scenes);untouched_.swap(p.untouched);scene_=p.selectedScene;mappingScene_=p.mappingScene;transition_.reset();pendingScene_.reset();nextScene_=p.nextScene;macros_.swap(p.macros);assignments_.swap(p.assignments);nextMacro_=p.nextMacro;pending_.clear();commandCount_=0;outputDrops_.clear();parameterRevisions_.clear();valueRevisions_.clear();staged_=false;
         tempo_.store(p.tempo);clockSource_.store(p.clock);playing_.store(false);loaded_.swap(loaded);reused_+=p.reused;keptStates_+=p.kept;
         ++revision_;sequence_+=2;history_.swap(history);
     });

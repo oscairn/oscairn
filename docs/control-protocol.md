@@ -1287,7 +1287,11 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   `budget.forget` (no parameters; the `system` permission) lets go of every plugin's measured CPU,
   returning `{forgotten:true}`: each counts at its declared or default estimate until it plays
   again (its measured memory stands, so a plugin so counted shows `measured` true when its memory is
-  known), and `measurements.json` is rewritten at once. For estimates a stall or a burst spoiled; an
+  known), and `measurements.json` is rewritten at once. A Performance not open counts each part at its
+  own sound's figures where its saved state was measured here, else its plugin's CPU at the median of
+  its sounds' figures (not their most), and a busiest figure unused for over a week wears off by half a
+  week ([RFC 0025](rfcs/0025-resource-budgets.md#one-sounds-extreme-figure-2026-11-17)), so one
+  sound measured stacked no longer prices every part of its plugin. For estimates a stall or a burst spoiled; an
   impossible figure in the file (a share above the audio time, negative) is dropped when it is read
   anyway, and a file written by an older estimator is discarded.
   While playing, `cpu` is also the shared voice budget's hard limit ([RFC 0018](rfcs/0018-voice-budget-and-stealing.md#step-3-status)):

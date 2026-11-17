@@ -173,6 +173,37 @@ Tested: control-admission (three parts at 40 % each fit on the cores where the s
 chain of two at 40 % is refused for its 80 %; from figures of five samples it opens with a notice);
 control-estimates updated for the file's version. Memory admission is as it was.
 
+#### One sound's extreme figure (2026-11-17)
+
+Found on the FANTOM-07 (3e022c57): ten Performances opened with "may not fit". `measurements.json`
+held two Sampler 0.9.5 sounds (`#6215288`, `#6108036`) at `cpu` 0.51 and 0.50, each at 24 voices,
+measured while a test stacked every piano part. A Performance not open has no declarations, so each
+of its Sampler parts (no note limit) counted at the most of every Sampler declaration's figures:
+51 %, five parts 255 % of ST Final's 287 %; open, its own keys estimated 0.614 in all. The figure
+wore off only while an instance with that exact key played; `budget.forget` cleared it.
+
+Now (`Session::estimate`, `measurementFor`, `costOf` in `core/control/src/budget.cpp`):
+
+- **Its own sound where known.** A node's saved state (its folder's files, `Session::stateDigest`)
+  is tied to the key its figures are kept under as it plays (`measure`, with its memory, every 200
+  ticks; `states` in `measurements.json`, kept while that key's figures are). A Performance not open
+  counts such a part at its own sound's figures, memory and CPU: never below what that sound was
+  measured to cost. A state edited and saved since it last opened is not known until it opens again.
+- **Else a typical figure.** A part whose state is not known counts its build's CPU at the median
+  of its sounds' figures (`cpu`, `rest`, `voice`, `voices`, each the median of the sounds measured;
+  the lower of the two middle ones), not their most; its memory stays the most (memory keeps erring
+  high: a saved state declaring more than the room left is still refused before it activates).
+- **An unused extreme wears off.** Each figure records the day its CPU was last sampled (`day`); a
+  busiest figure not sampled for more than a week counts at half for each week since, never below
+  what its voices were measured to cost (`rest + voice x voices`). It is not rewritten: playing the
+  sound measures it again.
+
+Tested: control-parts (`outlierSound`: the memory fixture's modes as sounds, three ordinary at 2 to
+3 % and one at 51 %; a Performance of the default mode never opened here opens without the notice,
+2.5 %, which it got before the change; one of the loud mode, opened once, still gets it, 51 %;
+with the outlier unused four weeks it opens without, 3.2 %). control-estimates and
+control-multi-sampler-load pass unchanged.
+
 ## Admission
 
 - **Loading a Performance or a Sound, adding a plugin, importing:** checked first. Over budget:
@@ -483,7 +514,9 @@ instance's is not. Admission counts the larger of the declaration and the measur
 the declaration alone until the plugin has been measured. Measurements are kept per plugin build
 and declared size (`id@version digest#bytes`), so a plugin whose modes differ (Reverb 1 at 2.2 MB, an
 EQ at 1 KB a context) is not counted at the largest seen; a Performance not open, which cannot
-ask its plugins, counts each build at the most of its measured declarations. Without
+ask its plugins, counts each part at its own sound's figures where its saved state was measured
+here, else each build's memory at the most of its measured declarations and its CPU at their
+median ([below](#one-sounds-extreme-figure-2026-11-17)). Without
 `oscairn.memory`, an effect engine counts the shared and context bytes its effect contexts'
 `resources` report and each further context its context bytes, instead of an instance each.
 The first activation of a fresh instance, at its default state, is asked too; the Performance

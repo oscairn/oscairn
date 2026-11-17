@@ -444,11 +444,14 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; uint32_t contexts = 0; uint64_t perContext = 0; uint32_t sounds = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here; contexts: the nodes one instance of it carried at most when parts shared it (0: not seen sharing); perContext: what each sound past the first was measured to add to an instance (0: not measured); sounds: the sounds its instance held when its memory was read (1 for an instance of one part)
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; uint32_t contexts = 0; uint64_t perContext = 0; uint32_t sounds = 0; uint32_t day = 0; }; // day: when its CPU was last sampled, in days since 1970 (0: not known), from which an unused busiest figure wears off (costOf); samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here; contexts: the nodes one instance of it carried at most when parts shared it (0: not seen sharing); perContext: what each sound past the first was measured to add to an instance (0: not measured); sounds: the sounds its instance held when its memory was read (1 for an instance of one part)
         Budget budget_;
         uint64_t shell_ = 0; // the UI's own resident memory (setShellMemory), reserved beside budget_.system
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
+        std::map<std::string, std::string> states_;            // a saved node's state (stateDigest) to the key it was last measured under, so a Performance not open counts each part at its own sound's figures
+        std::map<NodeId, std::string> stateOf_;                // the open Performance's nodes, the saved state each opened with (stateDigest)
+        static std::string stateDigest(const std::filesystem::path& folder); // a node's saved state's files, as a short digest; empty when too large to read
         bool measurementsLoaded_ = false, measurementsChanged_ = false;
         std::chrono::steady_clock::time_point measurementsSaved_{};
         uint64_t measureTicks_ = 0;
@@ -812,6 +815,7 @@ namespace oscairn
             std::vector<std::unique_ptr<Beside>> beside; // its nodes whose sounds were prepared in a playing instance
             Claimed claimed;                      // its nodes on the playing Performance's shared engines
             Timing::Open stats;                   // engine.timing's open: its counts and the read's times
+            std::map<NodeId,std::string> states;  // each node's saved state (stateDigest), with a budget
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.

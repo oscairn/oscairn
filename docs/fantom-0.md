@@ -676,8 +676,8 @@ What stops when Roland's app is stopped, from what it was seen to do:
   outputs beyond main are not), `controls` (Roland's counts, but whether each reaches the i.MX,
   and the roles below, are Oscairn's guesses) and `midi`. The controls, in order, with what
   they are in Oscairn ([RFC 0024's identities](rfcs/0024-device-profiles.md#default-targets)):
-  the lever as `wheel:1` (pitch bend) and `wheel:2` (modulation); WHEEL1 and WHEEL2 as
-  `wheel:3` and `wheel:4`, unassigned; S1 and S2 as switches `button:1` and `button:2`; control
+  WHEEL1 and WHEEL2 as `wheel:1` (pitch bend) and `wheel:2` (modulation), and the lever's two
+  axes as `lever:1` (side to side) and `lever:2` (pushed away), which drive them (below); S1 and S2 as switches `button:1` and `button:2`; control
   knobs 1 to 8 as `knob:1` to `knob:8`, paged by button; sliders 1 to 8 as `fader:1` to
   `fader:8` on part levels; CUTOFF and RESONANCE as `knob:9` and `knob:10`, a row playing the
   Filter bank (its first two roles are cutoff and resonance); E1 to E6 as screen knobs
@@ -1408,7 +1408,8 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   The panel gives the lever 0 to 1023 and it rests at 512 (not the exact middle, 511.5), so the
   bend is 8192 (0 to 16383, the instrument's whole travel, no scaling by the host) within 1% of the
   throw either side of the middle, and runs linearly from there to both ends: the lever springing
-  back is exactly 8192. (The panel map has no centre or dead zone field; this is the engine's.)
+  back is exactly 8192. The dead zone belongs to a control the profile says is sprung (`rest`, below),
+  not to pitch bend: a sprung control's position within 1% of its throw of its rest is the rest.
   The rule, one for every control with a function: a control sends its function to every part, unless
   the Performance has assigned the control to something else (a control moved by learn, `part` 0: the
   control no longer plays its function) or a part's Sound has its own assignment of the control (the
@@ -1416,9 +1417,26 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   bend...), the control drives its target, and other parts still get the function. An assignment
   with `"passes": true` does both for its part. A part's `receive` object can also turn a function
   off for the part whatever sent it (`pitchBend`, `modulation` and so on: `"none"`); an external
-  keyboard's wheel goes through the same filter. The lever's side-to-side and push, and WHEEL1 and
-  WHEEL2 (`wheel:3`, `wheel:4`), have no link to each other yet: only `wheel:1` and `wheel:2` have
-  functions, and WHEEL1 and WHEEL2 play only what a Performance or Sound assigns them.
+  keyboard's wheel goes through the same filter.
+
+  **Wheels and lever.** The panel map names WHEEL1 (analog 5, the id the panel's own test tool calls
+  WHEEL1; the owner calls it the pitch wheel, all the way to the left, to be confirmed by moving it
+  and reading `controllers.get`) `wheel:1` and WHEEL2 (analog 6) `wheel:2`: the logical pitch and
+  modulation controls that Performances, assignments, `passes` and a part's `receive` mean. The lever's
+  side-to-side (analog 7) and push (analog 8) are `lever:1` and `lever:2`, extra inputs the profile links
+  to them by default (`follows: ["wheel:1", "wheel:2"]`): whatever a Performance sets for the pitch or
+  mod wheel (its function, a part's assignment, `passes`, a part's `receive`) applies to the lever too.
+  The profile also says which are sprung (`rest`, 0 to 1): WHEEL1 rests at 0.5 (the owner), WHEEL2 stays
+  where it is left, the lever's axes rest at 0.5 and at 0. Two inputs on one control combine without
+  adding: an input that stays where it is left takes over at once; a sprung input takes over only when
+  its position reaches or crosses the value (measured from its rest), then follows it, back to its rest
+  when released. So with the mod wheel at 0.5 a lever pushed to 0.3 changes nothing, pushed past 0.5 it
+  takes over, and let go the value goes to 0 though the wheel is still at 0.5, until the wheel is moved
+  again. `controllers.get` names the control moved last by the input's own id (`lever:2`, `wheel:2`).
+  A Performance can unlink an extra input (`assignments.link`, `unlinked` in the Performance): the lever
+  then drives nothing until it is assigned like any control (`lever:2` to a parameter; a relative
+  assignment on the same target the wheel drives is how a user makes the lever add to the wheel). The
+  setting and the assignments are kept on a device without the lever and do nothing there.
 
 ## The key reader
 

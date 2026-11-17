@@ -41,6 +41,10 @@ namespace oscairn
         std::vector<std::string> modes;
         bool scenes = false, paged = false, switches = false, panic = false;
         std::vector<std::string> functions;
+        // Per control (shorter lists leave the rest alone): the logical control it follows by default (an extra input such as a
+        // lever's axis drives "wheel:1" unless a Performance unlinks it), and its rest position, 0 to 1 (sprung: it returns there; NaN: unsprung).
+        std::vector<std::string> follows;
+        std::vector<double> rest;
         struct Midi
         {
             std::string device;                 // the controller's profile id; empty: not MIDI (a panel's own)

@@ -60,6 +60,16 @@ int main()
         std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
         check(refused(replaced(fantomJson, "\"roland-i2c-slave\"", "\"korg-serial\"")), "a panel of a protocol with no reader");
         check(refused(replaced(fantomJson, "\"functions\": [\"pitchBend\"]", "\"functions\": [\"pitchBender\"]")), "a function the engine cannot play is an error in the profile, not a silent drop");
+        {
+            const auto& lever = fantom.controls[3];
+            check(lever.kind == "lever" && lever.count == 2 && lever.follows == std::vector<std::string>{"wheel:1", "wheel:2"} && lever.rest == std::vector<double>{.5, 0} &&
+                  fantom.controls[1].rest == std::vector<double>{.5} && fantom.controls[2].rest.empty(), "the FANTOM-07's lever follows the wheels and its axes rest at the middle and at 0; WHEEL1 rests at the middle, WHEEL2 stays");
+            const auto groups = controlGroups(fantom);
+            check(groups[3].follows == lever.follows && groups[3].rest == lever.rest && groups[1].rest == std::vector<double>{.5}, "and the control groups carry them");
+            check(refused(replaced(fantomJson, "\"follows\": [\"wheel:1\", \"wheel:2\"]", "\"follows\": [\"wheel\", \"wheel:2\"]")), "a follows that names no control is refused");
+            check(refused(replaced(fantomJson, "\"rest\": [0.5, 0]", "\"rest\": [0.5, 2]")), "a rest outside 0 to 1 is refused");
+            check(refused(replaced(fantomJson, "\"rest\": [0.5, 0]", "\"rest\": [0.5, 0, 0]")), "more rests than controls are refused");
+        }
         check(fantom.controls[1].functions == std::vector<std::string>{"pitchBend"} && fantom.controls[2].functions == std::vector<std::string>{"modulation"}, "the FANTOM-07's lever: pitchBend, then modulation");
         check(refused(replaced(fantomJson, "\"/dev/i2c-slave-2\"", "\"i2c-slave-2\"")), "a panel device outside /dev");
         check(refused(replaced(fantomJson, "\"roland-bmc-stock\"", "\"roland-bmc\"")), "a keyboard of a protocol with no reader");

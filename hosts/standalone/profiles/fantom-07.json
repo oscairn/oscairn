@@ -9,9 +9,9 @@
     "device": { "name": "hw:1,0", "channels": 6, "rate": 48000, "outputs": { "main": [0, 1] } } },
   "controls": [
     { "kind": "keys", "count": 76, "role": "notes", "sensing": "velocity, no aftertouch; from the BMC side over /dev/ttyGS0 (the profile's keyboard)" },
-    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["pitchBend"], "sensing": "the pitch bend/modulation lever, left and right; 0 to 1023, seen on a unit" },
-    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["modulation"], "sensing": "the pitch bend/modulation lever, pushed away; 0 to 1023, seen on a unit" },
-    { "kind": "wheels", "count": 2, "role": "assign", "sensing": "WHEEL1 and WHEEL2; 0 to 1023, seen on a unit" },
+    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["pitchBend"], "rest": [0.5], "sensing": "WHEEL1 (the id the panel's own test tool calls WHEEL1: analog 5), the pitch wheel, sprung to the middle (the owner); 0 to 1023, seen on a unit" },
+    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["modulation"], "sensing": "WHEEL2 (analog 6), the mod wheel, which stays where it is left (the owner); 0 to 1023, seen on a unit" },
+    { "kind": "lever", "count": 2, "role": "assign", "follows": ["wheel:1", "wheel:2"], "rest": [0.5, 0], "sensing": "the pitch bend/modulation lever: lever:1 left and right (analog 7), lever:2 pushed away (analog 8), both sprung; 0 to 1023, seen on a unit; they drive the pitch and mod wheels' controls unless a Performance unlinks them" },
     { "kind": "buttons", "count": 2, "role": "assign", "target": "switches", "sensing": "S1 and S2: panel switches 86 and 87, seen on a unit" },
     { "kind": "knobs", "count": 8, "role": "assign", "paging": "button", "sensing": "control knobs 1 to 8, 0 to 127, seen on a unit; PAN/LEVEL, CTRL and ASSIGN pick what they play" },
     { "kind": "faders", "count": 8, "role": "assign", "modes": ["part"], "sensing": "sliders 1 to 8, 0 to 127, seen on a unit; one chattered a step at rest" },

@@ -858,6 +858,11 @@ namespace oscairn
         // Physical controls (RFC 0011, physical_controls.h): the Performance's overrides, by
         // the control's logical identity. Assigning Kind::None removes one; saved with it.
         virtual std::vector<AssignmentOverride> assignments() const = 0;
+        // An extra input (a lever's axis: `lever:1`) that the device links by default to a logical control (`wheel:1`) drives it unless the Performance has
+        // unlinked it, when it is a control of its own, assignable like any. unlinked(): the Performance's list, kept whether or not this device has the
+        // controls; link(control, false) adds one, true takes it off. An edit.
+        virtual std::vector<std::string> unlinked() const = 0;
+        virtual void link( const std::string& control, bool linked ) = 0;
         virtual void assign( const std::string& control, const Assignment& target, uint32_t part = 0, bool passes = false ) = 0; // part: that part's Sound's own assignment, which replaces the control's function (pitch bend, CC 1...) for that part's instruments unless passes
 
         // Physical controls played by the engine (RFC 0011's instant controls): the joined control

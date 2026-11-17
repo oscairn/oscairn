@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Profile.h"
 #include "ProfileData.h"
+#include "oscairn/parts.h" // validPhysicalControl
+#include <limits>
 #include <juce_core/juce_core.h>
 #include <algorithm>
 #include <map>
@@ -52,7 +54,7 @@ namespace oscairn::standalone
             for(const auto& e : *v.getArray()) { require(e.isString() && e.toString().isNotEmpty() && e.toString().length() <= 128, std::string(key) + " holds names"); out.push_back(e.toString().toStdString()); }
             return out;
         }
-        const juce::StringArray controlKinds{"keys", "pads", "encoders", "knobs", "faders", "buttons", "pedal", "footswitches", "expression", "jog", "touchstrip", "wheels", "aftertouch", "breath"};
+        const juce::StringArray controlKinds{"keys", "pads", "encoders", "knobs", "faders", "buttons", "pedal", "footswitches", "expression", "jog", "touchstrip", "wheels", "aftertouch", "breath", "lever", "joystick", "ribbon"};
         const juce::StringArray controlRoles{"notes", "screen", "assign", "fixed"};
         const juce::StringArray banks{"assign", "filter", "ampEG", "eq", "levels", "effects"};
         const juce::StringArray surfaces{"desktop", "panel", "compact"};
@@ -184,7 +186,7 @@ namespace oscairn::standalone
             require(v.isArray() && v.size() <= 64, "controls must be a list");
             for(const auto& e : *v.getArray())
             {
-                const auto& o = object(e, "a control"); fields(o, {"kind", "count", "sensing", "role", "rows", "paging", "modes", "functions", "target", "midi"}, "a control");
+                const auto& o = object(e, "a control"); fields(o, {"kind", "count", "sensing", "role", "rows", "paging", "modes", "functions", "follows", "rest", "target", "midi"}, "a control");
                 Control c{text(o, "kind"), count(o, "count", 1024), text(o, "sensing", false), text(o, "role")};
                 require(controlKinds.contains(juce::String(c.kind)), "unknown control kind " + c.kind);
                 require(c.count > 0, "a control's count is at least 1");
@@ -205,6 +207,19 @@ namespace oscairn::standalone
                 c.modes = names(o, "modes");
                 for(const auto& m : c.modes) require(m == "part" || m == "element" || m == "audio", "a fader mode is part, element or audio");
                 c.functions = names(o, "functions");
+                c.follows = names(o, "follows");
+                if(const auto r = o.getProperty("rest"); !r.isVoid())
+                {
+                    require(r.isArray() && r.size() <= 64, "rest must be a list");
+                    for(const auto& e : *r.getArray())
+                    {
+                        require(e.isVoid() || ((e.isDouble() || e.isInt()) && double(e) >= 0 && double(e) <= 1), "rest holds positions from 0 to 1, or null for a control that stays where it is left");
+                        c.rest.push_back(e.isVoid() ? std::numeric_limits<double>::quiet_NaN() : double(e));
+                    }
+                }
+                require(c.rest.size() <= size_t(c.count) && c.follows.size() <= size_t(c.count), "follows and rest are at most one per control");
+                for(const auto& f : c.follows) require(validPhysicalControl(f), "follows names a control such as wheel:1: " + f);
+                require((c.follows.empty() && c.rest.empty()) || c.role == "assign", "only an assign group follows another control or rests");
                 c.target = text(o, "target", false);
                 const bool knobs = c.kind == "knobs" || c.kind == "encoders", levers = c.kind == "faders" || c.kind == "buttons";
                 const bool assign = c.role == "assign";
@@ -432,6 +447,7 @@ namespace oscairn::standalone
             // Its default target, and a controller's MIDI (RFC 0024).
             g.scenes = c.target == "scenes"; g.switches = c.target == "switches"; g.panic = c.target == "panic"; g.paged = !c.paging.empty();
             if(c.role != "fixed") g.functions = c.functions;
+            g.follows = c.follows; g.rest = c.rest;
             if(profile.controller() && c.midi.channel)
             {
                 using Message = ControlGroup::Midi::Message;

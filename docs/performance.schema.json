@@ -364,6 +364,13 @@
         ]
       }
     },
+    "unlinked": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/PhysicalControl" },
+      "description": "Extra inputs (a lever's axis: lever:1) the Performance has unlinked from the logical control the device links them to by default (wheel:1 for the pitch wheel and the lever's side to side, wheel:2 for the mod wheel and its push): each is then a control of its own, assignable like any other. Kept on a device without the control, where it does nothing. Absent: every extra input stays linked"
+    },
     "lock": {
       "type": "object",
       "description": "The plugin builds it was saved with (RFC 0006): for each plugin and platform, the build's digest, so an archive or a device can tell it has exactly that build",
@@ -485,7 +492,7 @@
     },
     "PhysicalControl": {
       "type": "string",
-      "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath):[1-9][0-9]{0,2}$"
+      "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath|lever|joystick|ribbon):[1-9][0-9]{0,2}$"
     },
     "NodeKey": {
       "type": "string",

@@ -15,14 +15,18 @@ namespace oscairn
     {
         constexpr int sendKey = 100; // a send's level among the values, beside the assignments' kinds: {sendKey, 0, bus, part}
 
-        // A lever's 0..1 as a 14-bit bend, 8192 at rest: linear, with a dead zone of 1% of the throw about
-        // the middle (a panel's lever reads 512 of 1023 at rest, and its spring never lands on 511.5), the rest
-        // scaled to reach both ends.
-        int bendOf(double v)
+        // A control's 0..1 as a 14-bit bend, 8192 at the middle (0.5), 0 and 16383 at the ends.
+        int bendOf(double v) { return std::clamp(int(std::lround(std::clamp(v, 0.0, 1.0) * 16383)), 0, 16383); }
+
+        // A sprung input's position with a dead zone of 1% of its throw (to either side of its rest) about the rest
+        // position, the rest scaled to reach both ends: a panel's lever reads 512 of 1023 at rest, not 511.5, and its spring
+        // never lands on one value, so what the spring returns to is exactly the rest.
+        double conditioned(double x, double rest)
         {
-            constexpr double zone = .01;
-            const double d = (std::clamp(v, 0.0, 1.0) - .5) * 2, a = std::max(0.0, std::abs(d) - zone) / (1 - zone);
-            return std::clamp(8192 + int(std::lround(std::copysign(a, d) * 8192)), 0, 16383);
+            x = std::clamp(x, 0.0, 1.0);
+            const double span = x >= rest ? 1 - rest : rest, zone = .01 * span, distance = std::abs(x - rest);
+            if(span <= 0 || distance <= zone) return rest;
+            return rest + std::copysign((distance - zone) / (span - zone) * span, x - rest);
         }
     }
 
@@ -31,8 +35,17 @@ namespace oscairn
         std::lock_guard lock(lock_);
         groups_ = std::move(groups); ports_ = std::move(ports);
         positions_.assign(groups_.size(), 0);
+        links_.clear(); holding_.clear();
+        for(const auto& r : resolveControls(AssignmentSource{}, groups_, 0)) if(!r.follows.empty() || !std::isnan(r.rest)) links_[r.control] = {r.follows, r.rest};
         mapping_ = {};
         dirty_ = true;
+    }
+
+    void ControllerInput::setUnlinked(std::set<std::string> unlinked)
+    {
+        std::lock_guard lock(lock_);
+        unlinked_ = std::move(unlinked);
+        holding_.clear();
     }
 
     std::map<std::string, std::string> ControllerInput::functions() const
@@ -81,7 +94,51 @@ namespace oscairn
         if(wake) wake();
     }
 
+    // A panel's control by identity. An input with a rest position (sprung) is conditioned about it. An extra input that
+    // follows a logical control (a lever's axis, `follows`) while the Performance leaves it linked drives that control, with the
+    // control's own input (a wheel) when it has one: the one holding the value is the latest to move, except that a sprung input
+    // takes over only when its position reaches or crosses the value, measured from its rest (so it does not drag back a value
+    // another input was left at), and then follows it, back to its rest when released; an input that stays where it is left takes
+    // over at once. A control alone is played as it came.
     bool ControllerInput::control(const std::string& control, ControlInput input) noexcept
+    {
+        std::string logical = control;
+        bool declared = false; // it follows a control or has a rest position: a lever or wheel
+        try
+        {
+            std::lock_guard lock(lock_);
+            const auto own = links_.find(control);
+            declared = own != links_.end();
+            const bool linked = own != links_.end() && !own->second.follows.empty() && !unlinked_.count(control);
+            if(linked) logical = own->second.follows;
+            const auto rest = own != links_.end() ? own->second.rest : std::numeric_limits<double>::quiet_NaN();
+            if(input.kind == ControlInput::Kind::Absolute && !std::isnan(rest)) input.value = conditioned(input.value, rest);
+            const bool shared = linked || std::any_of(links_.begin(), links_.end(), [&](const auto& l) { return l.second.follows == control && !unlinked_.count(l.first); });
+            if(shared && input.kind == ControlInput::Kind::Absolute)
+            {
+                auto& held = holding_[logical];
+                bool takes = std::isnan(held.value) || held.holder == control || std::isnan(rest);
+                if(!takes)
+                {
+                    const double v = held.value;
+                    takes = std::abs(v - rest) < 1e-9 || (v >= rest ? input.value >= v : input.value <= v);
+                }
+                if(!takes) { touched_ = control; return false; }
+                held.value = input.value; held.holder = control;
+            }
+        }
+        catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        const bool played = this->played(logical, input, control);
+        if(!played && declared)
+        {
+            // A lever or wheel that plays nothing is still the control moved last, for learn and for a client to see which one it is.
+            std::lock_guard lock(lock_);
+            touched_ = control;
+        }
+        return played;
+    }
+
+    bool ControllerInput::played(const std::string& control, ControlInput input, const std::string& physical) noexcept
     {
         std::function<void()> wake;
         bool played = false;
@@ -127,11 +184,13 @@ namespace oscairn
             try { played = session_.controller(controller, int(std::lround(v * 127))); }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
         }
-        if(played && !mapped && (controller >= 0 || !function.empty()))
+        if(played)
         {
-            // Counted as any played control is: the control moved last, for learn, and the moves so far.
+            // Counted as any played control is: the control moved last (by the input's own identity, a lever's axis not the control it
+            // drove), for learn, and the moves so far.
             std::lock_guard lock(lock_);
-            touched_ = control; ++touches_;
+            touched_ = physical;
+            if(!mapped && (controller >= 0 || !function.empty())) ++touches_;
         }
         return played;
     }

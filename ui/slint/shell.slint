@@ -52,6 +52,9 @@ export component Shell inherits Window {
     out property <bool> title-cut: bar.title-cut;
     out property <length> rec-width: bar.rec-width;
     out property <length> loading-width: bar.loading-width;
+    out property <length> library-rail: library.rail;
+    out property <length> library-rail-need: library.rail-need;
+    out property <float> library-rail-fit: library.rail-fit;
     out property <length> content-top: Theme.bar-height + (root.engine != "" ? Theme.touch : 0px); // the banner takes its own room
     out property <int> actions-mode: bar.actions-mode;
     out property <int> meters-mode: bar.meters-mode;

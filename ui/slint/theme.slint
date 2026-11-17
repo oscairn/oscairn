@@ -1018,8 +1018,29 @@ export component TabPages inherits Rectangle {
     out property <float> tabs-fit: 1.0;
     property <bool> has-pages: root.pages.length > 1;
     property <bool> has-tabs: root.tabs.length > 1;
-    // A rail's width: fixed by the theme's type and spacing, at most a share of the width.
-    out property <length> rail: min(Theme.rail-width, root.width * Theme.side-share);
+    // A rail's width: the theme's, or, where it is the only rail (the Library's, the Settings'), what its longest label needs
+    // on one line (a word that cannot break, at the small type in bold, and the tab's padding each side) when that is more;
+    // at most a share of the width, beyond which the labels are shrunk and then cut as before. Two rails (a plugin's pages and
+    // tabs) keep the theme's width: their labels shrink alike.
+    property <length> across: 2 * (Theme.tab-pad + Theme.pad-tight);
+    out property <length> rail-need: max(pages-need.preferred-width, tabs-need.preferred-width);
+    out property <length> rail: root.has-pages && root.has-tabs ? root.base-rail : max(root.base-rail, min(root.rail-need + root.across, root.width * Theme.rail-label-share));
+    pages-need := VerticalLayout {
+        width: 0px;
+        height: 0px;
+        for l in root.page-labels: RailNeed {
+            label: l;
+            inner: 100000px;
+        }
+    }
+    tabs-need := VerticalLayout {
+        width: 0px;
+        height: 0px;
+        for l in root.tab-labels: RailNeed {
+            label: l;
+            inner: 100000px;
+        }
+    }
     property <length> rails: (root.has-pages ? root.rail : 0px) + (root.has-tabs ? root.rail : 0px) + (root.has-pages && root.has-tabs ? Theme.gap : 0px);
     property <length> rows: (root.has-pages ? Theme.touch + Theme.gap : 0px) + (root.has-tabs ? Theme.touch + Theme.gap : 0px);
     // The content's room in each placement, and the one that has more of it.
@@ -1028,7 +1049,11 @@ export component TabPages inherits Rectangle {
     property <length> side-h: max(0px, root.height - 2 * Theme.margin - root.reserve);
     property <length> top-w: max(0px, root.width - 2 * Theme.margin);
     property <length> top-h: max(0px, root.height - 2 * Theme.margin - root.reserve - root.rows);
-    out property <float> side-area: root.side-w / 1px * (root.side-h / 1px);
+    // `auto` chooses by the rails at the theme's own width, so that a label that asks for more room does not turn them into strips.
+    property <length> base-rail: min(Theme.rail-width, root.width * Theme.side-share);
+    property <length> base-rails: (root.has-pages ? root.base-rail : 0px) + (root.has-tabs ? root.base-rail : 0px) + (root.has-pages && root.has-tabs ? Theme.gap : 0px);
+    property <length> base-side-w: max(0px, root.width - (root.base-rails > 0px ? root.base-rails + Theme.margin : Theme.margin) - Theme.margin);
+    out property <float> side-area: root.base-side-w / 1px * (root.side-h / 1px);
     out property <float> top-area: root.top-w / 1px * (root.top-h / 1px);
     // 0 two strips, 1 two rails.
     out property <int> mode: Theme.tab-placement == TabPlacement.top ? 0 : Theme.tab-placement == TabPlacement.side ? 1 : root.side-area > root.top-area ? 1 : 0;

@@ -41,7 +41,7 @@ export component KeyStrip inherits Rectangle {
             width: max(1px, k.w * root.white - Theme.hair);
             height: root.board-h;
             background: Theme.white-key;
-            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : 0.4;
+            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : Theme.disabled;
         }
     }
     for k in StripState.keys: Rectangle {
@@ -51,7 +51,7 @@ export component KeyStrip inherits Rectangle {
             width: k.w * root.white;
             height: root.board-h * 0.6;
             background: Theme.black-key;
-            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : 0.4;
+            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : Theme.disabled;
         }
     }
     // The range: an outline around its keys and a handle at each end (the end the dial changes in the focus color).

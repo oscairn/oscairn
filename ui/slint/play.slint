@@ -152,8 +152,8 @@ component Strip inherits Section {
     callback held(bool);
     // The strip's insides: the fader beside its meters (each a thin bar), the marks under them.
     property <length> fader-width: Theme.touch;
-    property <length> meter-width: 7px;
-    property <length> meter-pitch: 10px; // from one meter to the next
+    property <length> meter-width: Theme.meter-width;
+    property <length> meter-pitch: Theme.meter-pitch; // from one meter to the next
     property <length> meter-gap: Theme.pad-wide; // fader to meters
     property <length> meter-inset: Theme.pad-narrow; // the meters' ends from the fader's
     // The name and sound over the fader, the marks under it (their sides the screen's, smaller on a short strip).

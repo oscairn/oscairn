@@ -858,15 +858,18 @@ namespace oscairn
             bool savesSounds() const noexcept override { return savesSounds_; }
             void saveSound(uint32_t id, const std::string& directory) override
             {
+                auto lock = controlFor();
                 const auto i = ids_.find(id);
                 if(!savesSounds_ || i == ids_.end()) throw std::invalid_argument("no such sound to save on its own");
-                request(Op::SaveSound, Writer().u32(i->second).str(directory));
+                process()->exchange(header(Op::SaveSound).u32(i->second).str(directory).data);
             }
             std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const override
             {
+                auto& self = const_cast<WorkerHost&>(*this);
+                auto lock = self.controlFor();
                 const auto i = ids_.find(id);
                 if(!savesSounds_ || i == ids_.end()) return {};
-                Reader r = const_cast<WorkerHost*>(this)->request(Op::SoundValues, Writer().u32(i->second));
+                Reader r = self.process()->exchange(header(Op::SoundValues).u32(i->second).data);
                 std::vector<oscairn_sound_parameter_t> values(r.count(12));
                 for(auto& v : values) { v.id = r.u32(); v.value = r.f64(); }
                 return values;

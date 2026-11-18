@@ -50,3 +50,38 @@ fn a_row_that_does_not_fit_has_a_warning_icon_before_the_star() {
     assert!(with > 20 && without == 0, "the icon is drawn in the warning color on the unfit row only: {with} {without}");
     lib_png(&s, "lib-E-warning");
 }
+
+// Performances and Sounds have a color of their own (`color` in the library's item and in `library.edit`, set from the item's
+// Color menu), and the row draws it at its leading edge as the theme's row style says (`left`: a mark): three colored rows, in
+// the dark theme and the light one, each with its color's pixels at the edge and the row without a color with none.
+#[test]
+fn a_row_draws_its_own_color_at_the_leading_edge() {
+    let colors = [(0usize, "#3e63dd", slint::Color::from_rgb_u8(0x3e, 0x63, 0xdd)), (1, "#46a758", slint::Color::from_rgb_u8(0x46, 0xa7, 0x58)), (2, "#e5484d", slint::Color::from_rgb_u8(0xe5, 0x48, 0x4d))];
+    let mut s = scene("rows-color", 10);
+    for (i, hex, _) in colors {
+        s.e.items[i].color = hex.into();
+    }
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    for (what, bright) in [("lib-F-colors", false), ("lib-F-colors-light", true)] {
+        let ui = s.ui();
+        if bright {
+            theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-light", ""));
+        }
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let rows = rows(&ui);
+        assert!(rows[..3].iter().all(|r| r.tinted) && !rows[3].tinted, "{what}: three rows tinted, the fourth not");
+        for (i, hex, color) in colors {
+            let band = row_band(&s, i);
+            let edge = (band.0, band.0 + 40, band.2, band.3);
+            assert!(count(&s, color, edge, 300) > 100, "{what}: row {i} has {hex} at its edge");
+        }
+        let band = row_band(&s, 3);
+        for (_, _, color) in colors {
+            assert_eq!(count(&s, color, (band.0, band.0 + 40, band.2, band.3), 300), 0, "{what}: the row without a color has none of {color:?}");
+        }
+        lib_png(&s, what);
+    }
+}

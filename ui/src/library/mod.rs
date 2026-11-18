@@ -1042,10 +1042,9 @@ impl Screen {
         // Left (and the left knob) is the sidebar's.
         let left = matches!(action, Action::Arrow { dx, .. } if dx < 0) || matches!(action, Action::Move { pane: Some(0), .. });
         if left && self.side_visible() {
+            // The first step shows the cursor on the sidebar's first line, as the first step into a list shows it on the first row:
+            // one counted step, one line (it was two, the one that went in and the one that moved).
             self.enter_side();
-            if let Action::Move { by, .. } = action {
-                return self.act_side(Action::Move { pane: None, by });
-            }
             self.show();
             return Outcome::Stay;
         }

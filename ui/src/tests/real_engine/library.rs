@@ -11,14 +11,31 @@ fn items(r: &mut Real, kind: &str) -> Vec<(String, String)> {
 }
 
 fn shown(r: &Real) -> Vec<String> {
-    r.rows().into_iter().map(|x| x.0).filter(|l| l != "Filters").collect()
+    r.rows().into_iter().map(|x| x.0).collect()
 }
 
-/// Whether row `label` is the cursor's.
-fn press_item(r: &mut Real, label: &str) {
-    if !r.press(label) {
-        r.note(format!("no row {label:?}"));
+/// The search box tapped and the text typed on the keyboard.
+fn search(r: &mut Real, text: &str) {
+    r.screen.ui.global::<crate::LibraryState>().invoke_search_tapped();
+    typed(r, text);
+}
+
+/// A touch on the sidebar's line `label`, its view turned to it first.
+fn side(r: &mut Real, label: &str) -> bool {
+    let ui = r.screen.ui.clone_strong();
+    let lib = ui.global::<crate::LibraryState>();
+    let per = lib.get_side_per_view().max(1) as usize;
+    for first in (0..lib.get_side_total().max(1)).step_by(per) {
+        lib.invoke_side_scrolled(first);
+        r.settle();
+        if let Some(at) = lib.get_side_rows().iter().position(|x| x.label == label) {
+            lib.invoke_side_tapped(at as i32);
+            r.settle();
+            return true;
+        }
     }
+    r.note(format!("no sidebar line {label:?}"));
+    false
 }
 
 /// A bar action by label, through "More" where the bar folds them.
@@ -100,8 +117,7 @@ pub(super) fn library(r: &mut Real) {
 
     // Search.
     r.step("Library: Search for warm");
-    bar_do(r, "Search");
-    typed(r, "warm");
+    search(r, "warm");
     r.settle();
     r.sent("Search");
     let found = r.engine.call("library.query", json!({"kind": "performance", "text": "warm", "limit": 1000}));
@@ -109,36 +125,24 @@ pub(super) fn library(r: &mut Real) {
     let got = shown(r);
     r.check(got == names && !names.is_empty(), || format!("Search: the list shows {got:?}, the engine {names:?}"));
     r.png("lib-02-search");
-    bar_do(r, "Search");
-    typed(r, "");
+    search(r, "");
     r.settle();
 
-    // The filters: tags, favorites, library.
-    r.step("Library: Filters, Tags");
-    press_item(r, "Filters");
-    r.press("Tags");
-    r.settle();
-    eprintln!("   tags {:?}", r.rows());
+    // The sidebar: tags, favorites.
+    r.step("Library: sidebar, Tags");
+    side(r, "warm");
     r.png("lib-03-tags");
-    r.press("warm");
     r.sent("Tag warm");
     let found = r.engine.call("library.query", json!({"kind": "performance", "tags": ["warm"], "limit": 1000}));
     r.check(found["total"].as_u64() == Some(2), || format!("Tags: warm matches {}", found["total"]));
-    r.act(Action::Cancel(None));
-    r.press("Favorites");
+    side(r, "Favorites");
     r.sent("Favorites");
     r.png("lib-04-favorites");
     eprintln!("   with Favorites and warm: {:?}", shown(r));
-    r.press("Favorites");
-    r.act(Action::Cancel(None));
-    r.press("Filters");
-    r.press("Tags");
-    r.press("warm"); // let go
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
-    let rows = r.rows();
+    side(r, "Favorites");
+    side(r, "warm"); // let go
     let got = shown(r);
-    r.check(rows.first().map(|x| x.0.as_str()) == Some("Filters") && got == want, || format!("Filters: the list did not come back: {rows:?}"));
+    r.check(got == want, || format!("Sidebar: the list did not come back: {got:?}"));
 
     // A favorite, from the item's menu.
     r.step("Library: favorite");

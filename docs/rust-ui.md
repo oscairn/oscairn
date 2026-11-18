@@ -659,7 +659,9 @@ set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whate
   `src/library/side.rs`: Favorites and Recent, the libraries (All, My own, each installed library with its count), the tags with their
   counts; one line each, a touch target tall, the chosen ticked, several tags all of which must match; its own scroll bar; its width
   `Theme.sidebar-share`, 29% of the content) and the items at the right: name ("Untitled" without one), tags, "Locked",
-  "Auditioning", a star, the item's color as the theme puts a row's. A choice in the sidebar applies at once (the engine is asked
+  "Auditioning", at the trailing end a warning icon (the engine's `unfit`: the Performance does not fit this device; the reason is the
+  panel's, the line under the list's and the row's accessible label; the list answer has no finer level and no missing plugins) and
+  then the star, the item's color as the theme puts a row's (a mark at the leading edge by default). A choice in the sidebar applies at once (the engine is asked
   again); only opening a Performance waits for a press, as before. The **panel** (what the item under the cursor is) is hidden at first;
   its button shows it in the sidebar's place and hides it again, for the session. What only the panel said (why a Performance does not fit
   this device, which library it is locked in, a folder indexed in place) is in the line under the list while the cursor is on the row and
@@ -676,7 +678,8 @@ set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whate
   `scroll-lane`, `scroll-thumb-min`): a thin bar in its own lane at the list's right edge (the rows are narrower by the
   lane), always shown, its thumb the view's share of the list (at least a touch target long) at the view's place. A touch
   only: a tap on the track or a drag on it asks for the view at that place (`PartState.scrolled`, `Browser::scroll_to`,
-  a whole view at a time), drops the cursor (scrolling selects nothing), keeps the footer in step, and asks the engine
+  a whole view at a time; its lane is a touch target wide, `Theme.scroll-lane`, the visible bar a third of that), drops the cursor
+  (scrolling selects nothing), keeps the footer in step, and asks the engine
   for nothing (the list is held whole); it is not a cursor stop.
 - **Requests:** `library.query` (`kind`, `limit` 1000, `text`, `tags`, `favorites`, `recent`, `source`), `library.libraries`,
   `packages.installed` and `packages.preinstalled` on opening (the preinstall line is asked again each second only

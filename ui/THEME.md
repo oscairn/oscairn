@@ -243,3 +243,19 @@ type scale (nothing hardcoded; `no_screen_hardcodes_what_the_theme_sets` still h
   mark is `Theme.mark-off` (the same alpha the Play and mixer marks use: `Mark` takes it from the theme now), a mute that is on
   `Theme.danger` and a solo that is on the accent, as the strips'. Inks 14 and 15 of a view are `Theme.danger` and `Theme.mark-off`.
 - A label in a view's panel shrinks to 70% before it is cut (it was elided).
+
+## The shared list's style (2026-11-17)
+
+What a theme sets today that shapes a list: `radius` (0 to 16: every corner), `style.sections` (`separate`: cards with a gap and
+corners, `joined`: rows edge to edge, square, a thin line between), `style.edges` (the line's weight), `style.rows` (where an item's
+color goes: left, right, dot, fill), `style.depth`, `spacing` (every gap and padding) and `fontScale`. A list's gap, corners and
+divider were not separate tokens: they were the sections' (`Theme.gap-between`, `section-radius`, the joined line). They are now
+`Theme.list-gap`, `list-radius` and `list-divider` (and `Section.divider`), used by the shared list's rows and the Library's
+sidebar, and each follows the sections' style, so a theme looks as it did; making them keys of a theme file waits for the same
+keys in the JUCE parser (hosts/standalone/Theme.cpp). The Library's sidebar width is `Theme.sidebar-share`, the scroll bar's lane and
+bar `scroll-lane` and `scroll-bar`. Pictures of the same screens in two themes, one light with a blue accent, square and joined
+(tests/theme_pictures.rs, `blue_square_theme`: a theme as a file would define it; it becomes selectable in Settings > Appearance as
+a folder with that theme.json in the themes folder, and a built-in once it is added to hosts/standalone/themes).
+
+What stays round in a square theme because it is round by design: the knobs and slider thumbs, a switch's pill, the recording dot,
+the meters' bars and the sliders' thin tracks, a progress line, and a round-marks style's marks.

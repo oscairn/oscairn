@@ -62,21 +62,58 @@ pub fn dismiss_keyboard_hint() -> std::io::Result<()> {
     std::fs::write(dir.join("keyboard.txt"), format!("hint dismissed\n{rest}"))
 }
 
-/// How the sound chooser lists: library-view.txt, which the JUCE app's library pane keeps beside the theme choice
-/// (LibraryPane.cpp, `viewPreference`): the words "compact" or "comfortable" and "pills" or "list". The second word is
-/// kept as it is read.
+/// How the Library and the sound chooser list: library-view.txt, which the JUCE app's library pane keeps beside the theme choice
+/// (LibraryPane.cpp, `viewPreference`): the words "compact" or "comfortable" and "pills" or "list". Returns (compact, pills).
 pub fn library_view() -> (bool, bool) {
+    #[cfg(test)]
+    if let Some(v) = test_view::get() {
+        return v;
+    }
     let text = read("library-view.txt").unwrap_or_default();
     let words: Vec<&str> = text.split_whitespace().collect();
     (words.contains(&"compact"), words.contains(&"pills"))
 }
 
-/// Keeps the compact choice, with the pills word as it was.
-pub fn keep_library_view(compact: bool) -> std::io::Result<()> {
+/// The file's words for a choice, as the JUCE pane writes them.
+pub fn library_view_text(compact: bool, pills: bool) -> String {
+    format!("{}{}", if compact { "compact" } else { "comfortable" }, if pills { " pills" } else { " list" })
+}
+
+/// Keeps both choices of the library view (compact rows, the sidebar as pills).
+pub fn keep_library_view(compact: bool, pills: bool) -> std::io::Result<()> {
+    #[cfg(test)]
+    if test_view::set(compact, pills) {
+        return Ok(());
+    }
     let Some(dir) = config_dir() else { return Ok(()) };
-    let (_, pills) = library_view();
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("library-view.txt"), format!("{}{}", if compact { "compact" } else { "comfortable" }, if pills { " pills" } else { " list" }))
+    std::fs::write(dir.join("library-view.txt"), library_view_text(compact, pills))
+}
+
+/// In the tests every thread has its own library view, not the file in the one folder the tests share (they run side by side and
+/// the choice changes the Library's layout); a test that means the file switches it on for its thread.
+#[cfg(test)]
+pub mod test_view {
+    use std::cell::Cell;
+    thread_local! {
+        static VIEW: Cell<Option<(bool, bool)>> = const { Cell::new(Some((false, false))) };
+    }
+    pub fn get() -> Option<(bool, bool)> {
+        VIEW.with(Cell::get)
+    }
+    pub fn set(compact: bool, pills: bool) -> bool {
+        VIEW.with(|v| {
+            let mine = v.get().is_some();
+            if mine {
+                v.set(Some((compact, pills)));
+            }
+            mine
+        })
+    }
+    /// This thread reads and writes the real file (true), or its own choice again, as at first (false).
+    pub fn file(on: bool) {
+        VIEW.with(|v| v.set(if on { None } else { Some((false, false)) }));
+    }
 }
 
 /// Whether Routing shows parts collapsed: the line of routing-view.txt, which the JUCE app's Routing

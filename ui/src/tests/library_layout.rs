@@ -10,7 +10,7 @@ use super::*;
 use crate::{KeyboardState, LibraryState};
 
 /// The line the sidebar's cursor is on.
-fn side_cursor(ui: &Shell) -> Option<String> {
+pub(super) fn side_cursor(ui: &Shell) -> Option<String> {
     ui.global::<LibraryState>().get_side_rows().iter().find(|r| r.cursor).map(|r| r.label.to_string())
 }
 

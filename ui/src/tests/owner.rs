@@ -241,3 +241,41 @@ fn the_settings_rail_holds_its_longest_label_on_one_line() {
         }
     }
 }
+
+// The scroll bar sits close to the list: its visible bar starts the theme's small gap past the rows' right edge (at the list's side
+// of its lane), while the lane, the touch target, stays a full touch target wide, and begins no further left than the rows'
+// right padding, so a tap on the star or the warning icon is the row's, never the lane's. Pictures: polish-2 (and -blue).
+#[test]
+fn the_scroll_bar_sits_close_to_the_list() {
+    for (name, theme) in [("polish-2", None), ("polish-2-blue", Some(super::theme_pictures::blue_square_theme()))] {
+        let mut s = scene(name, 10);
+        let ui = s.ui();
+        if let Some(t) = theme {
+            theme::apply(&ui, &t);
+            s.f.screen.frame();
+            s.f.screen.frame();
+        }
+        let t = ui.global::<crate::Theme>();
+        let k = 1.55;
+        let (lane_left, row_right) = (ui.get_list_x() + ui.get_lane_x(), ui.get_list_x() + ui.get_lane_x() + t.get_scroll_overlap());
+        assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "{name}: the lane is a touch target");
+        // The icons end a padding short of the row's edge: the lane starts where they end, not over them.
+        let star_right = row_right - t.get_pad();
+        assert!(lane_left >= star_right - 0.01, "{name}: the lane {lane_left} overlaps the star's end {star_right}");
+        assert_eq!(t.get_scroll_lead(), t.get_scroll_overlap() + t.get_scroll_gap());
+        // As drawn: the first pixel of the bar's thumb (the muted color) right of the rows, in the first row's height.
+        let y = ((ui.get_list_y() + t.get_margin() + t.get_touch() / 2.) * k) as usize;
+        let m = t.get_muted();
+        let want = (m.red(), m.green(), m.blue());
+        let w = s.f.screen.w;
+        let from = ((row_right - 4.) * k) as usize;
+        let at = (from..w).find(|&x| {
+            let p = s.f.screen.pixels[y * w + x];
+            (p.r, p.g, p.b) == want
+        });
+        let gap = at.expect("the thumb is drawn") as f32 / k - row_right;
+        eprintln!("{name}: the bar starts {gap:.1} px past the rows (the gap token {})", t.get_scroll_gap());
+        assert!((gap - t.get_scroll_gap()).abs() <= 1.5, "{name}: the bar is {gap} from the rows");
+        lib_png(&s, name);
+    }
+}

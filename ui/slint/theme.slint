@@ -141,6 +141,11 @@ export global Theme {
     in-out property <length> scroll-lane: touch;
     in-out property <length> scroll-bar: scroll-lane / 3;
     out property <length> scroll-thumb-min: touch;
+    // The lane begins over the row's right padding (`pad`, where no icon is: the star and the warning end a padding short of the
+    // row's edge), and the visible bar sits a small gap past the row's edge, at the list's side of its lane.
+    out property <length> scroll-overlap: pad;
+    out property <length> scroll-gap: pad-tight;
+    out property <length> scroll-lead: scroll-overlap + scroll-gap;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;

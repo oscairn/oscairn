@@ -189,7 +189,7 @@ export component Library inherits Rectangle {
     for row[i] in LibraryState.side-rows: Rectangle {
         x: Theme.margin;
         y: root.content-y + i * (Theme.touch + root.gap);
-        width: root.side-width - root.lane;
+        width: root.side-width - root.lane + (root.side-long ? Theme.scroll-overlap : 0px);
         height: Theme.touch;
         if row.kind == 4: Text {
             x: Theme.pad;

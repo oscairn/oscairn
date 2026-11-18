@@ -278,3 +278,7 @@ progress lines, the scroll bar's track (a third of a lane wide: its half width, 
 own style), the piano's keys (`key-radius`, Panel.cpp's), and a table cell of the grid's views (half the radius).
 Test: `radii_are_one_family` (src/tests/theme_pictures.rs) reads the corner of the strip, the search box, the info button, a
 sidebar entry and a list item as drawn, in the default theme and the blue square one.
+
+## The scroll bar sits close to the list (2026-11-17)
+
+The lane stays a touch target wide (`scroll-lane`, 44) but the visible bar is drawn at the list side of it, not centered: the lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and the bar starts `Theme.scroll-gap` (a tight padding) past the row's edge (`Theme.scroll-lead` = overlap + gap, in the lane). The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the gap as drawn, in both themes.

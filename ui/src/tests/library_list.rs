@@ -5,90 +5,90 @@
 use super::library::*;
 use super::*;
 use crate::library::Outcome;
+use crate::LibraryState;
 
-// Search is the top bar's action: it asks for text on the keyboard, and what is typed narrows the list by the engine's
-// own match (name, description, tags); the Filters row says what is on.
+// Search is the box under the top bar: a tap or a press asks for text on the keyboard, and what is typed narrows the list
+// by the engine's own match (name, description, tags); the box shows the text and the line under the list counts the matches.
 #[test]
 fn search_narrows_by_what_is_typed() {
     let mut r = Rig::new(library());
-    assert_eq!(r.c.bar_tools()[0].label, "Search");
+    assert!(r.c.bar_tools().iter().all(|t| !t.label.starts_with("Search")), "the box searches, not a bar action");
     r.e.calls.clear();
-    assert_eq!(r.tool("Search"), Outcome::Prompt("Search the Performances".into(), String::new()));
+    assert_eq!(r.c.ask_search(), Outcome::Prompt("Search the Performances".into(), String::new()));
     r.c.entered("  warm ");
     r.settle();
     assert_eq!(r.e.called("library.query"), [json!({"kind": "performance", "limit": 1000, "text": "warm"})]);
-    assert_eq!(labels(r.ui()), ["Filters", "Brass Corner", "Evening Strings"]);
-    assert_eq!(value_of(r.ui(), "Filters"), "“warm” ›");
-    assert_eq!(r.c.bar_tools()[0].label, "Search: warm");
-    assert_eq!(r.tool("Search"), Outcome::Prompt("Search the Performances".into(), "warm".into()), "the text is there to change");
+    assert_eq!(labels(r.ui()), ["Brass Corner", "Evening Strings"]);
+    assert_eq!(r.ui().global::<LibraryState>().get_search(), "warm");
+    assert_eq!(footer(r.ui()).1, "Performances 1–2 of 2");
+    assert_eq!(r.c.ask_search(), Outcome::Prompt("Search the Performances".into(), "warm".into()), "the text is there to change");
     r.c.entered("");
     r.settle();
-    assert_eq!(labels(r.ui()).len(), 5);
+    assert_eq!(labels(r.ui()).len(), 4);
     // Canceled: nothing changes.
-    r.tool("Search");
+    r.c.ask_search();
     r.e.calls.clear();
     r.c.not_entered();
     r.settle();
     assert!(r.e.calls.is_empty());
+    // The cross takes the text away and asks again.
+    r.search("warm");
+    r.e.calls.clear();
+    r.c.clear_search();
+    r.settle();
+    assert_eq!(r.e.called("library.query"), [json!({"kind": "performance", "limit": 1000})]);
+    assert_eq!(r.ui().global::<LibraryState>().get_search(), "");
+    assert_eq!(labels(r.ui()).len(), 4);
 }
 
-// The filters are the sound chooser's: Favorites and Recent switches that ask again, the library everything, my own
-// or an installed one (with its count), the tags with their counts (the chosen first), all chosen must match, and a
-// library gone while chosen is let go.
+// The sidebar's choices make the query: Favorites and Recent switches that ask again, the library (All, my own or an
+// installed one, with its count), the tags with their counts (the chosen first), all chosen must match, and a library gone
+// while chosen is let go.
 #[test]
-fn the_filters_make_the_query() {
+fn the_sidebar_makes_the_query() {
     let mut r = Rig::new(library());
+    assert_eq!(r.side_labels(), ["Favorites", "Recent", "Libraries", "All", "My own", "A Friend's", "Tags", "warm", "brass", "strings", "choir", "pad"]);
+    assert_eq!(r.side().iter().filter(|x| x.on).map(|x| x.label.to_string()).collect::<Vec<_>>(), ["All"], "the library chosen is ticked");
     r.e.calls.clear();
-    r.press_row("Filters");
-    assert_eq!(labels(r.ui()), ["Favorites", "Recent", "Library", "Tags"]);
-    assert_eq!(r.c.path(), ["Library", "Performances", "Filters"]);
-    r.press_row("Favorites");
+    r.pick("Favorites");
     assert_eq!(r.e.called("library.query"), [json!({"kind": "performance", "limit": 1000, "favorites": true})]);
-    assert_eq!(value_of(r.ui(), "Favorites"), "On");
-    r.press_row("Favorites");
-    r.press_row("Recent");
+    assert!(r.side()[0].on);
+    r.pick("Favorites");
+    r.pick("Recent");
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000, "recent": true}));
-    r.press_row("Recent");
+    r.pick("Recent");
     // The library.
-    r.press_row("Library");
-    assert_eq!(labels(r.ui()), ["Everything", "My own", "A Friend's"]);
-    assert_eq!(rows(r.ui()).iter().map(|x| x.value.to_string()).collect::<Vec<_>>(), ["Chosen", "", "2"], "an installed library's items counted");
-    r.press_row("A Friend's");
+    assert_eq!(r.side().iter().map(|x| x.value.to_string()).collect::<Vec<_>>()[3..6], ["✓", "", "2"], "an installed library's items counted");
+    r.pick("A Friend's");
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000, "source": "friend"}));
-    assert_eq!(value_of(r.ui(), "Library"), "A Friend's ›");
+    assert!(r.e.methods().contains(&"library.libraries".to_string()), "which libraries are installed is asked again");
+    assert_eq!(r.side().iter().filter(|x| x.on).map(|x| x.label.to_string()).collect::<Vec<_>>(), ["A Friend's"]);
+    r.pick("All");
     // Tags: counted over the matches, the chosen first.
-    r.press_row("Library");
-    r.press_row("Everything");
-    r.press_row("Tags");
-    assert_eq!(labels(r.ui()), ["warm", "brass", "strings", "choir", "pad"]);
-    assert_eq!(value_of(r.ui(), "warm"), "2");
-    r.press_row("strings");
-    r.press_row("warm");
+    assert_eq!(r.side().iter().find(|x| x.label == "warm").unwrap().value, "2");
+    r.pick("strings");
+    r.pick("warm");
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000, "tags": ["strings", "warm"]}));
-    assert_eq!(labels(r.ui())[..2], ["strings", "warm"]);
-    assert_eq!(value_of(r.ui(), "warm"), "✓ 1");
-    r.c.back();
-    assert_eq!(value_of(r.ui(), "Tags"), "strings, warm ›");
-    r.c.back();
-    assert_eq!(labels(r.ui()), ["Filters", "Evening Strings"]);
-    assert_eq!(value_of(r.ui(), "Filters"), "strings, warm ›");
-    assert_eq!(r.c.path(), ["Library", "Performances"]);
+    assert_eq!(r.side_labels()[7..9], ["strings", "warm"]);
+    assert_eq!(r.side().iter().find(|x| x.label == "warm").unwrap().value, "✓ 1");
+    assert_eq!(labels(r.ui()), ["Evening Strings"]);
+    r.pick("warm");
+    assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000, "tags": ["strings"]}), "a tag let go");
 }
 
 // A library uninstalled while it was chosen: everything shows (LibraryPane.cpp timerCallback).
 #[test]
 fn a_library_gone_while_chosen_is_let_go() {
     let mut r = Rig::new(library());
-    r.press_row("Filters");
-    r.press_row("Library");
-    r.press_row("A Friend's");
-    assert_eq!(value_of(r.ui(), "Library"), "A Friend's ›");
+    r.pick("A Friend's");
+    assert!(r.side()[5].on);
     r.e.libraries.clear();
     r.e.calls.clear();
-    r.press_row("Library"); // asks which libraries are installed
-    assert_eq!(r.e.methods()[0], "library.libraries");
+    r.c.open(); // which libraries are installed, asked again
+    r.settle();
+    assert_eq!(r.e.methods()[1], "library.libraries");
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000}));
-    assert_eq!(labels(r.ui()), ["Everything", "My own"]);
+    assert_eq!(r.side_labels()[3..], ["All", "My own", "Tags", "warm", "brass", "strings", "choir", "pad"]);
 }
 
 // The star toggles from the item's menu, which Options on the top bar opens for the item under the cursor (the touch
@@ -97,9 +97,9 @@ fn a_library_gone_while_chosen_is_let_go() {
 fn a_favorite_is_toggled_from_the_menu() {
     let mut r = Rig::new(library());
     r.e.calls.clear();
-    r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on Filters
-    r.act(Action::Move { pane: None, by: 2 }); // Brass Corner
-    assert_eq!(rows(r.ui()).iter().position(|x| x.cursor), Some(2));
+    r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the first row
+    r.act(Action::Move { pane: None, by: 1 }); // Brass Corner
+    assert_eq!(rows(r.ui()).iter().position(|x| x.cursor), Some(1));
     r.tool("Options");
     let (title, items) = r.c.take_menu().expect("the item's menu");
     assert_eq!(title, "Brass Corner");
@@ -116,7 +116,7 @@ fn a_favorite_is_toggled_from_the_menu() {
 #[test]
 fn an_empty_library_says_what_is_installed() {
     let r = Rig::new(vec![]);
-    assert_eq!(labels(r.ui()), ["Filters", "Browse the Catalog"], "an empty list has a way to the Catalog");
+    assert_eq!(labels(r.ui()), ["Browse the Catalog"], "an empty list has a way to the Catalog");
     assert!(info(r.ui()).join(" ").contains("0 of 0 Performances No Performances yet."), "{:?}", info(r.ui()));
     let mut r = Rig::new(vec![]);
     r.e.plugin_packages = 5;
@@ -130,10 +130,8 @@ fn an_empty_library_says_what_is_installed() {
     r.settle();
     assert!(info(r.ui()).join(" ").contains("No setlists yet. The Setlist app makes them."));
     let mut r = Rig::new(library());
-    r.tool("Search");
-    r.c.entered("zzz");
-    r.settle();
-    assert_eq!(labels(r.ui()), ["Filters"]);
+    r.search("zzz");
+    assert!(labels(r.ui()).is_empty());
     assert!(info(r.ui()).contains(&"Nothing matches".to_string()));
 }
 
@@ -160,7 +158,6 @@ fn the_setup_of_the_release_is_said_while_it_runs() {
 #[test]
 fn the_panel_describes_the_item_under_the_cursor() {
     let mut r = Rig::new(library());
-    r.act(Action::Move { pane: None, by: 1 });
     r.act(Action::Move { pane: None, by: 1 }); // Untitled
     let lines = info(r.ui());
     assert_eq!(lines[..3], ["Performance", "Untitled", "Locked: A Friend's"]);

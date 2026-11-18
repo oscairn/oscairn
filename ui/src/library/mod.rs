@@ -4,12 +4,12 @@
 //! own or an installed library), by tags and by favorites, and what is done with them: a Performance is opened, a
 //! Sound made a new part, either tried in place, and each item edited, colored, duplicated or deleted.
 //!
-//! On the shared list screen (`browser.rs`, the Part screen's component): the kinds are the tabs above it (the
-//! shared tab family, `slint/library.slint`), the rows are a Filters row, which opens the sound chooser's Favorites,
-//! Recent, Library and Tags lists (`filters.rs`), then the items, and the panel beside them says what the item under
-//! the cursor is. Search, Audition and Options are the top bar's actions. Without touch: the dial and the left knob
-//! walk the tabs then the rows, a press on a Performance opens it, a press on anything else lists what can be done
-//! with it, the right knob scrolls the panel, Cancel goes back one level.
+//! On the shared list screen (`browser.rs`, the Part screen's component): under the top bar one row, the kinds as
+//! tabs (the shared tab family, `slint/library.slint`) and the search box; under it a sidebar (`side.rs`: Favorites,
+//! Recent, the libraries and the tags) and the items. Audition and Options are the top bar's actions. Without touch:
+//! the dial walks the row of tabs and the search box, then the list; left and right move between the sidebar and the
+//! list (the left knob is the sidebar's, the right knob the list's), a press on a Performance opens it, a press on
+//! anything else lists what can be done with it, Cancel goes back one level.
 //!
 //! Nothing here waits on the engine: a request goes out and its answer comes back as `reply`. A Performance takes
 //! seconds to open (`open.rs`), and the engine answers anything else as busy meanwhile, so each step of the
@@ -28,6 +28,7 @@ mod jobs;
 mod libraries;
 mod open;
 mod setlist;
+mod side;
 
 pub use filters::Installed;
 pub use install::fingerprint;
@@ -40,7 +41,7 @@ pub use open::Step;
 use crate::browser::{Browser, Nav};
 use crate::client::{Error, BUSY};
 use crate::menu;
-use crate::nav::Action;
+use crate::nav::{Action, Cursor};
 use crate::setlist::color;
 use crate::tabs;
 use crate::topbar::Tool;
@@ -48,6 +49,7 @@ use crate::{InfoLine, LibraryState, SettingData, Shell, TabLabel};
 use filters::Filters;
 use serde_json::{json, Value};
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::rc::Rc;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,19 +112,11 @@ pub enum Outcome {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Row {
-    Filters,
     Item(usize),
     /// The empty list's button to the Catalog.
     Browse,
     /// Row `n` of the page the mode shows (the file chooser, the install and export choices).
     Page(usize),
-    Favorites,
-    Recent,
-    Library,
-    Tags,
-    Source(usize),
-    Tag(usize),
-    Nothing,
     EditName,
     EditDescription,
     EditTags,
@@ -143,10 +137,6 @@ struct Draft {
 #[derive(Clone, Debug, PartialEq)]
 enum Mode {
     List,
-    /// Favorites, Recent, the library and the tags.
-    Filters,
-    Sources,
-    Tags,
     Edit(Draft),
     /// The file chooser (files.rs).
     Files(files::Files),
@@ -213,7 +203,6 @@ enum NoticeFor {
 /// What the top bar's actions are, in order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Act {
-    Search,
     Audition,
     Keep,
     Options,
@@ -249,8 +238,12 @@ pub struct Screen {
     plugins: usize,
     /// The packages that come with the release are installing: the line that says so, or its error.
     setup: String,
-    /// The tab the cursor is on, when it is on the tabs.
+    /// The stop of the row under the top bar the cursor is on (a tab, the search box, its cross), when it is on the row.
     tab_at: Option<usize>,
+    /// The sidebar's cursor and view, whether the cursor is on it, and the lines it shows.
+    side_cursor: Cursor,
+    side_focus: bool,
+    side_rows: Rc<VecModel<SettingData>>,
     /// The item last pressed or under the cursor: what Options is about.
     selected: Option<String>,
     auditioning: Auditioning,
@@ -267,8 +260,8 @@ pub struct Screen {
     notice_for: Option<NoticeFor>,
     /// Whether this screen is the one shown: the list and the tabs are written only then.
     active: bool,
-    /// The tabs as last written: whether shown, which, the cursor.
-    tabs_shown: Option<(u8, usize, Option<usize>)>,
+    /// The row under the top bar as last written: the tabs set, which, the cursor, the search text, whether the list is the kinds'.
+    tabs_shown: Option<(u8, usize, Option<usize>, String, bool)>,
     /// The Setlist app's state file, which says which setlist is open (setlist.rs).
     state_file: Option<std::path::PathBuf>,
     /// The modes this one was entered from (libraries.rs `enter`, `leave`).
@@ -313,6 +306,9 @@ impl Screen {
             plugins: 0,
             setup: String::new(),
             tab_at: None,
+            side_cursor: Cursor::new(0, 1),
+            side_focus: false,
+            side_rows: Rc::new(VecModel::default()),
             selected: None,
             auditioning: Auditioning::default(),
             part: 0,
@@ -363,6 +359,8 @@ impl Screen {
         self.mode = Mode::List;
         self.stack.clear();
         self.tab_at = None;
+        self.side_focus = false;
+        self.side_cursor = Cursor::new(0, 1);
         self.b.reset();
         self.query();
         self.push(Request::Libraries, "library.libraries", json!({}));
@@ -388,6 +386,7 @@ impl Screen {
             // The tags chosen for another kind are cleared (LibraryPane.cpp `showKind`).
             self.filters.chosen.clear();
             self.kind = kind;
+            self.side_cursor = Cursor::new(0, 1);
             self.b.reset_cursor();
             self.query();
         }
@@ -427,9 +426,6 @@ impl Screen {
         let mut path = vec!["Library".to_string()];
         match &self.mode {
             Mode::List => path.push(self.kind.plural().to_string()),
-            Mode::Filters => path.extend([self.kind.plural().to_string(), "Filters".into()]),
-            Mode::Sources => path.extend([self.kind.plural().to_string(), "Filters".into(), "Library".into()]),
-            Mode::Tags => path.extend([self.kind.plural().to_string(), "Filters".into(), "Tags".into()]),
             Mode::Edit(d) => path.extend([self.kind.plural().to_string(), format!("Edit {}", if d.name.is_empty() { "Untitled" } else { &d.name })]),
             Mode::Files(f) => path.extend([self.kind.plural().to_string(), f.title.clone()]),
             Mode::Install(i) => path.extend([self.kind.plural().to_string(), format!("Install {}", if i.name.is_empty() { "an archive" } else { &i.name })]),
@@ -446,6 +442,7 @@ impl Screen {
         self.active = false;
         self.b.hidden();
         self.tab_at = None;
+        self.side_focus = false;
         self.mode = Mode::List;
         self.menu = None;
         self.menu_for = None;
@@ -496,10 +493,9 @@ impl Screen {
 
     fn rows(&self) -> Vec<(Row, SettingData)> {
         let row = |label: String, value: String, kind: i32| SettingData { label: label.into(), value: value.into(), kind, ..Default::default() };
-        let toggle = |label: &str, on: bool| SettingData { label: label.into(), value: if on { "On" } else { "Off" }.into(), kind: 1, on, ..Default::default() };
         match &self.mode {
             Mode::List => {
-                let mut rows = vec![(Row::Filters, row("Filters".into(), format!("{} ›", self.filters.summary(&self.libraries)), 2))];
+                let mut rows: Vec<(Row, SettingData)> = Vec::new();
                 rows.extend(self.items.iter().enumerate().map(|(i, item)| {
                     let tint = color(&item.color);
                     (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), detail: item.description.as_str().into(), fluid: true, busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
@@ -509,37 +505,6 @@ impl Screen {
                     rows.push((Row::Browse, row("Browse the Catalog".into(), String::new(), 2)));
                 }
                 rows
-            }
-            Mode::Filters => vec![
-                (Row::Favorites, toggle("Favorites", self.filters.favorites)),
-                (Row::Recent, toggle("Recent", self.filters.recent)),
-                (Row::Library, row("Library".into(), format!("{} ›", self.filters.source_name(&self.filters.source, &self.libraries)), 2)),
-                (Row::Tags, row("Tags".into(), format!("{} ›", if self.filters.chosen.is_empty() { "none".to_string() } else { self.filters.chosen.join(", ") }), 2)),
-            ],
-            Mode::Sources => self
-                .filters
-                .sources(&self.libraries)
-                .into_iter()
-                .enumerate()
-                .map(|(i, (id, name, items))| {
-                    let on = id == self.filters.source;
-                    let count = items.map(|n| n.to_string()).unwrap_or_default();
-                    (Row::Source(i), SettingData { value: if on { "Chosen".into() } else { count.into() }, on, ..toggle(&name, on) })
-                })
-                .collect(),
-            Mode::Tags => {
-                let tags = self.filters.tag_list(&self.tags);
-                if tags.is_empty() {
-                    return vec![(Row::Nothing, row("No tags".into(), String::new(), 4))];
-                }
-                tags.into_iter()
-                    .enumerate()
-                    .map(|(i, (tag, count))| {
-                        let on = self.filters.chosen.contains(&tag);
-                        let tint = self.tag_color(&tag);
-                        (Row::Tag(i), SettingData { value: if on { format!("✓ {count}") } else { count.to_string() }.into(), on, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..toggle(&tag, on) })
-                    })
-                    .collect()
             }
             Mode::Import(i) => i.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
             Mode::Catalog(c) => c.rows().into_iter().enumerate().map(|(i, r)| (Row::Page(i), r)).collect(),
@@ -625,13 +590,25 @@ impl Screen {
                     lines.push(line("Nothing matches".into()));
                 }
             }
-            Mode::Tags => lines.push(line(format!("{} tags", self.filters.tag_list(&self.tags).len()))),
             _ => lines.push(line(self.kind.plural().into())),
         }
         if !self.setup.is_empty() && self.total != 0 {
             lines.extend(wrap(&self.setup, INFO_WIDTH).into_iter().map(line));
         }
         lines
+    }
+
+    /// The text in the search box: the list's, or the Catalog's.
+    fn search_text(&self) -> &str {
+        match &self.mode {
+            Mode::Catalog(c) => &c.search,
+            _ => &self.filters.search,
+        }
+    }
+
+    /// How many stops the row under the top bar has for the cursor: each tab, the search box, and its cross when it has text.
+    fn head_stops(&self) -> usize {
+        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty())
     }
 
     fn show_tabs(&mut self) {
@@ -641,11 +618,13 @@ impl Screen {
             Mode::Catalog(_) => 2,
             _ => 0,
         };
-        let state = (set, self.tab_current(), self.tab_at.filter(|_| self.tabs_visible()));
-        if self.tabs_shown == Some(state) {
+        let n = self.tab_names().len();
+        let stop = self.tab_at.filter(|_| self.tabs_visible());
+        let state = (set, self.tab_current(), stop, self.search_text().to_string(), self.mode == Mode::List);
+        if self.tabs_shown.as_ref() == Some(&state) {
             return;
         }
-        let was = self.tabs_shown.replace(state);
+        let was = self.tabs_shown.replace(state.clone());
         let lib = ui.global::<LibraryState>();
         if was.map(|w| w.0) != Some(state.0) {
             let names: Vec<String> = self.tab_names();
@@ -662,7 +641,12 @@ impl Screen {
             lib.set_page_heading(heading.into());
         }
         lib.set_page(state.1 as i32);
-        lib.set_page_cursor(state.2.map_or(-1, |c| c as i32));
+        lib.set_page_cursor(stop.filter(|s| *s < n).map_or(-1, |c| c as i32));
+        lib.set_header(self.tabs_visible());
+        lib.set_list_only(state.4);
+        lib.set_search(state.3.as_str().into());
+        lib.set_search_cursor(stop == Some(n));
+        lib.set_clear_cursor(stop == Some(n + 1));
     }
 
     /// The list, the tabs and the panel, each row set only when it changed.
@@ -671,15 +655,19 @@ impl Screen {
         if !self.active {
             return;
         }
-        if self.tab_at.is_some() {
+        if !self.side_visible() {
+            self.side_focus = false;
+        }
+        if self.tab_at.is_some() || self.side_focus {
             self.b.cursor = self.b.cursor.clear();
         }
+        if self.tab_at.is_some() {
+            self.side_focus = false;
+        }
+        self.show_side();
         let rows: Vec<SettingData> = self.rows().into_iter().map(|r| r.1).collect();
         let noun = match self.mode {
             Mode::List => self.kind.plural(),
-            Mode::Filters => "Filters",
-            Mode::Sources => "Libraries",
-            Mode::Tags => "Tags",
             Mode::Edit(_) => "Fields",
             Mode::Files(_) => "Files",
             Mode::Import(_) => "Choices",
@@ -687,17 +675,15 @@ impl Screen {
             Mode::Package(_) => "Details",
             Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) => "Choices",
         };
-        let n = rows.len();
         let info = self.info();
         let title = self.path().last().cloned().unwrap_or_default();
         let items_view = self.mode == Mode::List;
         self.b.show("", &title, noun, rows, info);
-        // The footer counts the items, not the Filters row (LibraryPane.cpp: "N Performances").
+        // The footer counts the items (LibraryPane.cpp: "N Performances"): row k is item k.
         if items_view {
             if let Some(ui) = self.ui.upgrade() {
                 let per = ui.global::<crate::PartState>().get_rows_per_view().max(1) as usize;
-                // Row k is item k: the Filters row is row 0.
-                let (from, to) = (self.b.cursor.first.max(1), n.min(self.b.cursor.first + per).saturating_sub(1));
+                let (from, to) = (self.b.cursor.first + 1, self.items.len().min(self.b.cursor.first + per));
                 let text = if to >= from { format!("{} {from}–{to} of {}", self.kind.plural(), self.items.len()) } else { String::new() };
                 let text = if self.total > self.items.len() as u64 { format!("{text}, {} in all", self.total) } else { text };
                 ui.global::<crate::PartState>().set_view(text.into());
@@ -710,7 +696,7 @@ impl Screen {
     // ---- the top bar ----
 
     fn acts(&self) -> Vec<Act> {
-        let mut acts = vec![Act::Search, Act::Audition];
+        let mut acts = vec![Act::Audition];
         if !self.auditioning.id.is_empty() {
             acts.push(Act::Keep);
         }
@@ -720,17 +706,13 @@ impl Screen {
 
     /// The screen's actions on the top bar.
     pub fn bar_tools(&self) -> Vec<Tool> {
-        if let Mode::Catalog(c) = &self.mode {
-            return vec![Tool::new(if c.search.is_empty() { "Search".to_string() } else { format!("Search: {}", c.search) })];
-        }
         if self.mode != Mode::List {
-            return if self.mode == Mode::Tags { vec![Tool { label: "Options".into(), enabled: self.tag_under_cursor().is_some(), on: false }] } else { vec![] };
+            return vec![];
         }
-        let target = self.target().is_some();
+        let target = self.target().is_some() || self.tag_under_cursor().is_some();
         self.acts()
             .into_iter()
             .map(|a| match a {
-                Act::Search => Tool::new(if self.filters.search.is_empty() { "Search".to_string() } else { format!("Search: {}", self.filters.search) }),
                 Act::Audition => Tool { label: if self.auditioning.id.is_empty() { "Audition" } else { "Stop" }.into(), enabled: !self.auditioning.id.is_empty() || self.can_audition(), on: !self.auditioning.id.is_empty() },
                 Act::Keep => Tool::new("Keep"),
                 Act::Options => Tool { label: "Options".into(), enabled: target, on: false },
@@ -742,26 +724,14 @@ impl Screen {
 
     /// Does bar action `i`.
     pub fn tool(&mut self, i: usize) -> Outcome {
-        if let Mode::Catalog(c) = &self.mode {
-            self.asking = Some(Asking::CatalogSearch);
-            return Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), c.search.clone());
-        }
-        if self.mode == Mode::Tags {
-            if let Some(tag) = self.tag_under_cursor() {
-                self.tag_menu(&tag);
-            }
-            return Outcome::Stay;
-        }
         let Some(act) = self.acts().get(i).copied() else { return Outcome::Stay };
         match act {
-            Act::Search => {
-                self.asking = Some(Asking::Search);
-                return Outcome::Prompt(format!("Search the {}", self.kind.plural()), self.filters.search.clone());
-            }
             Act::Audition => self.audition_toggle(),
             Act::Keep => self.stop_audition(true),
             Act::Options => {
-                if let Some(id) = self.target() {
+                if let Some(tag) = self.tag_under_cursor() {
+                    self.tag_menu(&tag);
+                } else if let Some(id) = self.target() {
                     self.item_menu(&id);
                 }
             }
@@ -774,21 +744,10 @@ impl Screen {
 
     /// The item Options is about: the one under the cursor, else the one last pressed (a tap leaves no cursor).
     fn target(&self) -> Option<String> {
-        if self.mode != Mode::List {
+        if self.mode != Mode::List || self.side_focus {
             return None;
         }
         self.cursor_item().and_then(|i| self.items.get(i)).map(|i| i.id.clone()).or_else(|| self.selected.clone().filter(|s| self.items.iter().any(|i| i.id == *s)))
-    }
-
-    fn tag_under_cursor(&self) -> Option<String> {
-        if self.mode != Mode::Tags {
-            return None;
-        }
-        let at = self.b.cursor.at?;
-        match self.rows().get(at)?.0 {
-            Row::Tag(i) => self.filters.tag_list(&self.tags).get(i).map(|t| t.0.clone()),
-            _ => None,
-        }
     }
 
     // ---- what the engine answers ----
@@ -858,7 +817,7 @@ impl Screen {
         self.hidden = r["hiddenTags"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
         if let (Some(id), Mode::List) = (on, &self.mode) {
             if let Some(at) = self.items.iter().position(|i| i.id == id) {
-                self.b.cursor.at = Some(at + 1); // the Filters row is the first
+                self.b.cursor.at = Some(at);
             }
         }
         // The row last pressed stays what Options is about while it is listed.
@@ -897,41 +856,6 @@ impl Screen {
     fn press(&mut self, at: usize) -> Outcome {
         let Some((row, _)) = self.rows().into_iter().nth(at) else { return Outcome::Stay };
         match row {
-            Row::Filters => {
-                self.mode = Mode::Filters;
-                self.b.reset_cursor();
-            }
-            Row::Favorites => {
-                self.filters.favorites = !self.filters.favorites;
-                self.query();
-            }
-            Row::Recent => {
-                self.filters.recent = !self.filters.recent;
-                self.query();
-            }
-            Row::Library => {
-                self.mode = Mode::Sources;
-                self.b.reset_cursor();
-                self.push(Request::Libraries, "library.libraries", json!({}));
-            }
-            Row::Tags => {
-                self.mode = Mode::Tags;
-                self.b.reset_cursor();
-            }
-            Row::Source(i) => {
-                if let Some((id, _, _)) = self.filters.sources(&self.libraries).get(i) {
-                    self.filters.source = id.clone();
-                    self.mode = Mode::Filters;
-                    self.b.reset_cursor();
-                    self.query();
-                }
-            }
-            Row::Tag(i) => {
-                if let Some((tag, _)) = self.filters.tag_list(&self.tags).get(i).cloned() {
-                    self.filters.toggle_tag(&tag);
-                    self.query();
-                }
-            }
             Row::Item(i) => return self.item_pressed(i),
             Row::Browse => self.catalog_for_kind(),
             Row::Page(i) => return self.page_press(i),
@@ -943,7 +867,6 @@ impl Screen {
                 self.mode = Mode::List;
                 self.b.reset_cursor();
             }
-            Row::Nothing => {}
         }
         Outcome::Stay
     }
@@ -988,12 +911,7 @@ impl Screen {
         self.tab_at = None;
         match self.mode {
             Mode::List => Outcome::Back,
-            Mode::Sources | Mode::Tags => {
-                self.mode = Mode::Filters;
-                self.b.reset_cursor();
-                Outcome::Stay
-            }
-            Mode::Filters | Mode::Edit(_) => {
+            Mode::Edit(_) => {
                 self.mode = Mode::List;
                 self.b.reset_cursor();
                 Outcome::Stay
@@ -1005,45 +923,99 @@ impl Screen {
         }
     }
 
-    /// The tabs have the cursor: the dial walks them and leaves for the list past the last; left and right along them.
-    fn act_tabs(&mut self, action: Action, at: usize) -> Outcome {
-        let last = self.tab_names().len().saturating_sub(1);
+    /// The cursor goes down from the row under the top bar to the list.
+    fn leave_head(&mut self) {
+        self.tab_at = None;
+        self.b.cursor = self.b.cursor.moved(0);
+    }
+
+    /// The row under the top bar has the cursor: the dial walks its stops (the tabs, the search box, its cross) and leaves
+    /// for the list past the last, left and right walk them, down leaves for the list.
+    fn act_head(&mut self, action: Action, at: usize) -> Outcome {
+        let last = self.head_stops().saturating_sub(1);
         match action {
             Action::Move { pane: None | Some(0), by } => {
                 let to = at as i64 + i64::from(by);
                 if to > last as i64 {
-                    self.tab_at = None;
-                    self.b.cursor = self.b.cursor.moved(0);
+                    self.leave_head();
                 } else {
                     self.tab_at = Some(to.max(0) as usize);
                 }
             }
             Action::Arrow { dx, dy } => {
-                let by = if dx != 0 { dx } else { dy };
-                let to = at as i64 + i64::from(by);
-                if to > last as i64 && dy > 0 {
-                    self.tab_at = None;
-                    self.b.cursor = self.b.cursor.moved(0);
-                } else {
-                    self.tab_at = Some(to.clamp(0, last as i64) as usize);
+                if dy > 0 {
+                    self.leave_head();
+                } else if dx != 0 {
+                    self.tab_at = Some((at as i64 + i64::from(dx)).clamp(0, last as i64) as usize);
                 }
             }
             Action::End(by) => self.tab_at = Some(if by < 0 { 0 } else { last }),
-            Action::Confirm(_) => {
-                self.show_page(at);
-                self.tab_at = Some(at);
-            }
+            Action::Confirm(_) => return self.head_press(at),
             _ => {}
         }
         self.show();
         Outcome::Stay
     }
 
+    /// A press on stop `at` of the row under the top bar.
+    fn head_press(&mut self, at: usize) -> Outcome {
+        let n = self.tab_names().len();
+        if at < n {
+            self.show_page(at);
+            self.tab_at = Some(at);
+        } else if at == n {
+            return self.ask_search();
+        } else {
+            self.clear_search();
+            self.tab_at = Some(n);
+        }
+        self.show();
+        Outcome::Stay
+    }
+
+    /// The search box tapped or pressed: the text is asked for on the keyboard.
+    pub fn ask_search(&mut self) -> Outcome {
+        if let Mode::Catalog(c) = &self.mode {
+            self.asking = Some(Asking::CatalogSearch);
+            return Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), c.search.clone());
+        }
+        if self.mode != Mode::List {
+            return Outcome::Stay;
+        }
+        self.asking = Some(Asking::Search);
+        Outcome::Prompt(format!("Search the {}", self.kind.plural()), self.filters.search.clone())
+    }
+
+    /// The cross in the search box: the text goes and the list is whole again.
+    pub fn clear_search(&mut self) {
+        if let Mode::Catalog(c) = &mut self.mode {
+            c.search.clear();
+        } else if !self.filters.search.is_empty() {
+            self.filters.search.clear();
+            self.query();
+        }
+        self.b.reset_cursor();
+        self.show();
+    }
+
     pub fn act(&mut self, action: Action) -> Outcome {
         if let (Some(at), true) = (self.tab_at, self.tabs_visible()) {
-            return self.act_tabs(action, at);
+            return self.act_head(action, at);
         }
-        // Moving up out of the first row reaches the tabs.
+        if self.side_focus && self.side_visible() {
+            return self.act_side(action);
+        }
+        // Left (and the left knob) is the sidebar's.
+        let left = matches!(action, Action::Arrow { dx, .. } if dx < 0) || matches!(action, Action::Move { pane: Some(0), .. });
+        if left && self.side_visible() {
+            self.enter_side();
+            if let Action::Move { by, .. } = action {
+                return self.act_side(Action::Move { pane: None, by });
+            }
+            self.show();
+            return Outcome::Stay;
+        }
+        // Moving up out of the first row reaches the row under the top bar.
         let up = matches!(action, Action::Move { pane: None | Some(0), by } if by < 0) || matches!(action, Action::Arrow { dy, .. } if dy < 0);
         if up && self.tabs_visible() && matches!(self.b.cursor.at, Some(0)) {
             self.b.cursor = self.b.cursor.clear();
@@ -1057,6 +1029,7 @@ impl Screen {
 
     pub fn tap(&mut self, row: i32) -> Outcome {
         self.tab_at = None;
+        self.side_focus = false;
         let nav = self.b.tap(row);
         self.handle(nav)
     }

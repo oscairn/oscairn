@@ -141,6 +141,30 @@ impl Rig {
         self.act(Action::Confirm(None))
     }
 
+    /// The sidebar's lines as the window has them.
+    pub fn side(&self) -> Vec<SettingData> {
+        self.ui().global::<LibraryState>().get_side_rows().iter().collect()
+    }
+
+    pub fn side_labels(&self) -> Vec<String> {
+        self.side().into_iter().map(|r| r.label.to_string()).collect()
+    }
+
+    /// A touch on the sidebar's line `label`.
+    pub fn pick(&mut self, label: &str) {
+        let at = self.side_labels().iter().position(|l| l == label).unwrap_or_else(|| panic!("{label} in {:?}", self.side_labels()));
+        self.c.side_tap(at as i32);
+        self.settle();
+    }
+
+    /// The search box asked and answered: the keyboard's title and what it started with.
+    pub fn search(&mut self, text: &str) -> Outcome {
+        let o = self.c.ask_search();
+        self.c.entered(text);
+        self.settle();
+        o
+    }
+
     pub fn tool(&mut self, label: &str) -> Outcome {
         let at = self.c.bar_tools().iter().position(|t| t.label.starts_with(label)).unwrap_or_else(|| panic!("{label} in {:?}", self.c.bar_tools()));
         let o = self.c.tool(at);
@@ -168,13 +192,13 @@ fn opening_asks_for_what_it_shows() {
 fn a_row_is_the_library_panes() {
     let r = Rig::new(library());
     let ui = r.ui();
-    assert_eq!(labels(ui), ["Filters", "Untitled", "Brass Corner", "Evening Strings", "Glass Choir"]);
+    assert_eq!(labels(ui), ["Untitled", "Brass Corner", "Evening Strings", "Glass Choir"]);
     assert_eq!(value_of(ui, "Evening Strings"), "strings  ·  warm  ★");
     assert_eq!(rows(ui).iter().find(|r| r.label == "Evening Strings").map(|r| (r.detail.to_string(), r.fluid)), Some(("Slow and wide".to_string(), true)), "the description is the row's detail, apart from its tags");
     assert_eq!(value_of(ui, "Untitled"), "Locked");
     assert_eq!(value_of(ui, "Glass Choir"), "Does not fit this device  ·  choir  ·  pad");
     assert_eq!(value_of(ui, "Brass Corner"), "brass  ·  warm");
-    assert_eq!(rows(ui).iter().map(|r| r.tinted).collect::<Vec<_>>(), [false, false, false, false, true], "only the one with a color is tinted");
+    assert_eq!(rows(ui).iter().map(|r| r.tinted).collect::<Vec<_>>(), [false, false, false, true], "only the one with a color is tinted");
     assert_eq!(footer(ui).1, "Performances 1–4 of 4");
 }
 
@@ -184,22 +208,18 @@ fn a_row_is_the_library_panes() {
 fn the_kinds_are_tabs_and_clear_the_tags() {
     let mut r = Rig::new(library());
     r.e.calls.clear();
-    r.press_row("Filters");
-    r.press_row("Tags");
-    r.press_row("warm");
+    r.pick("warm");
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000, "tags": ["warm"]}));
-    r.c.back();
-    r.c.back();
     r.e.calls.clear();
     r.c.show_page(1);
     r.settle();
     assert_eq!(r.e.called("library.query"), [json!({"kind": "sound", "limit": 1000})], "the tags went with the kind");
-    assert_eq!(labels(r.ui()), ["Filters", "Hollow Reed", "Soft Felt"]);
+    assert_eq!(labels(r.ui()), ["Hollow Reed", "Soft Felt"]);
     assert_eq!(r.ui().global::<LibraryState>().get_page(), 1);
     assert_eq!(footer(r.ui()).1, "Sounds 1–2 of 2");
     r.c.show_page(2);
     r.settle();
-    assert_eq!(labels(r.ui()), ["Filters", "Friday Set"]);
+    assert_eq!(labels(r.ui()), ["Friday Set"]);
 }
 
 /// Every name the Library's fixtures use for an item, a library, a package, a publisher or a signer: invented, none a person's

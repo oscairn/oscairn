@@ -75,18 +75,20 @@ fn more_is_an_icon_left_of_the_meters() {
 
 /// The same scene with the last character of the long name changed: whether the row is drawn differently, that is,
 /// whether that character is drawn at all (when it is cut off, the two pictures are alike).
-fn last_character_shows(name: &str) -> bool {
+pub(super) fn last_character_shows_for(name: &str, full: &str) -> bool {
     let draw = |last: char| {
         let mut s = scene(name, 10);
-        s.e.items[0].name = format!("{}{last}", &LONG[..LONG.len() - 1]);
+        s.e.items[0].name = format!("{}{last}", &full[..full.len() - 1]);
         shell::goto(shell::Screen::Home);
         shell::goto(shell::Screen::Library);
         s.serve();
         s.f.screen.frame();
         s.f.screen.frame();
-        let w = s.f.screen.w;
-        // The second row of the list (the first is Filters): 1280x720 at 1.55, left of the panel.
-        let band: Vec<(u8, u8, u8)> = (160..226).flat_map(|y| (120..640).map(move |x| (x, y))).map(|(x, y)| s.f.screen.pixels[y * w + x]).map(|p| (p.r, p.g, p.b)).collect();
+        let (w, ui) = (s.f.screen.w, s.ui());
+        // The first row of the list, 1280x720 at 1.55, as wide as the name may be.
+        let t = ui.global::<crate::Theme>();
+        let (x0, y0) = (((ui.get_list_x() + t.get_margin()) * 1.55) as usize, ((ui.get_list_y() + t.get_margin()) * 1.55) as usize);
+        let band: Vec<(u8, u8, u8)> = (y0..y0 + 66).flat_map(|y| (x0..x0 + 800).map(move |x| (x, y))).map(|(x, y)| s.f.screen.pixels[y * w + x]).map(|p| (p.r, p.g, p.b)).collect();
         (band, s)
     };
     let (a, s) = draw('1');
@@ -99,25 +101,7 @@ fn last_character_shows(name: &str) -> bool {
 // at 1280x720; tags give way to the name, and the description to the tags.
 #[test]
 fn a_row_s_name_is_drawn_whole_when_the_row_has_the_room() {
-    assert!(last_character_shows("owner-row"), "the name's last character is cut off the row");
-}
-
-// The rail is wide enough for its longest label on one line: "Performances" whole, at the default spacing and at 0.7.
-#[test]
-fn the_rail_holds_its_longest_label_on_one_line() {
-    for spacing in [1.0f32, 0.7] {
-        let mut s = scene("owner-rail", 10);
-        let ui = s.ui();
-        ui.global::<crate::Theme>().set_spacing(spacing);
-        s.f.screen.frame();
-        s.f.screen.frame();
-        owner_png(&s, &format!("owner-3-{spacing}"));
-        let (rail, need, fit) = (ui.get_library_rail(), ui.get_library_rail_need(), ui.get_library_rail_fit());
-        let across = 2. * (ui.global::<crate::Theme>().get_tab_pad() + ui.global::<crate::Theme>().get_pad_tight());
-        eprintln!("OWNER3 spacing {spacing}: rail {rail:.1}, need {need:.1} + {across:.1}, fit {fit}");
-        assert!(need > 0. && rail + 0.01 >= need + across, "the rail {rail} holds the label {need} and the padding {across}");
-        assert_eq!(fit, 1.0, "the label at the full small type");
-    }
+    assert!(last_character_shows_for("owner-row", LONG), "the name's last character is cut off the row");
 }
 
 // A long list drawn scrolled to the middle (the picture alone).
@@ -138,8 +122,8 @@ fn drag_bar(s: &mut Shelf, from: f32, to: f32, steps: usize) {
     let ui = s.ui();
     let t = ui.global::<crate::Theme>();
     // The list sits at the rail's right edge (the content's x less a margin), just under the bar.
-    let x = ui.get_library_rail() + ui.get_lane_x() + t.get_scroll_lane() / 2.;
-    let (top, track) = (t.get_bar_height() + t.get_margin(), ui.get_track_h());
+    let x = ui.get_list_x() + ui.get_lane_x() + t.get_scroll_lane() / 2.;
+    let (top, track) = (ui.get_list_y() + t.get_margin(), ui.get_track_h());
     let at = |f: f32| slint::LogicalPosition::new(x, top + f * track);
     ui.window().dispatch_event(WindowEvent::PointerPressed { position: at(from), button: PointerEventButton::Left });
     for i in 1..=steps {
@@ -150,8 +134,8 @@ fn drag_bar(s: &mut Shelf, from: f32, to: f32, steps: usize) {
     s.f.screen.frame();
 }
 
-// The bar's thumb shows the view's place and share of the list: a view of 6 in 11 rows (the Filters row and ten Performances)
-// is more than half of the track; in 301 rows it is the least length, a touch target, and it moves down the track with the
+// The bar's thumb shows the view's place and share of the list: a view of 6 in 10 rows
+// is more than half of the track; in 300 rows it is the least length, a touch target, and it moves down the track with the
 // view. The rows keep clear of the bar's lane.
 #[test]
 fn the_scroll_bar_shows_where_the_view_is_in_the_list() {
@@ -162,7 +146,7 @@ fn the_scroll_bar_shows_where_the_view_is_in_the_list() {
         let (y, h) = (ui.get_thumb_y(), ui.get_thumb_h());
         let per = ui.global::<crate::PartState>().get_rows_per_view() as f32;
         assert!(long && h >= touch - 0.01 && y.abs() < 0.01, "{n}: thumb {y} {h}");
-        let want = (track * per / (n as f32 + 1.)).max(touch).min(track);
+        let want = (track * per / n as f32).max(touch).min(track);
         assert!((h - want).abs() < 0.01, "{n}: the thumb is {h}, the view's share {want} of {track}");
         if n == 10 {
             assert!(h > track / 2., "6 of 11 is over half");
@@ -225,6 +209,35 @@ fn the_scroll_bar_is_wide_enough_to_tap() {
         if n == 2 {
             assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "the lane is a touch target: {} of {}", t.get_scroll_lane(), t.get_touch());
             assert!(t.get_scroll_bar() >= t.get_scroll_lane() / 3. - 0.01, "the bar is a third of the lane: {}", t.get_scroll_bar());
+        }
+    }
+}
+
+// The Settings app's rail (a lone rail, as the Library's was) is wide enough for its longest label on one line, as far as 16%
+// of the width allows, and shows its labels at the full small type where that is enough.
+#[test]
+fn the_settings_rail_holds_its_longest_label_on_one_line() {
+    fit_to_window();
+    for spacing in [1.0f32, 0.7] {
+        let mut s = super::settings_shell::Shelf::new("owner-settings-rail");
+        let ui = s.f.screen.ui.clone_strong();
+        s.f.screen.resize(1280, 720);
+        s.f.screen.set_scale(1.55);
+        theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
+        ui.global::<crate::Theme>().set_spacing(spacing);
+        shell::goto(shell::Screen::Settings);
+        s.serve();
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let t = ui.global::<crate::Theme>();
+        let (rail, need, fit) = (ui.get_settings_rail(), ui.get_settings_rail_need(), ui.get_settings_rail_fit());
+        let across = 2. * (t.get_tab_pad() + t.get_pad_tight());
+        let cap = 1280. / 1.55 * t.get_rail_label_share();
+        eprintln!("OWNER3 settings spacing {spacing}: rail {rail:.1}, need {need:.1} + {across:.1}, fit {fit}");
+        assert!(need > 0., "the labels were measured");
+        assert!(rail + 0.01 >= (need + across).min(cap), "the rail {rail} holds the label {need} and the padding {across} (cap {cap})");
+        if need + across <= cap {
+            assert_eq!(fit, 1.0, "the labels at the full small type");
         }
     }
 }

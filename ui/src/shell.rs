@@ -428,6 +428,11 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     menu.on_turn(|by| with_app(|a| a.menu_turn(by)));
     menu.on_resized(|| with_app(|a| a.menu_shown()));
     ui.global::<crate::LibraryState>().on_show_page(|i| with_app(|a| a.on_library(|l| l.tap_page(i.max(0) as usize))));
+    ui.global::<crate::LibraryState>().on_search_tapped(|| with_app(|a| a.library_act(|l| l.ask_search())));
+    ui.global::<crate::LibraryState>().on_search_cleared(|| with_app(|a| a.on_library(|l| l.clear_search())));
+    ui.global::<crate::LibraryState>().on_side_tapped(|i| with_app(|a| a.on_library(|l| l.side_tap(i))));
+    ui.global::<crate::LibraryState>().on_side_scrolled(|first| with_app(|a| a.on_library(|l| l.side_scroll_to(first))));
+    ui.global::<crate::LibraryState>().on_side_resized(|| with_app(|a| a.on_library(|l| l.show())));
     ui.global::<crate::SettingsState>().on_show_page(|i| with_app(|a| a.on_settings(|s| s.tap_page(i.max(0) as usize))));
     let notice = ui.global::<crate::NoticeState>();
     notice.on_tapped(|i| with_app(|a| a.notice_tap(i.max(0) as usize)));

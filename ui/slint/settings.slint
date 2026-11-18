@@ -21,6 +21,9 @@ export component Settings inherits Rectangle {
     out property <length> content-y: tabs.content-y;
     out property <length> content-width: tabs.content-width;
     out property <length> content-height: tabs.content-height;
+    out property <length> rail: tabs.rail;
+    out property <length> rail-need: tabs.rail-need;
+    out property <float> rail-fit: tabs.pages-fit;
     tabs := TabPages {
         x: 0px;
         y: 0px;

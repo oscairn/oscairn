@@ -94,23 +94,19 @@ fn pictures_of_the_library() {
             assert!(rows(&ui).iter().any(|r| r.cursor), "the cursor stays in view");
             let held = rows(&ui).len();
             assert!((4..=40).contains(&held), "{held} rows in a {w}x{h} window at {scale}");
-            bar_do(&mut s, "Search");
+            ui.global::<crate::LibraryState>().invoke_search_tapped();
             for ch in "Velvet".chars() {
                 shell::key(&ch.to_string());
             }
             shell::key(&slint::SharedString::from(slint::platform::Key::Return));
             shoot(&mut s, "500-search");
-            // The filters, the tags.
-            shell::act(Action::Move { pane: None, by: -1000 });
-            assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the Filters row");
+            // The sidebar and a tag chosen.
+            shell::act(Action::Arrow { dx: -1, dy: 0 });
+            shoot(&mut s, "sidebar");
+            shell::act(Action::Move { pane: None, by: 6 });
             shell::act(Action::Confirm(None));
-            shoot(&mut s, "filters");
-            shell::act(Action::Move { pane: None, by: 1 });
-            shell::act(Action::Move { pane: None, by: 3 });
-            shell::act(Action::Confirm(None));
-            shoot(&mut s, "tags");
-            shell::act(Action::Cancel(None));
-            shell::act(Action::Cancel(None));
+            shoot(&mut s, "tag-chosen");
+            shell::act(Action::Arrow { dx: 1, dy: 0 });
             // Sounds, then the Setlists tab, then an empty library.
             sounds(&mut s);
             ui.global::<crate::LibraryState>().invoke_show_page(1);
@@ -290,40 +286,4 @@ fn pictures_of_the_second_cut() {
             shell::goto(shell::Screen::Home);
         }
     }
-}
-
-// A rail label too wide for the rail even at 70% of the type is cut with an ellipsis on one line, never broken
-// mid-word: the Library's selected tab reads "Performances" on one line (the pixels of its fill read for lines of
-// ink), and a short name stays in one.
-#[test]
-fn a_rail_label_that_does_not_fit_at_seventy_percent_is_cut_on_one_line() {
-    fit_to_window();
-    let mut s = Shelf::new("rail-wrap");
-    let ui = s.ui();
-    shell::library_in_rust(true);
-    s.f.screen.resize(1280, 720);
-    s.f.screen.set_scale(1.55);
-    theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
-    s.e.items = big(10);
-    shell::goto(shell::Screen::Home);
-    shell::goto(shell::Screen::Library);
-    serve_and_draw(&mut s, "library-rail-wrap");
-    let screen = &s.f.screen;
-    let theme = ui.global::<crate::Theme>();
-    let (on, ink) = (theme.get_tab_on(), theme.get_tab_on_ink());
-    let same = |p: slint::Rgb8Pixel, c: slint::Color| (p.r, p.g, p.b) == (c.red(), c.green(), c.blue());
-    let rail = (theme.get_rail_width() * 1.55) as usize;
-    // The selected tab's rows: where the fill is at the rail's left edge.
-    let rows: Vec<usize> = (0..screen.h).filter(|&y| same(screen.pixels[y * screen.w + 6], on)).collect();
-    assert!(rows.len() > 40, "the selected tab is in the rail: {} rows", rows.len());
-    let mut bands = 0;
-    let mut in_band = false;
-    for &y in &rows {
-        let has_ink = (0..rail).any(|x| same(screen.pixels[y * screen.w + x], ink));
-        if has_ink && !in_band {
-            bands += 1;
-        }
-        in_band = has_ink;
-    }
-    assert_eq!(bands, 1, "the selected tab's label is on one line, cut, not broken mid-word");
 }

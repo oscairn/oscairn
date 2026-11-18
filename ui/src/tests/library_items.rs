@@ -82,7 +82,7 @@ fn an_item_is_edited_in_three_fields() {
     r.settle();
     assert_eq!(r.e.called("library.edit"), [json!({"id": "p4", "name": "Brass Hall", "description": "Big and bright", "tags": ["brass", "hall"], "color": ""})]);
     assert_eq!(footer(r.ui()).0, "Brass Hall saved.");
-    assert_eq!(labels(r.ui())[0], "Filters", "back on the list");
+    assert_eq!(labels(r.ui())[0], "Untitled", "back on the list");
     assert!(labels(r.ui()).contains(&"Brass Hall".to_string()));
     // Cancel: nothing is sent.
     options_for(&mut r, "Brass Hall");
@@ -91,7 +91,7 @@ fn an_item_is_edited_in_three_fields() {
     r.press_row("Cancel");
     r.settle();
     assert!(r.e.called("library.edit").is_empty());
-    assert_eq!(labels(r.ui())[0], "Filters");
+    assert_eq!(labels(r.ui())[0], "Untitled");
 }
 
 // A color from the nine, or none: `library.edit` with the item's own texts and the color's hex; the list shows it.
@@ -103,13 +103,13 @@ fn an_item_is_colored() {
     r.c.chosen(104); // Green: None is 100, Red 101, Orange 102, Yellow 103, Green 104
     r.settle();
     assert_eq!(r.e.called("library.edit"), [json!({"id": "p4", "name": "Brass Corner", "description": "", "tags": ["brass", "warm"], "color": "#46a758"})]);
-    assert!(rows(r.ui())[2].tinted);
+    assert!(rows(r.ui())[1].tinted);
     // None.
     options_for(&mut r, "Brass Corner");
     r.c.chosen(100);
     r.settle();
     assert_eq!(r.e.called("library.edit").last().unwrap()["color"], "");
-    assert!(!rows(r.ui())[2].tinted);
+    assert!(!rows(r.ui())[1].tinted);
 }
 
 // Duplicate (the user's own: "NAME copy") or copy into my own (a library's, which keeps its name).
@@ -166,14 +166,16 @@ fn a_refusal_is_said() {
     assert_eq!(footer(r.ui()).0, "The disk is full");
 }
 
-// A tag's menu (Options in the Tags list): hide it from the tag list (a hidden tag chosen as a filter stops filtering)
-// or give it a color, which shows beside it; hidden ones come back from the Libraries menu (second cut).
+// A tag's menu (Options with the sidebar's cursor on the tag): hide it from the tag list (a hidden tag chosen as a filter
+// stops filtering) or give it a color, which shows beside it; hidden ones come back from the Libraries menu (second cut).
 #[test]
 fn a_tag_is_hidden_or_colored() {
     let mut r = Rig::new(library());
-    r.press_row("Filters");
-    r.press_row("Tags");
-    r.act(Action::Move { pane: None, by: 0 });
+    // The left arrow reaches the sidebar; the dial walks its choices (headings are passed over) down to "warm".
+    r.act(Action::Arrow { dx: -1, dy: 0 });
+    assert_eq!(r.side().iter().position(|x| x.cursor), Some(0), "the sidebar has the cursor, on Favorites");
+    r.act(Action::Move { pane: None, by: 5 });
+    assert_eq!(r.side().iter().find(|x| x.cursor).map(|x| x.label.to_string()), Some("warm".into()));
     r.tool("Options");
     let (title, items) = r.c.take_menu().expect("the tag's menu");
     assert_eq!(title, "warm");
@@ -181,16 +183,15 @@ fn a_tag_is_hidden_or_colored() {
     r.c.chosen(104); // Green
     r.settle();
     assert_eq!(r.e.called("library.tag"), [json!({"tag": "warm", "hidden": false, "color": "#46a758"})]);
-    assert!(rows(r.ui())[0].tinted, "the tag's color shows");
+    assert!(r.side().iter().find(|x| x.label == "warm").unwrap().tinted, "the tag's color shows");
     // Hidden: gone from the list, and no longer filtering.
-    r.press_row("warm");
+    r.act(Action::Confirm(None));
     assert_eq!(r.e.called("library.query").last().unwrap()["tags"], json!(["warm"]));
-    r.act(Action::Move { pane: None, by: 0 });
     r.tool("Options");
     r.c.take_menu().unwrap();
     r.c.chosen(1);
     r.settle();
     assert_eq!(r.e.called("library.tag").last().unwrap(), &json!({"tag": "warm", "hidden": true, "color": "#46a758"}));
-    assert!(!labels(r.ui()).contains(&"warm".to_string()));
+    assert!(!r.side_labels().contains(&"warm".to_string()));
     assert_eq!(r.e.called("library.query").last().unwrap(), &json!({"kind": "performance", "limit": 1000}), "it no longer filters");
 }

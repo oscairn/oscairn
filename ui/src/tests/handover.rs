@@ -274,6 +274,24 @@ fn nothing_in_the_library_app_hands_the_display_over() {
     for page in 0..3 {
         walk(&mut f, 1, 7, &mut seen, &mut pressed, &mut vec![Step::Page(page)]);
     }
+    // The sidebar's lines and the search box and its cross, each touched on every kind.
+    for page in 0..3 {
+        enter(&mut f, 1, &[Step::Page(page)]);
+        let lib = ui.global::<crate::LibraryState>();
+        for i in 0..lib.get_side_rows().row_count() {
+            lib.invoke_side_tapped(i as i32);
+            settle(&mut f);
+            pressed += 1;
+            no_handover(&ui, &format!("sidebar line {i} of kind {page}"));
+        }
+        lib.invoke_search_tapped();
+        settle(&mut f);
+        close_overlays(&mut f);
+        lib.invoke_search_cleared();
+        settle(&mut f);
+        pressed += 2;
+        no_handover(&ui, &format!("search of kind {page}"));
+    }
     let mut screens: Vec<&String> = seen.iter().collect();
     screens.sort();
     eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());

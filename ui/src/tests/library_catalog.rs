@@ -118,7 +118,7 @@ fn an_empty_library_offers_the_catalog() {
     let mut r = Rig::new(vec![]);
     r.e.repos = vec![("https://repo.example".into(), "Example".into(), true)];
     r.e.repo_packages = vec![("https://repo.example".into(), Ok(vec![package("org.example.keys", "Felt Keys", vec![version("1.0.0", json!({"oscairn.sound": 5}))])]))];
-    assert_eq!(labels(r.ui()), ["Filters", "Browse the Catalog"]);
+    assert_eq!(labels(r.ui()), ["Browse the Catalog"]);
     r.c.show_page(1);
     r.settle();
     r.press_row("Browse the Catalog");
@@ -140,11 +140,12 @@ fn the_catalog_is_searched() {
         package("org.example.organ", "Pipe Organ", vec![version("1.0.0", json!({"oscairn.performance": 1}))]),
     ]);
     catalog(&mut r, &[]);
-    assert_eq!(r.c.bar_tools().iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Search"]);
-    assert_eq!(r.tool("Search"), Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), String::new()));
+    assert!(r.c.bar_tools().is_empty(), "the box under the top bar searches the Catalog");
+    assert_eq!(r.c.ask_search(), Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), String::new()));
     r.c.entered("pipe quill");
     assert_eq!(labels(r.ui()), ["Pipe Organ  1.0.0"]);
-    r.tool("Search");
+    assert_eq!(r.ui().global::<crate::LibraryState>().get_search(), "pipe quill", "the box shows it");
+    r.c.ask_search();
     r.c.entered("zzz");
     assert!(labels(r.ui()).is_empty());
     assert!(info(r.ui()).join(" ").contains("Nothing here matches the search."));

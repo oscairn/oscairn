@@ -115,7 +115,7 @@ component Cells inherits Rectangle {
 component Chip inherits Rectangle {
     in property <ChipData> data;
     opacity: data.off ? Theme.dim : 1;
-    border-radius: Theme.radius;
+    border-radius: Theme.corner;
     background: Theme.raised;
     border-width: data.failed ? Theme.cursor-width : Theme.hair;
     border-color: data.failed ? Theme.danger : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : Theme.wire-notes;

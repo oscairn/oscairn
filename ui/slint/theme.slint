@@ -183,9 +183,9 @@ export global Theme {
     out property <color> key-fill: surface.brighter(0.15);
     out property <length> key-radius: 4px; // a piano key's corners (Panel.cpp: 4 white, 3 black)
     out property <length> section-radius: sections == SectionStyle.joined ? 0px : radius + 2px; // drawSection
-    // The shared list's style (a list screen's rows, the Library's sidebar): the gap between its items, their corners and whether a
-    // line is drawn between them. Each follows the sections' style until a theme says otherwise: `separate`, cards with a gap and
-    // corners; `joined`, rows with no gap, square, a thin line between.
+    // The gap between a screen's items, their corners and whether a line is drawn between them (the shared lists and the Library's
+    // sidebar). Each follows the sections' style until a theme says otherwise: cards with a gap and corners, or, joined, no gap,
+    // square corners and a thin line.
     out property <length> list-gap: gap-between(gap);
     out property <length> list-radius: section-radius;
     out property <bool> list-divider: sections == SectionStyle.joined;

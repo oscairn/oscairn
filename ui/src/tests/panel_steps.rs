@@ -46,5 +46,5 @@ fn one_counted_step_is_one_row_and_n_steps_n_rows() {
     counted(&mut s, 5, 2, 0);
     assert_eq!(side_at(&ui), Some(1), "one step, one line");
     counted(&mut s, 5, 5, 0);
-    assert_eq!(side_at(&ui), Some(5), "three steps: Recent to All, My own, the library (the heading is passed)");
+    assert_eq!(side_at(&ui), Some(4), "three steps: Recent to the Libraries heading, All, My own");
 }

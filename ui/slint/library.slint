@@ -37,6 +37,10 @@ export global LibraryState {
     in property <bool> bubbles;
     in property <bool> view-cursor;
     callback view-toggled();
+    // Compact: the rows and the entries closer (its button is in the same row), and the sections of the sidebar that fold.
+    in property <bool> compact;
+    in property <bool> compact-cursor;
+    callback compact-toggled();
     // Each line's place in the view, and the width the sidebar's entries have (set here, read by the lines' layout).
     in property <[SideGeo]> side-geo;
     in-out property <length> side-room: 280px;
@@ -82,6 +86,46 @@ component ToolButton inherits Rectangle {
     }
 }
 
+// A sidebar section's heading: it folds the section (a press or a touch), its chevron says whether the entries under it are shown
+// (`value`, "open" or "closed"); "No tags" (a line with nothing to fold) is the same line without the chevron (`value` empty).
+component Heading inherits Rectangle {
+    in property <SettingData> data;
+    callback tapped();
+    property <bool> folds: root.data.fluid;
+    accessible-role: text;
+    accessible-label: root.data.label;
+    if root.folds: Rectangle {
+        accessible-role: button;
+        accessible-label: root.data.label + (root.data.value == "open" ? ", expanded" : ", collapsed");
+        TouchArea {
+            clicked => { root.tapped(); }
+        }
+    }
+    Text {
+        x: Theme.pad;
+        width: parent.width - 2 * Theme.pad - (root.folds ? Theme.icon : 0px);
+        height: parent.height;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        font-weight: 700;
+        color: Theme.muted;
+        text: root.data.label;
+    }
+    if root.folds: Image {
+        x: parent.width - Theme.pad - self.width;
+        y: (parent.height - self.height) / 2;
+        width: Theme.icon * 0.7;
+        height: Theme.icon * 0.7;
+        source: root.data.value == "open" ? @image-url("icons/chevron-down.svg") : @image-url("icons/chevron-right.svg");
+        colorize: Theme.muted;
+    }
+    Cursor {
+        corner: Theme.button-radius(parent.height);
+        shown: root.data.cursor;
+    }
+}
+
 // A sidebar entry as a bubble: the family's corner, the accent when chosen, the tag's color as a dot before its name.
 component Pill inherits Rectangle {
     in property <SettingData> data;
@@ -123,16 +167,16 @@ component Pill inherits Rectangle {
 
 export component Library inherits Rectangle {
     // The sidebar's and the list's top and the sidebar's height are the Part's (its rows, gap and footer).
-    property <length> gap: Theme.list-gap;
-    property <length> head: LibraryState.header ? Theme.touch + Theme.gap : 0px;
+    property <length> gap: Theme.dense(Theme.list-gap, LibraryState.compact);
+    property <length> head: LibraryState.header ? Theme.touch + Theme.dense(Theme.gap, LibraryState.compact) : 0px;
     out property <length> side-width: LibraryState.list-only ? (root.width - 3 * Theme.margin) * Theme.sidebar-share : 0px;
     out property <length> content-x: LibraryState.list-only ? 2 * Theme.margin + root.side-width : Theme.margin;
     out property <length> content-y: Theme.margin + root.head;
     out property <length> content-width: max(0px, root.width - root.content-x - Theme.margin);
     out property <length> content-height: max(0px, root.height - root.content-y - Theme.margin);
-    property <length> side-height: max(0px, root.content-height - Theme.touch - Theme.gap);
+    property <length> side-height: max(0px, root.content-height - Theme.footer(LibraryState.compact) - Theme.gap);
     // Bubbles are as far apart as the dense gap (a joined theme has no gap between its lines, but pills are apart).
-    property <length> step-gap: LibraryState.bubbles ? Theme.gap : root.gap;
+    property <length> step-gap: LibraryState.bubbles ? Theme.dense(Theme.gap, LibraryState.compact) : root.gap;
     property <int> side-per-view: max(1, floor((root.side-height + root.step-gap) / (Theme.touch + root.step-gap)));
     // What the entries share across: the sidebar less its lane (kept in bubbles whether or not a bar shows, so that the lines
     // that wrap do not change with the bar) and the overlap the rows take.
@@ -148,7 +192,7 @@ export component Library inherits Rectangle {
     out property <length> search-x: Theme.margin + root.tabs-width + Theme.margin;
     // The buttons at the right end of the row: the sidebar's view, then the panel.
     property <length> tool: Theme.touch + Theme.margin;
-    property <length> tools: LibraryState.list-only ? 2 * root.tool : 0px;
+    property <length> tools: LibraryState.list-only ? 3 * root.tool : 0px;
     out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin - root.tools);
     property <length> line: Theme.body + Theme.margin;
 
@@ -218,7 +262,7 @@ export component Library inherits Rectangle {
     }
     // The buttons at the right of the row: the sidebar as bubbles, and the panel in place of the sidebar (and back).
     if LibraryState.header && LibraryState.list-only: ToolButton {
-        x: root.width - Theme.margin - 2 * Theme.touch - Theme.margin;
+        x: root.width - Theme.margin - 3 * root.tool + Theme.margin;
         y: Theme.margin;
         width: Theme.touch;
         height: Theme.touch;
@@ -227,6 +271,17 @@ export component Library inherits Rectangle {
         on: LibraryState.bubbles;
         cursor: LibraryState.view-cursor;
         clicked => { LibraryState.view-toggled(); }
+    }
+    if LibraryState.header && LibraryState.list-only: ToolButton {
+        x: root.width - Theme.margin - 2 * root.tool + Theme.margin;
+        y: Theme.margin;
+        width: Theme.touch;
+        height: Theme.touch;
+        label: "Compact";
+        icon: @image-url("icons/compact.svg");
+        on: LibraryState.compact;
+        cursor: LibraryState.compact-cursor;
+        clicked => { LibraryState.compact-toggled(); }
     }
     if LibraryState.header && LibraryState.list-only: ToolButton {
         x: root.width - Theme.margin - Theme.touch;
@@ -282,16 +337,11 @@ export component Library inherits Rectangle {
         y: root.content-y + (LibraryState.bubbles ? self.geo.line : i) * (Theme.touch + root.step-gap);
         width: LibraryState.bubbles ? self.geo.w : root.side-room;
         height: Theme.touch;
-        if row.kind == 4: Text {
-            x: Theme.pad;
-            width: parent.width - Theme.pad;
+        if row.kind == 4: Heading {
+            width: parent.width;
             height: parent.height;
-            vertical-alignment: center;
-            overflow: elide;
-            font-size: Theme.small;
-            font-weight: 700;
-            color: Theme.muted;
-            text: row.label;
+            data: row;
+            tapped => { LibraryState.side-tapped(i); }
         }
         if row.kind != 4 && !LibraryState.bubbles: Row {
             width: parent.width;

@@ -55,6 +55,8 @@ export global PartState {
     callback scrolled(int);
     // How many rows the screen holds: set by the screen.
     in-out property <int> rows-per-view: 1;
+    // The Library's rows closer: set by the Library (its choice, kept).
+    in property <bool> compact;
     // How many lines of the read-only panel fit, and whether more are out of view: set by the screen.
     in-out property <int> info-per-view: 1;
     in property <bool> info-more;
@@ -266,8 +268,10 @@ export component Part inherits Rectangle {
     // The list takes the whole width and the read-only panel is not drawn (the Library puts its sidebar or panel at the left).
     in property <bool> list-only;
     // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
-    property <length> gap: Theme.list-gap;
-    property <length> footer: Theme.touch;
+    // The Library's list may be compact (its rows' gap and the footer line, ui/LIBRARY-APP.md); the other screens' never are.
+    property <bool> dense: root.list-only && PartState.compact;
+    property <length> gap: Theme.dense(Theme.list-gap, root.dense);
+    property <length> footer: Theme.footer(root.dense);
     property <length> list-width: root.list-only ? self.width - 2 * Theme.margin : (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;
     out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;

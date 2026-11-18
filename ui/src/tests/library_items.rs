@@ -171,10 +171,10 @@ fn a_refusal_is_said() {
 #[test]
 fn a_tag_is_hidden_or_colored() {
     let mut r = Rig::new(library());
-    // The left arrow reaches the sidebar; the dial walks its choices (headings are passed over) down to "warm".
+    // The left arrow reaches the sidebar; the dial walks its choices (headings are stops now) down to "warm".
     r.act(Action::Arrow { dx: -1, dy: 0 });
     assert_eq!(r.side().iter().position(|x| x.cursor), Some(0), "the sidebar has the cursor, on Favorites");
-    r.act(Action::Move { pane: None, by: 5 });
+    r.act(Action::Move { pane: None, by: 7 });
     assert_eq!(r.side().iter().find(|x| x.cursor).map(|x| x.label.to_string()), Some("warm".into()));
     r.tool("Options");
     let (title, items) = r.c.take_menu().expect("the tag's menu");

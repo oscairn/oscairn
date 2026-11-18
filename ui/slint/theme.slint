@@ -146,6 +146,17 @@ export global Theme {
     out property <length> scroll-overlap: pad;
     out property <length> scroll-gap: pad-tight;
     out property <length> scroll-lead: scroll-overlap + scroll-gap;
+    // Compact (the Library's): the spacing scale at its 0.7 step (ui/LIBRARY-APP.md), applied to the gaps between a list's rows and a
+    // sidebar's entries and to the header's, and the footer line cut to the type's height. Never below the scale's own least (0.6 of
+    // the unit) for the theme at hand, and the rows stay a touch target tall: the touch target (44) is not scaled.
+    out property <float> compact-scale: 0.7;
+    out property <float> spacing-least: 0.6;
+    pure public function dense(gap: length, compact: bool) -> length {
+        return compact ? gap * min(1.0, max(compact-scale, spacing-least / spacing)) : gap;
+    }
+    pure public function footer(compact: bool) -> length {
+        return compact ? body + 2 * pad-tight : touch;
+    }
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;

@@ -14,7 +14,7 @@ use crate::LibraryState;
 const TAGS: [&str; 14] = ["keys", "brass", "pad", "studio", "live", "warm", "bright", "strings", "lead", "bass", "choir", "organ", "noisy", "soft"];
 
 /// The Library with the tags the owner's library has: ten Performances, three of the fourteen each.
-fn tagged(name: &str) -> Shelf {
+pub(super) fn tagged(name: &str) -> Shelf {
     let mut s = scene(name, 10);
     s.e.items = (0..10).map(|i| stored("performance", &format!("p{i}"), &format!("Bright Strings {:03}", i + 2)).tags(&[TAGS[i], TAGS[(i + 4) % 14], TAGS[(i + 9) % 14]])).collect();
     shell::goto(shell::Screen::Home);
@@ -26,22 +26,26 @@ fn tagged(name: &str) -> Shelf {
 }
 
 /// How many of the tags the view shows.
-fn tags_in_view(ui: &Shell) -> usize {
+pub(super) fn tags_in_view(ui: &Shell) -> usize {
     ui.global::<LibraryState>().get_side_rows().iter().filter(|r| TAGS.contains(&r.label.as_str())).count()
 }
 
-/// The panel alone: up to the row under the bar, along to the view's button (the stop before the panel's), a press.
-fn press_view_button(s: &mut Shelf) {
-    let ui = s.ui();
+/// The panel alone: up to the row under the bar, along to the button `back` stops before the last (the panel's): 2 the sidebar's view,
+/// 1 compact; a press.
+pub(super) fn press_tool(s: &mut Shelf, back: i32) {
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Move { pane: None, by: -1 });
     shell::act(Action::End(1));
-    shell::act(Action::Move { pane: None, by: -1 });
-    assert!(ui.global::<LibraryState>().get_view_cursor(), "the view's button has the cursor");
+    shell::act(Action::Move { pane: None, by: -back });
     shell::act(Action::Confirm(None));
     s.serve();
     s.f.screen.frame();
     s.f.screen.frame();
+}
+
+/// The sidebar's view button, pressed by the panel alone.
+fn press_view_button(s: &mut Shelf) {
+    press_tool(s, 2);
 }
 
 // The button is a stop of the row under the bar (before the panel's), a press shows the sidebar as bubbles and another as lines.
@@ -56,6 +60,7 @@ fn bubbles_show_many_entries_to_a_line() {
     let (list_tags, list_lines) = (tags_in_view(&ui), lib.get_side_total());
     s.e.calls.clear();
     press_view_button(&mut s);
+    assert!(lib.get_view_cursor(), "the view's button has the cursor");
     assert!(lib.get_bubbles(), "a press on the button");
     assert!(s.e.calls.is_empty(), "a view is not a question for the engine: {:?}", s.e.methods());
     let (bubble_tags, bubble_lines) = (tags_in_view(&ui), lib.get_side_total());
@@ -103,7 +108,9 @@ fn the_cursor_moves_between_bubbles_and_chooses() {
     shell::act(Action::Arrow { dx: -1, dy: 0 });
     assert_eq!(side_cursor(&ui).as_deref(), Some("Favorites"), "and left");
     shell::act(Action::Arrow { dx: 0, dy: 1 });
-    assert_eq!(side_cursor(&ui).as_deref(), Some("All"), "down: the heading is passed, the library nearest across");
+    assert_eq!(side_cursor(&ui).as_deref(), Some("Libraries"), "down: the heading is a line of its own");
+    shell::act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!(side_cursor(&ui).as_deref(), Some("All"), "and the library nearest across below it");
     shell::act(Action::Arrow { dx: 1, dy: 0 });
     assert_eq!(side_cursor(&ui).as_deref(), Some("My own"), "libraries share a line");
     // A library is chosen alone.
@@ -115,6 +122,8 @@ fn the_cursor_moves_between_bubbles_and_chooses() {
     // Down to the tags, two chosen together.
     shell::act(Action::Arrow { dx: 0, dy: 1 });
     assert_eq!(side_cursor(&ui).as_deref(), Some("A Friend's"), "the library that wraps");
+    shell::act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!(side_cursor(&ui).as_deref(), Some("Tags"), "the next heading");
     shell::act(Action::Arrow { dx: 0, dy: 1 });
     let first_tag = side_cursor(&ui).unwrap();
     assert!(TAGS.contains(&first_tag.as_str()), "a tag: {first_tag}");
@@ -151,7 +160,7 @@ fn the_cursor_moves_between_bubbles_and_chooses() {
         shell::act(Action::Move { pane: None, by: 1 });
         seen.push(side_cursor(&ui).unwrap());
     }
-    assert_eq!(seen[..4], ["Favorites", "Recent", "All", "My own"], "{seen:?}");
+    assert_eq!(seen[..4], ["Favorites", "Recent", "Libraries", "All"], "{seen:?}");
 }
 
 // The choice is kept the way the JUCE pane keeps it, in library-view.txt beside the theme's choice ("comfortable" or "compact", "list"

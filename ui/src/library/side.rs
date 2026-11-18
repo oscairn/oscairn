@@ -12,7 +12,8 @@ use slint::Model;
 /// What a line of the sidebar is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Side {
-    Heading,
+    /// A section's heading (0 the libraries, 1 the tags): a press folds the section.
+    Heading(usize),
     Favorites,
     Recent,
     /// Library `n` of `Filters::sources`.
@@ -25,7 +26,12 @@ pub(super) enum Side {
 
 impl Side {
     fn pickable(self) -> bool {
-        !matches!(self, Side::Heading | Side::Empty)
+        !matches!(self, Side::Empty)
+    }
+
+    /// Alone on its line, however the entries are laid out.
+    fn whole_line(self) -> bool {
+        matches!(self, Side::Heading(_) | Side::Empty)
     }
 }
 
@@ -65,18 +71,21 @@ impl Screen {
 
     /// The lines of the sidebar, each with what it is.
     pub(super) fn side_entries(&self) -> Vec<(Side, SettingData)> {
-        let head = |t: &str| (Side::Heading, SettingData { label: t.into(), kind: 4, ..Default::default() });
+        let head = |n: usize, t: &str| (Side::Heading(n), SettingData { label: t.into(), kind: 4, fluid: true, value: if self.folded[n] { "closed" } else { "open" }.into(), ..Default::default() });
         let line = |side: Side, label: &str, count: String, on: bool, tint: Option<slint::Color>| {
             let value = if on { format!("✓ {count}").trim_end().to_string() } else { count };
             (side, SettingData { label: label.into(), value: value.into(), kind: 2, on, fluid: true, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..Default::default() })
         };
-        let mut out = vec![line(Side::Favorites, "Favorites", String::new(), self.filters.favorites, None), line(Side::Recent, "Recent", String::new(), self.filters.recent, None), head("Libraries")];
-        for (i, (id, name, items)) in self.filters.sources(&self.libraries).into_iter().enumerate() {
+        let mut out = vec![line(Side::Favorites, "Favorites", String::new(), self.filters.favorites, None), line(Side::Recent, "Recent", String::new(), self.filters.recent, None), head(0, "Libraries")];
+        for (i, (id, name, items)) in self.filters.sources(&self.libraries).into_iter().enumerate().filter(|_| !self.folded[0]) {
             let name = if id.is_empty() { "All".to_string() } else { name };
             out.push(line(Side::Source(i), &name, items.map(|n| n.to_string()).unwrap_or_default(), id == self.filters.source, None));
         }
-        out.push(head("Tags"));
+        out.push(head(1, "Tags"));
         let tags = self.filters.tag_list(&self.tags);
+        if self.folded[1] {
+            return out;
+        }
         if tags.is_empty() {
             out.push((Side::Empty, SettingData { label: "No tags".into(), kind: 4, ..Default::default() }));
         }
@@ -104,7 +113,7 @@ impl Screen {
         let (mut line, mut x, mut open) = (0, 0f32, false);
         let mut out = Vec::with_capacity(entries.len());
         for (side, data) in entries {
-            if !side.pickable() {
+            if side.whole_line() {
                 if open {
                     line += 1;
                     open = false;
@@ -132,6 +141,8 @@ impl Screen {
         let Some(ui) = self.ui.upgrade().filter(|_| self.active) else { return };
         let lib = ui.global::<LibraryState>();
         lib.set_bubbles(self.bubbles);
+        lib.set_compact(self.compact);
+        ui.global::<crate::PartState>().set_compact(self.compact);
         lib.set_side_rows(ModelRc::from(self.side_rows.clone()));
         lib.set_side_geo(ModelRc::from(self.side_geo.clone()));
         let cells = if self.side_visible() { self.side_cells() } else { vec![] };
@@ -231,7 +242,8 @@ impl Screen {
             }
             return;
         };
-        let across = c.x + c.w / 2.;
+        // A heading is the whole line: from it the way down or up is to the nearest the line's start (the first bubble).
+        let across = if c.side.whole_line() { c.x } else { c.x + c.w / 2. };
         let near = |i: &usize| ((cells[*i].x + cells[*i].w / 2. - across).abs() * 100.) as i64;
         self.side_cursor.at = (0..cells.len()).filter(|&i| cells[i].line == line && cells[i].side.pickable()).min_by_key(near);
     }
@@ -278,7 +290,12 @@ impl Screen {
                 let Some((tag, _)) = self.filters.tag_list(&self.tags).get(i).cloned() else { return };
                 self.filters.toggle_tag(&tag);
             }
-            Side::Heading | Side::Empty => return,
+            Side::Heading(n) => {
+                // A section folds or opens: nothing to ask of the engine.
+                self.folded[n] = !self.folded[n];
+                return;
+            }
+            Side::Empty => return,
         }
         self.b.reset_cursor();
         self.query();

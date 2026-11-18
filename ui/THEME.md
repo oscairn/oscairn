@@ -282,3 +282,11 @@ sidebar entry and a list item as drawn, in the default theme and the blue square
 ## The scroll bar sits close to the list (2026-11-17)
 
 The lane stays a touch target wide (`scroll-lane`, 44) but the visible bar is drawn at the list side of it, not centered: the lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and the bar starts `Theme.scroll-gap` (a tight padding) past the row's edge (`Theme.scroll-lead` = overlap + gap, in the lane). The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the gap as drawn, in both themes.
+
+## Compact and the sidebar's views (2026-11-17)
+
+`Theme.compact-scale` (0.7) is the spacing scale's step the Library's compact mode applies: `Theme.dense(gap, compact)` is the gap times
+the larger of 0.7 and 0.6 over the theme's own `spacing` (so a theme already at the scale's least 0.6 gets no more), and
+`Theme.footer(compact)` is the footer line's height: a touch target, or, compact, the type and two tight paddings. The touch target
+(44) is not scaled: rows, entries and the buttons stay at it. The list and the sidebar's bubbles are drawn with the family corner
+(`button-radius`), so they follow `radius` as everything does.

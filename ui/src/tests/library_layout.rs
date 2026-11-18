@@ -29,7 +29,7 @@ fn dial_to(s: &mut Shelf, label: &str) {
     panic!("{label} not reached: {:?} of {} lines", side_cursor(&s.ui()), s.ui().global::<LibraryState>().get_side_total());
 }
 
-// Without touch: the left arrow goes from the list to the sidebar, the dial walks its choices (the headings passed over),
+// Without touch: the left arrow goes from the list to the sidebar, the dial walks its choices (the headings are stops: a press folds),
 // a press chooses (a library, then a tag: each asks the engine at once), the right arrow goes back to the list, up from its
 // first row to the tabs, along them to the search box; the one cursor is in one place at a time.
 #[test]
@@ -42,8 +42,8 @@ fn the_sidebar_is_reached_and_chosen_by_the_panel_alone() {
     shell::act(Action::Arrow { dx: -1, dy: 0 });
     assert_eq!(side_cursor(&ui).as_deref(), Some("Favorites"));
     assert!(rows(&ui).iter().all(|r| !r.cursor), "one cursor: the list gave it up");
-    shell::act(Action::Move { pane: None, by: 3 });
-    assert_eq!(side_cursor(&ui).as_deref(), Some("My own"), "the heading and All are passed or counted as lines: Favorites, Recent, All, My own");
+    shell::act(Action::Move { pane: None, by: 4 });
+    assert_eq!(side_cursor(&ui).as_deref(), Some("My own"), "the heading is a stop: Favorites, Recent, Libraries, All, My own");
     shell::act(Action::Confirm(None));
     s.serve();
     assert_eq!(s.e.called("library.query").last().unwrap()["source"], "mine", "choosing applies at once");

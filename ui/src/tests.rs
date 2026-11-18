@@ -1268,6 +1268,7 @@ mod handover;
 mod owner;
 mod library_layout;
 mod library_bubbles;
+mod library_compact;
 mod library_info;
 mod library_rows;
 mod panel_steps;

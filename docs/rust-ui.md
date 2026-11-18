@@ -666,7 +666,10 @@ set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whate
   its button shows it in the sidebar's place and hides it again, for the session. What only the panel said (why a Performance does not fit
   this device, which library it is locked in, a folder indexed in place) is in the line under the list while the cursor is on the row and
   the panel is hidden. Audition and Options are the top bar's actions (Options with the cursor in the sidebar on a tag is the tag's
-  menu: color, hide). Without touch: the dial walks the row under the top bar (the tabs, the search box, its cross, the panel's button)
+  menu: color, hide). Three more buttons sit in that row, left of the panel's: **Bubbles** (the sidebar's entries as pills that wrap along a
+  line, as the JUCE pane's pills view; arrows go to the neighbor where they point) and **Compact** (the spacing scale's 0.7 step on the gaps of
+  rows and entries and a footer line of the type's height; every row stays a touch target tall), both kept in `library-view.txt` as the JUCE
+  pane keeps them; a sidebar section's heading folds it (a press or a touch; the session's). Without touch: the dial walks the row under the top bar (the tabs, the search box, its cross, the three buttons)
   and then the list; left and right (the left knob and the right knob) go between the sidebar and the list; up from the first row of
   either reaches the row; one cursor in one place at a time. The sound chooser (Part screen) keeps its Filters row: it is a picker over
   the Part screen with no room for a column.

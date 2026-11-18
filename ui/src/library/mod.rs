@@ -249,6 +249,10 @@ pub struct Screen {
     side_page: usize,
     /// The sidebar as bubbles (library-view.txt's "pills", the JUCE pane's word), not a line to an entry: kept for the next time.
     bubbles: bool,
+    /// Compact rows and entries (library-view.txt's "compact"): kept for the next time.
+    compact: bool,
+    /// The sidebar's sections folded (the libraries, the tags): the session's, not kept.
+    folded: [bool; 2],
     /// The panel is shown, in the sidebar's place (until the screen is left for good: a session's choice, not saved).
     info_on: bool,
     /// The item last pressed or under the cursor: what Options is about.
@@ -319,6 +323,8 @@ impl Screen {
             side_geo: Rc::new(VecModel::default()),
             side_page: 0,
             bubbles: crate::settings::library_view().1,
+            compact: crate::settings::library_view().0,
+            folded: [false; 2],
             info_on: false,
             selected: None,
             auditioning: Auditioning::default(),
@@ -630,7 +636,7 @@ impl Screen {
 
     /// How many stops the row under the top bar has for the cursor: each tab, the search box, and its cross when it has text.
     fn head_stops(&self) -> usize {
-        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty()) + if self.mode == Mode::List { 2 } else { 0 }
+        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty()) + if self.mode == Mode::List { 3 } else { 0 }
     }
 
     /// The panel's button is the last stop of the row, in the kinds' list.
@@ -638,15 +644,27 @@ impl Screen {
         (self.mode == Mode::List).then(|| self.head_stops() - 1)
     }
 
-    /// The sidebar's view (bubbles or lines) is the stop before it.
-    fn view_stop(&self) -> Option<usize> {
+    /// Compact is the stop before it, the sidebar's view (bubbles or lines) the one before that.
+    fn compact_stop(&self) -> Option<usize> {
         (self.mode == Mode::List).then(|| self.head_stops() - 2)
+    }
+
+    fn view_stop(&self) -> Option<usize> {
+        (self.mode == Mode::List).then(|| self.head_stops() - 3)
+    }
+
+    /// Compact rows and entries, or as they were.
+    pub fn toggle_compact(&mut self) {
+        self.compact = !self.compact;
+        let _ = crate::settings::keep_library_view(self.compact, self.bubbles);
+        self.side_cursor.first = 0;
+        self.show();
     }
 
     /// The sidebar as bubbles, or as lines again.
     pub fn toggle_bubbles(&mut self) {
         self.bubbles = !self.bubbles;
-        let _ = crate::settings::keep_library_view(crate::settings::library_view().0, self.bubbles);
+        let _ = crate::settings::keep_library_view(self.compact, self.bubbles);
         self.side_cursor.first = 0;
         self.show();
     }
@@ -695,6 +713,7 @@ impl Screen {
         lib.set_search_cursor(stop == Some(n));
         lib.set_clear_cursor(stop.is_some_and(|s| s == n + 1 && !state.3.is_empty()));
         lib.set_view_cursor(stop.is_some() && stop == self.view_stop());
+        lib.set_compact_cursor(stop.is_some() && stop == self.compact_stop());
         lib.set_info_on(state.5);
         lib.set_info_cursor(stop.is_some() && stop == self.info_stop());
     }
@@ -1023,6 +1042,9 @@ impl Screen {
             self.tab_at = Some(at);
         } else if Some(at) == self.view_stop() {
             self.toggle_bubbles();
+            self.tab_at = Some(at);
+        } else if Some(at) == self.compact_stop() {
+            self.toggle_compact();
             self.tab_at = Some(at);
         } else {
             self.clear_search();

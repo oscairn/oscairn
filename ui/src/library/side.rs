@@ -30,7 +30,7 @@ impl Side {
 impl Screen {
     /// Whether the sidebar is at the left: with the kinds' list.
     pub(super) fn side_visible(&self) -> bool {
-        self.mode == Mode::List
+        self.mode == Mode::List && !self.info_on
     }
 
     /// The lines of the sidebar, each with what it is.

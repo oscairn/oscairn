@@ -712,8 +712,64 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     let names = f.screen.ui.global::<SetlistState>().get_setlists().iter().collect::<Vec<_>>();
     assert_eq!((names[0].cursor, names[0].shown), (true, true), "shown on the first setlist by the first move");
     // Cancel is Back in one step, with the cursors where they are: Home.
-    f.navigation(nav(2, 2, pv, 1, 1));
+f.navigation(nav(2, 2, pv, 1, 1));
     assert_eq!(f.screen.ui.get_screen(), 0);
+}
+
+// A performance instrument: with the Setlist open and nothing happening, it asks nothing and draws
+// nothing (docs/rust-ui.md, idle); a status that says what the last said costs neither.
+#[test]
+fn setlist_at_rest_costs_no_request_and_no_frame() {
+    let performances: Vec<_> = (0..40).map(|i| json!({"id": format!("p{i}"), "name": format!("Song {i}"), "color": "", "path": format!("/lib/p{i}")})).collect();
+    let slots: Vec<_> = (0..30).map(|i| json!({"id": format!("p{i}"), "name": format!("Song {i}"), "color": "", "label": ""})).collect();
+    let content = json!({
+        "setlists": [{"id": "s1", "name": "Friday"}, {"id": "s2", "name": "Saturday"}],
+        "performances": performances,
+        "setlist": {"format": "oscairn.setlist", "version": 2, "info": {"id": "s1", "name": "Friday"}, "display": {"mode": "list"},
+            "pages": [{"name": "Set 1", "slots": slots}]},
+    });
+    let mut f = Fixture::new("setlist-idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
+    f.serve(13, &content);
+    assert_eq!(f.screen.ui.get_screen(), 1, "the Setlist opened");
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "sampleRate": 48000});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status}))); // the first: the takes and the meters follow
+    f.pump();
+    // Everything the shell and the screen ask until they are quiet, as a real engine would.
+    let mut quiet = 0;
+    while quiet < 3 {
+        slint::platform::update_timers_and_animations();
+        let Some(request) = f.engine.try_request(std::time::Duration::from_millis(60)) else {
+            quiet += 1;
+            continue;
+        };
+        quiet = 0;
+        let result = match request["method"].as_str().unwrap() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}),
+            "library.query" => json!({"items": [], "total": 0}),
+            "record.get" => json!({"takes": []}),
+            "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
+            "transport.get" => json!({"tempo": 120.0, "playing": false}),
+            "edit.history" => json!({"undo": "", "redo": ""}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    // The engine's status that says what the last said: no request, no frame.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
 }
 
 /// The real engine (OSCAIRN_ENGINE, which ctest gives when the build has one) with no audio

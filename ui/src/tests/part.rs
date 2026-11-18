@@ -580,6 +580,147 @@ fn harmony(part: &mut crate::part::Screen, key: serde_json::Value, scales: &[&st
     assert!(!refused);
 }
 
+// Reachability: every actionable control of the Part screen reached and activated from Home with
+// panel moves only (move, confirm, cancel/EXIT), no touch. The walk turns the dial (Move) over
+// the whole list, pages included, records which rows it visited, and presses (Confirm) each: a
+// value takes the change (a second press lays it down), a toggle sends its request and a second
+// press undoes it, a list of devices opens and EXIT closes it, an action (Sound, Insert effects,
+// Keyboard, Name) opens and EXIT comes back from it, and Remove part pressed twice removes the
+// part. The walk ends when a move leaves the cursor on the row it came from, past the last, and
+// what it visited is held against what the screen declares (its view's "… of N").
+#[test]
+fn part_reachable_from_home_by_panel_moves() {
+    let mut f = Fixture::new("part-reach");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let graph = std::cell::RefCell::new(part_graph());
+    let ui = f.screen.ui.clone_strong();
+    // A quiet engine: every request out is answered until none comes for a moment.
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.borrow().clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "library.libraries" => json!({"libraries": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => json!({"presets": []}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Home → the Performance tile → Play.
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move", 0); // the first read is only a baseline
+    nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play: the dial down to the first part, pressed, opens the Part screen.
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (4, "Keys".to_string()), "the press on a part opens the Part screen");
+    // The whole list the screen declares: the count its view's line ends with ("Settings 1–12 of N"),
+    // read while the screen is up, before the walk starts.
+    let declared = |ui: &Shell| -> usize {
+        let view = ui.global::<crate::PartState>().get_view().to_string();
+        view.rsplit(" of ").next().unwrap_or("0").parse().unwrap_or(0)
+    };
+    let n = declared(&ui);
+    // A value row: the press starts the change, the second lays it down. The rows the walk presses
+    // and what each press does; anything else it meets is a failure of the walk's own map.
+    let edit_rows = ["Level", "Pan", "Plays to", "Key", "Input channel", "Lowest key", "Highest key", "Transpose", "Lowest velocity", "Highest velocity", "Notes at once", "Reserved notes", "Priority", "MIDI out channel", "Send to Reverb", "Sustain pedal", "Sostenuto pedal", "Soft pedal"];
+    let part_state = ui.global::<crate::PartState>();
+    let (mut visited, mut previous, mut removed) = (Vec::new(), String::new(), false);
+    for _ in 0..200 {
+        let Some(at) = cursor_at(&ui) else {
+            // The cursor dropped (the screen was left and came back): the dial shows it again.
+            nav(&mut f, "move", 1);
+            settle(&mut f);
+            continue;
+        };
+        let label = rows(&ui)[at].0.clone();
+        if label == previous {
+            break; // the move left the cursor where it was: past the last row
+        }
+        if !visited.contains(&label) {
+            visited.push(label.clone());
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            if edit_rows.contains(&label.as_str()) {
+                assert!(rows(&ui)[at].3, "{label}: the press starts the change");
+                nav(&mut f, "confirm", 1); // the change laid down
+                settle(&mut f);
+                assert!(!rows(&ui)[at].3, "{label}: the second press ends it");
+            } else {
+                match label.as_str() {
+                    "Mute" | "Solo" => {
+                        nav(&mut f, "confirm", 1); // pressed again, back where it was
+                        settle(&mut f);
+                    }
+                    "Plays from" | "MIDI out" => {
+                        assert_eq!(part_state.get_title().as_str(), label.as_str(), "{label}: the press opens the list of devices");
+                        assert_eq!(rows(&ui)[0].0, if label == "Plays from" { "Any device" } else { "Off" });
+                        nav(&mut f, "cancel", 1); // EXIT closes the list
+                        settle(&mut f);
+                        assert_eq!(ui.get_screen(), 4, "{label}: closed, the walk still on the Part screen");
+                    }
+                    "Keyboard" => {
+                        assert!(ui.global::<crate::PianoState>().get_open(), "Keyboard: the press opens the playing keyboard");
+                        nav(&mut f, "cancel", 1);
+                        settle(&mut f);
+                        assert_eq!(ui.get_screen(), 4, "Keyboard: closed, the walk still on the Part screen");
+                    }
+                    "Name" => {
+                        assert!(ui.global::<crate::KeyboardState>().get_open(), "Name: the press opens the text keyboard");
+                        nav(&mut f, "cancel", 1);
+                        settle(&mut f);
+                        assert_eq!(ui.get_screen(), 4, "Name: closed, the walk still on the Part screen");
+                    }
+                    "Sound" | "Insert effects" => {
+                        assert_ne!(ui.get_screen(), 4, "{label}: the press opens its screen");
+                        nav(&mut f, "cancel", 1);
+                        settle(&mut f);
+                        assert_eq!(ui.get_screen(), 4, "{label}: EXIT comes back to the Part screen");
+                    }
+                    "Remove part" => {
+                        nav(&mut f, "confirm", 1); // pressed twice removes it
+                        settle(&mut f);
+                        removed = true;
+                    }
+                    _ => panic!("the walk pressed “{label}”, which it knows no effect of"),
+                }
+            }
+        }
+        if removed {
+            break;
+        }
+        previous = label;
+        nav(&mut f, "move", 1); // the dial on
+        settle(&mut f);
+    }
+    assert!(removed, "the walk never removed the part, which its last row does");
+    // What the walk visited against what the screen declares: every one of its N rows, no row twice.
+    eprintln!("visited {} of {n}: {visited:?}", visited.len());
+    assert!(n > 0, "the screen declares no count");
+    assert_eq!(visited.len(), n, "the walk visited {visited:?}, the screen declares {n}");
+    assert_eq!(visited.iter().collect::<std::collections::HashSet<_>>().len(), visited.len(), "a row visited twice: {visited:?}");
+    assert_eq!(ui.get_screen(), 3, "the part removed, the shell back on Play");
+}
+
 fn minor() -> serde_json::Value {
     json!({"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10], "name": "Minor"})
 }

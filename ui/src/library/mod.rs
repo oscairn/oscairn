@@ -478,14 +478,8 @@ impl Screen {
         if !item.library.is_empty() {
             detail = first("Locked", detail);
         }
-        if !item.unfit.is_empty() {
-            detail = first("Does not fit this device", detail);
-        }
         if item.id == self.auditioning.id && !item.id.is_empty() {
             detail = first("Auditioning", detail);
-        }
-        if item.favorite {
-            detail = if detail.is_empty() { "★".into() } else { format!("{detail}  ★") };
         }
         detail
     }
@@ -501,7 +495,7 @@ impl Screen {
                 let mut rows: Vec<(Row, SettingData)> = Vec::new();
                 rows.extend(self.items.iter().enumerate().map(|(i, item)| {
                     let tint = color(&item.color);
-                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), detail: item.description.as_str().into(), fluid: true, busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
+                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), detail: item.description.as_str().into(), warn: !item.unfit.is_empty(), star: item.favorite, reason: item.unfit.as_str().into(), fluid: true, busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
                 }));
                 // Nothing of the kind and nothing narrowing it: a way to the Catalog (LibraryPane.cpp: "Browse the Catalog").
                 if self.total == 0 && !self.filters.narrowed() && self.kind != Kind::Setlist {

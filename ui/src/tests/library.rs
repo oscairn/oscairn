@@ -193,10 +193,12 @@ fn a_row_is_the_library_panes() {
     let r = Rig::new(library());
     let ui = r.ui();
     assert_eq!(labels(ui), ["Untitled", "Brass Corner", "Evening Strings", "Glass Choir"]);
-    assert_eq!(value_of(ui, "Evening Strings"), "strings  ·  warm  ★");
+    assert_eq!(value_of(ui, "Evening Strings"), "strings  ·  warm");
+    assert!(rows(ui).iter().find(|r| r.label == "Evening Strings").is_some_and(|r| r.star && !r.warn), "a favorite has the star");
     assert_eq!(rows(ui).iter().find(|r| r.label == "Evening Strings").map(|r| (r.detail.to_string(), r.fluid)), Some(("Slow and wide".to_string(), true)), "the description is the row's detail, apart from its tags");
     assert_eq!(value_of(ui, "Untitled"), "Locked");
-    assert_eq!(value_of(ui, "Glass Choir"), "Does not fit this device  ·  choir  ·  pad");
+    assert_eq!(value_of(ui, "Glass Choir"), "choir  ·  pad");
+    assert!(rows(ui).iter().find(|r| r.label == "Glass Choir").is_some_and(|r| r.warn && !r.star && r.reason == "needs 3 GB of memory"), "the warning icon, the reason with it");
     assert_eq!(value_of(ui, "Brass Corner"), "brass  ·  warm");
     assert_eq!(rows(ui).iter().map(|r| r.tinted).collect::<Vec<_>>(), [false, false, false, true], "only the one with a color is tinted");
     assert_eq!(footer(ui).1, "Performances 1–4 of 4");

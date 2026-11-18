@@ -107,7 +107,7 @@ fn a_favorite_is_toggled_from_the_menu() {
     r.c.chosen(4);
     r.settle();
     assert_eq!(r.e.called("library.favorite"), [json!({"id": "p4", "favorite": true})]);
-    assert!(value_of(r.ui(), "Brass Corner").ends_with('★'));
+    assert!(rows(r.ui()).iter().any(|x| x.label == "Brass Corner" && x.star));
     assert_eq!(r.e.methods(), ["library.favorite", "library.query"], "asked again to show it");
     assert!(r.e.called("library.query")[0]["kind"] == "performance");
 }

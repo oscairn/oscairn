@@ -505,3 +505,333 @@ fn tile_density_follows_the_references_rules_and_has_more_room() {
         }
     }
 }
+
+// The parameter page is reachable without touch: from Home every control of the screen — the pages'
+// rail, the tabs' rail under it, every tile (knob, switch, dropdown, value), the search in the top
+// bar — is reached and activated with panel moves only (the dial `move`, `move:0` and `move:1` for
+// the rails' and tiles' columns and rows, confirm, cancel/EXIT), no touch. The walk records what it
+// visited and holds it against what the screen declares: the pages' and tabs' names and the tiles it
+// draws per entry, and the banks published for the device's screen knobs (`controllers.view`
+// `screen`), which follow the page and tiles shown.
+
+/// The walk's panel actions as the device's panel reaches the shell: the `controllers` totals, then
+/// answered and drawn.
+fn walk_act(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, key: &str, by: i64, list: &serde_json::Value, published: &mut Vec<(String, Vec<u64>)>) {
+    *total.entry(key.into()).or_default() += by;
+    f.navigation(json!(total.clone()));
+    params_settle(f, list, published);
+    f.screen.frame();
+}
+
+/// A quiet engine: every request out is answered until none comes for a moment. `params.list` is
+/// answered with `list`, values and texts as the plugin writes them; the screens are left at rest.
+/// What the page publishes for the device's screen knobs is recorded in `published`.
+fn params_settle(f: &mut Fixture, list: &serde_json::Value, published: &mut Vec<(String, Vec<u64>)>) {
+    let name_of = param_names(list);
+    let value_of = |id: u64| match id {
+        23 => 2.0,
+        24 => 1.0,
+        _ => 0.5,
+    };
+    while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+        let method = r["method"].as_str().unwrap_or_default().to_string();
+        let result = match method.as_str() {
+            "params.list" => list.clone(),
+            "params.get" => {
+                let node = r["params"]["values"][0]["node"].clone();
+                let values: Vec<serde_json::Value> = r["params"]["values"].as_array().unwrap().iter().map(|v| json!({"node": node, "param": v["param"], "value": value_of(v["param"].as_u64().unwrap_or(0))})).collect();
+                json!({"values": values})
+            }
+            "params.text" => json!({"text": "v"}),
+            "graph.get" => play_graph(),
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+            "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+            "parts.meters" => json!({"meters": []}),
+            "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+            "window.info" => json!({"available": false}),
+            "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+            "presets.list" => json!({"presets": []}),
+            "controllers.view" if r["params"]["screen"].is_object() => {
+                let screen = &r["params"]["screen"];
+                let ids: Vec<u64> = screen["params"].as_array().unwrap().iter().map(|a| a["param"].as_u64().unwrap()).collect();
+                published.push((screen["name"].as_str().unwrap_or_default().to_string(), ids));
+                json!({})
+            }
+            _ => json!({}),
+        };
+        f.reply(&r, json!({"result": result}));
+    }
+    let _ = name_of;
+}
+
+/// The parameters' names by id, from the list's JSON.
+fn param_names(list: &serde_json::Value) -> std::collections::HashMap<u64, String> {
+    list["parameters"].as_array().unwrap().iter().map(|p| (p["id"].as_u64().unwrap(), p["name"].as_str().unwrap().to_string())).collect()
+}
+
+/// The parameters' priorities by id.
+fn param_priorities(list: &serde_json::Value) -> std::collections::HashMap<u64, u64> {
+    list["parameters"].as_array().unwrap().iter().map(|p| (p["id"].as_u64().unwrap(), p["priority"].as_u64().unwrap())).collect()
+}
+
+/// The walk over one entry's tiles (a page's, or a page and tab's): the dial from the first tile to
+/// the last, each pressed (a knob's change taken and laid down, a switch flipped and back, a dropdown
+/// opened, all its values reached and EXIT closed, a value seen), and what it visited held against
+/// what the screen declares for this entry.
+fn walk_tiles(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, ui: &Shell, entry: (String, String), declared: &[String], list: &serde_json::Value, published: &mut Vec<(String, Vec<u64>)>) {
+    let _ = param_names(list);
+    let _tiles = |ui: &Shell| -> Vec<String> { ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect() };
+    let list_at = |ui: &Shell| -> (bool, i32, usize) {
+        let g = ui.global::<crate::GridState>();
+        (g.get_list_open(), g.get_list_cursor(), g.get_list().row_count())
+    };
+    let mut visited: Vec<String> = Vec::new();
+    let mut last = String::new();
+    let mut first = true;
+    for _ in 0..2 * declared.len() + 8 {
+        let g = ui.global::<crate::GridState>();
+        let at = g.get_tiles().iter().position(|t| t.cursor);
+        let Some(t) = at else {
+            if first {
+                walk_act(f, total, "move:0", 1, list, published); // across from the rail onto the tiles
+                first = false;
+                continue;
+            }
+            break; // the cursor came off the tiles (the walk moved up past the first)
+        };
+        let name = g.get_tiles().row_data(t).unwrap().name.to_string();
+        if name == last {
+            break; // past the last tile
+        }
+        if !visited.contains(&name) {
+            visited.push(name.clone());
+            let kind = g.get_tiles().row_data(t).unwrap().kind;
+            walk_act(f, total, "confirm", 1, list, published);
+            match kind {
+                // A knob or slider: the change, another press lays it down.
+                0 | 1 => {
+                    let g = ui.global::<crate::GridState>();
+                    let t = g.get_tiles().iter().position(|t| t.cursor).expect("the cursor stays while a value is changed");
+                    assert!(g.get_tiles().row_data(t).unwrap().editing, "{entry:?} {name}: the press starts the change");
+                    walk_act(f, total, "move", 1, list, published);
+                    walk_act(f, total, "confirm", 1, list, published);
+                    let g = ui.global::<crate::GridState>();
+                    let t = g.get_tiles().iter().position(|t| t.cursor).expect("the cursor stays when laid down");
+                    assert!(!g.get_tiles().row_data(t).unwrap().editing, "{entry:?} {name}: the second press ends it");
+                }
+                // A switch: the press flips it; the second flips it back.
+                3 => {
+                    let g = ui.global::<crate::GridState>();
+                    let t = g.get_tiles().iter().position(|t| t.cursor).expect("the cursor stays on the switch");
+                    let was = g.get_tiles().row_data(t).unwrap().on;
+                    walk_act(f, total, "confirm", 1, list, published);
+                    let g = ui.global::<crate::GridState>();
+                    let t = g.get_tiles().iter().position(|t| t.cursor).expect("the cursor stays after the flip");
+                    assert!(g.get_tiles().row_data(t).unwrap().on != was, "{entry:?} {name}: the second press flips it back");
+                }
+                // A dropdown: the list opens; every value reached by the dial; EXIT closes it.
+                4 => {
+                    let (open, _at, n) = list_at(ui);
+                    assert!(open, "{entry:?} {name}: the press opens the dropdown");
+                    while list_at(ui).1 > 0 {
+                        walk_act(f, total, "move", -1, list, published);
+                    }
+                    for _ in 0..n - 1 {
+                        walk_act(f, total, "move", 1, list, published);
+                    }
+                    assert_eq!(list_at(ui).1, (n - 1) as i32, "{entry:?} {name}: the dial reached the last value");
+                    walk_act(f, total, "cancel", 1, list, published);
+                    assert!(!list_at(ui).0, "{entry:?} {name}: EXIT closes the dropdown");
+                    // EXIT is one step from anywhere: it dropped the tile cursor with the list. The dial
+                    // onto the tiles again, and the walk goes on from the first.
+                    walk_act(f, total, "move:0", 1, list, published);
+                    assert!(ui.global::<crate::GridState>().get_tiles().iter().any(|t| t.cursor), "{entry:?} {name}: the dial shows the cursor again");
+                }
+                // A value: shown, not offered (read only).
+                6 => {}
+                other => panic!("{entry:?} {name}: the walk pressed kind {other}, which it knows no effect of"),
+            }
+        }
+        last = name.clone();
+        walk_act(f, total, "move", 1, list, published);
+    }
+    let mut seen: Vec<String> = visited.to_vec();
+    seen.sort();
+    let mut want: Vec<String> = declared.to_vec();
+    want.sort();
+    assert_eq!(seen, want, "{entry:?}: the walk visited the tiles, the screen declares {want:?}");
+}
+
+#[test]
+fn params_reachable_from_home_by_panel_moves() {
+    // A plugin whose page has tabs: 26 parameters on the page "Voice" (more than 24, so it has a tabs'
+    // rail), in the second-level modules "Tone" and "Amp"; the page "Output" without tabs. 27 in all,
+    // so the search is the page's action in the top bar.
+    let mut list = Vec::new();
+    for i in 0..13u32 {
+        list.push(param(i, &format!("Tone {i}"), "Voice/Tone", 1., false, "knob", i + 1));
+    }
+    for i in 13..23u32 {
+        list.push(param(i, &format!("Amp {}", i - 13), "Voice/Amp", 1., false, "knob", i + 1));
+    }
+    list.push(param(23, "Wave", "Voice/Amp", 5., true, "list", 24));
+    list.push(param(24, "Sync", "Voice/Amp", 1., true, "switch", 25));
+    list.push(param(25, "Voices", "Voice/Amp", 1., false, "auto", 26));
+    list[25]["flags"] = json!(8); // read only: the value alone
+    list.push(param(26, "Gain", "Output", 1., false, "knob", 27));
+    let list = json!({"parameters": list});
+    let name_of = param_names(&list);
+    let priority_of = param_priorities(&list);
+
+    let mut f = bar::play_on_the_shell("params-reach", json!({"id": "p1", "name": "Grand", "unsaved": false}), play_graph());
+    let ui = f.screen.ui.clone_strong();
+    let mut published: Vec<(String, Vec<u64>)> = Vec::new();
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    params_settle(&mut f, &list, &mut published);
+    walk_act(&mut f, &mut total, "move", 0, &list, &mut published); // the first read is only a baseline
+    // Home → the Performance tile → Play (panel moves only, as on the device).
+    assert_eq!(ui.get_screen(), 3, "the shell opens on Play");
+    walk_act(&mut f, &mut total, "move:1", 1, &list, &mut published);
+    walk_act(&mut f, &mut total, "confirm:1", 1, &list, &mut published);
+    assert_eq!(ui.get_screen(), 4, "the press on a part opens the Part screen");
+    // The Part screen: the dial down to "Insert effects", pressed, opens the chain.
+    let part_cursor = |ui: &Shell| -> Option<String> {
+        ui.global::<crate::PartState>().get_rows().iter().find(|r| r.cursor).map(|r| r.label.to_string())
+    };
+    let mut moves = 0;
+    while part_cursor(&ui).as_deref() != Some("Insert effects") {
+        walk_act(&mut f, &mut total, "move", 1, &list, &mut published);
+        moves += 1;
+        let rows: Vec<String> = ui.global::<crate::PartState>().get_rows().iter().map(|r| r.label.to_string()).collect();
+        assert!(moves < 60, "the dial never reached Insert effects: {:?} among {rows:?}", part_cursor(&ui));
+    }
+    walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published);
+    assert_eq!(ui.get_screen(), 5, "Insert effects opens the chain");
+    // The chain: the dial onto the plugin, pressed: its actions; on to Parameters.
+    let mut moves = 0;
+    while part_cursor(&ui).as_deref() != Some("1. Rhodes") {
+        walk_act(&mut f, &mut total, "move", 1, &list, &mut published);
+        moves += 1;
+        assert!(moves < 20, "the dial never reached the plugin: {:?}", part_cursor(&ui));
+    }
+    walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published);
+    let mut moves = 0;
+    while part_cursor(&ui).as_deref() != Some("Parameters") {
+        walk_act(&mut f, &mut total, "move", 1, &list, &mut published);
+        moves += 1;
+        assert!(moves < 20, "the actions never reached Parameters: {:?}", part_cursor(&ui));
+    }
+    walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published);
+    assert_eq!(ui.get_screen(), 7, "Parameters opens the page");
+    // The page: the pages' rail, entry by entry; under it the tabs', and under that the tiles; the
+    // walk reads what the screen declares as it shows each entry, and what it visited is held against it.
+    let pages = |ui: &Shell| -> Vec<String> { ui.global::<crate::GridState>().get_pages().iter().map(|p| p.to_string()).collect() };
+    let tabs = |ui: &Shell| -> Vec<String> { ui.global::<crate::GridState>().get_tabs().iter().map(|t| t.to_string()).collect() };
+    let tiles = |ui: &Shell| -> Vec<String> { ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect() };
+    let page_cursor = |ui: &Shell| -> i32 { ui.global::<crate::GridState>().get_page_cursor() };
+    let tab_cursor = |ui: &Shell| -> i32 { ui.global::<crate::GridState>().get_tab_cursor() };
+    let page = |ui: &Shell| -> i32 { ui.global::<crate::GridState>().get_page() };
+    let declared_pages = pages(&ui);
+    let mut declared_entries: Vec<(String, String, Vec<String>)> = Vec::new(); // (page, tab or "", tiles)
+    let mut visited_pages: Vec<String> = Vec::new();
+    let mut visited_entry_count = 0;
+    for p in 0..declared_pages.len() {
+        while page_cursor(&ui) < 0 {
+            walk_act(&mut f, &mut total, "move", -1, &list, &mut published); // the dial back out of the tiles (and the tabs' rail)
+        }
+        while page_cursor(&ui) != p as i32 {
+            let by = if page_cursor(&ui) < p as i32 { 1 } else { -1 };
+            walk_act(&mut f, &mut total, "move:1", by, &list, &mut published); // along the pages' rail (the rails stand at the side: pane 1 runs along one)
+        }
+        if !visited_pages.contains(&pages(&ui)[p]) {
+            visited_pages.push(pages(&ui)[p].clone());
+        }
+        walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published); // the page opens, the cursor stays on the rail
+        let page_name = pages(&ui)[p].clone();
+        let tab_names = tabs(&ui);
+        if tab_names.len() > 1 {
+            walk_act(&mut f, &mut total, "move:0", 1, &list, &mut published); // across to the tabs' rail, on the page's open tab
+            assert!(tab_cursor(&ui) >= 0, "{page_name}: across from the pages' rail is the tabs'");
+            let mut visited_tabs: Vec<String> = Vec::new();
+            for t in 0..tab_names.len() {
+                while tab_cursor(&ui) != t as i32 {
+                    let by = if tab_cursor(&ui) < t as i32 { 1 } else { -1 };
+                    walk_act(&mut f, &mut total, "move:1", by, &list, &mut published); // along the tabs' rail
+                }
+                walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published); // the tab opens
+                visited_tabs.push(tabs(&ui)[t].clone());
+                let declared = tiles(&ui);
+                declared_entries.push((page_name.clone(), tabs(&ui)[t].clone(), declared.clone()));
+                walk_tiles(&mut f, &mut total, &ui, (page_name.clone(), tabs(&ui)[t].clone()), &declared, &list, &mut published);
+                visited_entry_count += 1;
+                while tab_cursor(&ui) < 0 {
+                    walk_act(&mut f, &mut total, "move", -1, &list, &mut published); // back up to the tabs' rail
+                }
+            }
+            // The tabs the walk visited against what the page declares.
+            let mut seen: Vec<String> = visited_tabs.to_vec();
+            seen.sort();
+            let mut want: Vec<String> = tab_names.to_vec();
+            want.sort();
+            assert_eq!(seen, want, "{page_name}: the walk visited the tabs, the page declares {want:?}");
+        } else {
+            let declared = tiles(&ui);
+            declared_entries.push((page_name.clone(), String::new(), declared.clone()));
+            walk_tiles(&mut f, &mut total, &ui, (page_name.clone(), String::new()), &declared, &list, &mut published); // across to the tiles (walk_tiles descends)
+            visited_entry_count += 1;
+        }
+        while page_cursor(&ui) < 0 {
+            walk_act(&mut f, &mut total, "move", -1, &list, &mut published); // back up to the pages' rail
+        }
+    }
+    // The pages the walk visited against what the screen declares, and every entry once.
+    let mut seen: Vec<String> = visited_pages.to_vec();
+    seen.sort();
+    let mut want: Vec<String> = declared_pages.to_vec();
+    want.sort();
+    assert_eq!(seen, want, "the walk visited the pages, the screen declares {want:?}");
+    let mut entries: Vec<(String, String)> = declared_entries.iter().map(|e| (e.0.clone(), e.1.clone())).collect();
+    entries.sort();
+    entries.dedup();
+    assert_eq!(entries.len(), declared_entries.len(), "an entry visited twice: {declared_entries:?}");
+    assert_eq!(visited_entry_count, entries.len(), "the walk visited an entry twice: {visited_entry_count} of {entries:?}");
+    // The top bar's action of the page: the search (a plugin of more than 24 parameters), by the third
+    // pane, the dial along the bar, the press; EXIT closes the keyboard over the screen.
+    let bar_labels = |ui: &Shell| -> Vec<String> { ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect() };
+    assert!(bar_labels(&ui).iter().any(|l| l.starts_with("Search")), "the page declares a search among its bar actions: {:?}", bar_labels(&ui));
+    walk_act(&mut f, &mut total, "move:2", 1, &list, &mut published);
+    assert!(ui.global::<Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let mut moves = 0;
+    while !ui.global::<Bar>().get_actions().iter().any(|a| a.cursor && a.label.to_string().starts_with("Search")) && !ui.global::<Bar>().get_more_cursor() {
+        walk_act(&mut f, &mut total, "move", 1, &list, &mut published);
+        moves += 1;
+        assert!(moves < 12, "the bar's cursor never reached the search: {:?}", bar_labels(&ui));
+    }
+    walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published);
+    if ui.global::<crate::MenuState>().get_open() {
+        // The bar folded its actions into More: the search is a row of the menu.
+        let mut moves = 0;
+        while !ui.global::<crate::MenuState>().get_rows().iter().any(|r| r.cursor && r.label.to_string().starts_with("Search")) {
+            walk_act(&mut f, &mut total, "move", 1, &list, &mut published);
+            moves += 1;
+            assert!(moves < 12, "the menu's cursor never reached the search");
+        }
+        walk_act(&mut f, &mut total, "confirm", 1, &list, &mut published);
+    }
+    assert!(ui.global::<crate::KeyboardState>().get_open(), "the search opens the text keyboard");
+    walk_act(&mut f, &mut total, "cancel", 1, &list, &mut published);
+    assert!(!ui.global::<crate::KeyboardState>().get_open() && ui.get_screen() == 7, "EXIT closes it, the page kept");
+    // The banks: what was last published for the device's screen knobs is the page shown and its tiles
+    // by priority (the knobs play the page's banks).
+    let shown_page = pages(&ui)[page(&ui).max(0) as usize].clone();
+    let mut order: Vec<(u64, u64)> = tiles(&ui).iter().map(|n| {
+        let id = *name_of.iter().find(|(_, m)| *m == n).expect("a tile of the plugin's parameter").0;
+        (id, priority_of[&id])
+    }).collect();
+    order.sort_by_key(|(_, pr)| *pr);
+    let ids: Vec<u64> = order.iter().map(|(id, _)| *id).collect();
+    let last = published.last().unwrap_or_else(|| panic!("the page published nothing for the screen knobs"));
+    assert_eq!(last, &(shown_page, ids), "the banks follow the page shown and its tiles by priority; published so far: {published:?}");
+    eprintln!("visited {} pages and {visited_entry_count} entries; the last published page has {} banks", visited_pages.len(), published.last().map(|(_, p)| p.len()).unwrap_or(0));
+}

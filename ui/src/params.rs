@@ -466,14 +466,22 @@ impl Screen {
 
     /// params.changed: the values that moved, for this plugin.
     pub fn changed(&mut self, params: &Value) {
+        let mut moved = false;
         for c in params["changes"].as_array().into_iter().flatten() {
             if c["node"].as_u64() == Some(self.node) && c["kind"] == "value" {
                 if let (Some(p), Some(v)) = (c["param"].as_u64(), c["value"].as_f64()) {
-                    self.value_arrived(p as u32, v);
+                    // A value the page already shows (the plugin rewriting it, another client setting the same)
+                    // costs nothing: no text asked again, no relayout, no frame.
+                    if self.values.get(&(p as u32)) != Some(&v) {
+                        self.value_arrived(p as u32, v);
+                        moved = true;
+                    }
                 }
             }
         }
-        self.show();
+        if moved {
+            self.show();
+        }
     }
 
     fn value(&self, p: &Param) -> f64 {

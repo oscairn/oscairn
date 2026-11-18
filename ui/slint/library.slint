@@ -8,6 +8,13 @@
 import { Theme, TabBar, TabLabel, Field, Cursor, FitText, Button, Section } from "theme.slint";
 import { Row, ScrollBar, SettingData, PartState } from "part.slint";
 
+// Where a sidebar line is in the view: its line (counted from the view's first), and for bubbles its place along it.
+export struct SideGeo {
+    line: int,
+    x: length,
+    w: length,
+}
+
 export global LibraryState {
     in property <[string]> pages;
     in property <[TabLabel]> page-labels;
@@ -26,6 +33,13 @@ export global LibraryState {
     in property <bool> info-on;
     in property <bool> info-cursor;
     callback info-toggled();
+    // The sidebar's entries as wrapping bubbles (pills), not one to a line: its button in the row under the top bar.
+    in property <bool> bubbles;
+    in property <bool> view-cursor;
+    callback view-toggled();
+    // Each line's place in the view, and the width the sidebar's entries have (set here, read by the lines' layout).
+    in property <[SideGeo]> side-geo;
+    in-out property <length> side-room: 280px;
     // The list with the sidebar at its left (the kinds), else the list as the other screens have it.
     in property <bool> list-only;
     in property <[SettingData]> side-rows;
@@ -35,6 +49,76 @@ export global LibraryState {
     callback side-tapped(int);
     callback side-scrolled(int);
     callback side-resized();
+}
+
+// An icon button in the row under the top bar: a toggle (`on`), with its name for the accessibility tree and a cursor ring.
+component ToolButton inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <bool> on;
+    in property <bool> cursor;
+    callback clicked();
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.on;
+    Button {
+        text: "";
+        on: root.on;
+        clicked => { root.clicked(); }
+    }
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: Theme.icon * 0.85;
+        height: Theme.icon * 0.85;
+        source: root.icon;
+        colorize: root.on ? Theme.on-accent : Theme.text;
+    }
+    Cursor {
+        corner: Theme.button-radius(parent.height);
+        shown: root.cursor;
+        always: true;
+    }
+}
+
+// A sidebar entry as a bubble: the family's corner, the accent when chosen, the tag's color as a dot before its name.
+component Pill inherits Rectangle {
+    in property <SettingData> data;
+    callback tapped();
+    property <length> dot: Theme.small * 0.7;
+    property <length> dot-room: root.data.tinted ? root.dot + Theme.pad-tight : 0px;
+    background: root.data.on ? Theme.accent.with-alpha(Theme.wash) : Theme.raised;
+    border-radius: Theme.button-radius(self.height);
+    border-width: root.data.on ? 2 * Theme.hair : Theme.edge-width;
+    border-color: root.data.on ? Theme.accent : Theme.edge-color;
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.data.on;
+    accessible-label: root.data.label;
+    if root.data.tinted: Rectangle {
+        x: Theme.pad;
+        y: (parent.height - self.height) / 2;
+        width: root.dot;
+        height: root.dot;
+        border-radius: self.width / 2;
+        background: root.data.tint;
+    }
+    FitText {
+        x: Theme.pad + root.dot-room;
+        width: parent.width - 2 * Theme.pad - root.dot-room;
+        height: parent.height;
+        text: root.data.label;
+        ink: root.data.on ? Theme.accent : Theme.text;
+        bold: root.data.on;
+    }
+    TouchArea {
+        clicked => { root.tapped(); }
+    }
+    Cursor {
+        corner: Theme.button-radius(parent.height);
+        shown: root.data.cursor;
+    }
 }
 
 export component Library inherits Rectangle {
@@ -47,15 +131,25 @@ export component Library inherits Rectangle {
     out property <length> content-width: max(0px, root.width - root.content-x - Theme.margin);
     out property <length> content-height: max(0px, root.height - root.content-y - Theme.margin);
     property <length> side-height: max(0px, root.content-height - Theme.touch - Theme.gap);
-    property <int> side-per-view: max(1, floor((root.side-height + root.gap) / (Theme.touch + root.gap)));
+    // Bubbles are as far apart as the dense gap (a joined theme has no gap between its lines, but pills are apart).
+    property <length> step-gap: LibraryState.bubbles ? Theme.gap : root.gap;
+    property <int> side-per-view: max(1, floor((root.side-height + root.step-gap) / (Theme.touch + root.step-gap)));
+    // What the entries share across: the sidebar less its lane (kept in bubbles whether or not a bar shows, so that the lines
+    // that wrap do not change with the bar) and the overlap the rows take.
+    property <length> side-room: max(0px, root.side-width - (LibraryState.bubbles || root.side-long ? Theme.scroll-lane - Theme.scroll-overlap : 0px));
+    changed side-room => { LibraryState.side-room = root.side-room; LibraryState.side-resized(); }
     property <bool> side-long: LibraryState.side-total > root.side-per-view;
-    property <length> lane: root.side-long ? Theme.scroll-lane : 0px;
     changed side-per-view => { LibraryState.side-per-view = root.side-per-view; LibraryState.side-resized(); }
-    init => { LibraryState.side-per-view = root.side-per-view; }
+    init => {
+        LibraryState.side-per-view = root.side-per-view;
+        LibraryState.side-room = root.side-room;
+    }
     out property <length> tabs-width: min(tabs.natural, root.width * 0.55);
     out property <length> search-x: Theme.margin + root.tabs-width + Theme.margin;
-    property <length> info-button: LibraryState.list-only ? Theme.touch + Theme.margin : 0px;
-    out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin - root.info-button);
+    // The buttons at the right end of the row: the sidebar's view, then the panel.
+    property <length> tool: Theme.touch + Theme.margin;
+    property <length> tools: LibraryState.list-only ? 2 * root.tool : 0px;
+    out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin - root.tools);
     property <length> line: Theme.body + Theme.margin;
 
     tabs := TabBar {
@@ -122,32 +216,28 @@ export component Library inherits Rectangle {
             }
         }
     }
-    // The button at the right of the row: the panel in place of the sidebar, and back.
-    if LibraryState.header && LibraryState.list-only: Rectangle {
+    // The buttons at the right of the row: the sidebar as bubbles, and the panel in place of the sidebar (and back).
+    if LibraryState.header && LibraryState.list-only: ToolButton {
+        x: root.width - Theme.margin - 2 * Theme.touch - Theme.margin;
+        y: Theme.margin;
+        width: Theme.touch;
+        height: Theme.touch;
+        label: "Bubbles";
+        icon: @image-url("icons/view-bubbles.svg");
+        on: LibraryState.bubbles;
+        cursor: LibraryState.view-cursor;
+        clicked => { LibraryState.view-toggled(); }
+    }
+    if LibraryState.header && LibraryState.list-only: ToolButton {
         x: root.width - Theme.margin - Theme.touch;
         y: Theme.margin;
         width: Theme.touch;
         height: Theme.touch;
-        accessible-role: button;
-        accessible-label: "Details";
-        Button {
-            text: "";
-            on: LibraryState.info-on;
-            clicked => { LibraryState.info-toggled(); }
-        }
-        Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: Theme.icon * 0.85;
-            height: Theme.icon * 0.85;
-            source: @image-url("icons/info.svg");
-            colorize: LibraryState.info-on ? Theme.on-accent : Theme.text;
-        }
-        Cursor {
-            corner: Theme.button-radius(parent.height);
-            shown: LibraryState.info-cursor;
-            always: true;
-        }
+        label: "Details";
+        icon: @image-url("icons/info.svg");
+        on: LibraryState.info-on;
+        cursor: LibraryState.info-cursor;
+        clicked => { LibraryState.info-toggled(); }
     }
     // The panel in the sidebar's place: what the item under the cursor is, a few lines a view, turned by the arrows.
     if LibraryState.list-only && LibraryState.info-on: Section {
@@ -185,11 +275,12 @@ export component Library inherits Rectangle {
             clicked => { PartState.info-scroll(1); }
         }
     }
-    // The sidebar: one line an entry, a heading over each section.
+    // The sidebar: one line an entry, or bubbles that wrap; a heading over each section.
     for row[i] in LibraryState.side-rows: Rectangle {
-        x: Theme.margin;
-        y: root.content-y + i * (Theme.touch + root.gap);
-        width: root.side-width - root.lane + (root.side-long ? Theme.scroll-overlap : 0px);
+        property <SideGeo> geo: LibraryState.side-geo[i];
+        x: Theme.margin + (LibraryState.bubbles ? self.geo.x : 0px);
+        y: root.content-y + (LibraryState.bubbles ? self.geo.line : i) * (Theme.touch + root.step-gap);
+        width: LibraryState.bubbles ? self.geo.w : root.side-room;
         height: Theme.touch;
         if row.kind == 4: Text {
             x: Theme.pad;
@@ -202,7 +293,13 @@ export component Library inherits Rectangle {
             color: Theme.muted;
             text: row.label;
         }
-        if row.kind != 4: Row {
+        if row.kind != 4 && !LibraryState.bubbles: Row {
+            width: parent.width;
+            height: parent.height;
+            data: row;
+            tapped => { LibraryState.side-tapped(i); }
+        }
+        if row.kind != 4 && LibraryState.bubbles: Pill {
             width: parent.width;
             height: parent.height;
             data: row;

@@ -514,7 +514,7 @@ impl Screen {
             }
             (Row::Compact, _) => {
                 self.compact = !self.compact;
-                let _ = crate::settings::keep_library_view(self.compact);
+                let _ = crate::settings::keep_library_view(self.compact, crate::settings::library_view().1);
             }
             (Row::TagOptions, _) => {
                 self.mode = Mode::TagPick;

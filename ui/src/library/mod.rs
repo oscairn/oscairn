@@ -45,7 +45,7 @@ use crate::nav::{Action, Cursor};
 use crate::setlist::color;
 use crate::tabs;
 use crate::topbar::Tool;
-use crate::{InfoLine, LibraryState, SettingData, Shell, TabLabel};
+use crate::{InfoLine, LibraryState, SettingData, Shell, SideGeo, TabLabel};
 use filters::Filters;
 use serde_json::{json, Value};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -244,6 +244,11 @@ pub struct Screen {
     side_cursor: Cursor,
     side_focus: bool,
     side_rows: Rc<VecModel<SettingData>>,
+    side_geo: Rc<VecModel<SideGeo>>,
+    /// The cell of the sidebar the view starts at (the first one on its first line).
+    side_page: usize,
+    /// The sidebar as bubbles (library-view.txt's "pills", the JUCE pane's word), not a line to an entry: kept for the next time.
+    bubbles: bool,
     /// The panel is shown, in the sidebar's place (until the screen is left for good: a session's choice, not saved).
     info_on: bool,
     /// The item last pressed or under the cursor: what Options is about.
@@ -311,6 +316,9 @@ impl Screen {
             side_cursor: Cursor::new(0, 1),
             side_focus: false,
             side_rows: Rc::new(VecModel::default()),
+            side_geo: Rc::new(VecModel::default()),
+            side_page: 0,
+            bubbles: crate::settings::library_view().1,
             info_on: false,
             selected: None,
             auditioning: Auditioning::default(),
@@ -622,12 +630,25 @@ impl Screen {
 
     /// How many stops the row under the top bar has for the cursor: each tab, the search box, and its cross when it has text.
     fn head_stops(&self) -> usize {
-        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty()) + usize::from(self.mode == Mode::List)
+        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty()) + if self.mode == Mode::List { 2 } else { 0 }
     }
 
     /// The panel's button is the last stop of the row, in the kinds' list.
     fn info_stop(&self) -> Option<usize> {
         (self.mode == Mode::List).then(|| self.head_stops() - 1)
+    }
+
+    /// The sidebar's view (bubbles or lines) is the stop before it.
+    fn view_stop(&self) -> Option<usize> {
+        (self.mode == Mode::List).then(|| self.head_stops() - 2)
+    }
+
+    /// The sidebar as bubbles, or as lines again.
+    pub fn toggle_bubbles(&mut self) {
+        self.bubbles = !self.bubbles;
+        let _ = crate::settings::keep_library_view(crate::settings::library_view().0, self.bubbles);
+        self.side_cursor.first = 0;
+        self.show();
     }
 
     /// The panel shown, or the sidebar again.
@@ -672,7 +693,8 @@ impl Screen {
         lib.set_list_only(state.4);
         lib.set_search(state.3.as_str().into());
         lib.set_search_cursor(stop == Some(n));
-        lib.set_clear_cursor(stop.is_some_and(|s| s == n + 1 && Some(s) != self.info_stop()));
+        lib.set_clear_cursor(stop.is_some_and(|s| s == n + 1 && !state.3.is_empty()));
+        lib.set_view_cursor(stop.is_some() && stop == self.view_stop());
         lib.set_info_on(state.5);
         lib.set_info_cursor(stop.is_some() && stop == self.info_stop());
     }
@@ -998,6 +1020,9 @@ impl Screen {
             return self.ask_search();
         } else if Some(at) == self.info_stop() {
             self.toggle_info();
+            self.tab_at = Some(at);
+        } else if Some(at) == self.view_stop() {
+            self.toggle_bubbles();
             self.tab_at = Some(at);
         } else {
             self.clear_search();

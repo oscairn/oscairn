@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The Library's sidebar (LibraryPane.cpp's left column, ui/LIBRARY-APP.md A5 to A8): Favorites and Recent, then the
 //! libraries (All, My own, each one installed, with its count), then the tags with their counts. One line an entry,
-//! the ones chosen ticked; a choice narrows the list at once (the engine is asked again), several tags may be chosen
-//! and all must match. It has its own cursor and view, and its own scroll bar for touch.
+//! or, as bubbles, entries that wrap along a line (the JUCE pane's pills); the ones chosen ticked or lit; a choice narrows
+//! the list at once (the engine is asked again), several tags may be chosen and all must match. It has its own cursor and
+//! view, and its own scroll bar for touch.
 
 use super::*;
 use crate::nav::Cursor;
+use slint::Model;
 
 /// What a line of the sidebar is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +27,34 @@ impl Side {
     fn pickable(self) -> bool {
         !matches!(self, Side::Heading | Side::Empty)
     }
+}
+
+/// An entry with its place: the line it is on and, along the line, where it starts and how wide it is (logical pixels).
+#[derive(Clone)]
+pub(super) struct Cell {
+    pub side: Side,
+    pub data: SettingData,
+    pub line: usize,
+    pub x: f32,
+    pub w: f32,
+}
+
+/// How wide `text` is at `size`, estimated from the typeface's proportions (Inter): a narrow letter, a wide one, a capital, the rest.
+/// Bubbles are laid out here, before the window draws them, with a little over what the text needs (a name that still does not
+/// fit shrinks to 70% in its bubble, then is cut).
+pub(super) fn text_width(text: &str, size: f32) -> f32 {
+    let em: f32 = text
+        .chars()
+        .map(|c| match c {
+            ' ' | 'i' | 'j' | 'l' | '.' | ',' | ':' | ';' | '\'' | '|' | '!' => 0.28,
+            'f' | 't' | 'r' | 'I' | '1' | '-' | '(' | ')' => 0.38,
+            'm' | 'M' | 'W' | 'w' | '@' => 0.86,
+            c if c.is_ascii_uppercase() => 0.68,
+            c if c.is_ascii_digit() => 0.6,
+            _ => 0.57,
+        })
+        .sum();
+    em * size * 1.06
 }
 
 impl Screen {
@@ -56,35 +86,86 @@ impl Screen {
         out
     }
 
+    /// What the layout needs of the window: the width the entries share, the padding, the gap between bubbles, the type and a
+    /// touch target (the window's own numbers; the usual ones where there is no window).
+    fn side_metrics(&self) -> (f32, f32, f32, f32, f32, f32) {
+        let Some(ui) = self.ui.upgrade() else { return (280., 10., 4., 16., 13., 44.) };
+        let t = ui.global::<crate::Theme>();
+        (ui.global::<LibraryState>().get_side_room(), t.get_pad(), t.get_gap(), t.get_body(), t.get_small(), t.get_touch())
+    }
+
+    /// The entries with their places: a line each, or as bubbles that wrap (a heading, and the line of "No tags", alone on theirs).
+    pub(super) fn side_cells(&self) -> Vec<Cell> {
+        let entries = self.side_entries();
+        let (room, pad, gap, body, small, touch) = self.side_metrics();
+        if !self.bubbles {
+            return entries.into_iter().enumerate().map(|(i, (side, data))| Cell { side, data, line: i, x: 0., w: room }).collect();
+        }
+        let (mut line, mut x, mut open) = (0, 0f32, false);
+        let mut out = Vec::with_capacity(entries.len());
+        for (side, data) in entries {
+            if !side.pickable() {
+                if open {
+                    line += 1;
+                    open = false;
+                }
+                out.push(Cell { side, data, line, x: 0., w: room });
+                line += 1;
+                x = 0.;
+                continue;
+            }
+            let dot = if data.tinted { small * 0.7 + gap } else { 0. };
+            let w = (text_width(&data.label, body) + 2. * pad + dot).clamp(touch, room.max(touch));
+            if open && x + w > room + 0.01 {
+                line += 1;
+                x = 0.;
+            }
+            out.push(Cell { side, data, line, x, w });
+            x += w + gap;
+            open = true;
+        }
+        out
+    }
+
     /// The sidebar's view written to the window, each line only when it changed.
     pub(super) fn show_side(&mut self) {
         let Some(ui) = self.ui.upgrade().filter(|_| self.active) else { return };
         let lib = ui.global::<LibraryState>();
+        lib.set_bubbles(self.bubbles);
         lib.set_side_rows(ModelRc::from(self.side_rows.clone()));
-        let entries = if self.side_visible() { self.side_entries() } else { vec![] };
-        let (per, n) = (lib.get_side_per_view().max(1) as usize, entries.len());
+        lib.set_side_geo(ModelRc::from(self.side_geo.clone()));
+        let cells = if self.side_visible() { self.side_cells() } else { vec![] };
+        let (per, n) = (lib.get_side_per_view().max(1) as usize, cells.len());
+        let lines = cells.last().map_or(0, |c| c.line + 1);
         let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);
-        let last = n.saturating_sub(1) / per * per;
+        let last = lines.saturating_sub(1) / per * per;
+        // The first line of the view: the one the cursor is on is in it, else where the view was.
         let first = match at {
-            Some(a) if self.side_focus => a / per * per,
+            Some(a) if self.side_focus => cells[a].line / per * per,
             _ => (self.side_cursor.first / per * per).min(last),
         };
         self.side_cursor = Cursor { at, count: n, per_page: per, first };
+        self.side_page = cells.iter().position(|c| c.line >= first).unwrap_or(n);
         let (focus, at) = (self.side_focus, at);
-        let shown: Vec<SettingData> = entries.into_iter().enumerate().skip(first).take(per).map(|(i, (_, d))| SettingData { cursor: focus && at == Some(i), ..d }).collect();
+        let page: Vec<(usize, &Cell)> = cells.iter().enumerate().skip(self.side_page).take_while(|(_, c)| c.line < first + per).collect();
+        let shown: Vec<SettingData> = page.iter().map(|(i, c)| SettingData { cursor: focus && at == Some(*i), ..c.data.clone() }).collect();
+        let geo: Vec<SideGeo> = page.iter().map(|(_, c)| SideGeo { line: (c.line - first) as i32, x: c.x, w: c.w }).collect();
         crate::setlist::update(&self.side_rows, shown);
-        lib.set_side_total(n as i32);
+        if self.side_geo.iter().ne(geo.iter().cloned()) {
+            self.side_geo.set_vec(geo);
+        }
+        lib.set_side_total(lines as i32);
         lib.set_side_first(first as i32);
     }
 
     /// The cursor to the sidebar (the one cursor leaves the list or the row of tabs), on the line it was on, else the first.
     pub(super) fn enter_side(&mut self) {
-        let entries = self.side_entries();
+        let cells = self.side_cells();
         self.tab_at = None;
         self.b.cursor = self.b.cursor.clear();
         self.side_focus = true;
-        let on = self.side_cursor.at.filter(|a| entries.get(*a).is_some_and(|e| e.0.pickable()));
-        self.side_cursor.at = on.or_else(|| entries.iter().position(|e| e.0.pickable()));
+        let on = self.side_cursor.at.filter(|a| cells.get(*a).is_some_and(|e| e.side.pickable()));
+        self.side_cursor.at = on.or_else(|| cells.iter().position(|e| e.side.pickable()));
     }
 
     /// The cursor back to the list, on the first line of its view.
@@ -93,10 +174,16 @@ impl Screen {
         self.b.cursor = self.b.cursor.moved(0);
     }
 
-    /// The cursor `by` lines down the choices (headings are passed over); up from the first reaches the row of tabs.
+    /// The cursor to the row of tabs, from the first entry.
+    fn side_to_tabs(&mut self) {
+        self.side_focus = false;
+        self.tab_at = Some(self.tab_current());
+    }
+
+    /// The cursor `by` entries on (headings are passed over); up from the first reaches the row of tabs.
     fn side_move(&mut self, by: i64) {
-        let entries = self.side_entries();
-        let pick: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| e.0.pickable()).map(|(i, _)| i).collect();
+        let cells = self.side_cells();
+        let pick: Vec<usize> = cells.iter().enumerate().filter(|(_, e)| e.side.pickable()).map(|(i, _)| i).collect();
         if pick.is_empty() {
             return;
         }
@@ -104,13 +191,49 @@ impl Screen {
         let to = match now {
             None => 0,
             Some(0) if by < 0 => {
-                self.side_focus = false;
-                self.tab_at = Some(self.tab_current());
+                self.side_to_tabs();
                 return;
             }
             Some(k) => (k as i64 + by).clamp(0, pick.len() as i64 - 1) as usize,
         };
         self.side_cursor.at = Some(pick[to]);
+    }
+
+    /// An arrow among bubbles, to the neighbor where it points: along the line for left and right (right past the last of the
+    /// line leaves for the list), to the bubble nearest across on the next line up or down (up from the first line reaches the tabs).
+    fn side_arrow(&mut self, dx: i32, dy: i32) {
+        let cells = self.side_cells();
+        let Some(cur) = self.side_cursor.at.filter(|a| cells.get(*a).is_some_and(|c| c.side.pickable())) else {
+            return self.side_move(1);
+        };
+        let c = &cells[cur];
+        if dx != 0 {
+            let next = if dx > 0 {
+                (cur + 1..cells.len()).find(|&i| cells[i].line == c.line && cells[i].side.pickable())
+            } else {
+                (0..cur).rev().find(|&i| cells[i].line == c.line && cells[i].side.pickable())
+            };
+            match next {
+                Some(i) => self.side_cursor.at = Some(i),
+                None if dx > 0 => self.leave_side(),
+                None => {}
+            }
+            return;
+        }
+        let line = if dy > 0 {
+            (cur + 1..cells.len()).find(|&i| cells[i].line > c.line && cells[i].side.pickable()).map(|i| cells[i].line)
+        } else {
+            (0..cur).rev().find(|&i| cells[i].line < c.line && cells[i].side.pickable()).map(|i| cells[i].line)
+        };
+        let Some(line) = line else {
+            if dy < 0 {
+                self.side_to_tabs();
+            }
+            return;
+        };
+        let across = c.x + c.w / 2.;
+        let near = |i: &usize| ((cells[*i].x + cells[*i].w / 2. - across).abs() * 100.) as i64;
+        self.side_cursor.at = (0..cells.len()).filter(|&i| cells[i].line == line && cells[i].side.pickable()).min_by_key(near);
     }
 
     /// A navigation action while the cursor is on the sidebar: the dial and the arrows walk it, right goes to the list.
@@ -123,6 +246,7 @@ impl Screen {
                 return self.handle(nav);
             }
             Action::Move { by, .. } => self.side_move(i64::from(by)),
+            Action::Arrow { dx, dy } if self.bubbles && (dx != 0 || dy != 0) => self.side_arrow(dx.signum(), dy.signum()),
             Action::Arrow { dx, dy } if dx > 0 && dy == 0 => self.leave_side(),
             Action::Arrow { dx: 0, dy } => self.side_move(i64::from(dy)),
             Action::Page(by) => self.side_move(i64::from(by) * per),
@@ -140,8 +264,8 @@ impl Screen {
 
     /// A line chosen: what it narrows to is asked of the engine at once (choosing applies; opening a Performance still waits for a press).
     pub(super) fn side_press(&mut self, at: usize) {
-        let Some((side, _)) = self.side_entries().into_iter().nth(at) else { return };
-        match side {
+        let Some(cell) = self.side_cells().into_iter().nth(at) else { return };
+        match cell.side {
             Side::Favorites => self.filters.favorites = !self.filters.favorites,
             Side::Recent => self.filters.recent = !self.filters.recent,
             Side::Source(i) => {
@@ -160,12 +284,12 @@ impl Screen {
         self.query();
     }
 
-    /// A touch on line `row` of the view: the cursor drops, the line is chosen.
+    /// A touch on entry `row` of the view: the cursor drops, the entry is chosen.
     pub fn side_tap(&mut self, row: i32) {
         self.tab_at = None;
         self.side_focus = false;
         self.b.cursor = self.b.cursor.clear();
-        self.side_press(self.side_cursor.first + row.max(0) as usize);
+        self.side_press(self.side_page + row.max(0) as usize);
         self.show();
     }
 
@@ -173,7 +297,8 @@ impl Screen {
     pub fn side_scroll_to(&mut self, first: i32) {
         self.side_focus = false;
         let per = self.side_cursor.per_page.max(1);
-        let last = self.side_cursor.count.saturating_sub(1) / per * per;
+        let lines = self.side_cells().last().map_or(0, |c| c.line + 1);
+        let last = lines.saturating_sub(1) / per * per;
         self.side_cursor.first = (first.max(0) as usize / per * per).min(last);
         self.show();
     }
@@ -183,7 +308,7 @@ impl Screen {
         if !self.side_focus {
             return None;
         }
-        match self.side_entries().get(self.side_cursor.at?)?.0 {
+        match self.side_cells().get(self.side_cursor.at?)?.side {
             Side::Tag(i) => self.filters.tag_list(&self.tags).get(i).map(|t| t.0.clone()),
             _ => None,
         }

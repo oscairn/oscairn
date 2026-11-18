@@ -20,11 +20,11 @@ pub fn blue_square_theme() -> theme::Loaded {
         "wires": {"audio": "#2F6FD0", "notes": "#7B4BD6", "disabled": "#9AA3AD", "draining": "#B85A0A", "unconnected": "#C42D2D", "control": "#00805A"}}))
 }
 
-fn blue() -> theme::Loaded {
+pub(super) fn blue() -> theme::Loaded {
     blue_square_theme()
 }
 
-fn orange() -> theme::Loaded {
+pub(super) fn orange() -> theme::Loaded {
     theme::chosen(&theme::Places::default(), "oscairn-dark", "")
 }
 

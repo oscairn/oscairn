@@ -1362,3 +1362,52 @@ fn routing_reachable_from_home_by_panel_moves() {
 }
 
 use crate::routing::Stop as RoutingStop;
+
+// The canvas's chevrons are the screens' icon-only buttons (an icon, no words): each is a button for
+// accessibility and says what pressing it does (Expand part, Collapse part), as the panel's cells do.
+// Every accessible button on the screen carries a label, and the chevrons are among them.
+#[test]
+fn icon_only_buttons_have_accessible_labels() {
+    let mut s = Screen::sized(1280, 720);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    use slint::private_unstable_api::re_exports::{AccessibleRole, AccessibleStringProperty, ItemRc, WindowInner};
+    // Every accessible item in the window, the tree walked from its root.
+    fn walk(item: ItemRc, out: &mut Vec<(AccessibleRole, Option<slint::SharedString>)>) {
+        if item.is_accessible() {
+            out.push((item.accessible_role(), item.accessible_string_property(AccessibleStringProperty::Label)));
+        }
+        let mut child = item.first_child();
+        while let Some(c) = child {
+            let next = c.next_sibling();
+            walk(c, out);
+            child = next;
+        }
+    }
+    let buttons = |ui: &Shell| {
+        let root = WindowInner::from_pub(ui.window()).try_component().expect("the window's component");
+        let mut items = Vec::new();
+        walk(ItemRc::new_root(root), &mut items);
+        items.into_iter().filter(|(role, _)| matches!(role, AccessibleRole::Button | AccessibleRole::Checkbox | AccessibleRole::Switch | AccessibleRole::RadioButton | AccessibleRole::Combobox)).collect::<Vec<_>>()
+    };
+    let named = |what: &str, found: &[(AccessibleRole, Option<slint::SharedString>)]| {
+        assert!(!found.is_empty(), "{what}: no accessible buttons at all");
+        for (role, label) in found {
+            let label = label.as_deref().unwrap_or_default();
+            assert!(!label.is_empty(), "{what}: a {role:?} without a label");
+        }
+    };
+    // Collapsed: every part's box offers expanding it.
+    let found = buttons(&ui);
+    named("collapsed", &found);
+    let labels: Vec<String> = found.iter().map(|(_, l)| l.as_deref().unwrap().to_string()).collect();
+    assert!(labels.iter().all(|l| l == "Expand part"), "collapsed: the labels are {labels:?}");
+    // Expanded: the part's frame offers collapsing it.
+    r.tap_chevron(1, at(&ui, "Bass"));
+    s.frame();
+    let found = buttons(&ui);
+    named("expanded", &found);
+    let labels: Vec<String> = found.iter().map(|(_, l)| l.as_deref().unwrap().to_string()).collect();
+    assert!(labels.contains(&"Collapse part".to_string()), "expanded: the labels are {labels:?}");
+    assert!(labels.contains(&"Expand part".to_string()), "expanded: the labels are {labels:?}");
+}

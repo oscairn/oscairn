@@ -66,6 +66,8 @@ export global PartState {
 
 export component Row inherits Section {
     in property <SettingData> data;
+    divider: Theme.list-divider;
+    border-radius: Theme.list-radius;
     callback tapped();
     callback step(int);
     // A switch (kind 1) is drawn as one, left of its value text's end; its parts' sizes.
@@ -237,7 +239,7 @@ export component ScrollBar inherits Rectangle {
     Rectangle {
         x: (parent.width - Theme.scroll-bar) / 2;
         width: Theme.scroll-bar;
-        border-radius: self.width / 2;
+        border-radius: min(self.width / 2, Theme.radius);
         background: Theme.track;
         Rectangle {
             y: root.thumb-y;
@@ -264,7 +266,7 @@ export component Part inherits Rectangle {
     // The list takes the whole width and the read-only panel is not drawn (the Library puts its sidebar or panel at the left).
     in property <bool> list-only;
     // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
-    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> gap: Theme.list-gap;
     property <length> footer: Theme.touch;
     property <length> list-width: root.list-only ? self.width - 2 * Theme.margin : (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;

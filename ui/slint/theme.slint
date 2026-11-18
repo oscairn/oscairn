@@ -183,6 +183,12 @@ export global Theme {
     out property <color> key-fill: surface.brighter(0.15);
     out property <length> key-radius: 4px; // a piano key's corners (Panel.cpp: 4 white, 3 black)
     out property <length> section-radius: sections == SectionStyle.joined ? 0px : radius + 2px; // drawSection
+    // The shared list's style (a list screen's rows, the Library's sidebar): the gap between its items, their corners and whether a
+    // line is drawn between them. Each follows the sections' style until a theme says otherwise: `separate`, cards with a gap and
+    // corners; `joined`, rows with no gap, square, a thin line between.
+    out property <length> list-gap: gap-between(gap);
+    out property <length> list-radius: section-radius;
+    out property <bool> list-divider: sections == SectionStyle.joined;
     out property <color> wash-color: accent.with-alpha(wash);
     out property <color> track: border.with-alpha(track-alpha);
     out property <color> rule: border.with-alpha(0.6);
@@ -231,11 +237,13 @@ export global Theme {
 // and left one pixel outside; here its right and bottom, so the outer ones stay inside the area).
 export component Section inherits Rectangle {
     in property <color> fill: Theme.surface;
+    // Whether a line is drawn on the edge it shares with its neighbors (joined sections), else its own edge and corners.
+    in property <bool> divider: Theme.sections == SectionStyle.joined;
     background: root.fill;
     border-radius: Theme.section-radius;
-    border-width: Theme.sections == SectionStyle.joined ? 0px : Theme.edge-width;
+    border-width: root.divider ? 0px : Theme.edge-width;
     border-color: Theme.edge-color;
-    if Theme.sections == SectionStyle.joined: Rectangle {
+    if root.divider: Rectangle {
         // One pixel past the right and bottom: the neighbor's first pixel, so two sections draw one line.
         width: parent.width + Theme.hair;
         height: parent.height + Theme.hair;
@@ -1120,7 +1128,7 @@ export component RowMark inherits Rectangle {
         y: root.height * 0.22;
         width: Theme.mark;
         height: root.height * 0.56;
-        border-radius: Theme.mark / 2;
+        border-radius: min(Theme.mark / 2, Theme.radius);
         background: root.tint;
     }
     if root.shown && Theme.rows == RowStyle.right: Rectangle {
@@ -1128,7 +1136,7 @@ export component RowMark inherits Rectangle {
         y: root.height * 0.22;
         width: Theme.mark;
         height: root.height * 0.56;
-        border-radius: Theme.mark / 2;
+        border-radius: min(Theme.mark / 2, Theme.radius);
         background: root.tint;
     }
     if root.shown && Theme.rows == RowStyle.dot: Rectangle {

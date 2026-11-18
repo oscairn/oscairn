@@ -39,7 +39,7 @@ export global LibraryState {
 
 export component Library inherits Rectangle {
     // The sidebar's and the list's top and the sidebar's height are the Part's (its rows, gap and footer).
-    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> gap: Theme.list-gap;
     property <length> head: LibraryState.header ? Theme.touch + Theme.gap : 0px;
     out property <length> side-width: LibraryState.list-only ? (root.width - 3 * Theme.margin) * Theme.sidebar-share : 0px;
     out property <length> content-x: LibraryState.list-only ? 2 * Theme.margin + root.side-width : Theme.margin;

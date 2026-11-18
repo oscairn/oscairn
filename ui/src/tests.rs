@@ -1270,6 +1270,7 @@ mod library_layout;
 mod library_info;
 mod library_rows;
 mod panel_steps;
+mod theme_pictures;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the
 // optional two, the metrics, the eight style choices, the wires, the splash's colors, and what is

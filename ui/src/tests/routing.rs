@@ -1007,3 +1007,358 @@ fn a_drawing_larger_than_the_canvas_scrolls_with_the_cursor_and_a_drag_and_its_t
         assert!(state.get_pan_x() > 40., "{what}: a drag of 120 moved the view {}", state.get_pan_x());
     }
 }
+
+// Every actionable control of the Routing screen is reachable and activated from Home with panel moves
+// only: the dial (move) walks the canvas's places (frames, parts, plugins, ends, control pills) and the
+// panel's enabled cells, confirm presses each, cancel/EXIT closes what it opens (menus over the page,
+// the playing keyboard, the Controls page) and comes back. The walk records what it visited and holds it
+// against what the screen declares: the boxes drawn (frames, parts, plugins, ends, controls) and the
+// panel's enabled cells shown as the cursor passes them.
+
+/// The walk's moves and presses as the device's panel reaches the shell: the `controllers` totals.
+fn walk_nav(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, key: &str, by: i64) {
+    *total.entry(key.into()).or_default() += by;
+    f.navigation(json!(total.clone()));
+}
+
+/// A quiet engine: every request out is answered until none comes for a moment, so the walk's presses
+/// reach the engine as they would on the device and the screens are left at rest. The graph is answered
+/// with `graph`, as the engine would.
+fn walk_settle(f: &mut Fixture, graph: &serde_json::Value) {
+    while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(25)) {
+        let method = r["method"].as_str().unwrap_or_default().to_string();
+        let result = match method.as_str() {
+            "params.list" => json!({"parameters": [{"id": 1, "name": "Level", "flags": 32}, {"id": 2, "name": "Decay", "flags": 32}]}),
+            "graph.get" => graph.clone(),
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+            "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+            _ => json!({}),
+        };
+        f.reply(&r, json!({"result": result}));
+    }
+}
+
+fn routing_tool_at(f: &Fixture) -> usize {
+    f.screen.ui.global::<PartsState>().get_tools().iter().position(|t| t.label == "Routing").expect("the Routing button is declared")
+}
+
+fn tool_cursor_at(f: &Fixture) -> Option<usize> {
+    f.screen.ui.global::<PartsState>().get_tools().iter().position(|t| t.cursor)
+}
+
+/// The walk back to Routing after a press that left the screen: EXIT, then the Parts list's Routing
+/// button again by the dial.
+fn walk_back_to_routing(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, name: &str, back: i32) {
+    walk_nav(f, total, "cancel", 1);
+    walk_settle(f, &graph());
+    let got = f.screen.ui.get_screen();
+    assert_eq!(got, back, "{name}: EXIT takes the shell back");
+    if got != 12 {
+        let mut moves = 0;
+        loop {
+            if tool_cursor_at(f) == Some(routing_tool_at(f)) {
+                break;
+            }
+            walk_nav(f, total, "move", 1);
+            walk_settle(f, &graph());
+            moves += 1;
+            assert!(moves < 120, "the dial never reached the Routing button again");
+        }
+        walk_nav(f, total, "confirm", 1);
+        walk_settle(f, &graph());
+    }
+    assert_eq!(f.screen.ui.get_screen(), 12, "{name}: back on Routing");
+}
+
+/// The boxes and control pills drawn, each with its kind, in drawing order: what the screen declares
+/// as places of the canvas.
+fn routing_places(ui: &Shell) -> Vec<String> {
+    let state = ui.global::<RoutingState>();
+    let mut v: Vec<String> = state.get_frames().iter().map(|b| format!("frame {}", b.name)).collect();
+    v.extend(state.get_boxes().iter().map(|b| if b.part { format!("part {}", b.name) } else { format!("box {}", b.name) }));
+    v.extend(state.get_controls().iter().map(|b| format!("control {}", b.name)));
+    v
+}
+
+/// Where the cursor is: the nth place of the drawing's lists, or a cell of the panel's view.
+fn walk_cursor(ui: &Shell) -> Option<RoutingStop> {
+    let state = ui.global::<RoutingState>();
+    let canvas: Vec<bool> = state.get_frames().iter().map(|b| b.cursor).chain(state.get_boxes().iter().map(|b| b.cursor)).chain(state.get_controls().iter().map(|b| b.cursor)).collect();
+    if let Some(i) = canvas.iter().position(|c| *c) {
+        return Some(RoutingStop::Canvas(i));
+    }
+    for (r, row) in state.get_panel().iter().enumerate() {
+        for (c, cell) in row.cells.iter().enumerate() {
+            if cell.cursor {
+                return Some(RoutingStop::Panel(r, c));
+            }
+        }
+    }
+    None
+}
+
+/// The panel's cells the view shows now: (row words, cell label), the labeled ones.
+fn walk_panel_cells(ui: &Shell) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = vec![];
+    for r in ui.global::<RoutingState>().get_panel().iter() {
+        let text = r.text.to_string();
+        for c in r.cells.iter() {
+            let label = c.label.to_string();
+            if !label.is_empty() {
+                out.push((text.clone(), label));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn routing_reachable_from_home_by_panel_moves() {
+    let shared = graph();
+    let mut f = play_on_the_shell("routing-reach", json!({"id": "p1", "name": "Grand", "unsaved": false}), shared.clone());
+    let ui = f.screen.ui.clone_strong();
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    walk_settle(&mut f, &shared);
+    walk_nav(&mut f, &mut total, "move", 0); // the first read is only a baseline
+    walk_settle(&mut f, &shared);
+    assert_eq!(ui.get_screen(), 3, "the walk starts on Play");
+    // Play → the top bar (the third pane is a panel move) → Edit → the Parts list.
+    let edit_at = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == "Edit" && a.enabled)
+    };
+    let bar_cursor = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<crate::Bar>().get_actions().iter().position(|a| a.cursor)
+    };
+    walk_nav(&mut f, &mut total, "move:2", 1);
+    walk_settle(&mut f, &shared);
+    assert!(ui.global::<crate::Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let mut moves = 0;
+    while bar_cursor(&f).is_none() {
+        walk_nav(&mut f, &mut total, "move", 1); // past the name, on to the actions
+        walk_settle(&mut f, &shared);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached its actions");
+    }
+    moves = 0;
+    while edit_at(&f).is_none() || bar_cursor(&f) != edit_at(&f) {
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &shared);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached Edit");
+    }
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    walk_settle(&mut f, &shared);
+    assert_eq!(ui.get_screen(), 9, "Edit opens the Parts list");
+    // The Parts list: the dial down the rows to the buttons under the list, on to Routing, pressed.
+    moves = 0;
+    loop {
+        if tool_cursor_at(&f) == Some(routing_tool_at(&f)) {
+            break;
+        }
+        walk_nav(&mut f, &mut total, "move", 1); // the dial: cells, rows, then the buttons
+        walk_settle(&mut f, &shared);
+        moves += 1;
+        assert!(moves < 120, "the dial never reached the Routing button");
+    }
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    walk_settle(&mut f, &shared);
+    assert_eq!(ui.get_screen(), 12, "the Routing button opens the Routing page");
+    walk_settle(&mut f, &shared);
+    f.screen.frame();
+    // The canvas: the left knob (pane 0) walks the places; a press chooses (again: lets go); a control
+    // pill opens the Controls page, which EXIT leaves and the walk leaves back to Routing by the button.
+    let places = routing_places(&ui);
+    let mut visited: Vec<String> = vec![];
+    let mut last = String::new();
+    let mut round = 0;
+    loop {
+        round += 1;
+        assert!(round < 400, "the walk over the canvas never ended");
+        let Some(RoutingStop::Canvas(i)) = walk_cursor(&ui) else {
+            walk_nav(&mut f, &mut total, "move:0", 1); // the first move shows it on the first place
+            walk_settle(&mut f, &shared);
+            continue;
+        };
+        let now = routing_places(&ui);
+        let place = now.get(i).cloned().unwrap_or_else(|| panic!("cursor on place {i} of {now:?}"));
+        if place == last {
+            break; // the move left the cursor where it was: past the last place
+        }
+        if !visited.contains(&place) {
+            visited.push(place.clone());
+            let screen_was = ui.get_screen();
+            walk_nav(&mut f, &mut total, "confirm", 1);
+            walk_settle(&mut f, &shared);
+            if ui.get_screen() != screen_was {
+                assert_eq!(ui.get_screen(), 11, "only a control pill's press leaves the Routing page");
+                walk_back_to_routing(&mut f, &mut total, &format!("control {}", place), 9);
+            } else {
+                walk_nav(&mut f, &mut total, "confirm", 1); // again: lets go
+                walk_settle(&mut f, &shared);
+            }
+        }
+        last = place;
+        walk_nav(&mut f, &mut total, "move:0", 1);
+        walk_settle(&mut f, &shared);
+    }
+    assert_eq!(visited.len(), places.len(), "the walk visited {visited:?}, the screen declares {places:?}");
+    assert_eq!(visited.iter().collect::<std::collections::HashSet<_>>().len(), visited.len(), "a place visited twice: {visited:?}");
+    // The panel: the right knob (pane 1) walks the enabled cells of what is chosen; a press does what
+    // the cell says; a slider or a value takes the change and a second press lays it down; a menu over
+    // the page takes the moves and EXIT closes it. The walk chooses the LFO by the dial first: its box
+    // among the places, whose panel has the lanes, the keys' keyboard and the wires' mixes.
+    let mut visited_cells: Vec<(String, String)> = vec![];
+    let mut seen_cells: Vec<(String, String)> = vec![];
+    let mut moves = 0;
+    let mut blanks = 0;
+    loop {
+        if let Some(RoutingStop::Canvas(i)) = walk_cursor(&ui) {
+            let now = routing_places(&ui);
+            if now.get(i).map(String::as_str) == Some("box LFO") {
+                break;
+            }
+        } else {
+            blanks += 1;
+            assert!(blanks < 40, "the dial never showed the cursor again");
+        }
+        walk_nav(&mut f, &mut total, "move:0", -1); // the walk ended past the last place: back
+        walk_settle(&mut f, &shared);
+        moves += 1;
+        assert!(moves < 40, "the dial never reached the LFO again");
+    }
+    walk_nav(&mut f, &mut total, "confirm", 1); // the LFO chosen: its panel shows
+    walk_settle(&mut f, &shared);
+    walk_nav(&mut f, &mut total, "move:1", 1); // the right knob onto its panel's cells
+    walk_settle(&mut f, &shared);
+    seen_cells = walk_panel_cells(&ui);
+    seen_cells.sort();
+    seen_cells.dedup();
+    let mut last_cell = (String::new(), String::new());
+    let mut stable = 0;
+    let mut panel_moves = 0;
+    loop {
+        assert!(panel_moves < 300, "the walk over the panel never ended");
+        let Some(RoutingStop::Panel(r, c)) = walk_cursor(&ui) else {
+            // No panel cell under the cursor: the panel is empty (the press removed the node) or the
+            // cursor is still on the canvas. The chosen node is picked again by the dial, or entered.
+            stable = 0;
+            let chosen = panel(&ui)[0].0.clone();
+            if chosen != "Select a plugin to wire it, or to set the level of each source into it." {
+                walk_nav(&mut f, &mut total, "move:1", 1); // the node is chosen: into its panel
+                walk_settle(&mut f, &shared);
+                panel_moves += 1;
+                continue;
+            }
+            let mut again = 0;
+            loop {
+                let Some(RoutingStop::Canvas(i)) = walk_cursor(&ui) else {
+                    walk_nav(&mut f, &mut total, "move:0", 1);
+                    walk_settle(&mut f, &shared);
+                    again += 1;
+                    assert!(again < 40, "the dial never showed the cursor again after the panel emptied");
+                    continue;
+                };
+                if routing_places(&ui).get(i).map(String::as_str) == Some("box LFO") {
+                    break;
+                }
+                walk_nav(&mut f, &mut total, "move:0", 1);
+                walk_settle(&mut f, &shared);
+                again += 1;
+                assert!(again < 40, "the dial never reached the chosen node again");
+            }
+            walk_nav(&mut f, &mut total, "confirm", 1);
+            walk_settle(&mut f, &shared);
+            walk_nav(&mut f, &mut total, "move:1", 1); // chosen: into its panel
+            walk_settle(&mut f, &shared);
+            for cell in walk_panel_cells(&ui) {
+                if !seen_cells.contains(&cell) {
+                    seen_cells.push(cell);
+                }
+            }
+            panel_moves += 1;
+            continue;
+        };
+        let row = ui.global::<RoutingState>().get_panel().row_data(r).unwrap_or_else(|| panic!("panel row {r}"));
+        let cell = row.cells.iter().nth(c).unwrap_or_else(|| panic!("panel cell {c} of row {r}"));
+        let here = (row.text.to_string(), cell.label.to_string());
+        let kind = cell.kind;
+        if here == last_cell {
+            stable += 1;
+            if stable >= 2 && panel_moves > visited_cells.len() {
+                break; // the move left the cursor where it was: past the last enabled cell
+            }
+        } else {
+            stable = 0;
+        }
+        if !visited_cells.contains(&here) {
+            visited_cells.push(here.clone());
+            walk_nav(&mut f, &mut total, "confirm", 1);
+            walk_settle(&mut f, &shared);
+            match (kind, here.1.as_str()) {
+                (2, _) | (3, _) => {
+                    // A slider or a value: the press starts the change, the dial steps it, a press lays it down.
+                    walk_nav(&mut f, &mut total, "move", 1);
+                    walk_settle(&mut f, &shared);
+                    walk_nav(&mut f, &mut total, "confirm", 1);
+                    walk_settle(&mut f, &shared);
+                }
+                (_, "Connect audio to...") | (_, "Connect notes to...") | (_, "Connect lane to...") => {
+                    // A menu over the page: the dial moves it, confirm chooses or opens a submenu, EXIT
+                    // backs out a level and then closes it.
+                    assert!(ui.global::<MenuState>().get_open(), "{}: the press opens a menu", here.1);
+                    walk_nav(&mut f, &mut total, "move", 1);
+                    walk_settle(&mut f, &shared);
+                    walk_nav(&mut f, &mut total, "confirm", 1);
+                    walk_settle(&mut f, &shared);
+                    let mut closes = 0;
+                    while ui.global::<MenuState>().get_open() {
+                        walk_nav(&mut f, &mut total, "cancel", 1);
+                        walk_settle(&mut f, &shared);
+                        closes += 1;
+                        assert!(closes < 6, "{}: EXIT never closed the menu", here.1);
+                    }
+                }
+                (_, "Keyboard") => {
+                    assert!(ui.global::<crate::PianoState>().get_open(), "Keyboard: the press opens the playing keyboard");
+                    walk_nav(&mut f, &mut total, "cancel", 1);
+                    walk_settle(&mut f, &shared);
+                    assert!(!ui.global::<crate::PianoState>().get_open(), "Keyboard: EXIT closes it");
+                }
+                (_, "Open part") => {
+                    assert_eq!(ui.get_screen(), 4, "Open part: the press opens the Part screen");
+                    walk_nav(&mut f, &mut total, "cancel", 1);
+                    walk_settle(&mut f, &shared);
+                    assert_eq!(ui.get_screen(), 12, "Open part: EXIT comes back to Routing");
+                    walk_settle(&mut f, &shared);
+                }
+                _ => {}
+            }
+            // An activation may have changed the panel: its cells are declared as they show now.
+            for c in walk_panel_cells(&ui) {
+                if !seen_cells.contains(&c) {
+                    seen_cells.push(c);
+                }
+            }
+        }
+        last_cell = here;
+        panel_moves += 1;
+        walk_nav(&mut f, &mut total, "move:1", 1);
+        walk_settle(&mut f, &shared);
+    }
+    let mut misses: Vec<(String, String)> = seen_cells.iter().filter(|c| !visited_cells.contains(c)).cloned().collect();
+    misses.sort();
+    assert!(misses.is_empty(), "the panel shows enabled cells the walk never reached: {misses:?}");
+    assert_eq!(visited_cells.iter().collect::<std::collections::HashSet<_>>().len(), visited_cells.len(), "a cell visited twice: {visited_cells:?}");
+    // Cancel drops the cursor, again goes back to the Parts list.
+    let mut cancels = 0;
+    while ui.get_screen() != 9 {
+        walk_nav(&mut f, &mut total, "cancel", 1);
+        walk_settle(&mut f, &shared);
+        cancels += 1;
+        assert!(cancels < 4, "Cancel never came back to the Parts list");
+    }
+    assert_eq!(ui.get_screen(), 9, "Cancel goes back to the Parts list");
+}
+
+use crate::routing::Stop as RoutingStop;

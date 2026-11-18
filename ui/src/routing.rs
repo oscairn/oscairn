@@ -118,7 +118,7 @@ enum Pick {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Stop {
+pub enum Stop {
     /// The nth of the order.
     Canvas(usize),
     /// A cell of a row of the whole panel.

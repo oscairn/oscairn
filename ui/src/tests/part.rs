@@ -426,6 +426,66 @@ fn part_on_the_shell() {
     assert_eq!(ui.get_screen(), 3, "back to Play");
 }
 
+// A performance instrument: with the Part screen open and nothing happening, it asks nothing and draws
+// nothing (docs/rust-ui.md, idle); a status that says what the last said costs neither.
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut f = Fixture::new("part-idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    for _ in 0..12 {
+        let request = f.engine.request();
+        let result = match request["method"].as_str().unwrap() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => part_graph(),
+            "library.query" => json!({"items": [], "total": 0}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    f.screen.ui.global::<crate::PlayState>().invoke_part_tapped(1);
+    assert_eq!(f.screen.ui.get_screen(), 4, "the tap opened the part");
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "sampleRate": 48000});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status}))); // the first: the takes and the meters follow
+    f.pump();
+    // Everything the shell and the screen ask until they are quiet, as a real engine would.
+    let mut quiet = 0;
+    while quiet < 3 {
+        slint::platform::update_timers_and_animations();
+        let Some(request) = f.engine.try_request(std::time::Duration::from_millis(60)) else {
+            quiet += 1;
+            continue;
+        };
+        quiet = 0;
+        let result = match request["method"].as_str().unwrap() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => part_graph(),
+            "record.get" => json!({"takes": []}),
+            "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
+            "transport.get" => json!({"tempo": 120.0, "playing": false}),
+            "session.status" => json!({"midiInputs": []}),
+            "harmony.get" => json!({"key": {"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10], "name": "Minor"}, "parts": [], "scales": ["Major", "Minor"]}),
+            "edit.history" => json!({"undo": "", "redo": ""}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    // The engine's status that says what the last said: no request, no frame.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+}
+
 // Part draws in the built-in themes and an odd one (large type, extreme colors), with a value
 // being changed, and the devices list.
 #[test]

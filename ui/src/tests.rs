@@ -607,6 +607,100 @@ fn themes_switch_live_and_repaint_once() {
     assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0x00, 0x40, 0xc0), "focus: the accent when the theme has none");
 }
 
+// Home, Play, Part and Routing at 1280x720 in the light theme: pictures in target/theme-shots, and
+// checks that the screens are drawn in the light theme's colors — the background where nothing is
+// drawn is the theme's, and no dark-only ink (a literal or a token without a light value) covers the
+// screen: a dark theme's background would fail the dark-pixel bound, text in a dark theme's ink would
+// fail the white-pixel bound on the light background.
+#[test]
+fn light_theme_renders_the_stage_screens() {
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    // Answers everything the shell asks until it is quiet, `graph` for graph.get.
+    fn quiet(f: &mut Fixture, graph: &serde_json::Value) {
+        for _ in 0..60 {
+            let Some(request) = f.engine.try_request(WAIT) else { break };
+            let result = match request["method"].as_str().unwrap() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "edit.history" => json!({"undo": "", "redo": ""}),
+                "performance.reopen" => json!({"notice": ""}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+            f.pump();
+        }
+    }
+    // The screen's picture: the share of pixels near the light background, near the dark theme's
+    // text (#F6F8FA, the ink a dark-only literal would draw) and darker than 80/255 of luminance.
+    let check = |s: &Screen, name: &str| {
+        let g = s.ui.global::<crate::Theme>();
+        assert_eq!(g.get_id(), "oscairn-light", "{name}: the theme applied");
+        assert!(!g.get_dark(), "{name}: a light background");
+        let near = |want: [u8; 3], tol: u8| {
+            let mut count = 0u64;
+            for p in &s.pixels {
+                if p.r.abs_diff(want[0]) <= tol && p.g.abs_diff(want[1]) <= tol && p.b.abs_diff(want[2]) <= tol {
+                    count += 1;
+                }
+            }
+            count as f64 / s.pixels.len() as f64
+        };
+        let corner: [u8; 3] = [s.pixels[0].r, s.pixels[0].g, s.pixels[0].b];
+        assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "{name}: the background where nothing is drawn");
+        let dark_ink = near([0xF6, 0xF8, 0xFA], 2);
+        assert!(dark_ink < 0.000_28, "{name}: {:.2}% of the screen in a dark theme's text color", dark_ink * 100.0);
+        let dark = s.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
+        assert!(dark * 50 < s.pixels.len(), "{name}: the screen is mostly dark");
+        shot(s, name);
+    };
+    // Home on the shell.
+    let mut f = Fixture::new("light-home");
+    f.engine.answer(); // session.hello
+    f.pump();
+    quiet(&mut f, &json!([]));
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    check(&f.screen, "light-home");
+    // Play on the shell.
+    let mut f = Fixture::new("light-play");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    quiet(&mut f, &play_graph());
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    assert_eq!(f.screen.ui.get_screen(), 3, "Play");
+    check(&f.screen, "light-play");
+    // Part: the shell with Play, then a tap on the first part's name.
+    let mut f = Fixture::new("light-part");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    quiet(&mut f, &part::part_graph());
+    f.screen.ui.global::<crate::PlayState>().invoke_part_tapped(0);
+    quiet(&mut f, &part::part_graph());
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    assert_eq!(f.screen.ui.get_screen(), 4, "Part");
+    check(&f.screen, "light-part");
+    // Routing: the bar's Edit opens the Parts list, its Routing tool opens Routing.
+    let mut f = Fixture::new("light-routing");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    quiet(&mut f, &part::part_graph());
+    f.screen.ui.global::<Bar>().invoke_action(5); // Edit
+    quiet(&mut f, &part::part_graph());
+    f.screen.ui.global::<crate::PartsState>().invoke_tool(2); // Routing
+    quiet(&mut f, &part::part_graph());
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    assert_eq!(f.screen.ui.get_screen(), 12, "Routing");
+    check(&f.screen, "light-routing");
+}
+
 impl Fixture {
     /// Answers the next `n` requests as a quiet engine would: setlists, Performances and a setlist
     /// from `content`, anything else `{}`.

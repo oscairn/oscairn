@@ -244,6 +244,8 @@ pub struct Screen {
     side_cursor: Cursor,
     side_focus: bool,
     side_rows: Rc<VecModel<SettingData>>,
+    /// The panel is shown, in the sidebar's place (until the screen is left for good: a session's choice, not saved).
+    info_on: bool,
     /// The item last pressed or under the cursor: what Options is about.
     selected: Option<String>,
     auditioning: Auditioning,
@@ -261,7 +263,7 @@ pub struct Screen {
     /// Whether this screen is the one shown: the list and the tabs are written only then.
     active: bool,
     /// The row under the top bar as last written: the tabs set, which, the cursor, the search text, whether the list is the kinds'.
-    tabs_shown: Option<(u8, usize, Option<usize>, String, bool)>,
+    tabs_shown: Option<(u8, usize, Option<usize>, String, bool, bool)>,
     /// The Setlist app's state file, which says which setlist is open (setlist.rs).
     state_file: Option<std::path::PathBuf>,
     /// The modes this one was entered from (libraries.rs `enter`, `leave`).
@@ -309,6 +311,7 @@ impl Screen {
             side_cursor: Cursor::new(0, 1),
             side_focus: false,
             side_rows: Rc::new(VecModel::default()),
+            info_on: false,
             selected: None,
             auditioning: Auditioning::default(),
             part: 0,
@@ -526,6 +529,23 @@ impl Screen {
         }
     }
 
+    /// What only the panel said of the item under the cursor, for the line under the list: why it does not fit this device,
+    /// which library it is locked in, that it is a folder indexed in place.
+    fn cursor_note(&self) -> String {
+        let Some(item) = self.cursor_item().and_then(|i| self.items.get(i)) else { return String::new() };
+        let mut parts = Vec::new();
+        if !item.unfit.is_empty() {
+            parts.push(format!("Does not fit this device: {}", item.unfit));
+        }
+        if !item.own() {
+            parts.push(format!("Locked: {}", self.filters.source_name(&item.library, &self.libraries)));
+        }
+        if item.in_place {
+            parts.push("A folder indexed in place".to_string());
+        }
+        parts.join("  ·  ")
+    }
+
     /// The item the cursor is on.
     fn cursor_item(&self) -> Option<usize> {
         let at = self.b.cursor.at?;
@@ -608,7 +628,19 @@ impl Screen {
 
     /// How many stops the row under the top bar has for the cursor: each tab, the search box, and its cross when it has text.
     fn head_stops(&self) -> usize {
-        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty())
+        self.tab_names().len() + 1 + usize::from(!self.search_text().is_empty()) + usize::from(self.mode == Mode::List)
+    }
+
+    /// The panel's button is the last stop of the row, in the kinds' list.
+    fn info_stop(&self) -> Option<usize> {
+        (self.mode == Mode::List).then(|| self.head_stops() - 1)
+    }
+
+    /// The panel shown, or the sidebar again.
+    pub fn toggle_info(&mut self) {
+        self.info_on = !self.info_on;
+        self.side_focus = false;
+        self.show();
     }
 
     fn show_tabs(&mut self) {
@@ -620,7 +652,7 @@ impl Screen {
         };
         let n = self.tab_names().len();
         let stop = self.tab_at.filter(|_| self.tabs_visible());
-        let state = (set, self.tab_current(), stop, self.search_text().to_string(), self.mode == Mode::List);
+        let state = (set, self.tab_current(), stop, self.search_text().to_string(), self.mode == Mode::List, self.info_on);
         if self.tabs_shown.as_ref() == Some(&state) {
             return;
         }
@@ -646,7 +678,9 @@ impl Screen {
         lib.set_list_only(state.4);
         lib.set_search(state.3.as_str().into());
         lib.set_search_cursor(stop == Some(n));
-        lib.set_clear_cursor(stop == Some(n + 1));
+        lib.set_clear_cursor(stop.is_some_and(|s| s == n + 1 && Some(s) != self.info_stop()));
+        lib.set_info_on(state.5);
+        lib.set_info_cursor(stop.is_some() && stop == self.info_stop());
     }
 
     /// The list, the tabs and the panel, each row set only when it changed.
@@ -686,6 +720,9 @@ impl Screen {
                 let (from, to) = (self.b.cursor.first + 1, self.items.len().min(self.b.cursor.first + per));
                 let text = if to >= from { format!("{} {from}–{to} of {}", self.kind.plural(), self.items.len()) } else { String::new() };
                 let text = if self.total > self.items.len() as u64 { format!("{text}, {} in all", self.total) } else { text };
+                // With the panel hidden, what it would say that nothing else does follows the line while the cursor is on the row.
+                let note = self.cursor_note();
+                let text = if note.is_empty() || self.info_on { text } else { format!("{text}   ·   {note}") };
                 ui.global::<crate::PartState>().set_view(text.into());
             }
         }
@@ -965,6 +1002,9 @@ impl Screen {
             self.tab_at = Some(at);
         } else if at == n {
             return self.ask_search();
+        } else if Some(at) == self.info_stop() {
+            self.toggle_info();
+            self.tab_at = Some(at);
         } else {
             self.clear_search();
             self.tab_at = Some(n);

@@ -1267,6 +1267,7 @@ mod chrome;
 mod handover;
 mod owner;
 mod library_layout;
+mod library_info;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the
 // optional two, the metrics, the eight style choices, the wires, the splash's colors, and what is

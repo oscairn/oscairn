@@ -5,8 +5,8 @@
 // (part.slint's Part, which the shell lays in the area this leaves: content-x, content-y, content-width and
 // content-height); this component draws the row and the sidebar.
 
-import { Theme, TabBar, TabLabel, Field, Cursor, FitText } from "theme.slint";
-import { Row, ScrollBar, SettingData } from "part.slint";
+import { Theme, TabBar, TabLabel, Field, Cursor, FitText, Button, Section } from "theme.slint";
+import { Row, ScrollBar, SettingData, PartState } from "part.slint";
 
 export global LibraryState {
     in property <[string]> pages;
@@ -22,6 +22,10 @@ export global LibraryState {
     in property <bool> clear-cursor;
     callback search-tapped();
     callback search-cleared();
+    // The panel (what the item under the cursor is) shown in the sidebar's place, and the button that shows it.
+    in property <bool> info-on;
+    in property <bool> info-cursor;
+    callback info-toggled();
     // The list with the sidebar at its left (the kinds), else the list as the other screens have it.
     in property <bool> list-only;
     in property <[SettingData]> side-rows;
@@ -50,7 +54,9 @@ export component Library inherits Rectangle {
     init => { LibraryState.side-per-view = root.side-per-view; }
     out property <length> tabs-width: min(tabs.natural, root.width * 0.55);
     out property <length> search-x: Theme.margin + root.tabs-width + Theme.margin;
-    out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin);
+    property <length> info-button: LibraryState.list-only ? Theme.touch + Theme.margin : 0px;
+    out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin - root.info-button);
+    property <length> line: Theme.body + Theme.margin;
 
     tabs := TabBar {
         visible: LibraryState.header;
@@ -114,6 +120,69 @@ export component Library inherits Rectangle {
                 shown: LibraryState.clear-cursor;
                 always: true;
             }
+        }
+    }
+    // The button at the right of the row: the panel in place of the sidebar, and back.
+    if LibraryState.header && LibraryState.list-only: Rectangle {
+        x: root.width - Theme.margin - Theme.touch;
+        y: Theme.margin;
+        width: Theme.touch;
+        height: Theme.touch;
+        accessible-role: button;
+        accessible-label: "Details";
+        Button {
+            text: "";
+            on: LibraryState.info-on;
+            clicked => { LibraryState.info-toggled(); }
+        }
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Theme.icon * 0.85;
+            height: Theme.icon * 0.85;
+            source: @image-url("icons/info.svg");
+            colorize: LibraryState.info-on ? Theme.on-accent : Theme.text;
+        }
+        Cursor {
+            corner: Theme.button-radius(parent.height);
+            shown: LibraryState.info-cursor;
+            always: true;
+        }
+    }
+    // The panel in the sidebar's place: what the item under the cursor is, a few lines a view, turned by the arrows.
+    if LibraryState.list-only && LibraryState.info-on: Section {
+        x: Theme.margin;
+        y: root.content-y;
+        width: root.side-width;
+        height: root.side-height;
+        clip: true;
+        for text[i] in PartState.info: FitText {
+            x: Theme.pad;
+            y: Theme.pad-narrow + i * root.line;
+            width: parent.width - 2 * Theme.pad;
+            height: root.line;
+            text: text.text;
+            opacity: text.off ? Theme.dim : 1;
+            ink: text.head ? Theme.muted : text.failed ? Theme.danger : Theme.text;
+            size: text.head ? Theme.small : Theme.body;
+            bold: text.head;
+            align: TextHorizontalAlignment.left;
+        }
+        if PartState.info-more: Button {
+            x: parent.width - 2 * Theme.touch - Theme.pad-narrow;
+            y: parent.height - Theme.touch - Theme.pad-tight;
+            width: Theme.touch;
+            height: Theme.touch;
+            text: "▲";
+            clicked => { PartState.info-scroll(-1); }
+        }
+        if PartState.info-more: Button {
+            x: parent.width - Theme.touch - Theme.pad-tight;
+            y: parent.height - Theme.touch - Theme.pad-tight;
+            width: Theme.touch;
+            height: Theme.touch;
+            text: "▼";
+            clicked => { PartState.info-scroll(1); }
         }
     }
     // The sidebar: one line an entry, a heading over each section.

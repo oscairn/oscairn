@@ -302,3 +302,51 @@ fn every_page_is_reached_by_moves_alone() {
         open_settings(&mut s, &mut nav);
     }
 }
+
+// Each page of the app, reached the way the panel reaches it: a move shows the cursor on the list's first row, an arrow
+// up (the panel's up key) reaches the tabs on the page shown, arrows along them, a press shows the page; from the last
+// tab an arrow down leaves for the list. With nothing happening on a page, it asks nothing and draws nothing.
+#[test]
+fn every_page_by_panel_moves_is_idle_at_rest() {
+    let mut s = Shelf::new("settings-idle-pages");
+    shell::goto(shell::Screen::Settings);
+    s.serve();
+    let idle = |s: &mut Shelf, what: &str| {
+        s.f.screen.frame();
+        s.f.screen.frame();
+        assert_eq!(s.f.screen.frame(), None, "{what}: nothing is drawn at rest");
+        std::thread::sleep(Duration::from_millis(1200));
+        slint::platform::update_timers_and_animations();
+        assert!(s.f.engine.try_request(Duration::from_millis(500)).is_none(), "{what}: nothing is asked at rest");
+    };
+    let walk = |s: &mut Shelf, page: usize| {
+        if s.ui().global::<crate::PartState>().get_rows().iter().all(|r| !r.cursor) {
+            shell::act(Action::Move { pane: Some(0), by: 1 }); // the cursor on the list's first row
+        }
+        shell::act(Action::Arrow { dx: 0, dy: -1 }); // up to the tabs, on the page shown
+        if page > 0 {
+            shell::act(Action::Arrow { dx: 1, dy: 0 }); // along to the next tab
+        }
+        shell::act(Action::Confirm(None)); // it shows
+        s.serve();
+        assert_eq!(s.ui().global::<crate::SettingsState>().get_page(), page as i32, "the panel reached the page");
+    };
+    walk(&mut s, 0); // Appearance, where the app opened
+    s.serve();
+    let what = title(&s.ui()).to_string();
+    idle(&mut s, &what);
+    for page in 1..=tabs(&s.ui()).len() - 1 {
+        walk(&mut s, page);
+        let what = title(&s.ui()).to_string();
+        idle(&mut s, &what);
+        // From the tabs, arrow down walks them and past the last tab leaves for the list: down until the list has the
+        // cursor back.
+        loop {
+            shell::act(Action::Arrow { dx: 0, dy: 1 });
+            s.serve();
+            if s.ui().global::<crate::SettingsState>().get_page_cursor() == -1 {
+                break;
+            }
+        }
+    }
+}

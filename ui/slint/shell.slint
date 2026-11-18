@@ -52,13 +52,15 @@ export component Shell inherits Window {
     out property <bool> title-cut: bar.title-cut;
     out property <length> rec-width: bar.rec-width;
     out property <length> loading-width: bar.loading-width;
+    out property <length> list-x: list.x;
+    out property <length> list-y: list.y;
     out property <length> thumb-y: list.thumb-y;
     out property <length> thumb-h: list.thumb-h;
     out property <length> track-h: list.list-height;
     out property <length> lane-x: list.lane-x;
-    out property <length> library-rail: library.rail;
-    out property <length> library-rail-need: library.rail-need;
-    out property <float> library-rail-fit: library.rail-fit;
+    out property <length> settings-rail: settings.rail;
+    out property <length> settings-rail-need: settings.rail-need;
+    out property <float> settings-rail-fit: settings.rail-fit;
     out property <length> content-top: Theme.bar-height + (root.engine != "" ? Theme.touch : 0px); // the banner takes its own room
     out property <int> actions-mode: bar.actions-mode;
     out property <int> meters-mode: bar.meters-mode;
@@ -112,6 +114,7 @@ export component Shell inherits Window {
         visible: root.screen == 14;
     }
     list := Part {
+        list-only: root.screen == 13 && LibraryState.list-only;
         x: root.screen == 14 ? settings.content-x - Theme.margin : root.screen == 13 ? library.content-x - Theme.margin : 0px;
         y: root.content-top + (root.screen == 14 ? settings.content-y - Theme.margin : root.screen == 13 ? library.content-y - Theme.margin : 0px);
         width: root.screen == 14 ? settings.content-width + 2 * Theme.margin : root.screen == 13 ? library.content-width + 2 * Theme.margin : parent.width;

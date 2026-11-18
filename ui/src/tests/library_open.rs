@@ -67,9 +67,9 @@ fn a_busy_step_is_asked_again_and_the_last_chosen_opens_next() {
     assert_eq!(r.e.methods(), ["performance.info"]);
     assert_eq!(r.delayed.last(), Some(&("performance.info".to_string(), Duration::from_millis(100))));
     // A second and a third chosen meanwhile: only the last is kept.
-    r.c.tap(3); // Evening Strings (row 3)
-    r.c.tap(4); // Glass Choir
-    r.c.tap(1); // Untitled
+    r.c.tap(2); // Evening Strings (row 2)
+    r.c.tap(3); // Glass Choir
+    r.c.tap(0); // Untitled
     assert_eq!(footer(r.ui()).0, "Untitled opens next");
     r.later_all();
     assert_eq!(r.e.methods().iter().filter(|m| *m == "performance.info").count(), 4, "refused twice, then asked, then the next one asks: {:?}", r.e.methods());
@@ -166,14 +166,14 @@ fn a_sound_is_made_a_new_part() {
 fn an_item_is_tried_in_place() {
     let mut r = Rig::new(library());
     r.act(Action::Move { pane: None, by: 1 });
-    r.act(Action::Move { pane: None, by: 2 }); // Brass Corner
+    r.act(Action::Move { pane: None, by: 1 }); // Brass Corner
     r.e.calls.clear();
     r.tool("Audition");
     assert_eq!(r.e.called("audition.start"), [json!({"id": "p4"})], "a Performance needs no part");
     assert_eq!(footer(r.ui()).0, "Auditioning Brass Corner in place of the open Performance.");
     assert_eq!(value_of(r.ui(), "Brass Corner"), "Auditioning  ·  brass  ·  warm");
     let tools: Vec<String> = r.c.bar_tools().into_iter().map(|t| t.label).collect();
-    assert_eq!(tools, ["Search", "Stop", "Keep", "Options", "Install...", "Libraries..."]);
+    assert_eq!(tools, ["Stop", "Keep", "Options", "Install...", "Libraries..."]);
     // Browsing while one is tried: a press tries that one.
     r.press_row("Evening Strings");
     assert_eq!(r.e.called("audition.start").last().unwrap(), &json!({"id": "p1"}));
@@ -181,7 +181,7 @@ fn an_item_is_tried_in_place() {
     r.tool("Keep");
     assert_eq!(r.e.called("audition.stop"), [json!({"keep": true})]);
     assert_eq!(footer(r.ui()).0, "Kept.");
-    assert_eq!(r.c.bar_tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), ["Search", "Audition", "Options", "Install...", "Libraries..."]);
+    assert_eq!(r.c.bar_tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), ["Audition", "Options", "Install...", "Libraries..."]);
     // Stop puts it back.
     r.tool("Audition");
     r.tool("Stop");
@@ -197,7 +197,7 @@ fn a_sound_needs_a_part_and_nothing_is_tried_while_loading() {
     r.settle();
     r.c.part = 0;
     r.act(Action::Move { pane: None, by: 1 });
-    r.act(Action::Move { pane: None, by: 2 }); // Soft Felt
+    r.act(Action::Move { pane: None, by: 1 }); // Soft Felt
     r.e.calls.clear();
     r.tool("Audition");
     assert_eq!(footer(r.ui()).0, "Show a part in the Part view to audition a Sound in it.");
@@ -228,7 +228,7 @@ fn a_refused_audition_is_said() {
     let mut r = Rig::new(library());
     r.e.fail.push(("audition.start".into(), "It would not fit".into()));
     r.act(Action::Move { pane: None, by: 1 });
-    r.act(Action::Move { pane: None, by: 2 });
+    r.act(Action::Move { pane: None, by: 1 });
     r.tool("Audition");
     assert_eq!(footer(r.ui()).0, "Not auditioned: It would not fit");
     assert_eq!(value_of(r.ui(), "Brass Corner"), "brass  ·  warm");

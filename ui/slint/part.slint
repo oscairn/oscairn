@@ -235,10 +235,12 @@ export component ScrollBar inherits Rectangle {
 }
 
 export component Part inherits Rectangle {
+    // The list takes the whole width and the read-only panel is not drawn (the Library puts its sidebar or panel at the left).
+    in property <bool> list-only;
     // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> footer: Theme.touch;
-    property <length> list-width: (self.width - 3 * Theme.margin) * 0.58;
+    property <length> list-width: root.list-only ? self.width - 2 * Theme.margin : (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;
     out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
@@ -280,6 +282,7 @@ export component Part inherits Rectangle {
         scrolled(page) => { PartState.scrolled(page); }
     }
     Section {
+        visible: !root.list-only;
         x: 2 * Theme.margin + root.list-width;
         y: root.list-y;
         width: root.width - self.x - Theme.margin;

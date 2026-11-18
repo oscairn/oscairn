@@ -210,7 +210,7 @@ fn the_library_shows_the_chip_while_a_performance_opens() {
     let ui = s.ui();
     shell::goto(shell::Screen::Library);
     s.serve();
-    ui.global::<PartState>().invoke_tapped(2); // Brass Corner
+    ui.global::<PartState>().invoke_tapped(1); // Brass Corner
     let step = s.f.engine.request();
     assert_eq!(step["method"], "performance.info");
     s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": step["id"], "error": {"code": -32009, "message": "busy", "data": {"busy": "library.load", "ms": 800}}})));
@@ -233,7 +233,7 @@ fn the_library_shows_the_chip_while_a_performance_opens() {
     assert!(!s.f.screen.animating());
     // Unsaved changes: the question first, and no chip while it is open.
     s.e.open = ("p1".into(), "Evening Strings".into(), true);
-    ui.global::<PartState>().invoke_tapped(3);
+    ui.global::<PartState>().invoke_tapped(2);
     s.serve();
     assert!(ui.global::<NoticeState>().get_open());
     assert_eq!(ui.global::<Bar>().get_loading().as_str(), "", "nothing switches until it is confirmed");

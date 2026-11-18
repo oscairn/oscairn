@@ -131,6 +131,8 @@ export global Theme {
     // and one and a half tight paddings across (71 at the touch scale), never more than a share of the screen's width.
     out property <length> rail-width: 5 * small + 1.5 * pad-tight;
     out property <float> side-share: 0.12;
+    // The Library's sidebar (libraries and tags): this share of the content's width.
+    out property <float> sidebar-share: 0.29;
     // How much of the width a rail may take to hold its longest label on one line (the rail is the theme's width, more only
     // for that).
     out property <float> rail-label-share: 0.16;
@@ -581,6 +583,8 @@ component HTabs inherits Rectangle {
     property <bool> short: root.heading != "" && root.labels.length == root.names.length && whole.preferred-width > root.width + 0.5px;
     property <length> content: row.preferred-width;
     out property <bool> over: root.content > root.width + 0.5px;
+    // How wide the row of tabs is by itself, for a screen that puts something beside it.
+    out property <length> natural: whole.preferred-width;
     function settle() {
         flick.content-x = min(0px, max(root.width - root.content, flick.content-x));
     }
@@ -967,9 +971,12 @@ export component TabBar inherits Rectangle {
     callback picked(int);
     // A rail says how much of the small type its labels got (1, or down to 0.7).
     callback fitted(float);
-    if !root.vertical && !root.rail: HTabs {
-        width: parent.width;
-        height: parent.height;
+    // The width a horizontal row of tabs takes by itself (0 for the others).
+    out property <length> natural: !root.vertical && !root.rail ? htabs.natural : 0px;
+    htabs := HTabs {
+        visible: !root.vertical && !root.rail;
+        width: self.visible ? parent.width : 0px;
+        height: self.visible ? parent.height : 0px;
         names: root.names;
         labels: root.labels;
         heading: root.heading;

@@ -83,9 +83,10 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert_eq!(title(&ui), "Library › Performances");
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
-    assert_eq!(actions, ["Search", "Audition", "Options", "Install...", "Libraries...", "Record", "Capture"], "Undo, Redo and Save are the Performance app's");
+    assert_eq!(actions, ["Audition", "Options", "Install...", "Libraries...", "Record", "Capture"], "Undo, Redo and Save are the Performance app's");
     assert_eq!(tabs(&ui), ["Performances", "Sounds", "Setlists"]);
-    assert_eq!(labels(&ui)[0], "Filters");
+    assert_eq!(labels(&ui)[0], "Untitled");
+    assert_eq!(ui.global::<crate::LibraryState>().get_side_rows().row_data(0).unwrap().label.as_str(), "Favorites", "the sidebar is at the left");
     // Back goes Home; the screen's state is dropped with it.
     assert!(ui.invoke_key(slint::SharedString::from(slint::platform::Key::Escape)));
     assert_eq!(ui.get_screen(), 0);
@@ -102,8 +103,8 @@ fn a_load_that_takes_seconds_leaves_the_screen_alive() {
     s.serve();
     s.e.calls.clear();
     s.e.busy = 3;
-    // The press by touch: row 2, Brass Corner.
-    ui.global::<PartState>().invoke_tapped(2);
+    // The press by touch: row 1, Brass Corner.
+    ui.global::<PartState>().invoke_tapped(1);
     // The shell sent the first step; the engine answered busy; the screen is not blocked.
     let step = s.f.engine.request();
     assert_eq!(step["method"], "performance.info");
@@ -133,7 +134,7 @@ fn the_question_over_the_screen_is_answered_by_the_dial() {
     shell::goto(shell::Screen::Library);
     s.serve();
     s.e.open = ("p1".into(), "Evening Strings".into(), true);
-    ui.global::<PartState>().invoke_tapped(2);
+    ui.global::<PartState>().invoke_tapped(1);
     s.serve();
     assert!(ui.global::<NoticeState>().get_open());
     assert_eq!(ui.global::<NoticeState>().get_title().as_str(), "Save changes to Evening Strings before opening Brass Corner?");
@@ -151,7 +152,7 @@ fn the_question_over_the_screen_is_answered_by_the_dial() {
     // Cancel closes it with nothing chosen: nothing opens.
     s.e.open = ("p1".into(), "Evening Strings".into(), true);
     s.e.calls.clear();
-    ui.global::<PartState>().invoke_tapped(3);
+    ui.global::<PartState>().invoke_tapped(2);
     s.serve();
     assert!(ui.global::<NoticeState>().get_open());
     shell::act(Action::Cancel(None));
@@ -161,7 +162,7 @@ fn the_question_over_the_screen_is_answered_by_the_dial() {
     assert!(s.e.called("library.load").is_empty());
 }
 
-// Search is a bar action: the keyboard opens for it and what is typed narrows the list.
+// Search is the box under the top bar: the keyboard opens for it and what is typed narrows the list.
 #[test]
 fn search_is_typed_on_the_keyboard() {
     let mut s = Shelf::new("library-search");
@@ -169,7 +170,7 @@ fn search_is_typed_on_the_keyboard() {
     shell::set_text_on_screen(false);
     shell::goto(shell::Screen::Library);
     s.serve();
-    ui.global::<Bar>().invoke_action(0);
+    ui.global::<crate::LibraryState>().invoke_search_tapped();
     assert!(ui.global::<KeyboardState>().get_open());
     assert_eq!(ui.global::<KeyboardState>().get_title().as_str(), "Search the Performances");
     for ch in "warm".chars() {
@@ -178,8 +179,8 @@ fn search_is_typed_on_the_keyboard() {
     assert!(shell::key(&slint::SharedString::from(slint::platform::Key::Return)));
     s.serve();
     assert_eq!(s.e.called("library.query").last().unwrap()["text"], "warm");
-    assert_eq!(labels(&ui), ["Filters", "Brass Corner", "Evening Strings"]);
-    assert_eq!(ui.global::<Bar>().get_actions().row_data(0).unwrap().label.as_str(), "Search: warm");
+    assert_eq!(labels(&ui), ["Brass Corner", "Evening Strings"]);
+    assert_eq!(ui.global::<crate::LibraryState>().get_search().as_str(), "warm", "the box shows the text");
 }
 
 // A performance instrument: with the Library open and nothing happening, it asks nothing and draws nothing.

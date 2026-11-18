@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Library app (src/library): the tabs of the kinds it shows (Performances, Sounds, Setlists; the
-// Catalog's four) in the shared tab family, which the theme's tabPlacement puts in a strip or a rail.
-// The list under them is the shared list screen (part.slint's Part, which the shell lays in the
-// area these tabs leave: content-x, content-y, content-width and content-height), so this component
-// draws nothing else.
+// The Library app (src/library): under the top bar one row, the kinds it shows (Performances, Sounds, Setlists; the
+// Catalog's four) as the shared tabs in a strip, then a search box. Under it, for the kinds, a sidebar (Favorites,
+// Recent, the libraries and the tags) at the left and the list at the right. The list is the shared list screen
+// (part.slint's Part, which the shell lays in the area this leaves: content-x, content-y, content-width and
+// content-height); this component draws the row and the sidebar.
 
-import { TabPages, TabLabel } from "theme.slint";
+import { Theme, TabBar, TabLabel, Field, Cursor, FitText } from "theme.slint";
+import { Row, ScrollBar, SettingData } from "part.slint";
 
 export global LibraryState {
     in property <[string]> pages;
@@ -14,26 +15,140 @@ export global LibraryState {
     in property <int> page;
     in property <int> page-cursor: -1;
     callback show-page(int);
+    // The row under the top bar (the tabs and the search box): shown in the list and in the Catalog.
+    in property <bool> header;
+    in property <string> search;
+    in property <bool> search-cursor;
+    in property <bool> clear-cursor;
+    callback search-tapped();
+    callback search-cleared();
+    // The list with the sidebar at its left (the kinds), else the list as the other screens have it.
+    in property <bool> list-only;
+    in property <[SettingData]> side-rows;
+    in property <int> side-total;
+    in property <int> side-first;
+    in-out property <int> side-per-view: 1;
+    callback side-tapped(int);
+    callback side-scrolled(int);
+    callback side-resized();
 }
 
 export component Library inherits Rectangle {
-    out property <length> content-x: tabs.content-x;
-    out property <length> content-y: tabs.content-y;
-    out property <length> content-width: tabs.content-width;
-    out property <length> content-height: tabs.content-height;
-    out property <length> rail: tabs.rail;
-    out property <length> rail-need: tabs.rail-need;
-    out property <float> rail-fit: tabs.pages-fit;
-    tabs := TabPages {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        pages: LibraryState.pages;
-        page-labels: LibraryState.page-labels;
-        page-heading: LibraryState.page-heading;
-        page: LibraryState.page;
-        page-cursor: LibraryState.page-cursor;
-        page-picked(i) => { LibraryState.show-page(i); }
+    // The sidebar's and the list's top and the sidebar's height are the Part's (its rows, gap and footer).
+    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> head: LibraryState.header ? Theme.touch + Theme.gap : 0px;
+    out property <length> side-width: LibraryState.list-only ? (root.width - 3 * Theme.margin) * Theme.sidebar-share : 0px;
+    out property <length> content-x: LibraryState.list-only ? 2 * Theme.margin + root.side-width : Theme.margin;
+    out property <length> content-y: Theme.margin + root.head;
+    out property <length> content-width: max(0px, root.width - root.content-x - Theme.margin);
+    out property <length> content-height: max(0px, root.height - root.content-y - Theme.margin);
+    property <length> side-height: max(0px, root.content-height - Theme.touch - Theme.gap);
+    property <int> side-per-view: max(1, floor((root.side-height + root.gap) / (Theme.touch + root.gap)));
+    property <bool> side-long: LibraryState.side-total > root.side-per-view;
+    property <length> lane: root.side-long ? Theme.scroll-lane : 0px;
+    changed side-per-view => { LibraryState.side-per-view = root.side-per-view; LibraryState.side-resized(); }
+    init => { LibraryState.side-per-view = root.side-per-view; }
+    out property <length> tabs-width: min(tabs.natural, root.width * 0.55);
+    out property <length> search-x: Theme.margin + root.tabs-width + Theme.margin;
+    out property <length> search-width: max(0px, root.width - root.search-x - Theme.margin);
+
+    tabs := TabBar {
+        visible: LibraryState.header;
+        x: Theme.margin;
+        y: Theme.margin;
+        width: root.tabs-width;
+        height: Theme.touch;
+        names: LibraryState.pages;
+        labels: LibraryState.page-labels;
+        heading: LibraryState.page-heading;
+        current: LibraryState.page;
+        cursor: LibraryState.page-cursor;
+        picked(i) => { LibraryState.show-page(i); }
+    }
+    // The search box: a tap asks for the text on the keyboard, the cross takes it away.
+    if LibraryState.header: Field {
+        x: root.search-x;
+        y: Theme.margin;
+        width: root.search-width;
+        height: Theme.touch;
+        TouchArea {
+            clicked => { LibraryState.search-tapped(); }
+        }
+        Text {
+            x: Theme.pad;
+            width: parent.width - 2 * Theme.pad - (LibraryState.search == "" ? 0px : Theme.touch);
+            height: parent.height;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Theme.body;
+            color: LibraryState.search == "" ? Theme.muted : Theme.text;
+            text: LibraryState.search == "" ? "Search" : LibraryState.search;
+        }
+        Cursor {
+            corner: Theme.field-radius(parent.height);
+            shown: LibraryState.search-cursor;
+            always: true;
+        }
+        if LibraryState.search != "": Rectangle {
+            x: parent.width - Theme.touch;
+            width: Theme.touch;
+            height: parent.height;
+            TouchArea {
+                clicked => { LibraryState.search-cleared(); }
+            }
+            Text {
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: Theme.body;
+                color: Theme.text;
+                text: "×";
+            }
+            Cursor {
+                x: Theme.hair * 2;
+                y: Theme.hair * 2;
+                width: parent.width - 4 * Theme.hair;
+                height: parent.height - 4 * Theme.hair;
+                corner: Theme.field-radius(parent.height);
+                shown: LibraryState.clear-cursor;
+                always: true;
+            }
+        }
+    }
+    // The sidebar: one line an entry, a heading over each section.
+    for row[i] in LibraryState.side-rows: Rectangle {
+        x: Theme.margin;
+        y: root.content-y + i * (Theme.touch + root.gap);
+        width: root.side-width - root.lane;
+        height: Theme.touch;
+        if row.kind == 4: Text {
+            x: Theme.pad;
+            width: parent.width - Theme.pad;
+            height: parent.height;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Theme.small;
+            font-weight: 700;
+            color: Theme.muted;
+            text: row.label;
+        }
+        if row.kind != 4: Row {
+            width: parent.width;
+            height: parent.height;
+            data: row;
+            tapped => { LibraryState.side-tapped(i); }
+        }
+    }
+    ScrollBar {
+        visible: root.side-long && LibraryState.list-only;
+        x: Theme.margin + root.side-width - Theme.scroll-lane;
+        y: root.content-y;
+        width: Theme.scroll-lane;
+        height: root.side-height;
+        total: LibraryState.side-total;
+        first: LibraryState.side-first;
+        per-view: root.side-per-view;
+        scrolled(first) => { LibraryState.side-scrolled(first); }
     }
 }

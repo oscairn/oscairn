@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! What narrows the Library's list (LibraryPane.cpp `query_`): a search text, Favorites, Recent, the library the
-//! items come from and the tags chosen (all of them must match). The rows that choose them are the sound chooser's
-//! (sounds.rs: a Filters row opening Favorites, Recent, Library and Tags), and the query they make is the same.
+//! items come from and the tags chosen (all of them must match). The Library's sidebar (side.rs) chooses them; the sound
+//! chooser (sounds.rs) has its own rows for the same choices, and the query they make is the same.
 
 use super::item::Kind;
 use serde_json::{json, Value};
@@ -60,29 +60,6 @@ impl Filters {
         }
     }
 
-    /// What the Filters row says: what is on, or none.
-    pub fn summary(&self, libraries: &[Installed]) -> String {
-        let mut on = Vec::new();
-        if !self.search.is_empty() {
-            on.push(format!("“{}”", self.search));
-        }
-        if self.favorites {
-            on.push("Favorites".to_string());
-        }
-        if self.recent {
-            on.push("Recent".into());
-        }
-        if !self.source.is_empty() {
-            on.push(self.source_name(&self.source, libraries));
-        }
-        on.extend(self.chosen.iter().cloned());
-        if on.is_empty() {
-            "none".into()
-        } else {
-            on.join(", ")
-        }
-    }
-
     /// The libraries to choose from: everything, the user's own, then each installed one.
     pub fn sources(&self, libraries: &[Installed]) -> Vec<(String, String, Option<u64>)> {
         let mut out = vec![(String::new(), "Everything".to_string(), None), ("mine".into(), "My own".into(), None)];
@@ -123,7 +100,6 @@ mod tests {
         f.toggle_tag("keys");
         assert_eq!(f.params(Kind::Performance), json!({"kind": "performance", "limit": 1000, "text": "warm", "tags": ["keys"], "favorites": true, "recent": true, "source": "mine"}));
         assert!(f.narrowed());
-        assert_eq!(f.summary(&[]), "“warm”, Favorites, Recent, My own, keys");
         f.toggle_tag("keys");
         assert!(f.chosen.is_empty());
     }

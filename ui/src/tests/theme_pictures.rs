@@ -94,3 +94,73 @@ fn play_in_two_themes() {
         }
     }
 }
+
+/// How far in, in pixels, the top row of the box that holds the pixel column `x` first drawn under `from_y` starts: the box's
+/// corner as drawn (0 for a square one). The box's left edge is found a few rows down, on its straight side.
+fn corner_run(s: &Shelf, x: usize, from_y: usize) -> usize {
+    let (w, px) = (s.f.screen.w, &s.f.screen.pixels);
+    let at = |x: usize, y: usize| {
+        let p = px[y * w + x];
+        (p.r, p.g, p.b)
+    };
+    let bg = at(3, s.f.screen.h - 3);
+    let y0 = (from_y..s.f.screen.h).find(|&y| at(x, y) != bg).expect("a box");
+    let y1 = y0 + 24;
+    let x0 = (0..=x).rev().find(|&xx| at(xx, y1) == bg).map_or(0, |xx| xx + 1);
+    (x0..w).take_while(|&xx| at(xx, y0) == bg).count()
+}
+
+// One radius, in both themes: a button, the multi-way (segmented) strip, a list item, the search box and a sidebar entry all
+// take the theme's corner (radius + 2, 0 for radius 0), as drawn, within a pixel of each other. The lifted tab in its strip is
+// the corner less the strip's padding.
+#[test]
+fn radii_are_one_family() {
+    for (name, theme, square) in [("polish-1-orange", orange(), false), ("polish-1-blue", blue(), true)] {
+        let mut s = scene(name, 10);
+        let ui = s.ui();
+        theme::apply(&ui, &theme);
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let t = ui.global::<crate::Theme>();
+        let (r, c) = (t.get_radius(), t.get_corner());
+        assert_eq!(c, if r == 0. { 0. } else { r + 2. }, "{name}");
+        for h in [30., 44., 56.] {
+            assert_eq!((t.invoke_button_radius(h), t.invoke_field_radius(h)), (c, c), "{name}: a button and a field at {h}");
+        }
+        assert_eq!(t.get_section_radius(), if square { 0. } else { c }, "{name}");
+        assert_eq!(t.get_list_radius(), t.get_section_radius(), "{name}");
+        assert_eq!(t.invoke_inner(t.get_tab_pad()), (c - t.get_tab_pad()).max(0.), "{name}");
+        let k = 1.55;
+        // The tab strip, the search box, the info button, a sidebar entry, a list item: where each is under the bar.
+        let spots = [("tabs", 40.), ("search", 800. / k), ("info", 1255. / k), ("sidebar", 100.), ("item", 800. / k)];
+        let runs: Vec<(&str, usize)> = spots
+            .iter()
+            .map(|&(n, x)| (n, corner_run(&s, (x * k) as usize, if matches!(n, "sidebar" | "item") { 153 } else { 80 })))
+            .collect();
+        eprintln!("{name}: corner runs in pixels {runs:?}");
+        let (lo, hi) = (runs.iter().map(|r| r.1).min().unwrap(), runs.iter().map(|r| r.1).max().unwrap());
+        if r == 0. {
+            assert_eq!(hi, 0, "{name}: square everywhere: {runs:?}");
+        } else {
+            assert!(lo > 2 && hi - lo <= 2, "{name}: one family of corners: {runs:?}");
+        }
+        lib_png(&s, name);
+    }
+}
+
+// Play in both themes, for the radii (the picture alone).
+#[test]
+fn polish_1_play_pictures() {
+    for (name, theme) in [("polish-1-orange-play", orange()), ("polish-1-blue-play", blue())] {
+        fit_to_window();
+        let mut f = play_on_the_shell(name, json!({"id": "p1", "name": "Grand Piano", "unsaved": false}), play_graph());
+        f.screen.resize(1280, 720);
+        f.screen.set_scale(1.55);
+        theme::apply(&f.screen.ui, &theme);
+        f.screen.frame();
+        f.screen.frame();
+        if let Ok(dir) = std::env::var("OWNER_SHOTS") {
+            png_of(&dir, &f.screen.pixels, f.screen.w, f.screen.h, name);
+        }
+    }
+}

@@ -174,7 +174,7 @@ component NodeBox inherits Rectangle {
     property <float> s: RoutingState.scale;
     opacity: (data.bright ? 1 : Theme.dim) * (data.off ? 0.55 : 1);
     Rectangle {
-        border-radius: Theme.radius;
+        border-radius: Theme.corner;
         background: data.chosen ? Theme.accent.with-alpha(Theme.wash) : Theme.surface;
         border-width: data.chosen ? Theme.cursor-width : Theme.hair;
         border-color: data.chosen ? Theme.accent : data.failed ? Theme.danger : Theme.border;
@@ -214,7 +214,7 @@ component NodeBox inherits Rectangle {
     }
     Cursor {
         shown: data.cursor;
-        corner: Theme.radius;
+        corner: Theme.corner;
     }
 }
 

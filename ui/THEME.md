@@ -259,3 +259,22 @@ a folder with that theme.json in the themes folder, and a built-in once it is ad
 
 What stays round in a square theme because it is round by design: the knobs and slider thumbs, a switch's pill, the recording dot,
 the meters' bars and the sliders' thin tracks, a progress line, and a round-marks style's marks.
+
+## One corner for the family (2026-11-17)
+
+Every stand-alone element takes one corner, `Theme.corner`: the theme's `radius` plus 2 (`drawSection`'s), 0 where the radius is 0.
+`Theme.button-radius(h)` and `Theme.field-radius(h)` are that corner, at most half the height; `section-radius` and `list-radius` are
+that corner, 0 in a joined theme (items that touch are square by joining, not by their radius). A piece drawn inside another takes
+`Theme.inner(padding)`: the corner less the padding, so the two stay concentric (the lifted tab in the strip: the corner less
+`tab-pad`). Nothing else may have its own number.
+
+Changed from before (what came from another token or a literal): the segmented strip's track (`radius + 4`), its lifted tab, the
+tab's shadow and a folder tab's top corners (`radius + 1`), the tab's cursor ring (`radius + 2`), buttons in a pill style (half the
+height) and in a rounded one (`radius`), fields (half the height up to 56, else `radius + 3`: the search box, the dropdowns), the
+chain's plugin chips and the routing boxes and their cursor (`radius`). `style.buttons` (pill, rounded) is still read, checked and
+kept, but both draw the family's corner: a pill beside the rows' and cards' corners did not read as one family. Left as they were,
+by design or as a different thing: knobs and slider thumbs, a switch's pill, the recording dot, the meters and thin tracks,
+progress lines, the scroll bar's track (a third of a lane wide: its half width, at most the radius), a mark (`mark-radius`: its
+own style), the piano's keys (`key-radius`, Panel.cpp's), and a table cell of the grid's views (half the radius).
+Test: `radii_are_one_family` (src/tests/theme_pictures.rs) reads the corner of the strip, the search box, the info button, a
+sidebar entry and a list item as drawn, in the default theme and the blue square one.

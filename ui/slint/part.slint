@@ -22,6 +22,9 @@ export struct SettingData {
     tint: color, // an item's own color, where the theme puts it (drawListRow): the whole row or a mark in it
     tinted: bool,
     detail: string, // a fluid row's description: the last of its parts to keep room
+    warn: bool, // a trailing warning icon: the Performance does not fit this device (`reason` says why)
+    star: bool, // a trailing star: a favorite
+    reason: string,
     fluid: bool, // the row's name, value and detail share its width by priority: the name, then the value, then the detail
     columns: [string], // a row in columns (the Catalog's: name, version, publisher, state and summary), each shrunk then cut on its own
 }
@@ -101,7 +104,12 @@ export component Row inherits Section {
     }
     // A fluid row: the name keeps what it needs (at its least, 70% of the type) before the value does, the value its natural
     // width before the detail gets any, and the detail what is left, if that is worth drawing.
-    property <length> room: root.width - 2 * Theme.pad - root.label-room - root.value-room - root.buttons;
+    // The trailing icons of a fluid row, before the value: the warning, then the star at the end.
+    property <length> mark-w: Theme.icon * 0.85;
+    property <length> trail: (data.warn ? root.mark-w + Theme.pad-tight : 0px) + (data.star ? root.mark-w + Theme.pad-tight : 0px);
+    accessible-role: list-item;
+    accessible-label: data.label + (data.warn ? ", does not fit this device: " + data.reason : "") + (data.star ? ", favorite" : "");
+    property <length> room: root.width - 2 * Theme.pad - root.label-room - root.value-room - root.buttons - root.trail;
     property <length> name-need: name-measure.preferred-width;
     property <length> value-need: value-measure.preferred-width;
     property <length> name-room: root.data.fluid ? min(root.name-need, max(root.room - root.value-need - Theme.pad, root.name-need * 0.7), root.room - min(root.value-need, root.room * 0.25) - Theme.pad) : root.width * 0.4 - Theme.pad - root.label-room;
@@ -136,13 +144,31 @@ export component Row inherits Section {
         text: root.data.detail;
     }
     if !root.in-columns: FitText {
-        x: root.data.fluid ? parent.width - Theme.pad - root.value-room - root.buttons - root.value-room-fluid : parent.width * 0.4 + Theme.pad;
+        x: root.data.fluid ? parent.width - Theme.pad - root.value-room - root.buttons - root.trail - root.value-room-fluid : parent.width * 0.4 + Theme.pad;
         width: root.data.fluid ? root.value-room-fluid : parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
         height: parent.height;
         text: data.value;
         ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;
         bold: true;
         align: TextHorizontalAlignment.right;
+    }
+    if data.star: Text {
+        x: parent.width - Theme.pad - root.mark-w;
+        width: root.mark-w;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: Theme.body;
+        color: Theme.text;
+        text: "★";
+    }
+    if data.warn: Image {
+        x: parent.width - Theme.pad - root.mark-w - (data.star ? root.mark-w + Theme.pad-tight : 0px);
+        y: (parent.height - self.height) / 2;
+        width: root.mark-w;
+        height: root.mark-w;
+        source: @image-url("icons/triangle-alert.svg");
+        colorize: Theme.warning;
     }
     if data.kind == 1 && data.switch: Rectangle {
         x: parent.width - root.switch-width - Theme.pad;

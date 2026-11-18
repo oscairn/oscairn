@@ -149,7 +149,7 @@ pub(super) fn library(r: &mut Real) {
     r.sent("Favorite");
     let now = r.engine.call("library.query", json!({"id": id}));
     r.check(now["items"][0]["favorite"] == true, || format!("Favorite: the engine has {}", now["items"][0]["favorite"]));
-    r.check(r.rows().iter().any(|x| x.0 == "Brass Hall" && x.1.contains('★')), || "Favorite: the row has no star".into());
+    r.check(r.screen.ui.global::<crate::PartState>().get_rows().iter().any(|x| x.label == "Brass Hall" && x.star), || "Favorite: the row has no star".into());
     r.goto("Brass Hall");
     bar_do(r, "Options");
     choose(r, "Remove from favorites");

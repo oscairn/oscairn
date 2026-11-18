@@ -714,6 +714,56 @@ fn controls_open_from_the_parts_list_and_a_menu_choice_reaches_the_engine() {
     f.screen.frame();
 }
 
+// A performance instrument: with the Controls page open and nothing happening, it asks nothing and draws
+// nothing (docs/rust-ui.md, idle); a status that says what the last said costs neither.
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut f = play_on_the_shell("controls-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), graph());
+    let ui = f.screen.ui.clone_strong();
+    let g = graph();
+    ui.global::<Bar>().invoke_action(5); // Edit: the Parts list
+    assert_eq!(ui.get_screen(), 9);
+    ui.global::<PartsState>().invoke_tool(1); // Controls
+    assert_eq!((ui.get_screen(), crate::tests::title(&ui)), (11, "Parts › Controls".to_string()));
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "sampleRate": 48000});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status}))); // the first: the takes and the meters follow
+    f.pump();
+    // Everything the shell and the page ask until they are quiet, as a real engine would.
+    let mut quiet = 0;
+    while quiet < 3 {
+        let Some(request) = f.engine.try_request(std::time::Duration::from_millis(60)) else {
+            quiet += 1;
+            continue;
+        };
+        quiet = 0;
+        let result = match request["method"].as_str().unwrap() {
+            "params.list" => list_reply(),
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => g.clone(),
+            "record.get" => json!({"takes": []}),
+            "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
+            "transport.get" => json!({"tempo": 120.0, "playing": false}),
+            "session.status" => json!({"midiInputs": []}),
+            "edit.history" => json!({"undo": "Volume of Keys", "redo": ""}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    assert_eq!(ui.global::<ControlsState>().get_rows().row_data(1).unwrap().name.as_str(), "Rhodes · Cutoff", "the page is whole: the targets' parameters are named");
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    // The engine's status that says what the last said: no request, no frame.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+}
+
 // The page and the menu in every built-in theme and the two odd ones, at the keyboard's 1280x720, a small
 // device's 800x480, 800 wide and the FANTOM-07's scale: pictures in target/screens and target/theme-shots.
 #[test]

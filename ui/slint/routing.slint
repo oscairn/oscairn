@@ -154,6 +154,8 @@ component FrameBox inherits Rectangle {
         width: 30px * root.s;
         height: 30px * root.s;
         down: true;
+        accessible-role: button;
+        accessible-label: "Collapse part";
     }
     if data.chevron > 0: TouchArea {
         x: parent.width - 44px * root.s;
@@ -292,6 +294,8 @@ component PartBox inherits Rectangle {
         width: 30px * root.s;
         height: 30px * root.s;
         down: false;
+        accessible-role: button;
+        accessible-label: "Expand part";
     }
     if data.chevron > 0: TouchArea {
         x: parent.width - 44px * root.s;

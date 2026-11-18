@@ -652,15 +652,22 @@ The Library app (`ui/src/library/`, `ui/slint/library.slint`, `ui/LIBRARY-APP.md
 whole and **Home's tile opens it** (`library_glue.rs` `PORTED`). **To fall back to the JUCE Library app from the device,
 set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whatever `PORTED` says). All 45 rows are built (43 ticked, 2 n/a). The first cut:
 
-- **The screen** is the shared list screen (`browser.rs`, the Part screen's component laid by the shell in the area the
-  tabs leave) under the shared tab family: Performances, Sounds and Setlists, in a strip or a rail as the theme's
-  `tabPlacement` says. The first row is Filters (the sound chooser's Favorites, Recent, Library and Tags lists,
-  `library/filters.rs`), then the items: name ("Untitled" without one), tags and description, "Locked",
-  "Does not fit this device", "Opening", "Auditioning", a star, the item's color as the theme puts a row's. The panel
-  describes the item under the cursor (name, a favorite's star, tags, description, where it is from, why it does not fit, that it opens or is tried; with the cursor on Filters, the item chosen before or the first) and moving the cursor asks the engine for nothing. Search, Audition (Stop and Keep while one is tried) and Options are the top bar's
-  actions; Options opens the item menu for the item under the cursor, or the one last pressed (touch leaves no cursor).
-  Without touch the dial walks the tabs and then the rows; up from the first row reaches the tabs, up from the first tab
-  the top bar; a press on a Performance opens it, on any other row lists what can be done with it.
+- **The screen** is the shared list screen (`browser.rs`, the Part screen's component) under one row below the top bar: the
+  kinds (Performances, Sounds, Setlists) as the shared tab family in a strip, the search box (a tap or a press asks for the text on the
+  keyboard; the text shows in the box; its cross takes it away; the engine's own match narrows the list and the line under it counts
+  the matches) and, at the right, the button that shows the panel. Under the row, the **sidebar** at the left (`slint/library.slint`,
+  `src/library/side.rs`: Favorites and Recent, the libraries (All, My own, each installed library with its count), the tags with their
+  counts; one line each, a touch target tall, the chosen ticked, several tags all of which must match; its own scroll bar; its width
+  `Theme.sidebar-share`, 29% of the content) and the items at the right: name ("Untitled" without one), tags, "Locked",
+  "Auditioning", a star, the item's color as the theme puts a row's. A choice in the sidebar applies at once (the engine is asked
+  again); only opening a Performance waits for a press, as before. The **panel** (what the item under the cursor is) is hidden at first;
+  its button shows it in the sidebar's place and hides it again, for the session. What only the panel said (why a Performance does not fit
+  this device, which library it is locked in, a folder indexed in place) is in the line under the list while the cursor is on the row and
+  the panel is hidden. Audition and Options are the top bar's actions (Options with the cursor in the sidebar on a tag is the tag's
+  menu: color, hide). Without touch: the dial walks the row under the top bar (the tabs, the search box, its cross, the panel's button)
+  and then the list; left and right (the left knob and the right knob) go between the sidebar and the list; up from the first row of
+  either reaches the row; one cursor in one place at a time. The sound chooser (Part screen) keeps its Filters row: it is a picker over
+  the Part screen with no room for a column.
 - **A row shares its width by priority** (`part.slint` `Row`, a `fluid` row): the name first (it keeps what it needs, at least
   70% of the type, before the tags do), then the tags and states (their natural width, at least a quarter of the row), then
   the description (what is left, muted, only if that is six small-type heights or more); the name is cut only when the row

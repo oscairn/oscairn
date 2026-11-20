@@ -1266,14 +1266,16 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
 - `budget.set` takes `{cpu}` and optional `memory`: the device's budget ([RFC 0025](rfcs/0025-resource-budgets.md)),
   `cpu` the share of the audio thread's time the plugins may take (0 checks nothing), `memory` in
   bytes (0 or absent: not checked). `budget.estimate` takes an optional `{directory}` (absent: the
-  open Performance) and returns `{cpu,memory,fits,seamless,budget,plugins,longest,cores,uncertain}`, each plugin with
+  open Performance) and returns `{cpu,memory,fits,seamless,fades,budget,plugins,longest,cores,uncertain}`, each plugin with
   `name`, `plugin`, `cpu`, `memory` and `measured`. CPU is checked per core (RFC 0025's
   [model](rfcs/0025-resource-budgets.md#the-cpu-model-per-core)): `cpu`, the total, must fit the budget's share of each of `cores`
   audio cores, and `longest`, the costliest part's chain (its plugins one after another in a block), the budget's share of one block;
   `uncertain`: it would not fit, but only by figures from too few blocks, by plugins not yet measured, or by more than its plugins cost at rest (RFC 0025: CPU refuses only past the rest), so it counts as fitting and opening it adds a notice. For the open Performance, `fits` counts it
-  alone and `seamless` adds the last Performance still ringing out. With a budget, opening a Performance over it,
+  alone and `seamless` adds the last Performance still ringing out. For another, `seamless`: it and the open one,
+  priced by the notes still sounding, fit the same per-core model together; `fades`: they do not in CPU, but the
+  memory is there, so the open one's tail fades out in 150 ms (RFC 0021). With a budget, opening a Performance over it,
   or adding a plugin that would take the open one over it, fails saying what does not fit; one
-  that fits only alone opens as a cut, without the last ringing out. A plugin whose
+  that fits only alone in memory opens as a cut, without the last ringing out. A plugin whose
   `oscairn.memory` declaration exceeds what the memory budget leaves is refused before it activates.
   `budget.forget` (no parameters; the `system` permission) lets go of every plugin's measured CPU,
   returning `{forgotten:true}`: each counts at its declared or default estimate until it plays

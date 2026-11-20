@@ -476,6 +476,9 @@ namespace oscairn
         // A loaded plugin's cost: its measurement, its memory the larger of that and what it
         // declared (oscairn.memory); an effect context made from another counts its own bytes.
         Cost nodeCost(const Graph& graph, NodeId node, const std::string& name = {}, uint32_t limit = 0) const;
+        // A node ringing out (RFC 0021): it takes no new notes, so its CPU is its rest and its cost per voice for the notes
+        // still held or pedaled through it (its whole measured figure for one never measured per voice, and for an effect).
+        Cost ringingCost(const Graph& graph, NodeId node, const std::string& name = {}) const;
         // What the memory budget leaves for one more plugin to declare beside these (0: no memory budget).
         uint64_t memoryRoom(const Graph& graph, const std::vector<NodeId>& beside) const;
         uint64_t memoryRoom() const;                            // beside the open Performance
@@ -497,7 +500,7 @@ namespace oscairn
         std::optional<Measurement> measurementFor(const std::string& key) const; // by plugin key, as costOf finds it: the build's, or the most of its builds'
         // A shared instance's further part (`rank` 1 its second) by its plugin's measurement and declared total: nothing where none applies.
         static std::optional<uint64_t> furtherPart(const std::optional<Measurement>& m, uint32_t rank, uint64_t declared);
-        Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}) const;
+        Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}, const Feeds& playingFeeds = {}) const; // playingFeeds: the parts of `playing`'s
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
 
@@ -846,7 +849,15 @@ namespace oscairn
         static constexpr size_t warmLimit = 32; // without memory classes; with them, memory bounds them (evictOpportunistic)
         bool keepInstances_ = false;                      // an audition opening a Performance: take over nothing set aside
         std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free = {});
-        void open(Prepared& prepared, bool seamless);
+        void open(Prepared& prepared, bool seamless, bool fades = false);
+        // A change over the CPU budget with the memory there (Estimate::fades): the last Performance is carried over as in a
+        // seamless change, its ways to the outputs on this live gain, which service() takes from 1 to 0 over fadeSeconds;
+        // then what rings out of it goes at once (endRinging_), its retiring sounds choked (RFC 0021, 2026-11-19).
+        static constexpr uint8_t retiringSlot = 255;
+        static constexpr double fadeSeconds = .15;
+        std::optional<uint64_t> fading_; // framesProcessed_ when the fade began
+        std::set<NodeId> fadingNodes_, endNow_; // carried over fading; faded, for ringOut() to remove at once
+        void fade();
         std::unique_ptr<Prepared> prepared_; // the next one, prepared ahead; after graph_, so it goes first
         std::set<NodeId> nodesOf(const Part& part) const;
         void dropSendTargets(); // the control targets on sends that no longer exist

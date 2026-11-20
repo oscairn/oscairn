@@ -777,15 +777,16 @@ void Session::openPerformance(const std::string& directory) {
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
-    bool seamless=true;uint64_t incoming=0;std::string uncertain,cut;
-    if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless;incoming=e.memory;
+    bool seamless=true,fades=false;uint64_t incoming=0;std::string uncertain,cut;
+    if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless || e.fades;fades=e.fades;incoming=e.memory;
         if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure, not yet measured, or above what its plugins cost at rest; notes give way under load";
         if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");
-        // A cut is never silent to the player (the owner's rule: held notes ring out): said when it cut a note
-        // held, pedaled or heard in the last tenth of a second.
-        if(!seamless){bool heard=false;std::set<NodeId> outgoing(leaving_);for(const auto& [n,name]:nodes_)outgoing.insert(n);
+        // A cut, or a tail faded out fast, is never silent to the player (the owner's rule: held notes ring out): said when it
+        // ended a note held, pedaled or heard in the last tenth of a second.
+        if(!e.seamless){bool heard=false;std::set<NodeId> outgoing(leaving_);for(const auto& [n,name]:nodes_)outgoing.insert(n);
             for(const auto n:outgoing)heard=heard || (graph_.contains(n) && !graph_.silent(n,uint64_t(sampleRate_/10)));
-            if(heard)cut="the last Performance's notes could not ring out: the two Performances together would not fit this device's budget, so this one opened at once";}
+            if(heard)cut=fades?"the last Performance's notes could not ring out: with them ringing beside this Performance the device's CPU would not keep up, so they faded out in "+std::to_string(int(fadeSeconds*1000))+" ms"
+                             :"the last Performance's notes could not ring out: the two Performances together would not fit this device's memory, so this one opened at once";}
         // RFC 0045: room for its new instances before they load. Instances kept warm whose plugin it does not
         // use go first, least recently used first; those it may take stay (evictOpportunistic after the change).
         if(memoryClasses()){
@@ -807,7 +808,7 @@ void Session::openPerformance(const std::string& directory) {
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them.
     if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming);
     auto stats=prepared->stats;
-    {Clock publish{stats.publish};open(*prepared,seamless);}
+    {Clock publish{stats.publish};open(*prepared,seamless,fades);}
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
     if(!cut.empty()){notices_.push_back(cut);std::fprintf(stderr,"oscairn: %s\n",cut.c_str());}
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
@@ -997,7 +998,7 @@ bool Session::preparePerformance(const std::string& directory) {
     const auto root=performanceRoot(directory);
     bool opportunistic=false;
     if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));
-        if(!e.seamless){
+        if(!e.seamless && !e.fades){
             // RFC 0025: with memory classes it is prepared anyway, as opportunistic data, when what
             // neither running apps' reservations nor committed memory hold allows, so the cut is fast.
             const auto used=memoryClasses()?reservedMemory(false)+budget_.margin+committedMemory():0;
@@ -1498,7 +1499,7 @@ void Session::retireShared(const SoundContext& node) {
 }
 
 // Publishes a read Performance in place of the open one.
-void Session::open(Prepared& p,bool seamless) {
+void Session::open(Prepared& p,bool seamless,bool fades) {
     auto& next=p.next;auto& wires=p.wires;auto& disabled=p.disabled;
     // The instances it reused: session.status counts their late and silent blocks from here, as a fresh one's.
     std::vector<const PluginHost*> reused(p.warm.begin(),p.warm.end());for(const auto n:p.taken)reused.push_back(graph_.node(n).host.get());
@@ -1522,13 +1523,20 @@ void Session::open(Prepared& p,bool seamless) {
     // Its outgoing sounds ring out through the outgoing chain, by the plugin's ring-out buffer.
     // Only one change's tail carries over: one still ringing out of it is cut at the cue (chokes).
     if(seamless)for(const auto& b:p.beside){next->takeNotes(graph_,b->was,b->now);
-        // A way out of the outgoing chain into a plugin this Performance took over is left out: the rest rings, said.
+        // A way out of the outgoing chain into a plugin this Performance took over is left out: the others ring, said.
         if(const auto lost=next->ringOut(graph_,b->was,b->now)){const auto n=nodes_.find(b->was);
             p.notices.push_back("the last Performance's notes ring out without part of their chain: "+(n==nodes_.end()?std::string("a plugin"):n->second)+" also played into a plugin this Performance took over");
             std::fprintf(stderr,"oscairn: %s\n",p.notices.back().c_str());}
         b->chokes=graph_.ringOutRoutes(b->was)!=0;}
     // The outgoing nodes of shared engines it claimed select the Default at the cue, so new notes never
     // reach their sounds, which go once idle: their held notes keep their voices, and a cut drops them (RFC 0021).
+    // Over the CPU budget with the memory there (Estimate::fades): what rings out reaches the outputs through the fade's live
+    // gain, at 1 from the first block, which fade() takes to 0.
+    // A change while one fades: those keep fading (carryOver froze their routes again).
+    if(fades){std::set<NodeId> ringing;for(const auto& b:p.beside)ringing.insert(b->now);
+        if(!fading_){graph_.setLiveGain(retiringSlot,1,false);fadingNodes_.clear();}
+        fadingNodes_.insert(leaving.begin(),leaving.end());next->fadeRoutes(fadingNodes_,ringing,retiringSlot);}
+    else if(fading_){std::erase_if(fadingNodes_,[&](NodeId n){return !leaving.count(n);});next->fadeRoutes(fadingNodes_,{},retiringSlot);}
     std::vector<std::shared_ptr<PluginHost>> outgoingShared;
     {std::set<NodeId> outgoing(leaving_);for(const auto& [id,name]:nodes_)outgoing.insert(id);
         for(const auto n:outgoing)if(const auto c=std::dynamic_pointer_cast<SoundContext>(graph_.node(n).host))
@@ -1567,6 +1575,7 @@ void Session::open(Prepared& p,bool seamless) {
     for(auto& b:p.beside)if(b->chokes)for(auto& r:retiringSounds_)if(r.node==b->was){if(r.older)r.node=0;else{r.node=b->now;r.older=true;}}
     for(auto& b:p.beside)if(!b->old.empty() || graph_.ringOutRoutes(b->now))retiringSounds_.push_back({b->host,std::move(b->old),b->now});
     beside_+=p.beside.size();
+    if(fades && !fading_)fading_=framesProcessed_.load(std::memory_order_relaxed); // one already fading goes on from where it is
     for(const auto& c:outgoingShared)retireShared(dynamic_cast<const SoundContext&>(*c));
     // Its levels start at its own, as in a new Session, not ramp from the last Performance's (whose
     // routes ringing out have theirs frozen): every slot given afresh, the master's too.

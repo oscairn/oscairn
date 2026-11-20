@@ -1757,14 +1757,25 @@ namespace
             t.setBudget({.9, 0});
             check(t.estimate((root / "budget-one").string()).plugins.at(0).measured, "and known to the next session before it loads");
         }
-        // Seamless only when both fit: a fresh device, every plugin at the default (.02).
+        // Seamless only when both fit as one Performance does, on one audio core here (OSCAIRN_AUDIO_CORES): a fresh
+        // device, every plugin at the default (.02). Past the CPU with the memory there, the last one's tail fades out
+        // (RFC 0021, 2026-11-19); past the memory, the change is a cut.
         ::setenv("OSCAIRN_DATA_HOME", (root / "budget-fresh").c_str(), 1);
+        ::setenv("OSCAIRN_AUDIO_CORES", "1", 1);
         fs::create_directories(root / "budget-fresh");
         Session u(48000, frames);
         u.setBudget({.03, 0});
         u.loadPerformance((root / "budget-one").string());
-        const auto e = u.estimate((root / "budget-one").string());
-        check(e.fits && !e.seamless, "it fits alone, not beside itself");
+        auto e = u.estimate((root / "budget-one").string());
+        check(e.fits && !e.seamless && e.fades, "it fits alone, not beside itself in CPU, with the memory there: it fades");
+        check(u.preparePerformance((root / "budget-one").string()), "so it is prepared ahead beside it");
+        u.loadPerformance((root / "budget-one").string());
+        check(u.leaving() == 1, "and the last one is carried over, fading");
+        { Audio x; for(int i = 0; i < int(48000 * .2 / frames); ++i) x.run(u); }
+        check(u.leaving() == 0, "and gone once faded");
+        u.setBudget({.05, u.estimate().memory + e.memory - 1});
+        e = u.estimate((root / "budget-one").string());
+        check(e.fits && !e.seamless && !e.fades, "past the memory beside itself: no fade");
         check(!u.preparePerformance((root / "budget-one").string()), "nor is it prepared ahead beside it");
         u.loadPerformance((root / "budget-one").string());
         check(u.leaving() == 0, "so the change is a cut");
@@ -1772,6 +1783,7 @@ namespace
         check(u.preparePerformance((root / "budget-one").string()), "with room for both, it is prepared ahead");
         u.loadPerformance((root / "budget-one").string());
         check(u.leaving() == 1, "and rings out");
+        ::unsetenv("OSCAIRN_AUDIO_CORES");
     }
 
     // A build changed without a new version (0.1.0 stays 0.1.0) is measured again: measurements

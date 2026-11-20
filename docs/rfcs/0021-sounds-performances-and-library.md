@@ -1403,16 +1403,32 @@ change: an instance a held note sounds through, and every node it sends to, is b
 (`Session::freeInstances`), so none is taken over, and an effect offering effect contexts gets a
 new context while its old node rings out. `control-performance-switch` checks `Graph::ringOut`
 itself with such a route: the way into the Delay ringing out is made, the other left out and
-counted. What does cut held notes is admission: a
-change is seamless only while the open Performance, at full cost (its busiest figures and all its
-memory, however few notes still ring), and the incoming one, at full cost too (even where its
-sounds go beside the open instance, whose memory is then counted twice), fit one block's CPU
-budget and the memory ceiling together, where the open one alone may use the budget on every
-audio core. A cut that ends a note held, pedaled or heard now says so in a notice ("the last
-Performance's notes could not ring out"). Proposed for the estimates' rework, not built: price
-what rings out at what it holds now (its memory resident, its CPU at rest plus the voices still
-sounding), a node prepared beside at its sounds' memory only, and hold the sum against the
-budget on every audio core as admission does.
+counted. What cut held notes was admission: a change was seamless only while the open
+Performance, at full cost (its busiest figures, however few notes still ring), and the incoming
+one fit one block's CPU budget together, where the open one alone may use the budget on every
+audio core. On the unit each Sampler part counts about 0.21 of a block, so two Sampler
+Performances (Nameless Piano and Imperial PopRock, 1.10 together) cut against a 0.75 block, while
+opening ST Final alone (1.39) was accepted against 0.75 on each of 3 audio cores. Now the two are
+held to that same model: their total within the budget on every audio core (2.25 on the unit),
+each chain, theirs and its, within one block's (0.75), the outgoing one priced as it rings out
+(`Session::ringingCost`: an instrument at its rest plus its cost per voice for the notes still
+held or pedaled through it, its whole figure where no cost per voice was measured; an effect as
+measured). Past that in CPU with the memory there, the change does not cut either: the outgoing
+Performance is carried over as in any seamless change, its ways to the outputs on a live gain of
+their own (`Session::retiringSlot`), which `Session::fade` takes from 1 to 0 over 150 ms; then its
+plugins go at once and its sounds beside the incoming ones are choked, silent by then, so their
+CPU is free. Past the memory it is still a cut, since both instances' memory cannot be held. A
+fade or a cut that ends a note held, pedaled or heard says so in a notice ("the last
+Performance's notes could not ring out" and why). Not built: shedding the outgoing Performance's
+least important voices instead of fading all of them (RFC 0046's order); the load guard still
+sheds notes under a real overload. Memory is still counted at full for both (a node prepared
+beside counts its instance again), proposed for the estimates' rework.
+`control-performance-switch` checks, with the unit's 3 audio cores (`OSCAIRN_AUDIO_CORES`) and
+the plugins at their guessed figures: two Performances past one block together but within the
+cores ring out through the outgoing Delay (with the old rule, a cut to zero); and A, twice as
+many plain instruments as cores holding a note, to a synth through a Delay fades: said, no step
+past a twentieth of the note's level (the old rule: a step of the whole level), silent after the
+fade, A's plugins gone, then B as a fresh load.
 
 The unit (2026-11-19, FANTOM-07) then showed a cut with nothing logged in 32 of the owner's 87
 Performances: each has a part sending at level 0 to an empty bus the converter did not build,

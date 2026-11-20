@@ -227,6 +227,19 @@ namespace oscairn
         return c;
     }
 
+    Control::Cost Session::ringingCost(const Graph& graph, NodeId node, const std::string& name) const
+    {
+        auto c = nodeCost(graph, node, name);
+        const auto& host = graph.host(node);
+        if(!host.noteInputPorts()) return c; // an effect plays what reaches it: as measured
+        const auto voices = graph.sounding(node);
+        if(voices == UINT32_MAX) return c; // just set retiring, not yet counted
+        if(!voices) { c.cpu = c.rest > 0 ? std::min(c.rest, c.cpu) : c.cpu; return c; }
+        if(const auto m = measurementFor(pluginKey(graph, node)); m && m->voice > 0)
+            c.cpu = std::min(c.cpu, (c.rest > 0 ? std::min(c.rest, c.cpu) : 0) + m->voice * voices);
+        return c;
+    }
+
     uint64_t Session::memoryRoom(const Graph& graph, const std::vector<NodeId>& beside) const
     {
         const auto ceiling = budget_.cpu > 0 ? memoryCeiling() : 0;
@@ -695,18 +708,20 @@ namespace oscairn
     // chain the budget's share of one block, a part's counting the buses it plays through or sends to after
     // its own (RFC 0045's guard, 12e: `feeds`, each part's buses). Figures from too few blocks that would refuse
     // it let it open, said (uncertain).
-    Control::Estimate Session::estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds) const
+    Control::Estimate Session::estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds, const Feeds& playingFeeds) const
     {
         Estimate e;
         e.plugins = plugins; e.budget = budget_;
         e.cores = std::max(1u, worker::usableCores() - 1);
+        if(const char* n = std::getenv("OSCAIRN_AUDIO_CORES"); n && std::atoi(n) > 0) e.cores = uint32_t(std::atoi(n)); // a small device's on a desktop, as the graph's lanes' total (tests, diagnosis)
         // The costliest chain: a part's own and then the costliest way on through the buses it feeds (no loops: the format refuses them).
-        auto longestOf = [&](const std::map<std::string, double>& chains, double alone) {
+        auto longestOf = [&](const std::map<std::string, double>& chains, double alone, const Feeds& feeding = {}, bool own = true) {
+            const auto& f = own ? feeds : feeding;
             std::map<std::string, double> way;
             std::function<double(const std::string&)> through = [&](const std::string& part) {
                 if(const auto w = way.find(part); w != way.end()) return w->second;
                 double next = 0;
-                if(const auto f = feeds.find(part); f != feeds.end()) for(const auto& bus : f->second) next = std::max(next, through(bus));
+                if(const auto x = f.find(part); x != f.end()) for(const auto& bus : x->second) next = std::max(next, through(bus));
                 const auto c = chains.find(part);
                 return way[part] = (c == chains.end() ? 0 : c->second) + next;
             };
@@ -722,7 +737,12 @@ namespace oscairn
         e.longest = longestOf(chains, alone);
         if(budget_.cpu <= 0) return e;
         double cpu = e.cpu; uint64_t memory = e.memory;
-        for(const auto& c : playing) { cpu += c.cpu; memory += c.memory; }
+        std::map<std::string, double> ringing; double ringingAlone = 0; // the playing Performance's chains, beside this one's
+        for(const auto& c : playing)
+        {
+            cpu += c.cpu; memory += c.memory;
+            if(c.part.empty()) ringingAlone = std::max(ringingAlone, c.cpu); else ringing[c.part] += c.cpu;
+        }
         const auto ceiling = e.budget.memory = memoryCeiling();
         const auto recording = recorder_.committedBytes(); // beside it, as committed
         const bool memoryFits = !ceiling || e.memory + recording <= ceiling;
@@ -766,9 +786,15 @@ namespace oscairn
             e.uncertain = total <= budget_.cpu * e.cores && longestOf(resting, longest) <= budget_.cpu;
         }
         e.fits = (memoryFits && cpuFits) || e.uncertain;
-        // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the
-        // per-core model; hold them against budget x cores once a device has measured changes ringing out on several cores.
-        e.seamless = e.fits && cpu <= budget_.cpu && (!ceiling || memory + recording <= ceiling);
+        // A change is seamless when this Performance and what rings out beside it (priced by the caller: the voices still
+        // sounding, not the whole Performance) fit as one Performance does: their total within the budget on every audio
+        // core, and each chain, theirs and its, within one block's (RFC 0021, 2026-11-19; it was both totals within one
+        // block's budget, so a Performance using more than half a core never rang out). Over in CPU alone, with the memory
+        // there, the change still carries the last one over and fades its tail out fast (fades) instead of a cut.
+        const bool memoryBoth = !ceiling || memory + recording <= ceiling;
+        const bool cpuBoth = cpu <= budget_.cpu * e.cores && std::max(e.longest, longestOf(ringing, ringingAlone, playingFeeds, false)) <= budget_.cpu;
+        e.seamless = e.fits && cpuBoth && memoryBoth;
+        e.fades = e.fits && !cpuBoth && memoryBoth;
         std::sort(e.plugins.begin(), e.plugins.end(), [](const Cost& a, const Cost& b) { return a.cpu > b.cpu; });
         return e;
     }
@@ -822,12 +848,14 @@ namespace oscairn
         if(budget_.cpu > 0) loadMeasurements();
         // What plays now: this Performance's plugins, and any still ringing out from the last.
         std::vector<Cost> open, ringing;
+        std::vector<Cost> playing; // the open Performance as it would ring out: by the voices sounding now
         for(const auto& [node, name] : nodes_)
         {
             open.push_back(nodeCost(graph_, node, name, noteLimit(node)));
-            for(const auto& p : parts_) if(nodesOf(p).count(node)) { open.back().part = "part " + std::to_string(p.id); break; }
+            playing.push_back(ringingCost(graph_, node, name));
+            for(const auto& p : parts_) if(nodesOf(p).count(node)) { open.back().part = playing.back().part = "part " + std::to_string(p.id); break; }
         }
-        for(const auto node : leaving_) if(graph_.contains(node)) ringing.push_back(nodeCost(graph_, node));
+        for(const auto node : leaving_) if(graph_.contains(node)) { ringing.push_back(ringingCost(graph_, node)); playing.push_back(ringing.back()); }
         Feeds feeds; // each part's buses: the one it plays through, and those it sends to
         for(const auto& p : parts_)
         {
@@ -838,7 +866,6 @@ namespace oscairn
         // The open one fits on its own; what rings out from the last only makes it not seamless,
         // so adding a plugin right after a change is not refused for a tail.
         if(directory.empty()) return estimateOf(open, ringing, feeds);
-        auto playing = open; playing.insert(playing.end(), ringing.begin(), ringing.end());
         // A Performance or a Sound in a folder: its plugins by identity, from its document.
         const auto file = fs::path(directory) / (fs::exists(fs::path(directory) / "sound.json") ? "sound.json" : "performance.json");
         const auto bytes = state_files::read(file, 4 * 1024 * 1024);
@@ -913,6 +940,6 @@ namespace oscairn
             // A further part (furtherPart).
             if(shares && seen) if(const auto x = furtherPart(seen, ++further[instance], seen->declared)) coming.back().memory = *x;
         }
-        return estimateOf(coming, playing, its);
+        return estimateOf(coming, playing, its, feeds);
     }
 }

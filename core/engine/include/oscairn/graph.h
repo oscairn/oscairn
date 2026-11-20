@@ -171,6 +171,9 @@ namespace oscairn
         /// Removes `node`'s ring-out routes (once its retiring sounds are gone), or with `older` only
         /// those from channels 2 and 3 (once the older tail has faded); takes effect at commit().
         void dropRingOut( NodeId node, bool older = false );
+        /// The routes to the outputs from `nodes` (frozen by carryOver, so naming no live gain) and from the ring-out
+        /// channels of `ringing` name live gain `slot`: a Performance change fading the last one's tail (Session::fade).
+        void fadeRoutes( const std::set<NodeId>& nodes, const std::set<NodeId>& ringing, uint8_t slot );
         size_t ringOutRoutes( NodeId node ) const; // the routes ringOut made from `node` and not dropped
         /// A replacement prepared ahead keeps its node IDs: nodes added here meanwhile take later ones.
         void reserveIds( const Graph& prepared ) { nextId_ = std::max( nextId_, prepared.nextId_ ); }

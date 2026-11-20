@@ -272,6 +272,9 @@ namespace oscairn
         connectAudioBatch(routes);
         return lost;
     }
+    void Graph::fadeRoutes(const std::set<NodeId>& nodes,const std::set<NodeId>& ringing,uint8_t slot) {
+        for(auto& r:audioRoutes_)if(r.to.node==graphOutput && (r.from.port==ringOutPort ? ringing.count(r.from.node)!=0 : nodes.count(r.from.node)!=0))r.live[0]=slot;
+    }
     void Graph::dropRingOut(NodeId node,bool older) { std::erase_if(audioRoutes_,[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort && (!older || r.from.channel>=2);}); }
     size_t Graph::ringOutRoutes(NodeId node) const { return size_t(std::count_if(audioRoutes_.begin(),audioRoutes_.end(),[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort;})); }
     void Graph::publishReplacement(Graph& next,const std::function<void()>& onPublish) {

@@ -987,6 +987,85 @@ int main(int argc, char** argv)
             }
         }
 
+        ::setenv("OSCAIRN_AUDIO_CORES", "3", 1); // the FANTOM-07's: estimates and the lanes' total as on the unit
+        // The ring-out fit rule (RFC 0021, 2026-11-19): a change rings out when the incoming Performance and the
+        // outgoing one, priced by what still sounds, fit as one Performance does: their total within the budget on
+        // every audio core, each chain within one block's. Measurements forgotten, every plugin counts at the same
+        // guess, so the figures are the estimate's own. Before, both totals had to fit one block's budget: on the unit
+        // a switch between two Sampler Performances (1.10 of a 0.75 block) cut, where opening ST Final (1.39) alone was
+        // accepted.
+        {
+            const auto g1 = temp.path / "fit-a", g2 = temp.path / "fit-b";
+            ringing(g1, 0, argv[1], argv[3], .5); ringing(g2, 1, argv[1], argv[3], .5);
+            Session t(48000, frames), r(48000, frames);
+            auto held = [&](Session& s, const fs::path& a) { load(s, a); quiet(s); s.controller(64, 127); s.note(true, 60, .8); blocks(s, 20); s.note(false, 60, 0); };
+            held(t, g1); held(r, g1);
+            t.setBudget({64}); t.forgetMeasurements();
+            const auto open = t.estimate(""), next = t.estimate(g2.string());
+            const auto cores = next.cores;
+            if(cores < 2) std::printf("ring out fit: one audio core here, the rule's per-core case not checked\n");
+            else
+            {
+                // A budget both fit together on the audio cores, not in one block.
+                const double budget = std::max(next.longest, (open.cpu + next.cpu) / cores) * 1.1;
+                check(open.cpu + next.cpu > budget, "ring out fit: the two together are past one block's budget");
+                t.setBudget({budget}); t.forgetMeasurements();
+                const auto e = t.estimate(g2.string());
+                std::printf("ring out fit: the open Performance %.3f and the next %.3f of a budget of %.3f a block on %u cores: seamless %d\n", open.cpu, next.cpu, budget, cores, int(e.seamless));
+                check(e.seamless && !e.fades, "ring out fit: two Performances that fit the audio cores together ring out");
+                const auto routes = t.ringOutRoutes();
+                load(t, g2);
+                Audio x, y; double dip = 1e9;
+                for(int i = 0; i < 40; ++i) { x.run(t); y.run(r); double a = 0, b = 0; for(auto v : x.l) a += double(v) * v; for(auto v : y.l) b += double(v) * v; dip = std::min(dip, a / std::max(b, 1e-30)); }
+                check(t.ringOutRoutes() > routes && dip > .1, "ring out fit: the held note rings on through its Delay: " + std::to_string(dip));
+                t.setBudget({});
+            }
+        }
+        // Past the audio cores in CPU, with the memory there: the change no longer cuts. The last Performance is carried
+        // over and its tail fades out in 150 ms (no step past a twentieth of the note's level), then its plugins go, said in a
+        // notice. A: twice as many plain instruments as audio cores, one holding a note; B: a synth through a Delay.
+        {
+            Session probe(48000, frames);
+            const auto cores = probe.estimate("").cores;
+            const auto heavy = temp.path / "fade-a", light = temp.path / "fade-b";
+            if(2 * cores <= 42)
+            {
+                many(heavy, 0, argv[4], 2 * cores); ringing(light, 1, argv[1], argv[3], .5);
+                Session t(48000, frames);
+                load(t, heavy); quiet(t);
+                t.controller(64, 127); t.note(true, 1, .8); blocks(t, 20);
+                t.setBudget({64}); t.forgetMeasurements();
+                const auto open = t.estimate(""), next = t.estimate(light.string());
+                const double budget = std::max(next.longest, next.cpu / cores) * 1.05; // B alone fits; with A's total, not
+                check(open.cpu + next.cpu > budget * cores, "fade: the two together are past the audio cores");
+                t.setBudget({budget}); t.forgetMeasurements();
+                const auto e = t.estimate(light.string());
+                check(e.fits && !e.seamless && e.fades, "fade: B fits alone, not with A ringing out, and the memory is there: it fades");
+                Audio x; float last = 0, before = 0, step = 0, after = 0;
+                for(int i = 0; i < 10; ++i) { x.run(t); for(auto v : x.l) { before = std::max(before, std::abs(v)); last = v; } } // the held note's level
+                load(t, light);
+                bool said = false; for(const auto& n : t.sessionStatus().notices) said = said || n.find("faded out in 150 ms") != std::string::npos;
+                check(said, "fade: the notice says the last Performance's notes faded out");
+                const int fadeBlocks = int(.15 * 48000 / frames);
+                double early = 0;
+                for(int i = 0; i < fadeBlocks + 40; ++i)
+                {
+                    x.run(t);
+                    for(auto v : x.l) { step = std::max(step, std::abs(v - last)); last = v; if(i < 5) early += double(v) * v; if(i > fadeBlocks + 4) after = std::max(after, std::abs(v)); }
+                }
+                std::printf("fade: largest step %.5f against the note's level %.5f, %.6f left after the fade\n", step, before, after);
+                check(early > 0, "fade: the tail still sounds as the fade begins (no cut)");
+                check(before > 0 && step <= .05f * before, "fade: no click, a step of " + std::to_string(step) + " against the level " + std::to_string(before));
+                check(after == 0, "fade: silent after the fade: " + std::to_string(after));
+                blocks(t, 4);
+                check(!t.leaving(), "fade: A's plugins gone once faded");
+                t.note(false, 1, 0); t.controller(64, 0); t.setBudget({});
+                compare(t, light, "fade: then B as a fresh load");
+            }
+            else std::printf("fade: %u audio cores, more parts than the fixture's keyboard holds: not checked\n", cores);
+        }
+        ::unsetenv("OSCAIRN_AUDIO_CORES");
+
         if(const char* real = std::getenv("OSCAIRN_SWITCH_PERFORMANCES"); real && *real)
         {
             std::vector<fs::path> p; std::string all(real);

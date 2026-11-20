@@ -380,7 +380,7 @@ namespace oscairn
         std::erase_if(panSlots_, [&](const auto& s) { return !faderSlots_.count(s.first); });
         std::erase_if(sendSlots_, [&](const auto& s) {
             return std::none_of(parts_.begin(), parts_.end(), [&](const Part& p) { return p.id == s.first.first && std::any_of(p.sends.begin(), p.sends.end(), [&](const Send& x) { return x.bus == s.first.second; }); }); });
-        std::set<uint8_t> used;
+        std::set<uint8_t> used{retiringSlot}; // the last Performance's fade (fade())
         for(const auto& [part, slot] : faderSlots_) used.insert(slot);
         for(const auto& [part, slots] : panSlots_) used.insert(slots.begin(), slots.end());
         for(const auto& [send, slot] : sendSlots_) used.insert(slot);
@@ -554,7 +554,7 @@ namespace oscairn
         for(const auto n : disabled_)
             if(!rungOut_.count(n) && graph_.idle(n, quiet, limit, held)) { rungOut_.insert(n); done = true; }
         for(auto it = leaving_.begin(); it != leaving_.end(); )
-            if(panic || graph_.idle(*it, quiet, limit, held))
+            if(panic || endNow_.count(*it) || graph_.idle(*it, quiet, limit, held))
             {
                 // A node of a shared engine: its sound goes, the instance plays on for the others (RFC 0021).
                 if(const auto* c = dynamic_cast<const SoundContext*>(&graph_.host(*it))) retireShared(*c);
@@ -562,11 +562,26 @@ namespace oscairn
                 it = leaving_.erase(it); done = true;
             }
             else ++it;
+        endNow_.clear();
         if(!done) return;
         evictOpportunistic();
         compileWires();
         graph_.commit();
         ++revision_; publish(ChangeKind::Graph);
+    }
+
+    // A change over the CPU budget (open's fades): the last Performance's ways to the outputs fade from 1 to 0 over
+    // fadeSeconds, a step each tick ramped across each block; then what rings out goes at once and its retiring sounds
+    // are choked, silent by then, so their CPU is free (RFC 0021, 2026-11-19).
+    void Session::fade()
+    {
+        if(!fading_) return;
+        const double done = double(framesProcessed_.load(std::memory_order_relaxed) - *fading_) / (fadeSeconds * sampleRate_);
+        graph_.setLiveGain(retiringSlot, float(std::max(0.0, 1 - done)));
+        if(done < 1 + 2.0 * maxFrames_ / (fadeSeconds * sampleRate_)) return; // a block or two at 0 first
+        fading_.reset();
+        for(const auto& r : retiringSounds_) if(const auto h = r.host.lock()) try { h->chokeRetiring(); } catch(const std::exception&) {}
+        endNow_.swap(fadingNodes_); fadingNodes_.clear();
     }
 
     // A scene's edit (its own buildParts included): when it changed only what live gains play, those

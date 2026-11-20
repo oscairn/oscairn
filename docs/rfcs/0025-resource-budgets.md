@@ -274,10 +274,15 @@ never write the user's data folder.
   open one over it (it is unloaded again), each saying what is needed, what is allowed and the
   three heaviest plugins. The app shows a refused Performance's reason over the screen until OK,
   whatever asked for it (the last one reopened at the start, the Library, the Setlist, a file):
-  "The Performance did not open" and the engine's words (`desktop-gaps`). A Performance that fits alone but not beside the one playing (and any
-  still ringing out) opens as a cut; the desktop says so after opening it. When that cut a note held, pedaled or
-  heard in the last tenth of a second, `session.status`'s notices say "the last Performance's notes could not
-  ring out" and why (2026-11-19), so a cut is never silent. Nor is it prepared
+  "The Performance did not open" and the engine's words (`desktop-gaps`). Beside the one playing (and any
+  still ringing out), a change rings out when the two fit as one Performance does: their total within the
+  budget on every audio core and each chain within one block's, the outgoing one priced by what still sounds
+  (its rest and its cost per voice for the notes held or pedaled; RFC 0021, 2026-11-19; it was both totals
+  within one block's budget, at full cost). Past that in CPU with the memory there, the outgoing tail fades
+  out in 150 ms (`Estimate::fades`, `budget.estimate`'s `fades`). Past the memory, the change is a cut; the
+  desktop says so after opening it. When a fade or a cut ended a note held, pedaled or heard in the last tenth
+  of a second, `session.status`'s notices say "the last Performance's notes could not ring out" and why, so it
+  is never silent. A Performance past the memory beside the open one is not prepared
   ahead (RFC 0021): `preparePerformance` returns false, and the Setlist app says it will open
   when cued.
 

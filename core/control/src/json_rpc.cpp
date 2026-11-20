@@ -748,7 +748,7 @@ namespace oscairn
                 try{e=c.estimate(member(p,"directory")?std::string(string(member(p,"directory"))):std::string());}catch(const std::exception& x){throw Failure{-32005,x.what()};}
                 std::vector<std::string> plugins;
                 for(const auto& x:e.plugins)plugins.push_back("{\"name\":"+quote(x.name)+",\"plugin\":"+quote(x.plugin)+",\"cpu\":"+encode(x.cpu)+",\"memory\":"+std::to_string(x.memory)+",\"measured\":"+(x.measured?"true":"false")+'}');
-                return "{\"cpu\":"+encode(e.cpu)+",\"memory\":"+std::to_string(e.memory)+",\"fits\":"+(e.fits?"true":"false")+",\"seamless\":"+(e.seamless?"true":"false")+
+                return "{\"cpu\":"+encode(e.cpu)+",\"memory\":"+std::to_string(e.memory)+",\"fits\":"+(e.fits?"true":"false")+",\"seamless\":"+(e.seamless?"true":"false")+",\"fades\":"+(e.fades?"true":"false")+
                     ",\"longest\":"+encode(e.longest)+",\"cores\":"+std::to_string(e.cores)+",\"uncertain\":"+(e.uncertain?"true":"false")+
                     ",\"budget\":{\"cpu\":"+encode(e.budget.cpu)+",\"memory\":"+std::to_string(e.budget.memory)+"},\"plugins\":"+join(plugins)+'}';
             }

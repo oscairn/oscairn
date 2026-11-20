@@ -326,7 +326,7 @@ namespace oscairn
         // budget.cpu of one block. uncertain: it would not fit, but by figures from too few blocks, and would with
         // those at a quarter, or by plugins not yet measured, or by more than its plugins cost at rest (CPU refuses only past
         // the rest); it is let open, said in the notices.
-        struct Estimate { double cpu = 0; uint64_t memory = 0; std::vector<Cost> plugins; Budget budget; bool fits = true, seamless = true; double longest = 0; uint32_t cores = 1; bool uncertain = false; };
+        struct Estimate { double cpu = 0; uint64_t memory = 0; std::vector<Cost> plugins; Budget budget; bool fits = true, seamless = true; double longest = 0; uint32_t cores = 1; bool uncertain = false; bool fades = false; }; // fades: not seamless for CPU alone: the last Performance's tail fades out fast (RFC 0021)
         virtual Estimate estimate(const std::string& directory = {}) = 0;
         // Forgets every plugin's measured CPU (not its memory): each counts at its declared or default
         // estimate, marked unmeasured, until it plays again. For estimates a stall or a burst spoiled.

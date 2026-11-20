@@ -49,10 +49,12 @@ namespace
     {
         std::array<float, frames> l{}, r{};
         float* out[2]{l.data(), r.data()};
+        bool service = true; // false: a block without the control thread's tick (it ticks every 20 ms on a device)
         bool sounding() const { return std::any_of(l.begin(), l.end(), [](float x) { return x != 0; }); }
         void run(Session& s)
         {
-            s.service(); forbidAllocation = true;
+            if(service) s.service();
+            forbidAllocation = true;
             const bool ok = s.process(out, frames);
             forbidAllocation = false; check(ok, "render");
         }
@@ -179,6 +181,15 @@ namespace
         blocks(s, 2);
         s.savePerformance(file.string());
     }
+    // The converter writes the send wire to its muted empty bus unmuted, at level 0: the saved Performance made so.
+    void unmuteEmptySend(const fs::path& file)
+    {
+        auto bytes = state_files::read(file / "performance.json", 4 << 20); std::string text(bytes.begin(), bytes.end());
+        const std::string muted = "\"level\":0,\"pan\":0,\"mute\":true";
+        const auto at = text.find(muted); check(at != std::string::npos, "the send wire to the empty bus");
+        if(at != std::string::npos) text.replace(at, muted.size(), "\"level\":0,\"pan\":0,\"mute\":false");
+        state_files::write(file / "performance.json", text.data(), text.size());
+    }
     // An effect for chained: the Delay (by path) or the fixture's effect (path and plugin ID).
     struct Effect { const char* path = nullptr; const char* id = nullptr; };
     // One Basic Synth part on the whole keyboard playing one sound marked by `brightness`: through
@@ -222,14 +233,34 @@ namespace
             check(s.selectSound(synths[i], s.prepareSound(synths[i], "Chained " + std::to_string(brightness) + " " + std::to_string(i), {{1, brightness}, {4, double(1 + i)}})), "select a sound");
         blocks(s, 2);
         s.savePerformance(file.string());
-        if(empty) // the converter writes the send wire to the muted bus unmuted, at level 0
-        {
-            auto bytes = state_files::read(file / "performance.json", 4 << 20); std::string text(bytes.begin(), bytes.end());
-            const std::string muted = "\"level\":0,\"pan\":0,\"mute\":true";
-            const auto at = text.find(muted); check(at != std::string::npos, "the send wire to the empty bus");
-            if(at != std::string::npos) text.replace(at, muted.size(), "\"level\":0,\"pan\":0,\"mute\":false");
-            state_files::write(file / "performance.json", text.data(), text.size());
-        }
+        if(empty) unmuteEmptySend(file);
+    }
+    // One Sampler part on the whole keyboard, a 4 s sample (long.wav) through a Delay (as the owner's sampled Performances: a
+    // Sampler, then effects); with `empty`, also the converter's level-0 send to an empty bus (chained's `empty`).
+    void sampled(const fs::path& file, const char* sampler, const char* delay, const fs::path& samples, bool empty)
+    {
+        Session s(48000, frames);
+        const auto folder = s.registerAssetFolder(samples.string());
+        const auto n = s.add("sampler", sampler), fx = s.add("delay", delay);
+        const auto part = s.addPart("Piano"); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx);
+        if(empty) { const auto bus = s.addPart("Reverb (not built yet)", {PartInput::Kind::Bus}); s.setPartLevel(bus, .25, true); s.setSend(part, bus, 0); }
+        s.commit();
+        check(s.setParameter(fx, 1, .25) && s.setParameter(fx, 2, .3) && s.setParameter(fx, 3, .3), "delay settings");
+        check(s.selectSound(n, s.prepareSound(n, "Looped", {}, {}, {}, "<region> sample=long.wav ampeg_release=0.5", folder.library, folder.directory)), "sampler sound");
+        blocks(s, 2);
+        s.savePerformance(file.string());
+        if(empty) unmuteEmptySend(file);
+    }
+    // One Basic Synth part on the keys up to 40 alone.
+    void lower(const fs::path& file, const char* synth)
+    {
+        Session s(48000, frames);
+        const auto n = s.add("synth", synth);
+        PartInput keys; keys.zones = {NoteZone{0, 40}};
+        const auto part = s.addPart("Saw", keys); s.insertIntoPart(part, 0, n); s.commit();
+        check(s.selectSound(n, s.prepareSound(n, "Saw low", {{1, .5}})), "select a sound");
+        blocks(s, 2);
+        s.savePerformance(file.string());
     }
     struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
@@ -987,6 +1018,103 @@ int main(int argc, char** argv)
             }
         }
 
+        auto energyOf = [](const Audio& a) { double e = 0; for(auto v : a.l) e += double(v) * v; return e; };
+        // Evidence (2) of 2026-11-19: a Sampler Performance, a chord held by the pedal, switched to one on another
+        // instrument plugin (the unit's Nameless Piano -> Nameless saw: A's instances gone at +0.01 s). A's instance is not
+        // taken over: it is kept, ringing through its own chain, takes no new notes, and goes once silent after the pedal
+        // lets go. Without and with the converter's level-0 send to an empty bus (evidence 3).
+        {
+            { std::vector<float> wave(4 * 48000); for(size_t f = 0; f < wave.size(); ++f) wave[f] = float(.3 * ((f * 3) % 200) / 200.0 - .15); writeWavFile(samples / "long.wav", wave, 1, 48000); }
+            const auto b = temp.path / "lower-saw"; lower(b, argv[1]);
+            for(const bool empty : {false, true})
+            {
+                const std::string what = empty ? "a Sampler with a level-0 send to an empty bus" : "a Sampler";
+                const auto a = temp.path / (empty ? "sampled-empty" : "sampled"); sampled(a, argv[2], argv[3], samples, empty);
+                // t and w switch, t then striking a key A plays and B does not; r stays on A.
+                Session t(48000, frames), w(48000, frames), r(48000, frames);
+                for(auto* s : {&t, &w, &r})
+                {
+                    load(*s, a); quiet(*s); s->controller(64, 127);
+                    for(const int k : {48, 60, 64, 67}) s->note(true, k, .8);
+                    blocks(*s, 40);
+                    for(const int k : {48, 60, 64, 67}) s->note(false, k, 0);
+                    blocks(*s, 10);
+                }
+                load(t, b); load(w, b);
+                Audio x, y, z; double dip = 1e9, late = 0, lateA = 0; bool same = true; size_t kept = 0;
+                for(int i = 0; i < 400; ++i)
+                {
+                    if(i == 20) t.note(true, 72, .8);
+                    if(i == 60) t.note(false, 72, 0);
+                    x.run(t); y.run(w); z.run(r);
+                    const double e = energyOf(x), ea = energyOf(z);
+                    if(i < 40) dip = std::min(dip, e / std::max(ea, 1e-30));
+                    if(i >= 370) { late += e; lateA += ea; } // a second on
+                    same = same && x.l == y.l && x.r == y.r;
+                    if(i == 200) kept = t.leaving();
+                }
+                std::printf("ring out, %s -> another instrument: the least block of the first 40 %.3f of the chord without the change, a second on %.4f against %.4f; %zu of A's nodes ringing out at 0.5 s\n",
+                            what.c_str(), dip, late, lateA, kept);
+                check(dip > .1 && late > .1 * lateA, "ring out, " + what + " -> another instrument: the pedaled chord rings on: the least block " + std::to_string(dip) + ", a second on " + std::to_string(late) + " against " + std::to_string(lateA));
+                check(kept > 0, "ring out, " + what + " -> another instrument: A's instance is kept while it rings");
+                check(same, "ring out, " + what + " -> another instrument: A's instance takes no new notes (a key only A plays sounds nothing)");
+                t.controller(64, 0);
+                for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1);
+                check(!t.leaving(), "ring out, " + what + " -> another instrument: A's instance goes once silent after the pedal");
+            }
+        }
+        // A send raised from 0 while a note sounds (a level-0 send is left out of the routes, so raising it compiles it
+        // back): the send comes in without a click, and the part's fader and the master still move live after (no
+        // graph.commit). To a bus with the Delay, and to the converter's empty bus (muted at a quarter level, so silent).
+        for(const bool emptyBus : {false, true})
+        {
+            const std::string what = emptyBus ? "to an empty bus" : "to a bus with a Delay";
+            Session t(48000, frames), r(48000, frames); uint32_t part = 0, bus = 0;
+            for(auto* s : {&t, &r})
+            {
+                const auto n = s->add("synth", argv[1]);
+                part = s->addPart("Part"); s->insertIntoPart(part, 0, n);
+                bus = s->addPart(emptyBus ? "Reverb (not built yet)" : "Bus", {PartInput::Kind::Bus});
+                if(emptyBus) s->setPartLevel(bus, .25, true);
+                else { const auto fx = s->add("delay", argv[3]); s->insertIntoPart(bus, 0, fx); s->commit(); check(s->setParameter(fx, 1, .1) && s->setParameter(fx, 2, .3) && s->setParameter(fx, 3, .5), "delay settings"); }
+                s->setSend(part, bus, 0); s->commit();
+                check(s->selectSound(n, s->prepareSound(n, "Soft", {{1, .2}})), "select a sound");
+                quiet(*s); s->note(true, 48, .8); blocks(*s, 40);
+            }
+            Audio x, y; float step = 0, steady = 0, prev = 0, prevR = 0; double after = 0;
+            for(int i = 0; i < 80; ++i)
+            {
+                if(i == 40) { t.setSend(part, bus, .5); t.commit(); }
+                x.run(t); y.run(r);
+                for(uint32_t f = 0; f < frames; ++f)
+                {
+                    // The send's own sound, t less r: its largest step as it comes in against the note's own largest step.
+                    const float d = x.l[f] - y.l[f];
+                    if(i >= 40 && i < 44) step = std::max(step, std::abs(d - prev));
+                    if(i < 40) steady = std::max(steady, std::abs(y.l[f] - prevR));
+                    prev = d; prevR = y.l[f];
+                }
+                if(i >= 60) after += energyOf(x);
+            }
+            std::printf("send raised from 0, %s: its largest step coming in %.5f against the note's own %.5f\n", what.c_str(), step, steady);
+            check(step <= steady, "send raised from 0, " + what + ": no click as it comes in: a step of " + std::to_string(step) + " against the note's " + std::to_string(steady));
+            check(after > 0, "send raised from 0, " + what + ": the note still sounds");
+            // shortcut: to an empty bus that plays where the part does, the raised send and the part's fader are one route
+            // again, mixing their live gains, so it is baked and the fader is heard at graph.commit (the app commits after
+            // every edit), not at once; a route per live-gain set would keep it live, if the converter's empty buses stay.
+            Audio a; double was = 0, now = 0;
+            for(int i = 0; i < 2; ++i) { a.run(t); was += energyOf(a); }
+            t.setPartLevel(part, .25, false);
+            if(emptyBus) t.commit();
+            for(int i = 0; i < 2; ++i) { a.run(t); now += energyOf(a); }
+            check(now < .2 * was, "send raised from 0, " + what + ": the part's fader lowered is heard (at once but to an empty bus): " + std::to_string(was) + ", then " + std::to_string(now));
+            t.setMaster(.25, 0);
+            if(emptyBus) t.commit();
+            was = now; now = 0;
+            for(int i = 0; i < 2; ++i) { a.run(t); now += energyOf(a); }
+            check(now < .2 * was, "send raised from 0, " + what + ": the master lowered is heard (at once but to an empty bus): " + std::to_string(was) + ", then " + std::to_string(now));
+        }
+
         ::setenv("OSCAIRN_AUDIO_CORES", "3", 1); // the FANTOM-07's: estimates and the lanes' total as on the unit
         // The ring-out fit rule (RFC 0021, 2026-11-19): a change rings out when the incoming Performance and the
         // outgoing one, priced by what still sounds, fit as one Performance does: their total within the budget on
@@ -1024,10 +1152,14 @@ int main(int argc, char** argv)
         // Past the audio cores in CPU, with the memory there: the change no longer cuts. The last Performance is carried
         // over and its tail fades out in 150 ms (no step past a twentieth of the note's level), then its plugins go, said in a
         // notice. A: twice as many plain instruments as audio cores, one holding a note; B: a synth through a Delay.
+        // With `stall`, the control thread ticks once in the fade and next well past its end (held up): the gain still
+        // ramps to 0 across a block before A's plugins go, not a cut from where the last tick left it.
+        for(const bool stall : {false, true})
         {
+            const std::string how = stall ? "fade, the control thread held up: " : "fade: ";
             Session probe(48000, frames);
             const auto cores = probe.estimate("").cores;
-            const auto heavy = temp.path / "fade-a", light = temp.path / "fade-b";
+            const auto heavy = temp.path / (stall ? "stall-a" : "fade-a"), light = temp.path / (stall ? "stall-b" : "fade-b");
             if(2 * cores <= 42)
             {
                 many(heavy, 0, argv[4], 2 * cores); ringing(light, 1, argv[1], argv[3], .5);
@@ -1037,30 +1169,35 @@ int main(int argc, char** argv)
                 t.setBudget({64}); t.forgetMeasurements();
                 const auto open = t.estimate(""), next = t.estimate(light.string());
                 const double budget = std::max(next.longest, next.cpu / cores) * 1.05; // B alone fits; with A's total, not
-                check(open.cpu + next.cpu > budget * cores, "fade: the two together are past the audio cores");
+                check(open.cpu + next.cpu > budget * cores, how + "the two together are past the audio cores");
                 t.setBudget({budget}); t.forgetMeasurements();
                 const auto e = t.estimate(light.string());
-                check(e.fits && !e.seamless && e.fades, "fade: B fits alone, not with A ringing out, and the memory is there: it fades");
+                check(e.fits && !e.seamless && e.fades, how + "B fits alone, not with A ringing out, and the memory is there: it fades");
                 Audio x; float last = 0, before = 0, step = 0, after = 0;
                 for(int i = 0; i < 10; ++i) { x.run(t); for(auto v : x.l) { before = std::max(before, std::abs(v)); last = v; } } // the held note's level
                 load(t, light);
                 bool said = false; for(const auto& n : t.sessionStatus().notices) said = said || n.find("faded out in 150 ms") != std::string::npos;
-                check(said, "fade: the notice says the last Performance's notes faded out");
+                check(said, how + "the notice says the last Performance's notes faded out");
                 const int fadeBlocks = int(.15 * 48000 / frames);
                 double early = 0;
-                for(int i = 0; i < fadeBlocks + 40; ++i)
+                // The control thread's tick as on a device, every 20 ms (8 blocks of 128): the fade's steps that far apart,
+                // each ramped across a block.
+                const int tick = stall ? fadeBlocks + 10 : int(.02 * 48000 / frames), quietFrom = stall ? fadeBlocks + 12 : fadeBlocks + 2 * tick + 2;
+                for(int i = 0; i < fadeBlocks + 60; ++i)
                 {
+                    x.service = i % tick == 0;
                     x.run(t);
-                    for(auto v : x.l) { step = std::max(step, std::abs(v - last)); last = v; if(i < 5) early += double(v) * v; if(i > fadeBlocks + 4) after = std::max(after, std::abs(v)); }
+                    for(auto v : x.l) { step = std::max(step, std::abs(v - last)); last = v; if(i < 5) early += double(v) * v; if(i > quietFrom) after = std::max(after, std::abs(v)); }
                 }
-                std::printf("fade: largest step %.5f against the note's level %.5f, %.6f left after the fade\n", step, before, after);
-                check(early > 0, "fade: the tail still sounds as the fade begins (no cut)");
-                check(before > 0 && step <= .05f * before, "fade: no click, a step of " + std::to_string(step) + " against the level " + std::to_string(before));
-                check(after == 0, "fade: silent after the fade: " + std::to_string(after));
+                x.service = true;
+                std::printf("%slargest step %.5f against the note's level %.5f, %.6f left after the fade\n", how.c_str(), step, before, after);
+                check(early > 0, how + "the tail still sounds as the fade begins (no cut)");
+                check(before > 0 && step <= .05f * before, how + "no click, a step of " + std::to_string(step) + " against the level " + std::to_string(before));
+                check(after == 0, how + "silent after the fade: " + std::to_string(after));
                 blocks(t, 4);
-                check(!t.leaving(), "fade: A's plugins gone once faded");
+                check(!t.leaving(), how + "A's plugins gone once faded");
                 t.note(false, 1, 0); t.controller(64, 0); t.setBudget({});
-                compare(t, light, "fade: then B as a fresh load");
+                compare(t, light, (how + "then B as a fresh load").c_str());
             }
             else std::printf("fade: %u audio cores, more parts than the fixture's keyboard holds: not checked\n", cores);
         }

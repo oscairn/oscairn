@@ -855,7 +855,8 @@ namespace oscairn
         // then what rings out of it goes at once (endRinging_), its retiring sounds choked (RFC 0021, 2026-11-19).
         static constexpr uint8_t retiringSlot = 255;
         static constexpr double fadeSeconds = .15;
-        std::optional<uint64_t> fading_; // framesProcessed_ when the fade began
+        std::optional<uint64_t> fading_, faded_; // framesProcessed_ when the fade began, and when its gain was set to 0
+        bool fadeChokes_ = false; // the last change faded: its retiring sounds are choked once silent
         std::set<NodeId> fadingNodes_, endNow_; // carried over fading; faded, for ringOut() to remove at once
         void fade();
         std::unique_ptr<Prepared> prepared_; // the next one, prepared ahead; after graph_, so it goes first

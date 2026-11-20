@@ -576,11 +576,15 @@ namespace oscairn
     void Session::fade()
     {
         if(!fading_) return;
-        const double done = double(framesProcessed_.load(std::memory_order_relaxed) - *fading_) / (fadeSeconds * sampleRate_);
-        graph_.setLiveGain(retiringSlot, float(std::max(0.0, 1 - done)));
-        if(done < 1 + 2.0 * maxFrames_ / (fadeSeconds * sampleRate_)) return; // a block or two at 0 first
-        fading_.reset();
-        for(const auto& r : retiringSounds_) if(const auto h = r.host.lock()) try { h->chokeRetiring(); } catch(const std::exception&) {}
+        const auto now = framesProcessed_.load(std::memory_order_relaxed);
+        const double done = double(now - *fading_) / (fadeSeconds * sampleRate_);
+        if(done < 1) { graph_.setLiveGain(retiringSlot, float(1 - done)); return; }
+        // 0 heard for two blocks before anything goes: a tick late (the control thread held up) must not end it unfaded.
+        if(!faded_) { graph_.setLiveGain(retiringSlot, 0); faded_ = now; return; }
+        if(now - *faded_ < 2 * uint64_t(maxFrames_)) return;
+        fading_.reset(); faded_.reset();
+        // A change since that did not fade has its own tail beside these, ringing: only a fade's tails are choked.
+        if(fadeChokes_) for(const auto& r : retiringSounds_) if(const auto h = r.host.lock()) try { h->chokeRetiring(); } catch(const std::exception&) {}
         endNow_.swap(fadingNodes_); fadingNodes_.clear();
     }
 

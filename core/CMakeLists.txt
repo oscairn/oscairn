@@ -162,6 +162,10 @@ add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-v
 add_test(NAME clap-host-rust COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(clap-host-rust PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
+# Both hosts take a draft-2 table with a null importance as draft 1: loaded, alike, no report.
+add_test(NAME clap-host-rust-null-importance COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(clap-host-rust-null-importance PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1;OSCAIRN_FIXTURE_NULL_IMPORTANCE=1")
 # The same check from a recording of the reference, as it will run once the C++ host is gone.
 add_test(NAME clap-host-rust-replay COMMAND sh -c "t=\"$0\" b=\"$1\"; shift; \"$b\" --record \"$t.transcript\" \"$@\" >/dev/null && \"$b\" --replay \"$t.transcript\" \"$@\""
     "${CMAKE_CURRENT_BINARY_DIR}/clap-host" $<TARGET_FILE:oscairn-clap-host-rust-test> $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
@@ -575,6 +579,14 @@ add_test(NAME voice-importance COMMAND oscairn-voice-importance-test $<TARGET_FI
 add_test(NAME voice-importance-workers COMMAND oscairn-voice-importance-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(voice-importance PROPERTIES TIMEOUT 60)
 set_tests_properties(voice-importance-workers PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000")
+# A draft-1 engine, and a draft-2 table with a null importance, keep their voice budget against the host.
+add_executable(oscairn-voice-budget-draft1-test engine/tests/voice_budget_draft1.cpp)
+target_link_libraries(oscairn-voice-budget-draft1-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-voice-budget-draft1-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME voice-budget-draft1 COMMAND oscairn-voice-budget-draft1-test $<TARGET_FILE:oscairn-voice-fixture>)
+add_test(NAME voice-budget-draft1-workers COMMAND oscairn-voice-budget-draft1-test $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(voice-budget-draft1 PROPERTIES TIMEOUT 60)
+set_tests_properties(voice-budget-draft1-workers PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000")
 # RFC 0046 step 5: the owner's scenario (a pedaled piano and an expensive lead) through real workers in every placement.
 add_executable(oscairn-voice-scenario-test engine/tests/voice_scenario.cpp)
 target_link_libraries(oscairn-voice-scenario-test PRIVATE oscairn_engine)

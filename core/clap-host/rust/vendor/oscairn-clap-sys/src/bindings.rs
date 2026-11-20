@@ -1205,8 +1205,8 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_plugin_ui, value_icon) - 48usize];
 };
 pub type oscairn_plugin_ui_t = oscairn_plugin_ui;
-pub const OSCAIRN_EXT_VOICE_BUDGET: &[u8; 29] = b"oscairn.voice-budget/draft-2\0";
-pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1: &[u8; 29] = b"oscairn.voice-budget/draft-1\0";
+pub const OSCAIRN_EXT_VOICE_BUDGET: &[u8; 29] = b"oscairn.voice-budget/draft-1\0";
+pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2: &[u8; 29] = b"oscairn.voice-budget/draft-2\0";
 pub const OSCAIRN_VOICE_BUDGET_MONO: _bindgen_ty_24 = 1;
 pub const OSCAIRN_VOICE_BUDGET_LEGATO: _bindgen_ty_24 = 2;
 pub type _bindgen_ty_24 = ::std::os::raw::c_uint;
@@ -1397,5 +1397,5 @@ pub mod ids {
     pub const OSCAIRN_EXT_UI_DRAFT_4: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_4);
     pub const OSCAIRN_EXT_UI_DRAFT_3: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_3);
     pub const OSCAIRN_EXT_VOICE_BUDGET: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET);
-    pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1);
+    pub const OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2);
 }

@@ -254,7 +254,8 @@ worker alike. The calls and the order to give voices up in:
 #### Publishing the importance list (draft 2, RFC 0046)
 
 So the host can weigh a pedaled piano note against a lead synth's held one in another part, an
-instrument offering `oscairn.voice-budget/draft-2` reports after each block, through `importance`,
+instrument offering `oscairn.voice-budget/draft-2` (`OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2`; the
+unsuffixed `OSCAIRN_EXT_VOICE_BUDGET` stays draft 1's) reports after each block, through `importance`,
 each sound context's 16 least important voices, least important first, and how many it sounds. The
 host then takes the least important voices among those whose removal frees the time that is short
 (the lane's own thread when one thread is over, any part's when the device's cores are), by
@@ -281,8 +282,8 @@ and the age come from `held`, `pedaled` and `ageMs`, never from the level.
 ```cpp
 static const oscairn_plugin_voice_budget_t budget{Engine::honorsVolume, Engine::setLimits,
     Engine::activeVoices, Engine::voiceNotes, Engine::importance};
-// in get_extension: the same table for both drafts
-if(!std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET) || !std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1)) return &budget;
+// in get_extension: the same table for both drafts (OSCAIRN_EXT_VOICE_BUDGET is draft 1's ID)
+if(!std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2) || !std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET)) return &budget;
 // in your Engine (Derived), beside render:
 double loudness(const Voice& v) const; // as above
 float weight(const Voice& v) const;    // its layers or oscillators; default 1

@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 /*
- * oscairn.voice-budget (draft 1): a plugin that gives up its own voices within a limit the host
+ * oscairn.voice-budget (draft 2, and draft 1 without `importance`): a plugin that gives up its own voices within a limit the host
  * sets, so the host need not choose among its notes (RFC 0018, option C). The host shares one
  * processing budget among every plugin; it measures each plugin's cost, and for a plugin with
  * this extension it reads what the plugin plays and tells it how many voices it may keep.
@@ -84,12 +84,15 @@ extern "C" {
  * A plugin may refine this (one element of a layered note before a whole note) but should not
  * break rule 1.
  *
- * Draft 2 adds `importance` to the table; a host asks for draft 2 first and treats a plugin
- * answering only draft 1 as reporting no importance.
+ * Draft 2 adds `importance` to the table under its own ID, OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2;
+ * OSCAIRN_EXT_VOICE_BUDGET stays draft 1's, so an engine rebuilt with a four-entry table keeps
+ * answering what it always did. A plugin offering draft 2 returns the same table for both IDs. A
+ * host asks for draft 2 first, then draft 1, and treats a draft-1 table, or a draft-2 table whose
+ * `importance` is null, as reporting no importance (the cost-only behavior), never refusing it.
  */
 
-static const char OSCAIRN_EXT_VOICE_BUDGET[] = "oscairn.voice-budget/draft-2";
-static const char OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1[] = "oscairn.voice-budget/draft-1";
+static const char OSCAIRN_EXT_VOICE_BUDGET[] = "oscairn.voice-budget/draft-1";
+static const char OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2[] = "oscairn.voice-budget/draft-2";
 
 enum
 {
@@ -152,7 +155,7 @@ typedef struct oscairn_plugin_voice_budget
     void (CLAP_ABI* set_limits)(const clap_plugin_t* plugin, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count);
     uint32_t (CLAP_ABI* active_voices)(const clap_plugin_t* plugin, double* voice_cost);
     uint32_t (CLAP_ABI* notes)(const clap_plugin_t* plugin, oscairn_voice_budget_note_t* notes, uint32_t capacity);
-    // Draft 2 only: absent from a draft-1 table.
+    // Draft 2 only: absent from a draft-1 table; null in a draft-2 table means no report.
     uint32_t (CLAP_ABI* importance)(const clap_plugin_t* plugin, oscairn_voice_budget_importance_t* contexts, uint32_t capacity);
 } oscairn_plugin_voice_budget_t;
 

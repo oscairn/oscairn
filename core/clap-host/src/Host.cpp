@@ -675,10 +675,11 @@ struct Host::Impl {
         if(s.exclusiveState)s.state=s.sounds->state;
         if(s.exclusiveState)s.soundSnapshots = static_cast<const oscairn_plugin_sound_snapshots_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_SOUND_SNAPSHOTS));
         if(s.soundSnapshots && (!s.soundSnapshots->prepare || !s.soundSnapshots->ring_out!=!s.soundSnapshots->choke_retiring))throw std::runtime_error("Invalid sound-snapshot interface");
-        s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET));
-        s.reportsImportance = s.voiceBudget != nullptr; // draft 2's table ends with importance; draft 1's does not
-        if(!s.voiceBudget)s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1));
-        if(s.voiceBudget && (!s.voiceBudget->honors_volume || !s.voiceBudget->set_limits || !s.voiceBudget->active_voices || !s.voiceBudget->notes || (s.reportsImportance && !s.voiceBudget->importance)))throw std::runtime_error("Invalid voice-budget interface");
+        s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2));
+        // Draft 2's table ends with importance, draft 1's does not (never read it there); a null one is no report.
+        s.reportsImportance = s.voiceBudget && s.voiceBudget->importance;
+        if(!s.voiceBudget)s.voiceBudget = static_cast<const oscairn_plugin_voice_budget_t*>(s.plugin->get_extension(s.plugin,OSCAIRN_EXT_VOICE_BUDGET));
+        if(s.voiceBudget && (!s.voiceBudget->honors_volume || !s.voiceBudget->set_limits || !s.voiceBudget->active_voices || !s.voiceBudget->notes))throw std::runtime_error("Invalid voice-budget interface");
         s.honorsVolume = s.voiceBudget && s.voiceBudget->honors_volume(s.plugin);
         if(s.state && (!s.state->save || !s.state->load))throw std::runtime_error("Incomplete plugin state interface");
         s.assetDependencies = static_cast<const oscairn_plugin_asset_dependencies_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_ASSET_DEPENDENCIES));

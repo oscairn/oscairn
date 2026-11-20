@@ -204,10 +204,10 @@ const _: () = {
     ["Offset of field: oscairn_clap_statistics::restedBlocks"][::core::mem::offset_of!(oscairn_clap_statistics, restedBlocks) - 144usize];
     ["Offset of field: oscairn_clap_statistics::cpuMicroseconds"][::core::mem::offset_of!(oscairn_clap_statistics, cpuMicroseconds) - 152usize];
 };
-pub const OSCAIRN_CLAP_RUNTIME_ERROR: _bindgen_ty_22 = 1;
-pub const OSCAIRN_CLAP_INVALID_ARGUMENT: _bindgen_ty_22 = 2;
-pub const OSCAIRN_CLAP_LOGIC_ERROR: _bindgen_ty_22 = 3;
-pub type _bindgen_ty_22 = ::core::ffi::c_uint;
+pub const OSCAIRN_CLAP_RUNTIME_ERROR: _bindgen_ty_23 = 1;
+pub const OSCAIRN_CLAP_INVALID_ARGUMENT: _bindgen_ty_23 = 2;
+pub const OSCAIRN_CLAP_LOGIC_ERROR: _bindgen_ty_23 = 3;
+pub type _bindgen_ty_23 = ::core::ffi::c_uint;
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq)]
 pub struct oscairn_clap_preset {

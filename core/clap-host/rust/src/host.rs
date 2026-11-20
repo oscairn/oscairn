@@ -1395,15 +1395,15 @@ pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
             return Err("Invalid sound-snapshot interface".into());
         }
     }
-    // Draft 2's table ends with importance; draft 1's does not.
-    s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET));
-    s.reports_importance.set(!s.voice_budget.is_null());
+    // Draft 2's table ends with importance, draft 1's does not (never read it there); a null one is no report.
+    s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2));
+    s.reports_importance.set(s.voice_budget.get().is_some_and(|x| x.importance.is_some()));
     if s.voice_budget.is_null() {
-        s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1));
+        s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET));
     }
     let budget = s.voice_budget.get();
     if let Some(x) = budget {
-        if x.honors_volume.is_none() || x.set_limits.is_none() || x.active_voices.is_none() || x.notes.is_none() || (s.reports_importance.get() && x.importance.is_none()) {
+        if x.honors_volume.is_none() || x.set_limits.is_none() || x.active_voices.is_none() || x.notes.is_none() {
             return Err("Invalid voice-budget interface".into());
         }
     }

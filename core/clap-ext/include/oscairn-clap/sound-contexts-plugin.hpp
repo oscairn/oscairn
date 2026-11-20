@@ -48,8 +48,8 @@
 //
 // oscairn.voice-budget (voice-budget.h, RFC 0018, RFC 0046): building an oscairn_plugin_voice_budget_t
 // {Engine::honorsVolume, Engine::setLimits, Engine::activeVoices, Engine::voiceNotes, Engine::importance}
-// and returning it from get_extension for OSCAIRN_EXT_VOICE_BUDGET (draft 2; and for _DRAFT_1 too, for an
-// older host), the instrument keeps within the voices the host gives it and each
+// and returning it from get_extension for OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2 and for OSCAIRN_EXT_VOICE_BUDGET
+// (draft 1, for an older host), the instrument keeps within the voices the host gives it and each
 // context's limit, reserve, priority and mode, giving voices up in that header's order (from
 // voice-budget-plugin.hpp): a voice past a limit fades out over the choke time; one is cut only when
 // the pool has no free slot, a voice already fading first. It may provide

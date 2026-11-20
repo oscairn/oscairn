@@ -22,7 +22,9 @@
 // CLAP preferred, as a host sends a controller only to a port that takes MIDI): a note let go with the pedal down
 // sounds on, at its cost, until the pedal comes up, as a piano's.
 // With OSCAIRN_FIXTURE_VOICE_BUDGET it offers draft 2, reporting each block its least important voices through the
-// SDK's Importance (RFC 0046), unless OSCAIRN_FIXTURE_DRAFT_1=1: then draft 1 alone, as a plugin without the report.
+// SDK's Importance (RFC 0046), unless OSCAIRN_FIXTURE_DRAFT_1=1: then draft 1 alone, a four-entry table, as a plugin
+// built before draft 2; or OSCAIRN_FIXTURE_NULL_IMPORTANCE=1: that table under both IDs, as a draft-1 engine rebuilt
+// against draft 2's header whose table leaves importance null.
 // OSCAIRN_FIXTURE_DECAY_S: a held or pedaled voice's level falls by 60 dB over this many seconds, as a piano's (default:
 // none); OSCAIRN_FIXTURE_LEVEL: its sounds' output level, linear (default 1). OSCAIRN_FIXTURE_CHANNEL_US=CHANNEL:US: a voice
 // of a note on that MIDI channel costs US microseconds instead (a lead beside a piano in one instance or one process, whose
@@ -234,7 +236,11 @@ struct Plugin {
                     s.importance.list(s.voices.size(),[&](size_t i){return s.voices[i].active?&candidates[i]:nullptr;},s.limits);
                     return s.importance.write(out,capacity);}};
             if(!std::strcmp(id,CLAP_EXT_NOTE_PORTS))return &notes;
-            if(std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET") && (!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1) || (!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET) && !std::getenv("OSCAIRN_FIXTURE_DRAFT_1"))))return &budget;
+            static const oscairn_plugin_voice_budget_t fourEntries{budget.honors_volume,budget.set_limits,budget.active_voices,budget.notes};
+            if(!std::getenv("OSCAIRN_FIXTURE_VOICE_BUDGET"))return nullptr;
+            if(std::getenv("OSCAIRN_FIXTURE_NULL_IMPORTANCE") && (!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET) || !std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2)))return &fourEntries;
+            if(!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET))return std::getenv("OSCAIRN_FIXTURE_DRAFT_1")?&fourEntries:&budget;
+            if(!std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2) && !std::getenv("OSCAIRN_FIXTURE_DRAFT_1"))return &budget;
             return nullptr;
         };
     }

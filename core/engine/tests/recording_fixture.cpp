@@ -266,7 +266,7 @@ namespace
         if(!std::strcmp(id, OSCAIRN_EXT_EFFECT_CONTEXTS)) return &effects;
         if(!std::strcmp(id, CLAP_EXT_PRESET_LOAD)) return &presets;
         if(!std::strcmp(id, OSCAIRN_EXT_MEMORY)) return &memory;
-        if(!std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET)) return &voiceBudget;
+        if(!std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2) || !std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET)) return &voiceBudget;
         if(!std::strcmp(id, CLAP_EXT_PARAMS)) return &params;
         if(!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &audio;
         if(!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &notes;

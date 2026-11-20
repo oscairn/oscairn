@@ -200,6 +200,13 @@ typedef struct oscairn_voice_budget_importance
 uint32_t (CLAP_ABI* importance)(const clap_plugin_t* plugin, oscairn_voice_budget_importance_t* out, uint32_t capacity);
 ```
 
+**Its ID.** Draft 2 is `OSCAIRN_EXT_VOICE_BUDGET_DRAFT_2`; `OSCAIRN_EXT_VOICE_BUDGET` keeps meaning
+draft 1, so an engine rebuilt against the new header with a four-entry table keeps answering draft
+1 and keeps its voice budget (the SDK owner's review: the first patch moved the unsuffixed name to
+draft 2, and such an engine then answered draft 2 with a null `importance`). The host asks for draft
+2, then draft 1, and treats a draft-1 table or a null `importance` as no report: today's cost-only
+behavior, never a refused plugin.
+
 A context's entry is 204 bytes; 16 contexts are 3,264 bytes in the shared block beside the
 10,240 the note report already takes.
 

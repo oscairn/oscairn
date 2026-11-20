@@ -1,7 +1,7 @@
 # RFC 0046: Voice importance across parts
 
-Status: accepted by the owner, 2026-11-17 ([his answers](#the-owners-answers)); steps 1 to 4 built
-([as built](#as-built-steps-3-to-5)), 5 to 7 to come. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
+Status: accepted by the owner, 2026-11-17 ([his answers](#the-owners-answers)); steps 1 to 5 built
+([as built](#as-built-steps-3-to-5)), 6 and 7 to come. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
 contexts and shared instances ([RFC 0005](0005-sound-contexts.md),
 [RFC 0021](0021-sounds-performances-and-library.md)) and the load guard, lanes and placement of
 [RFC 0045](0045-audio-scheduling-on-small-devices.md) (its no-glitch guard, steps 12a to 12o).
@@ -34,8 +34,9 @@ Checked when built and tested; the sections below say how.
       tested by `engine-core-importance` (the scenario modeled in every placement)
 - [x] 4. Thread-bound or device-bound told apart from the worker's wake wait, run and CPU time
       ([which limit](#which-limit-is-binding)); `heldOff` and `mismatch` in `engine.timing`
-- [ ] 5. Tests: the owner's scenario in every placement mode and in process; a plugin without
-      the report; no flapping; idle cost ([plan](#plan))
+- [x] 5. Tests: the owner's scenario in every placement mode and in process, through real workers
+      (`voice-importance-scenario`); a plugin without the report; no flapping over 2,000 blocks;
+      idle cost ([as built](#as-built-steps-3-to-5))
 - [ ] 6. The plugins session: Sampler, VA and FM publish through the helper, a release each
 - [ ] 7. On the keyboard: the scenario played and measured
 
@@ -596,8 +597,8 @@ What it took besides the order:
 
 - **The report reached the core empty** in every graph: `Plugins::importance` (core/engine/rust/
   src/lib.rs) read `lists` as an argument before the call that set it. The modeled test drives the
-  core directly and the step-2 tests ask the host, so neither saw it; step 5's scenario through
-  real workers found it. The call now comes first.
+  core directly and the step-2 tests ask the host, so neither saw it; `voice-importance-scenario`
+  found it. The call now comes first.
 - **A listing plugin's limit leaves room for the note just admitted** (the step-3 fault: with the
   piano and the lead in one pool worker the lane over its time took 1 piano and 1 lead voice, not
   about 16 piano). The caps were set to the voices reported less those taken, so the lead's second
@@ -623,10 +624,28 @@ worker, 16 piano voices for an excess of 15, the lead none; apart with the devic
 the lead none; apart with the lead's own lane over, the lead's 3 released, the piano none; one
 shared instance, 10 (its one cost per voice prices the piano against the lead); in process, 16; a
 piano without the report, 24, the lead none; 2,000 blocks with a new note every 25, no flapping and
-no mismatch.
+no mismatch. `voice-importance-scenario` plays it through real workers in plugin, chain (an insert
+after the lead), pool with one process and with two, and in process, a piano without the report,
+and 2,000 blocks with new notes: the lead keeps both keys wherever the piano's voices free what is
+short, the piano loses nothing for the lead's own lane, no part goes silent.
+
+Through real workers (the fixture, a piano voice 15 µs, a lead voice 180, a 1,000 µs allowance;
+Mac, no block lost in any case):
+
+| Placement | Case | Piano voices given up (of 30) | Lead given up, keys kept | A part silent |
+|---|---|---|---|---|
+| pool, one process | same thread over | 7 | 0, 2 | no |
+| in process | same thread over | 12 | 0, 2 | no |
+| plugin / chain / pool, two processes | device out of core time | 8 / 9 / 8 | 0, 2 | no |
+| plugin / chain / pool, two processes | lead's own lane over | 0 | 2 of its 3 released, 2 | no |
+| plugin | piano without the report | 8 (host notes) | 0, 2 | no |
+| pool, one process | 2,000 blocks, a new note every 25 | 81 (9 + one per new note) | 0, 2 | no |
 
 Cost: the helper's report for 128 voices (list and write) takes 1.1 µs a block on the Mac (5.5 µs
-before: a log10 in every comparison, now one per voice); the A53's is step 7's to measure.
+before: a log10 in every comparison, now one per voice); the A53's is step 7's to measure. At rest
+the worker bench (oscairn-handoff-bench, the Basic Synth, one worker, three runs each, alternating
+with main at b7a5e3fc) shows no change: median overhead 7.1, 15.0, 16.5 µs before, 6.8, 15.7, 12.2
+after, within the machine's noise.
 
 ## Ruled out
 

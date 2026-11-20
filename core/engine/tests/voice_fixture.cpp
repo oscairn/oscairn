@@ -18,12 +18,15 @@
 // OSCAIRN_FIXTURE_VOICE_BUDGET): it reports no voices and no cost, and keeps to no limit, as a plugin whose report is wrong.
 // OSCAIRN_FIXTURE_IGNORE_LIMIT=1 (with OSCAIRN_FIXTURE_VOICE_BUDGET): it reports its voices truly but keeps to no limit.
 // OSCAIRN_FIXTURE_REPORT_US: the cost per voice it reports (default its real one), as a plugin's figure from another load.
-// OSCAIRN_FIXTURE_SUSTAIN=1: it takes the sustain pedal (MIDI controller 64, any channel): a note let go with the pedal
-// down sounds on, at its cost, until the pedal comes up, as a piano's.
+// OSCAIRN_FIXTURE_SUSTAIN=1: it takes the sustain pedal (MIDI controller 64, any channel; its note port takes MIDI too,
+// CLAP preferred, as a host sends a controller only to a port that takes MIDI): a note let go with the pedal down
+// sounds on, at its cost, until the pedal comes up, as a piano's.
 // With OSCAIRN_FIXTURE_VOICE_BUDGET it offers draft 2, reporting each block its least important voices through the
 // SDK's Importance (RFC 0046), unless OSCAIRN_FIXTURE_DRAFT_1=1: then draft 1 alone, as a plugin without the report.
 // OSCAIRN_FIXTURE_DECAY_S: a held or pedaled voice's level falls by 60 dB over this many seconds, as a piano's (default:
-// none); OSCAIRN_FIXTURE_LEVEL: its sounds' output level, linear (default 1).
+// none); OSCAIRN_FIXTURE_LEVEL: its sounds' output level, linear (default 1). OSCAIRN_FIXTURE_CHANNEL_US=CHANNEL:US: a voice
+// of a note on that MIDI channel costs US microseconds instead (a lead beside a piano in one instance or one process, whose
+// environment its worker took when it started).
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -53,11 +56,15 @@ struct Plugin {
     oscairn::voices::Importance<1> importance; // draft 2's report, audio thread
     bool draft1=false; // OSCAIRN_FIXTURE_DRAFT_1
     double decay=0,outputLevel=1; // OSCAIRN_FIXTURE_DECAY_S, OSCAIRN_FIXTURE_LEVEL
+    int costlyChannel=-1;double channelMicroseconds=0; // OSCAIRN_FIXTURE_CHANNEL_US
     uint64_t framesDone=0; // its steady time, for the voices' ages
     double loudness(const Voice& v) const {return outputLevel*v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
-    // A voice as the order sees it: a pedaled one is the pedal's, not the key's.
+    // A voice as the order sees it: a pedaled one is the pedal's, not the key's; its weight its cost against the others'.
     oscairn::voices::Candidate candidate(const Voice& v) const
-    {return {0,true,v.held && !v.sustained,v.choking,false,loudness(v),v.started,v.sustained,double(framesDone-v.startedAt)*1000.0/rate};}
+    {
+        const float weight=v.channel==costlyChannel && microseconds>0?float(channelMicroseconds/microseconds):1.f;
+        return {0,true,v.held && !v.sustained,v.choking,false,loudness(v),v.started,v.sustained,double(framesDone-v.startedAt)*1000.0/rate,weight};
+    }
     // Its limit: the instance's, or its one context's own where lower.
     uint32_t limit() const {const uint32_t own=limits.of(0,true).limit;return own && (!limits.limit || own<limits.limit)?own:limits.limit;}
     uint32_t sounding() const {uint32_t n=0;for(const auto& v:voices)n+=v.active && !v.choking;return n;}
@@ -157,6 +164,7 @@ struct Plugin {
         draft1=std::getenv("OSCAIRN_FIXTURE_DRAFT_1")!=nullptr;
         if(const char* d=std::getenv("OSCAIRN_FIXTURE_DECAY_S"))decay=std::atof(d);
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LEVEL"))outputLevel=std::atof(l);
+        if(const char* c=std::getenv("OSCAIRN_FIXTURE_CHANNEL_US"))std::sscanf(c,"%d:%lf",&costlyChannel,&channelMicroseconds);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
             char word[32]{};long at=0,calls=1;
@@ -177,7 +185,7 @@ struct Plugin {
             s.frames=b->frames_count;
             while(s.limit() && s.sounding()>s.limit()){const int i=s.victim(oscairn::voices::none);if(i<0)break;s.fadeOut(i);}
             std::fill_n(left,b->frames_count,0.f);std::fill_n(right,b->frames_count,0.f);
-            uint32_t sounding=0;for(const auto& v:s.voices)sounding+=v.active;
+            uint32_t sounding=0,costly=0;for(const auto& v:s.voices){sounding+=v.active && v.channel!=s.costlyChannel;costly+=v.active && v.channel==s.costlyChannel;}
             const auto began=std::chrono::steady_clock::now();
             auto cpuNow=[]{timespec t{};clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t);return std::chrono::seconds(t.tv_sec)+std::chrono::nanoseconds(t.tv_nsec);};
             const auto cpuBegan=cpuNow();
@@ -192,7 +200,7 @@ struct Plugin {
             // The voices' cost: busy, as DSP is, for their time.
             const long call=long(++s.calls);
             const double extra=s.spikeCalls && call>=s.spikeAt && call<s.spikeAt+s.spikeCalls?s.spikeUs:0;
-            const auto spend=std::chrono::duration<double,std::micro>((s.microseconds*sounding+s.blockMicroseconds)*b->frames_count/128.0+extra);
+            const auto spend=std::chrono::duration<double,std::micro>((s.microseconds*sounding+s.channelMicroseconds*costly+s.blockMicroseconds)*b->frames_count/128.0+extra);
             if(s.cpuClock)while(cpuNow()-cpuBegan<spend){}
             else while(std::chrono::steady_clock::now()-began<spend){}
             s.framesDone+=b->frames_count;
@@ -207,7 +215,9 @@ struct Plugin {
                 [](const clap_plugin_t*,uint32_t i,bool input,clap_note_port_info_t* p){
                     if(!input || i)return false;
                     const auto dialect=std::getenv("OSCAIRN_FIXTURE_MIDI")?CLAP_NOTE_DIALECT_MIDI:CLAP_NOTE_DIALECT_CLAP;
-                    *p={};p->id=0;p->supported_dialects=p->preferred_dialect=dialect;std::strcpy(p->name,"Notes");return true;}};
+                    // Taking the sustain pedal, it takes MIDI too: a host sends a controller only to a port that does.
+                    const auto sustain=std::getenv("OSCAIRN_FIXTURE_SUSTAIN")?CLAP_NOTE_DIALECT_MIDI:0u;
+                    *p={};p->id=0;p->supported_dialects=dialect|sustain;p->preferred_dialect=dialect;std::strcpy(p->name,"Notes");return true;}};
             if(!std::strcmp(id,CLAP_EXT_AUDIO_PORTS))return &audio;
             static const oscairn_plugin_voice_budget_t budget{
                 [](const clap_plugin_t*){return true;},

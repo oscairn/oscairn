@@ -575,6 +575,12 @@ add_test(NAME voice-importance COMMAND oscairn-voice-importance-test $<TARGET_FI
 add_test(NAME voice-importance-workers COMMAND oscairn-voice-importance-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(voice-importance PROPERTIES TIMEOUT 60)
 set_tests_properties(voice-importance-workers PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000")
+# RFC 0046 step 5: the owner's scenario (a pedaled piano and an expensive lead) through real workers in every placement.
+add_executable(oscairn-voice-scenario-test engine/tests/voice_scenario.cpp)
+target_link_libraries(oscairn-voice-scenario-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-voice-scenario-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME voice-importance-scenario COMMAND oscairn-voice-scenario-test $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(voice-importance-scenario PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
 # The worker is untrusted: one writing an out-of-range voice report is bounded by the engine.
 add_executable(oscairn-hostile-worker plugin-host/src/worker_main.cpp plugin-host/src/Worker.cpp engine/tests/hostile_worker.cpp)
 target_compile_definitions(oscairn-hostile-worker PRIVATE OSCAIRN_HOSTILE_WORKER)

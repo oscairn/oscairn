@@ -183,7 +183,7 @@ development; rebuild against the current headers.
 | Declared memory (`oscairn.memory/draft`) | A device near its memory limit refuses the plugin before its large allocation, and a worker gets a memory limit that fits it | [memory](https://github.com/oscairn/oscairn-clap/blob/main/docs/memory.md) | KICK memory test fixture |
 | Native sound contexts (`oscairn.sound-contexts/draft-5`) | Multitimbral playing and instant switching: prepared sounds in one instance (up to the plugin's capacity, at most 256; the SDK's default is 8), each MIDI channel choosing one, held notes keeping theirs, presets prepared while playing | [sound-contexts](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts.md), SDK [sound-contexts-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts-plugin.md) | Basic Synth, Legacy Sampler |
 | Snapshots prepared beside (`oscairn.sound-snapshots/draft-4`) | Instant Performance changes without loading a snapshot into an instance; tails ringing out through the outgoing Performance's effects; parts sharing one instance | [sound-snapshots](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-snapshots.md) | Basic Synth |
-| Voice budget (`oscairn.voice-budget/draft-1`) | The instrument gives up its own least audible voices (a layer, an element) within a limit from the shared CPU budget, instead of the host fading whole notes | [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md), SDK [voice-budget-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget-plugin.md) | Basic Synth; test fixture (`voice_fixture.cpp`, layered) |
+| Voice budget (`oscairn.voice-budget/draft-2`, or draft 1 without the importance report) | The instrument gives up its own least important voices (a layer, an element) within a limit from the shared CPU budget, instead of the host fading whole notes, and reports which matter least so the host weighs them against every other part's | [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md), SDK [voice-budget-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget-plugin.md) | Basic Synth; test fixture (`voice_fixture.cpp`, layered) |
 | Native effect contexts (`oscairn.effect-contexts/draft`) | Many effect slots sharing one engine's memory, with tails reported; the next Performance's effects as new contexts while the old ones ring out | [effect-contexts](https://github.com/oscairn/oscairn-clap/blob/main/docs/effect-contexts.md) | Delay |
 | Parameter-target lanes (`oscairn.param-target`, `oscairn.param-target-lanes/draft`) | For sequencers and modulators: change other plugins' parameters at an exact sample in the same block, directly or through a control | [param-target](https://github.com/oscairn/oscairn-clap/blob/main/docs/param-target.md) | Step Sequencer, LFO |
 | Free-running beat (`oscairn.beat`) | For arpeggiators and clocks: a beat position shared by every plugin that runs while the transport is stopped | [beat](https://github.com/oscairn/oscairn-clap/blob/main/docs/beat.md) | Test fixture (`follower_fixture.cpp`) |
@@ -249,6 +249,29 @@ instance each get their own limit (their notes' voices and a share of the room);
 `active_voices` for the instance as a whole. The host supports it in the engine's process and in a
 worker alike. The calls and the order to give voices up in:
 [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md).
+
+**Draft 2: how much each voice matters (RFC 0046).** So the host can weigh a pedaled piano note
+against a lead synth's held one, an instrument offering `oscairn.voice-budget/draft-2` reports after
+each block, through `importance`, each sound context's 16 least important voices, least important
+first, and how many voices it sounds. Every plugin uses one scale: a voice's tier (0 released or
+under -60 dBFS at the plugin's output, 1 held only by a pedal, 2 key held, 3 struck under 50 ms
+ago), then its level at the plugin's output in dBFS (the sound's own output level included) less a
+decibel per second of age, at most ten. Voices the order never gives up (a held mono key, held
+voices within the part's reserve) are not listed. When the host lowers a context's limit by n, the
+plugin must give up, at its next block, exactly the n voices it listed first. The SDK does it all:
+
+- On `oscairn::contexts::Engine` (sound-contexts-plugin.hpp): add `Engine::importance` as the table's
+  fifth entry and return the table for both `OSCAIRN_EXT_VOICE_BUDGET` (draft 2) and
+  `OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1`. The helper tracks each voice's age (from `steady_time`) and
+  whether a pedal holds it; make `loudness(const Voice&)` the voice's gain at the plugin's output,
+  the sound's output level included.
+- With your own voice pool (voice-budget-plugin.hpp): fill each `Candidate`'s `pedaled` (key up, a
+  pedal holding it) and `ageMs` (since its note-on, from your frame count) beside `held` and
+  `loudness`; keep an `oscairn::voices::Importance<>` and from `importance` call
+  `list(count, get, limits)` over the same candidates `victim()` sees, then `write(out, capacity)`.
+  `victim()` and the list share one order, so a context lowered by n gives up the n it listed.
+  Keep each context within its own limit (`limits.of(context, selected).limit`) as well as the
+  instance's.
 
 ### Instant Performance changes
 

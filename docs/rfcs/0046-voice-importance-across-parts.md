@@ -1,7 +1,7 @@
 # RFC 0046: Voice importance across parts
 
-Status: accepted by the owner, 2026-11-17 ([his answers](#the-owners-answers)); steps 1 to 3 built
-([as built](#as-built-steps-3-to-5)), 4 to 7 to come. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
+Status: accepted by the owner, 2026-11-17 ([his answers](#the-owners-answers)); steps 1 to 4 built
+([as built](#as-built-steps-3-to-5)), 5 to 7 to come. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
 contexts and shared instances ([RFC 0005](0005-sound-contexts.md),
 [RFC 0021](0021-sounds-performances-and-library.md)) and the load guard, lanes and placement of
 [RFC 0045](0045-audio-scheduling-on-small-devices.md) (its no-glitch guard, steps 12a to 12o).
@@ -32,8 +32,8 @@ Checked when built and tested; the sections below say how.
       their unit's weight; the engine-core-diff, engine-run-diff and engine-audio-diff vectors
       recorded again ([the decision](#c-the-hosts-decision), [as built](#as-built-steps-3-to-5));
       tested by `engine-core-importance` (the scenario modeled in every placement)
-- [ ] 4. Thread-bound or device-bound told apart from the worker's wake and run times
-      ([which limit](#which-limit-is-binding))
+- [x] 4. Thread-bound or device-bound told apart from the worker's wake wait, run and CPU time
+      ([which limit](#which-limit-is-binding)); `heldOff` and `mismatch` in `engine.timing`
 - [ ] 5. Tests: the owner's scenario in every placement mode and in process; a plugin without
       the report; no flapping; idle cost ([plan](#plan))
 - [ ] 6. The plugins session: Sampler, VA and FM publish through the helper, a release each
@@ -578,11 +578,16 @@ The rule's three cases, in core/engine/rust/src/budget.rs:
   a shared instance that is the neighbors' pedaled tails before the lead's voices; in a worker or a
   chain of its own, the lead's own released and oldest voices.
 - **(b) Other threads only when core time ran out, as many as free what is missing**: `device`
-  fires on the lanes' total past `budget × cores`; it takes the least important voices anywhere
-  until their costs (`victim_cost`: an entry's weight at the instance's measured cost) cover the
-  excess. The deadline rule takes from any lane only with the device short, else from the lane
-  furthest over and those feeding it (`deadline`).
-- **(c) Never a voice that frees nothing short**: a lane rule never looks past its lane; and the
+  fires on the lanes' total past `budget × cores`, or on a lane held off its core
+  (`Lane::judge_held`: over its time, or losing a block of its own, while its threads' CPU time
+  fits its limit, with its time well above that CPU time or a wake wait past a quarter of its
+  time); it takes the least important voices anywhere until their costs (`victim_cost`: an
+  entry's weight at the instance's measured cost) cover the excess, the total's or the held
+  lanes'. A held lane's losses take from any lane (`lost`); its own over-time takes nothing from it
+  (`measured`). The deadline rule takes from any lane only with the device short, else from the
+  lane furthest over and those feeding it (`deadline`).
+- **(c) Never a voice that frees nothing short**: a lane rule never looks past its lane; a lane
+  marked only for a loss after it is not held (its voices free the lost block's time); and the
   merge stops at a context whose 16 listed voices are spent while more sound unlisted (`unlisted`
   in `choose_on`): those may be less important than anything else, so nothing above its last
   listed one goes until its next report lists them.
@@ -606,7 +611,8 @@ What it took besides the order:
   median (25 piano voices for an excess of 15).
 
 A listing plugin's context keeps to the cap the budget set on it (`context_cap`), in place of the
-proportional split. `importance_mismatch` counts a context found over its cap two reports on. The vectors of engine-core-diff,
+proportional split. `importance_mismatch` counts a context found over its cap two reports on, in
+`engine.timing` as `mismatch` (expected 0), beside `heldOff`. The vectors of engine-core-diff,
 engine-run-diff and engine-audio-diff were recorded again from the Rust core
 ([developer guide](../developer-guide.md#the-engine-cores-vectors)): the first two because the
 victims change on purpose, the third only for the two counters a node's activity gained (its

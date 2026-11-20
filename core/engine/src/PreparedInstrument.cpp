@@ -335,6 +335,13 @@ public:
     bool asleep() const noexcept override {return asleep_;}
     // statistics()'s sum, over the instances process() plays rather than the main thread's plan.
     double blockMicroseconds() const noexcept override {double n=0;for(const auto& s:current_->instances)if(s)n+=s->host->blockMicroseconds();return n;}
+    // Its instances' worker stamps: the longest wait, the CPU times summed; unknown when any instance's is.
+    bool blockTimes(float& cpu,float& wait) const noexcept override {
+        cpu=0;wait=0;bool known=false;
+        for(const auto& s:current_->instances)if(s){float c,w;if(!s->host->blockTimes(c,w)){cpu=wait=-1;return false;}cpu+=c;wait=std::max(wait,w);known=true;}
+        if(!known)cpu=wait=-1;
+        return known;
+    }
     uint64_t missedBlocks() const noexcept override {uint64_t n=0;for(const auto& s:current_->instances)if(s)n+=s->host->missedBlocks();return n;}
     // Every instance that ran this block was reset (audio thread, after process): every note ended.
     bool wasReset() const noexcept override {return reset_;}

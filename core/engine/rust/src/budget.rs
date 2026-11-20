@@ -55,6 +55,7 @@ pub struct Activity {
     pub faded_for_deadline: AtomicU64,
     pub unfit: AtomicU64,
     pub importance_mismatch: AtomicU64,
+    pub held_off: AtomicU64,
 }
 
 /// The blocks a plugin that gives up its own voices may sound more than its limit before its notes
@@ -232,6 +233,31 @@ pub struct Lane {
     pub since: u32, // blocks since its last loss, plus one; 0 for none yet
     pub worst: f32, // its recent worst block's time: the largest, falling 1 % a block (12n)
     pub settle: u8, // blocks before it is judged against its limit again, after listed voices on it went
+    /// This block's raw time (each step's last block, not their medians), its threads' CPU time in it (a step's time
+    /// where unknown; timed, some step's known), and its thread's wait to be woken, the least of its plugins' (0 unknown;
+    /// RFC 0046 step 4).
+    pub run: f32,
+    pub cpu: f32,
+    pub timed: bool,
+    pub wait: f32,
+    pub lost_own: bool, // a block of its own lost this block (not one after it)
+    /// Over its time or losing a block of its own only by waiting for a core: its threads' CPU time within its limit,
+    /// with its time well past that CPU time (preempted) or a wait to be woken past WAIT_SHARE of its time. Its own
+    /// voices would not help; the device's time is what is short.
+    pub held: bool,
+}
+
+impl Lane {
+    /// RFC 0046 step 4: over its time, or losing a block of its own, while its threads' own work (their CPU time) fits its
+    /// limit and they were held off a core (their time well past their CPU time, or a long wait to be woken): the
+    /// device's time is short, not its thread's. A lane over by its own work is its own to answer, however long its next
+    /// wake waits behind it; and a lane marked for a loss after it, within its own time, is not held: its voices free
+    /// the time of the block that was lost.
+    pub fn judge_held(&mut self) {
+        let trouble = self.took > self.limit || self.lost_own;
+        let held_off = self.run - self.cpu > (1.0 - SOFT) * self.limit || self.wait > WAIT_SHARE * self.miss;
+        self.held = trouble && self.timed && self.limit.is_finite() && self.cpu <= self.limit && held_off;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -258,6 +284,8 @@ pub struct Budget {
     /// The lanes a deadline's give-up may take from (MARKED): the one furthest over its time and those feeding it.
     pub marked: Vec<bool>,
 }
+/// A thread woken this share of its time late was held off its core: the device's time is short, not its own.
+const WAIT_SHARE: f32 = 0.25;
 /// choose's `lane` for the lanes `marked` names.
 pub const MARKED: usize = usize::MAX;
 
@@ -615,7 +643,8 @@ impl Budget {
             l.settle -= 1;
             return;
         }
-        if limit <= 0.0 || total <= limit || !again {
+        // Over only by waiting for a core: the device rule's to answer, from any lane (RFC 0046 step 4).
+        if limit <= 0.0 || total <= limit || !again || l.held {
             return;
         }
         // At most a quarter over the estimate a block, and never a reserve.
@@ -632,20 +661,23 @@ impl Budget {
         }
         self.choke(rs, lane, scale, 0.0, None, 0, false);
     }
-    /// After a block whose lanes together took more than `total` microseconds, in it and the one
-    /// before: the device is out of core time as a whole, so any lane's voice frees what is short. The least
-    /// important voices go, wherever they are, until the excess (less the notes already fading) is covered.
+    /// After a block whose lanes together took more than `total` microseconds, or with a lane over its time only by
+    /// waiting for a core (held), in it and the one before: the device is out of core time as a whole, so any lane's
+    /// voice frees what is short. The least important voices go, wherever they are, until the excess (the total's, or
+    /// the held lanes' time past their limits; less the notes already fading) is covered.
     pub fn device(&mut self, rs: &mut Routes, total: f32) {
         let took: f32 = self.lanes.iter().map(|l| l.took).sum();
-        let again = std::mem::replace(&mut self.device_over, took > total);
+        let held: f32 = self.lanes.iter().filter(|l| l.held).map(|l| (l.took - l.limit).max(0.0)).sum();
+        let short = (took - total).max(held);
+        let again = std::mem::replace(&mut self.device_over, short > 0.0);
         if self.device_hold != 0 {
             self.device_hold -= 1;
             return;
         }
-        if took <= total || !again {
+        if short <= 0.0 || !again {
             return;
         }
-        let mut excess = took - total;
+        let mut excess = short;
         for i in 0..self.lanes.len() {
             excess -= self.estimate(rs, i, Counting::Ending) - self.estimate(rs, i, Counting::Kept);
             // given up already, until they end
@@ -696,7 +728,9 @@ impl Budget {
                 continue;
             }
             l.hold = LOSS_HOLD_BLOCKS;
-            match self.choose(rs, Some(i), false, false, true) {
+            // A lane held off its core loses blocks for the device's time: any lane's voice frees it.
+            let from = if l.held { None } else { Some(i) };
+            match self.choose(rs, from, false, false, true) {
                 Some(v) => {
                     if let Some(a) = self.give_up(rs, v) {
                         a.faded_for_loss.fetch_add(1, Relaxed);
@@ -814,6 +848,24 @@ mod tests {
         cheap.per_note.set(1e-7);
         cheap.per_note_scale.set(1.0);
         assert_eq!(budget.voice_limit(&crate::Routes(()), 0, &cheap, 10, 10.0), 65536);
+    }
+
+    /// RFC 0046 step 4: a lane is held off its core (the device's time short, not its thread's) only when it is over
+    /// its time or lost a block of its own while its own work fits its limit and it was kept from running.
+    #[test]
+    fn held_only_by_waiting_for_a_core() {
+        let lane = |took: f32, run: f32, cpu: f32, wait: f32, lost_own: bool| {
+            let mut l = Lane { limit: 800.0, miss: 1000.0, took, run, cpu, timed: cpu > 0.0, wait, lost_own, ..Lane::default() };
+            l.judge_held();
+            l.held
+        };
+        assert!(!lane(900.0, 900.0, 890.0, 20.0, false), "over by its own work: its own to answer");
+        assert!(!lane(900.0, 900.0, 890.0, 600.0, false), "over by its own work, however long its next wake waited behind it");
+        assert!(lane(900.0, 900.0, 600.0, 20.0, false), "preempted: its time well past its CPU time");
+        assert!(lane(700.0, 700.0, 650.0, 400.0, true), "a block of its own lost after a long wait to be woken");
+        assert!(!lane(700.0, 700.0, 650.0, 20.0, true), "a block lost with no sign of waiting");
+        assert!(!lane(700.0, 700.0, 300.0, 400.0, false), "within its time: nothing to answer");
+        assert!(!lane(900.0, 900.0, 0.0, 600.0, false), "its CPU time unknown (the engine's process)");
     }
 
     /// RFC 0046's key: the tier above all (a quiet held key above a loud pedaled note), then the part's priority, then

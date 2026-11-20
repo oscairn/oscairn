@@ -188,6 +188,9 @@ namespace oscairn
         // Audio thread, after process(): statistics().lastMicroseconds, for a host whose statistics()
         // reads main-thread state (the graph's voice budget asks for it every block).
         virtual double blockMicroseconds() const noexcept { return statistics().lastMicroseconds; }
+        // Its last block in its worker, for the budget (RFC 0046 step 4): the CPU time its thread used and its wait to be
+        // woken for it, in microseconds; false (both -1) where unknown, as in the engine's process.
+        virtual bool blockTimes(float& cpu, float& wait) const noexcept { cpu = wait = -1; return false; }
         // Audio thread, after process(): the plugin said it makes no more sound until it gets
         // input (CLAP_PROCESS_SLEEP). False where a host cannot tell.
         virtual bool asleep() const noexcept { return false; }

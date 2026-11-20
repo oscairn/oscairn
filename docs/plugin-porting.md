@@ -215,7 +215,8 @@ are missed (a worker's allowance, the callback's time in the engine's process; R
 guard), budget or none, and the lanes together no more than the budget (with none, 80% of a
 block) on each audio core, so notes give way before a block is ever missed and a worker is not
 restarted for load (RFC 0018). A lane's notes give way only for its own limit; past the lanes'
-total, the least important voices of any lane give way (RFC 0046), as many as the excess. Notes fade (a few milliseconds); a note
+total, or with a lane held off its core (its CPU time within its limit, its time not), the least
+important voices of any lane give way (RFC 0046), as many as the excess. Notes fade (a few milliseconds); a note
 is choked at once only when its lane's block would otherwise be missed. For a
 plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
 first ([Behaving well](#behaving-well)); after blocks are lost it also holds the notes it gives such a

@@ -370,6 +370,8 @@ pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, fi
         sent,
         importance,
         contexts,
+        cpu: f.cpu,
+        wait: f.wait,
     };
     notes.finish(&mut Routes(()), step as usize, &rendered);
 }
@@ -506,6 +508,14 @@ impl oscairn_plugins {
         let (mut cost, mut notes, mut n) = (0.0, std::ptr::null(), 0);
         // SAFETY: as `sent`.
         unsafe { ((self.voices.expect("voices"))(self.context, s as u32, &mut cost, &mut notes, &mut n), cost, slice(notes, n)) }
+    }
+    /// Its worker's wait to run its last block and the CPU time it used, microseconds (0 unknown; a table without the
+    /// call knows neither).
+    pub fn waited(&self, s: usize) -> (f32, f32) {
+        let mut cpu = 0.0;
+        // SAFETY: the C++'s callback, called with its context and a step of the plan.
+        let wait = self.waited.map_or(0.0, |w| unsafe { w(self.context, s as u32, &mut cpu) });
+        (wait, cpu)
     }
     /// Draft 2's importance report: a list per context (RFC 0046).
     pub fn importance(&self, s: usize) -> &[oscairn_voice_budget_importance_t] {
@@ -691,7 +701,7 @@ mod tests {
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);
-        assert_eq!(size_of::<Activity>(), 152);
+        assert_eq!(size_of::<Activity>(), 160);
         assert_eq!((offset_of!(Activity, rest), offset_of!(Activity, stolen), offset_of!(Activity, lane_limit)), (28, 48, 72));
         assert_eq!((offset_of!(Activity, stranded), offset_of!(Activity, per_note_scale), offset_of!(Activity, over_limit)), (92, 96, 104));
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);
@@ -803,6 +813,8 @@ mod tests {
                 importance_count: 0,
                 contexts: std::ptr::null(),
                 context_count: 0,
+                cpu: 0.0,
+                wait: 0.0,
             };
             // SAFETY: live notes and buffers of the sizes given, for these calls.
             unsafe {

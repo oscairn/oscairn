@@ -36,7 +36,7 @@ OSCAIRN_SAME(perNote,per_note) OSCAIRN_SAME(seedRest,seed_rest) OSCAIRN_SAME(see
 OSCAIRN_SAME(hardChokes,hard_chokes) OSCAIRN_SAME(stolenForDevice,stolen_for_device) OSCAIRN_SAME(laneLimit,lane_limit)
 OSCAIRN_SAME(laneTook,lane_took) OSCAIRN_SAME(badOutput,bad_output) OSCAIRN_SAME(badRun,bad_run) OSCAIRN_SAME(stranded,stranded)
 OSCAIRN_SAME(ownVoices,own_voices) OSCAIRN_SAME(honorsVolume,honors_volume) OSCAIRN_SAME(perNoteScale,per_note_scale)
-OSCAIRN_SAME(voiceLimit,voice_limit) OSCAIRN_SAME(overLimit,over_limit) OSCAIRN_SAME(stolenForLoss,faded_for_loss) OSCAIRN_SAME(lostBlocks,lost) OSCAIRN_SAME(stolenForDeadline,faded_for_deadline) OSCAIRN_SAME(unfitBlocks,unfit) OSCAIRN_SAME(importanceMismatch,importance_mismatch)
+OSCAIRN_SAME(voiceLimit,voice_limit) OSCAIRN_SAME(overLimit,over_limit) OSCAIRN_SAME(stolenForLoss,faded_for_loss) OSCAIRN_SAME(lostBlocks,lost) OSCAIRN_SAME(stolenForDeadline,faded_for_deadline) OSCAIRN_SAME(unfitBlocks,unfit) OSCAIRN_SAME(importanceMismatch,importance_mismatch) OSCAIRN_SAME(heldOff,held_off)
 #undef OSCAIRN_SAME
 static_assert(sizeof(oscairn::Graph::Activity)==sizeof(oscairn_activity));
 
@@ -566,7 +566,7 @@ namespace oscairn
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
                 a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed),
                 a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed),a.stolenForDeadline.load(std::memory_order_relaxed),
-                a.unfitBlocks.load(std::memory_order_relaxed),a.importanceMismatch.load(std::memory_order_relaxed)};
+                a.unfitBlocks.load(std::memory_order_relaxed),a.importanceMismatch.load(std::memory_order_relaxed),a.heldOff.load(std::memory_order_relaxed)};
     }
     Graph::OutputGuard Graph::outputGuard( NodeId node ) const
     {
@@ -1196,7 +1196,8 @@ namespace oscairn
             [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
             [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
             [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);},
-            [](void* c,uint32_t s,uint32_t frames){return !C::handedSource(c,s) && C::host(c,s).rest(frames);}};
+            [](void* c,uint32_t s,uint32_t frames){return !C::handedSource(c,s) && C::host(c,s).rest(frames);},
+            [](void* c,uint32_t s,float* cpu){float wait=-1;C::host(c,s).blockTimes(*cpu,wait);return wait;}};
         static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
         oscairn_plugins plugins=table;plugins.context=&calls;
         const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);

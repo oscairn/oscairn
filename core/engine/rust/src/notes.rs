@@ -142,6 +142,9 @@ pub struct Rendered<'a> {
     pub importance: &'a [Listed],
     /// The engine's sound ID of each of the step's contexts, by index (an importance report names its lists by them).
     pub contexts: &'a [u32],
+    /// Its worker thread's CPU time in the block and its wait to be woken for it, microseconds; 0 or below unknown.
+    pub cpu: f32,
+    pub wait: f32,
 }
 
 pub struct Notes {
@@ -249,6 +252,7 @@ impl Notes {
         self.total = (if t.budget > 0.0 { t.budget } else { LOAD_MARGIN * t.period }) * t.cores;
         for lane in &mut self.budget.lanes {
             (lane.limit, lane.miss, lane.took, lane.others_took) = (if t.budget > 0.0 { t.budget } else { f32::INFINITY }, f32::INFINITY, 0.0, 0.0);
+            (lane.run, lane.cpu, lane.timed, lane.wait, lane.lost_own) = (0.0, 0.0, false, 0.0, false);
         }
         for s in (0..self.steps.len()).rev() {
             let Some(step) = self.steps.get(s) else { continue };
@@ -383,6 +387,14 @@ impl Notes {
                 if !step.budgeted {
                     lane.others_took += step.cost;
                 }
+                lane.run += r.took;
+                lane.cpu += if r.cpu > 0.0 { r.cpu } else { r.took };
+                lane.timed |= r.cpu > 0.0;
+                // The thread's wait to be woken: its first block's (in a pool or a chain each later plugin's wait
+                // includes the blocks rendered before it on the same thread).
+                if r.wait > 0.0 {
+                    lane.wait = if lane.wait > 0.0 { lane.wait.min(r.wait) } else { r.wait };
+                }
             }
             if let (true, Some(a)) = (step.budgeted, &step.activity) {
                 let live: u32 = step.sources.iter().map(|s| rs[s.route].live()).sum();
@@ -505,6 +517,9 @@ impl Notes {
         if let Some(a) = self.steps.get(s).and_then(|x| x.activity) {
             a.lost.fetch_add(1, Relaxed);
         }
+        if let Some(lane) = self.steps.get(s).and_then(|x| self.budget.lanes.get_mut(x.lane)) {
+            lane.lost_own = true;
+        }
         self.reach.fill(0.0);
         for i in (0..=s).rev() {
             let Some(step) = self.steps.get(i) else { continue };
@@ -534,6 +549,12 @@ impl Notes {
             lane.others = lane.others_took;
             let took = lane.took;
             lane.worst = took.max(lane.worst * 0.99);
+            lane.judge_held();
+            if lane.held {
+                for a in self.steps.iter().filter(|s| s.lane == i && s.budgeted).filter_map(|s| s.activity) {
+                    a.held_off.fetch_add(1, Relaxed);
+                }
+            }
             self.budget.measured(rs, i, took);
         }
         self.budget.device(rs, self.total);

@@ -1044,6 +1044,13 @@ namespace oscairn
             WorkerTiming* workerTiming() noexcept override { return &timing_; }
             // The budget's every block: the one value, not statistics()' gathering of every counter.
             double blockMicroseconds() const noexcept override { return shared_->lastMicroseconds.load(std::memory_order_relaxed); }
+            // The worker's stamps for the block last handed, once recorded for it (audio thread, as workerTimes).
+            bool blockTimes(float& cpu, float& wait) const noexcept override
+            {
+                const bool known = timed_ == sequence_ && sequence_ != 0;
+                cpu = known ? float(lastCpuNs_) / 1000.f : -1.f; wait = known ? float(lastWaitNs_) / 1000.f : -1.f;
+                return known;
+            }
             uint64_t missedBlocks() const noexcept override { return late_.load(std::memory_order_relaxed) + silent_.load(std::memory_order_relaxed); }
             kick::clap::Statistics statistics() const noexcept override
             {
@@ -1174,6 +1181,7 @@ namespace oscairn
                 timing_.wake.record(s.wokeAt - sent, at);
                 timing_.run.record(s.doneAt - s.wokeAt, at, s.cpuNs);
                 timing_.cpu.record(s.cpuNs, at);
+                lastWaitNs_ = std::clamp<int64_t>(s.wokeAt - sent, 0, 1'000'000'000); lastCpuNs_ = std::clamp<int64_t>(s.cpuNs, 0, 1'000'000'000);
                 // What a block usually takes in the worker (an eighth of each new one), for the extra block's catching up; the worker's stamps bounded.
                 const auto run = std::clamp<int64_t>(s.doneAt - s.wokeAt, 0, 1'000'000'000);
                 runNs_ += (run - runNs_) / 8;
@@ -1829,6 +1837,7 @@ namespace oscairn
             bool kept_ = true, playedKept_ = true, abandoned_ = false;
             std::vector<float> last_;
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
+            int64_t lastWaitNs_ = 0, lastCpuNs_ = 0; // the last block's wait to be woken and CPU time, as workerTimes recorded them
             uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
             uint32_t startsSeen_ = UINT32_MAX, graceLeft_ = 0; bool noGrace_ = false; // timing_'s starts last seen, and the blocks left of the start's grace (start)
             // The block start handed over, for finish.

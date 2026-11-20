@@ -62,6 +62,7 @@ typedef struct
     uint32_t voice_limit, over_limit;
     uint64_t faded_for_loss, lost, faded_for_deadline, unfit;
     uint64_t importance_mismatch; /* RFC 0046: a context found sounding more voices than the cap its plugin was given */
+    uint64_t held_off;            /* RFC 0046 step 4: blocks its lane was over its time only by waiting for a core */
 } oscairn_activity;
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note
@@ -148,7 +149,9 @@ typedef struct
  * notes are gone (a lost block, or its host reset it), and whether its block was late or silenced (a
  * worker past its allowance); its oscairn.voice-budget report
  * (read when the budget counts its notes and it rendered); the events it sent (its NOTE_ENDs); draft 2's
- * importance report, a list per context (RFC 0046), and the step's contexts' sound IDs by index, which the lists name. */
+ * importance report, a list per context (RFC 0046), and the step's contexts' sound IDs by index, which the lists name;
+ * its worker thread's CPU time in that block and its wait to be woken for it, in microseconds (RFC 0046 step 4; 0 or
+ * below: unknown, as in the engine's process). */
 typedef struct
 {
     float took;
@@ -163,6 +166,7 @@ typedef struct
     uint32_t importance_count;
     const uint32_t* contexts;
     uint32_t context_count;
+    float cpu, wait;
 } oscairn_finish;
 
 /* A plan's audio (oscairn_audio): its buffers, the audio connections into its steps and the graph's
@@ -233,6 +237,7 @@ typedef struct
     void (*deadline)(void* context, int64_t at, bool only);
     void (*helpers)(void* context, uint32_t count, oscairn_job job, void* job_context);
     bool (*rest)(void* context, uint32_t step, uint32_t frames); /* PluginHost::rest: slept through uncalled */
+    float (*waited)(void* context, uint32_t step, float* cpu); /* PluginHost::blockTimes: its wait to run, its CPU time (us, 0 or below unknown) */
 } oscairn_plugins;
 /* One block for the run: the graph's audio in and out, frames, and the output guard's fade (frames); its events (each's tag in tags, which may be
  * null) and the queued parameters; the beat event; recovery asked for the input's notes or all; whether

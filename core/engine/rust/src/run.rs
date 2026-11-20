@@ -731,8 +731,13 @@ impl Run {
             sent: &[],
             importance: &[],
             contexts: &[],
+            cpu: 0.0,
+            wait: 0.0,
         };
         step.missed = missed;
+        if budgeting && processed {
+            (r.wait, r.cpu) = p.waited(s);
+        }
         if budgeting && step.budgeted && processed {
             (r.voices, r.voice_cost, r.notes) = p.voices(s);
             r.importance = p.importance(s);
@@ -974,6 +979,7 @@ mod tests {
             deadline: Some(deadline),
             helpers: Some(helpers),
             rest: Some(rest),
+            waited: None,
         };
         let (beat, live, mut out) = (Event::header(40, 0, 1001, 0, 0), [1f32; 256], [0f32; 256]);
         let (mut next_id, mut drops, mut midi) = (0u32, 0u64, [NO_MIDI; 1024]);

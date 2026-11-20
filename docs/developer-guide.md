@@ -160,7 +160,9 @@ frees the most time, and a listing plugin's caps count the notes admitted since 
 activity's digest cut to its old size. `engine-core.vec` alone was recorded again at `7f01e5e2`, on the SDK owner's
 review of RFC 0046: the host's own notes count as just struck for 50 ms plus one block (they are stamped at their
 block's start, so their age runs up to a block ahead), which changes some victims; `engine-run.vec` and
-`engine-audio.vec` replay unchanged.
+`engine-audio.vec` replay unchanged. `engine-core.vec` alone again at `d6b5b6a2`: a draining connection's voices (the
+last Performance ringing out) rank below every live voice of their tier, which changes some victims in plans with
+draining sources; `engine-run.vec` and `engine-audio.vec` replay unchanged.
 
 The conditions record and replay share: the core is always built `cargo --release`; the tests and `vectors_math.c`
 are built `-ffp-contract=off`; and the test executables define `exp`, `log1p` and `pow` themselves

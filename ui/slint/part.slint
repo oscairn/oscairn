@@ -72,6 +72,14 @@ export component Row inherits Section {
     border-radius: Theme.list-radius;
     callback tapped();
     callback step(int);
+    // A finger drag on this row: once it passes the theme's drag threshold it is a scroll (`drag-move`,
+    // the vertical offset since the press, anchored to the press so the list follows it), not a tap;
+    // a press and a release within the threshold are a tap. The parent's `scrolled` is its own.
+    callback drag-move(length);
+    callback drag-end();
+    property <length> press-y: 0px;
+    property <bool> armed: false;
+    property <bool> dragging: false;
     // A switch (kind 1) is drawn as one, left of its value text's end; its parts' sizes.
     property <length> switch-width: 38px;
     property <length> switch-height: 24px;
@@ -84,7 +92,31 @@ export component Row inherits Section {
         shown: data.tinted;
     }
     TouchArea {
-        clicked => { root.tapped(); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.press-y = self.mouse-y;
+                root.armed = true;
+                root.dragging = false;
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                if (root.armed && !root.dragging) {
+                    root.tapped(); // a press and a release without a drag: a tap
+                }
+                root.armed = false;
+                root.dragging = false;
+                root.drag-end();
+            }
+        }
+        moved => {
+            if (root.armed && !root.dragging) {
+                let dy = self.mouse-y - root.press-y;
+                if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                    root.dragging = true;
+                }
+            }
+            if (root.dragging) {
+                root.drag-move(self.mouse-y - root.press-y);
+            }
+        }
     }
     // The item's color mark takes room from the text beside it: at the left (and a dot) from the label, at the right
     // from the value, so the two never overlap.
@@ -276,6 +308,20 @@ export component Part inherits Rectangle {
     property <length> list-y: Theme.margin;
     out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
+    // A finger drag on a row scrolls the list: the anchor (the state the drag began at) and the row pitch it follows.
+    property <bool> dz-on: false;
+    property <int> dz-first0: 0;
+    property <length> dz-y0: 0px;
+    property <length> dz-pitch: Theme.touch + root.gap;
+    function dz-move(dy: length) {
+        if (!root.dz-on) { root.dz-on = true; root.dz-first0 = PartState.first; root.dz-y0 = dy; }
+        let up = round((root.dz-y0 - dy) / root.dz-pitch);
+        let target = max(0, min(root.dz-first0 + up, PartState.total - 1));
+        if (target != PartState.first) { PartState.scrolled(target); }
+    }
+    function dz-end() {
+        root.dz-on = false;
+    }
     // The scroll bar, when the list is longer than the view: its own lane at the list's right edge, the rows narrower by it.
     property <bool> long: PartState.total > root.per-view;
     property <length> lane: root.long ? Theme.scroll-lane : 0px;
@@ -301,6 +347,8 @@ export component Part inherits Rectangle {
         data: row;
         tapped => { PartState.tapped(i); }
         step(by) => { PartState.step(i, by); }
+        drag-move(dy) => { root.dz-move(dy); }
+        drag-end() => { root.dz-end(); }
     }
     bar := ScrollBar {
         visible: root.long;

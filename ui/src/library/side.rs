@@ -186,11 +186,11 @@ impl Screen {
         let (per, n) = (per, cells.len());
         let lines = cells.last().map_or(0, |c| c.line + 1);
         let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);
-        let last = lines.saturating_sub(1) / per * per;
+        let last = lines.saturating_sub(1);
         // The first line of the view: the one the cursor is on is in it, else where the view was.
         let first = match at {
             Some(a) if self.side_focus => cells[a].line / per * per,
-            _ => (self.side_cursor.first / per * per).min(last),
+            _ => self.side_cursor.first.min(last),
         };
         self.side_cursor = Cursor { at, count: n, per_page: per, first };
         self.side_page = cells.iter().position(|c| c.line >= first).unwrap_or(n);
@@ -348,13 +348,12 @@ impl Screen {
         self.show();
     }
 
-    /// The scroll bar's request: the view starts at line `first` (a touch only: the cursor drops).
+    /// The scroll bar's or a finger drag's request: the view starts at line `first` (a touch only: the cursor drops).
     pub fn side_scroll_to(&mut self, first: i32) {
         self.side_focus = false;
-        let per = self.side_cursor.per_page.max(1);
         let lines = self.side_cells().last().map_or(0, |c| c.line + 1);
-        let last = lines.saturating_sub(1) / per * per;
-        self.side_cursor.first = (first.max(0) as usize / per * per).min(last);
+        let last = lines.saturating_sub(1);
+        self.side_cursor.first = (first.max(0) as usize).min(last);
         self.show();
     }
 

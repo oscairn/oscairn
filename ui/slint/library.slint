@@ -184,6 +184,20 @@ export component Library inherits Rectangle {
     property <length> step-gap: LibraryState.bubbles ? Theme.dense(Theme.gap, LibraryState.compact) : root.gap;
     // The lines that fit are the Rust layout's (their heights vary: a heading is compact); it writes them to the state, read here.
     property <int> side-per-view: LibraryState.side-per-view;
+    // A finger drag on a sidebar entry scrolls it (the anchor the drag began at, its line pitch), as a list's row drag does.
+    property <bool> sd-on: false;
+    property <int> sd-first0: 0;
+    property <length> sd-y0: 0px;
+    property <length> sd-pitch: Theme.touch + root.step-gap;
+    function sd-move(dy: length) {
+        if (!root.sd-on) { root.sd-on = true; root.sd-first0 = LibraryState.side-first; root.sd-y0 = dy; }
+        let up = round((root.sd-y0 - dy) / root.sd-pitch);
+        let target = max(0, min(root.sd-first0 + up, LibraryState.side-total - 1));
+        if (target != LibraryState.side-first) { LibraryState.side-scrolled(target); }
+    }
+    function sd-end() {
+        root.sd-on = false;
+    }
     // What the entries share across: the sidebar less its lane (kept in bubbles whether or not a bar shows, so that the lines
     // that wrap do not change with the bar) and the overlap the rows take.
     property <length> side-room: max(0px, root.side-width - (LibraryState.bubbles || root.side-long ? Theme.scroll-lane - Theme.scroll-overlap : 0px));
@@ -353,6 +367,8 @@ export component Library inherits Rectangle {
             height: parent.height;
             data: row;
             tapped => { LibraryState.side-tapped(i); }
+            drag-move(dy) => { root.sd-move(dy); }
+            drag-end() => { root.sd-end(); }
         }
         if row.kind != 4 && LibraryState.bubbles: Pill {
             width: parent.width;

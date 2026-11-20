@@ -3,9 +3,11 @@
 //! (ui/LIBRARY-APP.md rows A4 to A14), against the fake engine.
 
 use super::library::*;
+use super::library_shell::Shelf;
 use super::*;
 use crate::library::Outcome;
-use crate::LibraryState;
+use crate::tests::library_fake::stored;
+use crate::{LibraryState, PartState, Theme};
 
 // Search is the box under the top bar: a tap or a press asks for text on the keyboard, and what is typed narrows the list
 // by the engine's own match (name, description, tags); the box shows the text and the line under the list counts the matches.
@@ -166,4 +168,70 @@ fn the_panel_describes_the_item_under_the_cursor() {
     assert_eq!(lines[..2], ["Performance", "Glass Choir"]);
     assert!(lines.contains(&"choir, pad".to_string()) && lines.contains(&"My own".to_string()));
     assert!(lines.contains(&"Does not fit this device".to_string()) && lines.contains(&"needs 3 GB of memory".to_string()), "{lines:?}");
+}
+
+/// A point on the window that lies on row `row` of the list: the Library lays the shared list at the
+/// area the tabs and the sidebar leave (`content-x`, `content-y`), the Part's own list at its margin.
+fn on_row(s: &Screen, row: usize, inset: f32) -> (f32, f32) {
+    let th = s.ui.global::<Theme>();
+    let (margin, gap, touch, bar) = (th.get_margin(), th.get_gap(), th.get_touch(), th.get_bar_height());
+    let cx = 2.0 * margin + (W as f32 - 3.0 * margin) * th.get_sidebar_share();
+    let cy = bar + margin + touch + gap; // the screen sits under the top bar
+    let pitch = touch + th.get_list_gap();
+    (cx + margin + 40.0, cy + margin + row as f32 * pitch + inset)
+}
+
+fn press(s: &Screen, p: (f32, f32)) {
+    s.ui.window().dispatch_event(slint::platform::WindowEvent::PointerPressed { position: slint::LogicalPosition::new(p.0, p.1), button: slint::platform::PointerEventButton::Left });
+    s.ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(p.0, p.1) });
+}
+fn move_to(s: &Screen, p: (f32, f32)) {
+    s.ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(p.0, p.1) });
+}
+fn release(s: &Screen, p: (f32, f32)) {
+    s.ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased { position: slint::LogicalPosition::new(p.0, p.1), button: slint::platform::PointerEventButton::Left });
+}
+
+// A finger drag on the rows scrolls the list (it follows the finger row for row) and is not a tap: a
+// press on a row, a drag three rows up, a release — the list moved three rows, no row was opened.
+#[test]
+fn a_drag_on_the_rows_scrolls_the_list_and_is_not_a_tap() {
+    let mut s = Shelf::new("library-drag");
+    s.e.items.extend((0..40).map(|i| stored("performance", &format!("p{i}"), &format!("Warm Bass {i}"))));
+    let ui = s.ui();
+    crate::shell::goto(crate::shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame(); // the rows are placed in the window
+    let (x, y) = on_row(&s.f.screen, 4, 22.0);
+    assert_eq!(ui.global::<PartState>().get_first(), 0, "starts on the first view");
+    let info_before = s.e.called("performance.info").len();
+    press(&s.f.screen, (x, y));
+    // Up by three rows (the touch + gap pitch each), in small steps so the drag crosses the theme's
+    // threshold early and then scrolls row for row.
+    for i in 1..=12 {
+        move_to(&s.f.screen, (x, y - i as f32 * 12.0));
+    }
+    release(&s.f.screen, (x, y - 144.0));
+    s.serve();
+    assert_eq!(ui.global::<PartState>().get_first(), 3, "the list followed the drag up three rows");
+    assert!(rows(&ui).iter().all(|rr| !rr.cursor), "no row was opened by the drag");
+    assert_eq!(s.e.called("performance.info").len(), info_before, "the drag opened no row: {:?}", s.e.methods());
+}
+
+// A press and a release with no movement is still a tap: the view does not move, the row is opened.
+#[test]
+fn a_press_and_release_without_movement_taps_the_row() {
+    let mut s = Shelf::new("library-tap");
+    s.e.items.extend((0..40).map(|i| stored("performance", &format!("p{i}"), &format!("Warm Bass {i}"))));
+    let ui = s.ui();
+    crate::shell::goto(crate::shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame();
+    let (x, y) = on_row(&s.f.screen, 0, 22.0);
+    let info_before = s.e.called("performance.info").len();
+    press(&s.f.screen, (x, y));
+    release(&s.f.screen, (x, y));
+    s.serve();
+    assert_eq!(ui.global::<PartState>().get_first(), 0, "a tap does not scroll");
+    assert!(s.e.called("performance.info").len() > info_before, "the row's tap opened it: {:?}", s.e.methods());
 }

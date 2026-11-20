@@ -14,7 +14,9 @@
 //   - Pool with one process, 2,000 blocks, a new piano note every 25: the lead never touched, no part silent, and no more
 //     given up than the first excess and the new notes bring (no flapping).
 // In every case no part goes silent and every plugin keeps to its caps. A claim a slow machine could fail by itself is
-// checked only when the guard counted no lost block on the part it is about. Usage: voice-fixture (OSCAIRN_PLUGIN_WORKER
+// checked only when the guard counted no lost block on the part it is about; that the piano loses nothing for the lead's lane,
+// also only when it kept its 30 notes until the lead played (under ThreadSanitizer a piano voice costs some 30 us, not 15, and
+// its own lane gives up some 10 before the lead plays: the machine, not the lead). Usage: voice-fixture (OSCAIRN_PLUGIN_WORKER
 // set, OSCAIRN_WORKER_BUDGET_US the allowance).
 //   oscairn-voice-scenario-test
 #include "oscairn/graph.h"
@@ -131,7 +133,7 @@ int main(int argc,char** argv){try{
     // guard counted no lost block and gave nothing up for the callback's time on the part it is about (developer guide,
     // Timing tests).
     auto premised=[&](bool premise,bool ok,const std::string& what){
-        if(premise)check(ok,what);else std::printf("%s: the machine lost blocks on that part: not checked\n",what.c_str());};
+        if(premise)check(ok,what);else std::printf("%s: the machine lost blocks on that part, or slowed it past its lane: not checked\n",what.c_str());};
     auto leadKept=[&](Mode m,const Seen& s,const char* what){
         check(s.pianoGave>=1,std::string(name(m))+", "+what+": the piano's voices give way");
         premised(s.calm(),s.leadGave==0 && s.leadLeft==2,std::string(name(m))+", "+what+": the lead keeps both keys, gives up nothing");};
@@ -143,7 +145,7 @@ int main(int argc,char** argv){try{
         leadKept(m,d,"device out of core time");
         const auto o=measure(m,Case::OwnLane,"lead's own lane over");
         check(o.leadGave>=1,std::string(name(m))+": the lead gives up its own voices for its own lane");
-        premised(o.pianoLost==0 && o.pianoDeadline==0,o.pianoGave==0,std::string(name(m))+": the piano, on another lane, loses nothing for the lead's");
+        premised(o.pianoLost==0 && o.pianoDeadline==0 && o.pianoBefore==30,o.pianoGave==0,std::string(name(m))+": the piano, on another lane, loses nothing for the lead's");
         premised(o.leadLost==0,o.leadLeft>=2,std::string(name(m))+": the lead keeps its held keys");
     }
     leadKept(Mode::Plugin,measure(Mode::Plugin,Case::NoReport,"piano without the report"),"piano without the report");

@@ -246,7 +246,18 @@ const oscairn_plugins plugins{nullptr,
         Model::log(c,14,s);static thread_local oscairn_voice_budget_note_t list[4];auto r=Model::rng(c,s,14);
         for(uint32_t i=0;i<4;++i)list[i]={int32_t(r.below(30))-1,0,int16_t(r.below(2)),int16_t(40+r.below(30)),1+r.below(3),float(r.unit())};
         *cost=10+r.below(40);*notes=list;*n=r.below(5);return r.below(20);},
-    [](void*,uint32_t,const oscairn_voice_budget_importance_t** lists){*lists=nullptr;return 0u;}, // none reported
+    [](void* c,uint32_t s,const oscairn_voice_budget_importance_t** lists){ // draft 2's report (RFC 0046): a list per context, by sound ID 7 and up
+        Model::log(c,24,s);static thread_local oscairn_voice_budget_importance_t list[2];auto r=Model::rng(c,s,24);
+        const uint32_t n=r.below(3);
+        for(uint32_t k=0;k<n;++k)
+        {
+            list[k]={};list[k].context=7+k;
+            const uint32_t voices=r.below(20);
+            const uint32_t listed=r.below(OSCAIRN_VOICE_BUDGET_LEAST+1);
+            list[k].voices=uint16_t(voices);list[k].count=uint16_t(std::min(listed,voices));
+            for(uint32_t i=0;i<list[k].count;++i){const uint32_t tier=r.below(4);const uint32_t age=r.below(3000);const uint32_t level=r.below(120);list[k].least[i]={uint8_t(tier),0,uint16_t(age),-float(level)};}
+        }
+        *lists=list;return n;},
     [](void* c,uint32_t s,uint32_t limit,const oscairn_voice_budget_context_t* p,uint32_t n){Model::log(c,15,s,p,n*sizeof *p);Model::log(c,15,s,&limit,4);},
     [](void* c,uint32_t s,uint32_t k){Model::log(c,16,s,&k,4);return 7+k;},
     [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){Model::log(c,17,s,&k,4);auto r=Model::rng(c,s,17+k);for(uint32_t i=0,m=r.below(3);i<m;++i){const uint32_t id=r.below(5);const double v=r.unit();const auto p=param(0,id,v);emit(e,&p);}},

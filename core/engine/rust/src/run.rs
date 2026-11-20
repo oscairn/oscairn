@@ -533,6 +533,10 @@ impl Run {
             );
         }
         audio.mix(self.steps.len(), &mut b.outputs, frames as usize, b.live_from, b.live_to);
+        // Each step's gain to the outputs, by which the budget hears a part's voices in the mix (RFC 0046).
+        if notes.budgeting() {
+            audio.reach(b.live_to, &mut notes.budget.gains);
+        }
         // The lanes judged, the callback's time left once the block is collected (RFC 0045's guard), the timing report kept.
         notes.end(rs, if ends != 0 { micros(ends - p.now()) } else { f32::NAN });
         ok
@@ -712,6 +716,7 @@ impl Run {
         }
         let took = if budgeting { p.took(s) as f32 } else { 0.0 };
         let missed = p.missed(s);
+        let mut ids = [0u32; MAX_CONTEXTS]; // its contexts' sound IDs, which its importance report names
         let step = &mut self.steps[s];
         let mut r = Rendered {
             took,
@@ -725,11 +730,19 @@ impl Run {
             notes: &[],
             sent: &[],
             importance: &[],
+            contexts: &[],
         };
         step.missed = missed;
         if budgeting && step.budgeted && processed {
             (r.voices, r.voice_cost, r.notes) = p.voices(s);
             r.importance = p.importance(s);
+            if !r.importance.is_empty() {
+                let n = notes.contexts(s).min(MAX_CONTEXTS);
+                for (c, id) in ids.iter_mut().enumerate().take(n) {
+                    *id = p.sound(s, c as u32);
+                }
+                r.contexts = &ids[..n];
+            }
             (r.own_voices, r.honors_volume) = (p.own_voices(s), p.honors_volume(s));
         }
         r.sent = p.sent(s);

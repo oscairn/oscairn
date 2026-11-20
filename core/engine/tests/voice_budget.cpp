@@ -5,7 +5,7 @@
 // loud ones. Released notes are newer and as loud as the held ones, so neither age nor velocity
 // alone puts them first. Without the budget the plugins' time passes it in most blocks;
 // with it, they stay under, and the notes given up (faded, or choked at the hard limit) are the released and quiet ones before any
-// loud held note (A's bass and melody spared), B's last. Usage: plugin [notes per group [share]],
+// loud held note (A's bass and melody spared), B's last; a note struck under 50 ms ago counts as held (RFC 0046). Usage: plugin [notes per group [share]],
 // the budget being the plugins at rest and that share of what the notes add (default .5); the voice fixture
 // (OSCAIRN_FIXTURE_VOICE_US) costs a fixed time per voice, a real instrument what it costs.
 #include "oscairn/graph.h"
@@ -143,7 +143,8 @@ int main(int argc,char** argv){try{
         size_t part=0;for(size_t p=0;p<3;++p)if(s.node==held.nodes[p])part=p;
         ++lost[part];
         if(loud){if(firstLoud<0)firstLoud=int(i);loudAt=std::min(loudAt,s.block);}
-        else{lastQuiet=int(i);passedOver|=note.block<loudAt && decidedFrom(part,s.block)>loudAt;}
+        // RFC 0046: a note struck under 50 ms (38 blocks) before the loud one went was protected as just struck.
+        else{lastQuiet=int(i);passedOver|=note.block<loudAt && loudAt-note.block>=38 && decidedFrom(part,s.block)>loudAt;}
     }
     std::printf("given up: %zu (A %zu, B %zu, C %zu), %zu of them choked before any fade; the last released or quiet one at %d, the first loud held one at %d\n",held.recorder.steals.size(),lost[0],lost[1],lost[2],cut,lastQuiet,firstLoud);
     std::printf("in order (q released or quiet, l loud, then the part; capitals choked before any fade): %s\n",order.c_str());

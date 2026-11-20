@@ -1278,11 +1278,12 @@ pub struct oscairn_voice_budget_least {
     pub flags: u8,
     pub age_ms: u16,
     pub level_db: f32,
+    pub weight: f32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of oscairn_voice_budget_least"]
-        [::std::mem::size_of::<oscairn_voice_budget_least>() - 8usize];
+        [::std::mem::size_of::<oscairn_voice_budget_least>() - 12usize];
     ["Alignment of oscairn_voice_budget_least"]
         [::std::mem::align_of::<oscairn_voice_budget_least>() - 4usize];
     ["Offset of field: oscairn_voice_budget_least::tier"]
@@ -1293,6 +1294,8 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_voice_budget_least, age_ms) - 2usize];
     ["Offset of field: oscairn_voice_budget_least::level_db"]
         [::std::mem::offset_of!(oscairn_voice_budget_least, level_db) - 4usize];
+    ["Offset of field: oscairn_voice_budget_least::weight"]
+        [::std::mem::offset_of!(oscairn_voice_budget_least, weight) - 8usize];
 };
 pub type oscairn_voice_budget_least_t = oscairn_voice_budget_least;
 #[repr(C)]
@@ -1301,12 +1304,13 @@ pub struct oscairn_voice_budget_importance {
     pub context: u32,
     pub voices: u16,
     pub count: u16,
+    pub weight: f32,
     pub least: [oscairn_voice_budget_least_t; 16usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of oscairn_voice_budget_importance"]
-        [::std::mem::size_of::<oscairn_voice_budget_importance>() - 136usize];
+        [::std::mem::size_of::<oscairn_voice_budget_importance>() - 204usize];
     ["Alignment of oscairn_voice_budget_importance"]
         [::std::mem::align_of::<oscairn_voice_budget_importance>() - 4usize];
     ["Offset of field: oscairn_voice_budget_importance::context"]
@@ -1315,8 +1319,10 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_voice_budget_importance, voices) - 4usize];
     ["Offset of field: oscairn_voice_budget_importance::count"]
         [::std::mem::offset_of!(oscairn_voice_budget_importance, count) - 6usize];
+    ["Offset of field: oscairn_voice_budget_importance::weight"]
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, weight) - 8usize];
     ["Offset of field: oscairn_voice_budget_importance::least"]
-        [::std::mem::offset_of!(oscairn_voice_budget_importance, least) - 8usize];
+        [::std::mem::offset_of!(oscairn_voice_budget_importance, least) - 12usize];
 };
 pub type oscairn_voice_budget_importance_t = oscairn_voice_budget_importance;
 #[repr(C)]

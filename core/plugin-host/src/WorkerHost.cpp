@@ -1482,10 +1482,14 @@ namespace oscairn
                         }
                         c.voices = uint16_t(std::min<uint32_t>(c.voices, maxVoices));
                         c.count = uint16_t(std::min<uint32_t>(c.count, OSCAIRN_VOICE_BUDGET_LEAST));
+                        // A weight is a voice's cost against its others: positive and finite, else 1 (a context's sum, else its voices).
+                        auto weight = [](float w, float none) { return std::isfinite(w) && w > 0 ? std::min(w, 1e6f) : none; };
+                        c.weight = weight(c.weight, float(c.voices));
                         for(auto& v : c.least)
                         {
-                            v.tier = std::min<uint8_t>(v.tier, 3);
+                            v.tier = std::min<uint8_t>(v.tier, 2);
                             v.level_db = std::isfinite(v.level_db) ? std::clamp(v.level_db, -120.f, 24.f) : -120.f;
+                            v.weight = weight(v.weight, 1);
                         }
                     }
                     std::atomic_thread_fence(std::memory_order_acquire);

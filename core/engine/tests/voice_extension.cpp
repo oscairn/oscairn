@@ -58,8 +58,8 @@ int main(int argc,char** argv){try{
             for(uint32_t n=0;n<count;++n)check(std::isfinite(notes[n].loudness) && notes[n].loudness>=0,"a level in range: "+std::to_string(notes[n].loudness));
             const oscairn_voice_budget_importance_t* lists=nullptr;const uint32_t listed=synth.importanceReport(lists);
             check(listed<=OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS,"contexts bounded: "+std::to_string(listed));
-            for(uint32_t c=0;c<listed;++c){check(lists[c].voices<=(1u<<16) && lists[c].count<=OSCAIRN_VOICE_BUDGET_LEAST,"a list bounded");
-                for(const auto& v:lists[c].least)check(v.tier<=3 && std::isfinite(v.level_db) && v.level_db>=-120 && v.level_db<=24,"an entry in range");}
+            for(uint32_t c=0;c<listed;++c){check(lists[c].voices<=(1u<<16) && lists[c].count<=OSCAIRN_VOICE_BUDGET_LEAST && std::isfinite(lists[c].weight) && lists[c].weight>0,"a list bounded");
+                for(const auto& v:lists[c].least)check(v.tier<=2 && std::isfinite(v.level_db) && v.level_db>=-120 && v.level_db<=24 && std::isfinite(v.weight) && v.weight>0 && v.weight<=1e6,"an entry in range");}
             clamped=clamped || (voices==(1u<<16) && count==kick::clap::Host::maxBlockEvents);
         }
         check(clamped,"the worker's out-of-range report arrived, bounded");
@@ -124,7 +124,9 @@ int main(int argc,char** argv){try{
         uint32_t whole=0;for(uint32_t i=0;i<count;++i)whole+=notes[i].voices==4;
         check(whole<8,"elements dropped from notes, not notes from the sound");
         for(uint32_t i=0;i<count;++i)check(notes[i].loudness>.9f,"each note keeps its loudest element");
-        check(given.stolen==0 && given.hardChokes==0,"the host gave up none of its notes");
+        // Draft 2: the voices the host takes are those the plugin listed (counted as faded), given up by the plugin itself;
+        // none of its notes is faded or choked from outside.
+        check(g.sounding(s)==8 && given.hardChokes==0,"the host gave up none of its notes: "+std::to_string(g.sounding(s))+" held");
     }catch(...){error=std::current_exception();}}).join();
     if(error)std::rethrow_exception(error);
     std::puts("ok: one pool's policy across sounds, and elements given up before notes");

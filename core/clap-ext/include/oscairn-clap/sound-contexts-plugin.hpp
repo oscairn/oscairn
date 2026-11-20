@@ -53,8 +53,11 @@
 // context's limit, reserve, priority and mode, giving voices up in that header's order (from
 // voice-budget-plugin.hpp): a voice past a limit fades out over the choke time; one is cut only when
 // the pool has no free slot, a voice already fading first. It may provide
-//   double loudness(const Voice&)  the voice's level now at the plugin's output, linear, the sound's own
-//                                  output level included (default: velocity, volume and choke fade)
+//   double loudness(const Voice&)  the voice's level now at the plugin's output, linear: envelope x
+//                                  velocity x volume x the sound's own output level, no pass over its
+//                                  samples (default: velocity, volume and choke fade)
+//   float weight(const Voice&)     its cost relative to the other voices, as the layers or oscillators
+//                                  it runs (default: 1)
 //   bool mono(const Context&)      the sound plays one note at a time (default: false)
 //   double voiceCost()             microseconds a voice costs a block (default: 0, no estimate)
 //   static constexpr bool volumeExpressions = true;   when render multiplies by amplitude()
@@ -245,7 +248,7 @@ namespace oscairn::contexts
         {
             const auto& c = contexts[v.context];
             const double ageMs = steadyTime < 0 || v.startedAt < 0 ? -1.0 : double(steadyTime + eventTime - v.startedAt) * 1000.0 / voiceRate;
-            return {c.id, c.selected.load(std::memory_order_relaxed) != 0, v.held, v.chokeLength != 0, derived().mono(c), derived().loudness(v), v.started, v.pedaled, ageMs};
+            return {c.id, c.selected.load(std::memory_order_relaxed) != 0, v.held, v.chokeLength != 0, derived().mono(c), derived().loudness(v), v.started, v.pedaled, ageMs, derived().weight(v)};
         }
         // Enters the release stage: no longer held by a pedal.
         void releaseVoice(Voice& v) { v.pedaled = false; derived().release(v); }
@@ -267,6 +270,7 @@ namespace oscairn::contexts
             while(voiceLimits.limit && sounding() > voiceLimits.limit) { const int i = voiceVictim(oscairn::voices::none); if(i < 0) break; fadeOut(i); }
         }
         double loudness(const Voice& v) const { return v.velocity * amplitude(v, 0); }
+        float weight(const Voice&) const { return 1; }
         bool mono(const Context&) const { return false; }
         double voiceCost() const { return 0; }
         bool asleep() const { return false; }

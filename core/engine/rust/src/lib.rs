@@ -347,13 +347,14 @@ pub unsafe extern "C" fn rust_core_notes_route(
 #[no_mangle]
 pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, finish: *const oscairn_finish) {
     // SAFETY: the caller's contract: live notes used by nothing else, a readable finish and arrays.
-    let (notes, f, voice_notes, sent, importance) = unsafe {
+    let (notes, f, voice_notes, sent, importance, contexts) = unsafe {
         (
             &mut *notes,
             &*finish,
             slice((*finish).notes, (*finish).note_count),
             slice((*finish).sent, (*finish).sent_count),
             slice((*finish).importance, (*finish).importance_count),
+            slice((*finish).contexts, (*finish).context_count),
         )
     };
     let rendered = Rendered {
@@ -368,6 +369,7 @@ pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, fi
         notes: voice_notes,
         sent,
         importance,
+        contexts,
     };
     notes.finish(&mut Routes(()), step as usize, &rendered);
 }
@@ -508,8 +510,11 @@ impl oscairn_plugins {
     /// Draft 2's importance report: a list per context (RFC 0046).
     pub fn importance(&self, s: usize) -> &[oscairn_voice_budget_importance_t] {
         let mut lists = std::ptr::null();
+        // The call first: it sets `lists` (an argument read before it would be the null it started as).
         // SAFETY: as `sent`.
-        unsafe { slice(lists, (self.importance.expect("importance"))(self.context, s as u32, &mut lists)) }
+        let n = unsafe { (self.importance.expect("importance"))(self.context, s as u32, &mut lists) };
+        // SAFETY: as `sent`.
+        unsafe { slice(lists, n) }
     }
     /// A shared engine's context `c`'s parameters set since its last block, each to `emit`.
     pub fn parameters(&self, s: usize, c: usize, mut emit: &mut dyn FnMut(&Event) -> bool) {
@@ -686,7 +691,7 @@ mod tests {
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);
-        assert_eq!(size_of::<Activity>(), 144);
+        assert_eq!(size_of::<Activity>(), 152);
         assert_eq!((offset_of!(Activity, rest), offset_of!(Activity, stolen), offset_of!(Activity, lane_limit)), (28, 48, 72));
         assert_eq!((offset_of!(Activity, stranded), offset_of!(Activity, per_note_scale), offset_of!(Activity, over_limit)), (92, 96, 104));
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);
@@ -796,6 +801,8 @@ mod tests {
                 sent_count: u32::from(b % 5 == 0),
                 importance: std::ptr::null(),
                 importance_count: 0,
+                contexts: std::ptr::null(),
+                context_count: 0,
             };
             // SAFETY: live notes and buffers of the sizes given, for these calls.
             unsafe {

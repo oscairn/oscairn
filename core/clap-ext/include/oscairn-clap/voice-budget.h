@@ -58,6 +58,16 @@ extern "C" {
  *   and how many voices it sounds; at most `capacity` contexts, returns how many it wrote. A voice
  *   rule 1 keeps is not listed. When the host then lowers a context's limit by n, the plugin gives
  *   up the n voices it listed first, at the start of its next block: the host checks it.
+ *   A listed voice is the plugin's unit of giving up, the same thing its limit and active_voices
+ *   count (a sampler's note with all its layers, a synth's voice), never a part of one. Units may
+ *   differ in cost: each entry's `weight` is its unit's cost relative to the others (the layers or
+ *   oscillators it runs; 0 counts as 1), and a context's `weight` the sum over the voices it
+ *   counts in `voices` (0: `voices`, every unit 1). The host turns weight into time: the instance's
+ *   measured time above rest divided by its contexts' total weight, times the entry's weight.
+ *   `level_db` is cheap and the same in every plugin: 20 log10 of the product of the voice's
+ *   envelope level, its velocity gain, its volume expression and the sound's own output level, 0
+ *   dB being the voice's sample or oscillator at its nominal full scale; no pass over its samples.
+ *   The host adds the part's gain. Tier, the struck flag and age are carried apart from it.
  *
  * The order a plugin gives up voices in, which the Oscairn SDK's helper (voice-budget-plugin.hpp)
  * implements (RFC 0046's scale, the same in every plugin):
@@ -65,11 +75,12 @@ extern "C" {
  *      a legato line's included), nor a held voice of a context at or under its reserve, unless
  *      the new voice is for that same context;
  *   2. by tier: released (key up, no pedal holding it) or inaudible (below -60 dBFS at the
- *      plugin's output), then held only by a pedal, then key held, then struck under 50 ms ago;
+ *      plugin's output, unless struck under 50 ms ago: an attack is not judged by its level), then
+ *      held only by a pedal, then key held;
  *   3. the new voice's own context before others;
  *   4. the context of lower priority before higher;
- *   5. the least audible: its level in dBFS less a decibel per second of age (at most ten), then
- *      the oldest.
+ *   5. a voice struck under 50 ms ago after the others of its tier; then the least audible: its
+ *      level in dBFS less a decibel per second of age (at most ten), then the oldest.
  * A plugin may refine this (one element of a layered note before a whole note) but should not
  * break rule 1.
  *
@@ -111,16 +122,18 @@ typedef struct oscairn_voice_budget_note
 enum
 {
     OSCAIRN_VOICE_BUDGET_LEAST = 16, // the voices a context's importance report lists
+    OSCAIRN_VOICE_BUDGET_STRUCK = 1, // a listed voice's flag: struck under 50 ms ago
 };
 
 // A voice in an importance report (draft 2).
 typedef struct oscairn_voice_budget_least
 {
-    uint8_t  tier;     // 0 released or inaudible, 1 held by a pedal, 2 key held, 3 struck under 50 ms ago
-    uint8_t  flags;    // 0
+    uint8_t  tier;     // 0 released or inaudible, 1 held only by a pedal, 2 key held
+    uint8_t  flags;    // OSCAIRN_VOICE_BUDGET_STRUCK
     uint16_t age_ms;   // since its note-on, at most 65,535
     float    level_db; // its gain now at the plugin's output, dBFS (envelope, velocity, volume expression and
                        // the sound's own output level); -120 for silence
+    float    weight;   // its cost relative to the context's other voices (layers, oscillators); 0 counts as 1
 } oscairn_voice_budget_least_t;
 
 // A context's importance report (draft 2).
@@ -129,6 +142,7 @@ typedef struct oscairn_voice_budget_importance
     uint32_t context; // a sound context's ID, or OSCAIRN_VOICE_BUDGET_SELECTED for a plugin without contexts
     uint16_t voices;  // its voices sounding, those fading out not counted
     uint16_t count;   // entries in least
+    float    weight;  // the sum of its sounding voices' weights; 0: voices (each 1)
     oscairn_voice_budget_least_t least[OSCAIRN_VOICE_BUDGET_LEAST]; // least important first
 } oscairn_voice_budget_importance_t;
 

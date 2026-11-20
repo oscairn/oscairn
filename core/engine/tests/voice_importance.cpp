@@ -4,7 +4,7 @@
 // basic-synth.
 //
 // Two keys held softly, three pedaled loudly: the list puts the pedaled voices first, whatever their level (a held key
-// outranks a pedaled note), the quietest of them first; a key just struck ranks above both until it is 50 ms old. With
+// outranks a pedaled note), the quietest of them first; a key just struck ranks above the other held keys until it is 50 ms old. With
 // its context's limit lowered by two, the synth gives up the two voices it listed first: the list left is the old one
 // less its first two.
 #include "oscairn/graph.h"
@@ -34,11 +34,11 @@ int main(int argc,char** argv){try{
     auto block=[&](std::span<const Event> events={}){forbidAllocation=true;const bool ok=g.process(out,frames,nullptr,events.data(),uint32_t(events.size()));forbidAllocation=false;check(ok,"rendered without allocating");};
     auto send=[&](const Event& e){block({&e,1});};
     auto wait=[&](int blocks){for(int i=0;i<blocks;++i)block();};
-    struct Entry{uint8_t tier;float level;};
+    struct Entry{uint8_t tier;float level;bool struck;};
     auto list=[&]{
         const oscairn_voice_budget_importance_t* lists=nullptr;const uint32_t n=synth.importanceReport(lists);
         check(n==1,"one context listed: "+std::to_string(n));
-        std::vector<Entry> v;for(uint32_t i=0;i<lists[0].count;++i)v.push_back({lists[0].least[i].tier,lists[0].least[i].level_db});
+        std::vector<Entry> v;for(uint32_t i=0;i<lists[0].count;++i)v.push_back({lists[0].least[i].tier,lists[0].least[i].level_db,(lists[0].least[i].flags&OSCAIRN_VOICE_BUDGET_STRUCK)!=0});
         return std::pair{uint32_t(lists[0].voices),v};};
     // No reserve, so held voices are listed too; no limit yet.
     std::array<oscairn_voice_budget_context_t,1> limits{{{OSCAIRN_VOICE_BUDGET_SELECTED,0,0,0,0}}};
@@ -50,7 +50,7 @@ int main(int argc,char** argv){try{
     {
         const auto [voices,v]=list();
         check(voices==6 && v.size()==6,"six voices listed: "+std::to_string(voices)+", "+std::to_string(v.size()));
-        check(v.back().tier==3,"the key just struck ranks above every other: tier "+std::to_string(v.back().tier));
+        check(v.back().tier==2 && v.back().struck,"the key just struck ranks above every other held key: tier "+std::to_string(v.back().tier));
     }
     send(Event::note(false,72,0));wait(60); // the soft key let go (pedaled now); 80 ms on, none is just struck
     const auto [voices,before]=list();

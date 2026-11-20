@@ -1,7 +1,7 @@
 # RFC 0046: Voice importance across parts
 
-Status: proposed, 2026-11-17, from the owner's request of that day. Design only: nothing here is
-built. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
+Status: accepted by the owner, 2026-11-17 ([his answers](#the-owners-answers)); steps 1 to 3 built
+([as built](#as-built-steps-3-to-5)), 4 to 7 to come. Builds on the voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), sound
 contexts and shared instances ([RFC 0005](0005-sound-contexts.md),
 [RFC 0021](0021-sounds-performances-and-library.md)) and the load guard, lanes and placement of
 [RFC 0045](0045-audio-scheduling-on-small-devices.md) (its no-glitch guard, steps 12a to 12o).
@@ -26,10 +26,12 @@ Checked when built and tested; the sections below say how.
       `voice-importance-workers` (the list's order, a held key above louder pedaled ones, a key just
       struck above both, and a context lowered by two giving up the two it listed first). The
       host's check that the plugin kept to it is step 3's
-- [ ] 3. The host's decision in `budget.rs`: one importance order for reported voices and host
+- [x] 3. The host's decision in `budget.rs`: one importance order for reported voices and host
       notes; the lane, total, loss and deadline rules take the least important voices from the
-      resources each rule constrains; per-context limits from the decision; engine-core-diff and
-      engine-run-diff vectors recorded again ([the decision](#c-the-hosts-decision))
+      resources each rule constrains; per-context limits from the decision; draft 2's entries carry
+      their unit's weight; the engine-core-diff, engine-run-diff and engine-audio-diff vectors
+      recorded again ([the decision](#c-the-hosts-decision), [as built](#as-built-steps-3-to-5));
+      tested by `engine-core-importance` (the scenario modeled in every placement)
 - [ ] 4. Thread-bound or device-bound told apart from the worker's wake and run times
       ([which limit](#which-limit-is-binding))
 - [ ] 5. Tests: the owner's scenario in every placement mode and in process; a plugin without
@@ -176,11 +178,12 @@ enum { OSCAIRN_VOICE_BUDGET_LEAST = 16 };
 
 typedef struct oscairn_voice_budget_least
 {
-    uint8_t  tier;     // 0 released or inaudible, 1 held by a pedal, 2 key held, 3 just struck
-    uint8_t  flags;    // 0 (reserved)
+    uint8_t  tier;     // 0 released or inaudible, 1 held by a pedal, 2 key held
+    uint8_t  flags;    // OSCAIRN_VOICE_BUDGET_STRUCK: struck under 50 ms ago
     uint16_t age_ms;   // since note-on, saturating at 65,535
     float    level_db; // the voice's gain now at the instance's output, dBFS: envelope, velocity,
                        // volume expression and the sound's own output level; -120 for silence
+    float    weight;   // its cost against the context's other voices (layers, oscillators); 0: 1
 } oscairn_voice_budget_least_t;
 
 typedef struct oscairn_voice_budget_importance
@@ -188,6 +191,7 @@ typedef struct oscairn_voice_budget_importance
     uint32_t context; // a sound context's ID, or OSCAIRN_VOICE_BUDGET_SELECTED
     uint16_t voices;  // its voices sounding now, those already fading out not counted
     uint16_t count;   // entries in least, at most OSCAIRN_VOICE_BUDGET_LEAST
+    float    weight;  // the sum of its sounding voices' weights; 0: voices
     oscairn_voice_budget_least_t least[OSCAIRN_VOICE_BUDGET_LEAST]; // ascending importance
 } oscairn_voice_budget_importance_t;
 
@@ -195,8 +199,25 @@ typedef struct oscairn_voice_budget_importance
 uint32_t (CLAP_ABI* importance)(const clap_plugin_t* plugin, oscairn_voice_budget_importance_t* out, uint32_t capacity);
 ```
 
-A context's entry is 136 bytes; 16 contexts are 2,176 bytes in the shared block beside the
-10,240 the note report already takes. Voices a context may never give up (rule 1 of the
+A context's entry is 204 bytes; 16 contexts are 3,264 bytes in the shared block beside the
+10,240 the note report already takes.
+
+**A listed voice is the engine's unit of giving up**: the same thing its voice limit and
+`active_voices` count, since the host lowers that limit by the entries it takes. The Sampler's unit
+is a note (one slot starting up to 16 layers), the VA's and FM's a voice; never a layer of a note
+the engine gives up whole. Units differ in cost (a 16-layer piano note and a one-layer one), so
+each entry carries a **weight**: its cost against the context's other units, in whatever measure
+the engine has (the layers or oscillators it runs; 0 counts as 1), and each context the sum of its
+sounding units' weights. The host still measures one cost per voice for the instance (its time
+above rest over `active_voices`, which no engine can estimate for the core it runs on); a weight of
+1 then costs that times the instance's voices over their total weight, and an entry its weight
+times that. An engine whose units cost alike leaves the weights at 1.
+
+**The level is the cheap one, the same in every engine**: `level_db` is 20 log10 of the product of
+the voice's envelope level, its velocity gain, its volume expression and the sound's own output
+level, 0 dB being its sample or oscillator at nominal full scale; no pass over its samples (a
+measured output level would cost one pass per voice per block). The host adds the part's gain.
+The tier, the struck flag and the age are carried apart from it. Voices a context may never give up (rule 1 of the
 extension: a held mono or legato voice, held voices within the reserve) are not listed.
 
 **Why 16 and not one number.** A limit applies a block after it is sent, and a fade takes one or
@@ -224,8 +245,10 @@ three parts, compared in order, which the host packs into one float:
 1. **Tier.** 0: released (key up, no pedal holding it), or inaudible (its level at the plugin's
    output below -60 dBFS: in a stage mix it is not heard; judged there, not after the part's gain,
    so the plugin's own order and the host's agree); 1: held only by the sustain or sostenuto
-   pedal; 2: key held; 3: just struck (younger than 50 ms, whatever its state: an attack is quiet
-   at first and must not be judged by its level). A held voice of a mono or legato line and held
+   pedal; 2: key held. A voice **just struck** (younger than 50 ms) is never judged inaudible (an
+   attack is quiet at first) and goes after every other voice of its tier and part priority: a
+   flag within its tier, not a tier above the held keys, so a held key always outranks a note
+   struck and let go (the owner's first answer). A held voice of a mono or legato line and held
    voices within the part's reserve are not candidates at all.
 2. **Part priority**, the player's: the existing 0-10 `priority` on the part's input, lower giving
    way first (`input.priority` in the Performance document, read at
@@ -236,7 +259,9 @@ three parts, compared in order, which the host packs into one float:
    in the mix, less a decibel per second of age up to ten (a 10-second-old note counts 10 dB
    quieter than a fresh one of its level).
 
-Packed: `S = 20,000 × tier + 1,000 × priority + clamp(100 + m, 0, 999)`, lower going first.
+Packed (budget.rs `key`): `S = 100,000 × tier + 2,000 × priority + 1,000 × struck + clamp(100 + m,
+0, 999)`, lower going first; a part's highest and lowest held keys (the bass and the melody of a
+chord) add 30,000, last within the held tier.
 
 **Who applies the part's gain.** The engine knows its voice's level including the sound's own
 output level; it cannot know the mixer. The host knows the gain from the instrument's output to
@@ -523,15 +548,79 @@ an effect changes the level a lot (a compressor), accepted; one cost per voice p
 misprices voices of very different patches in one shared instance; a third-party plugin
 reporting a flattering list costs only its own sound, and the check makes it visible.
 
-## Open questions
+## The owner's answers
 
-1. Should a key held always outrank a pedaled note, even one far louder? (yes/no; proposed yes,
-   with the -60 dBFS floor taking inaudible held notes first.)
-2. Is the existing part **Priority** (0-10) the "protect this part" control, or should the Part
-   page get a separate **Protect** switch? (priority/switch; proposed priority.)
-3. Is 50 ms the right protection for a just-struck note? (yes/a number.)
-4. When the lead's own worker is over its time, may it take one block more latency (RFC 0045's
-   extra block, twice the time) before it sheds its own voices? (yes/no.)
+The owner, 2026-11-17, to the four questions this RFC asked, and his rule over all of it:
+
+1. A key held always outranks a pedaled note, however much louder: **yes** (the -60 dBFS floor
+   still takes inaudible held notes first).
+2. The existing part **Priority** (0-10) is the "protect this part" control: **priority**, no new
+   switch.
+3. 50 ms protects a just-struck note: **yes**.
+4. The lead may take an extra block of latency before shedding its own voices: **no**.
+
+His rule, one in every placement mode: a less important voice is taken only where taking it frees
+time the important voice actually lacks. (a) Voices in the same thread as the lane that is short
+always qualify; (b) voices in other threads qualify only when core time as a whole ran out, and then
+only as many as free what is missing; (c) never a voice whose removal frees nothing that is short.
+A part's last voice is protected. His scenario: 30 pedaled piano notes and an expensive lead under
+overload: the oldest and quietest piano notes go, as many as needed, the lead survives, no part
+silent.
+
+## As built (steps 3 to 5)
+
+The rule's three cases, in core/engine/rust/src/budget.rs:
+
+- **(a) The lane that is short gives up its own thread's voices**: admission (`admit`), a lane over
+  its limit two blocks running (`measured`) and a lane losing blocks (`lost`) choose with
+  `Some(lane)`: the least important voice rendered on that thread, a listed one (its context's
+  next, `listed_key`) or a host note (`note_key`), on one key (`choose_on`). In a pool process or
+  a shared instance that is the neighbors' pedaled tails before the lead's voices; in a worker or a
+  chain of its own, the lead's own released and oldest voices.
+- **(b) Other threads only when core time ran out, as many as free what is missing**: `device`
+  fires on the lanes' total past `budget × cores`; it takes the least important voices anywhere
+  until their costs (`victim_cost`: an entry's weight at the instance's measured cost) cover the
+  excess. The deadline rule takes from any lane only with the device short, else from the lane
+  furthest over and those feeding it (`deadline`).
+- **(c) Never a voice that frees nothing short**: a lane rule never looks past its lane; and the
+  merge stops at a context whose 16 listed voices are spent while more sound unlisted (`unlisted`
+  in `choose_on`): those may be less important than anything else, so nothing above its last
+  listed one goes until its next report lists them.
+
+What it took besides the order:
+
+- **The report reached the core empty** in every graph: `Plugins::importance` (core/engine/rust/
+  src/lib.rs) read `lists` as an argument before the call that set it. The modeled test drives the
+  core directly and the step-2 tests ask the host, so neither saw it; step 5's scenario through
+  real workers found it. The call now comes first.
+- **A listing plugin's limit leaves room for the note just admitted** (the step-3 fault: with the
+  piano and the lead in one pool worker the lane over its time took 1 piano and 1 lead voice, not
+  about 16 piano). The caps were set to the voices reported less those taken, so the lead's second
+  key arrived over its cap and the lead gave up its own held key. A listing plugin's instance limit
+  is never cut below what it sounds and its notes; its context's cap counts the voices admitted
+  since its report (`Heard::admitted`), and admission makes room for its new note at one voice's
+  cost.
+- **A lane is judged again only once the voices taken have left its time** (`Lane::settle`, three
+  blocks): a listing plugin drops them at its next block and its report at once, while the lane's
+  time, the median of five blocks, follows in three. Without it the rule took again on the stale
+  median (25 piano voices for an excess of 15).
+
+A listing plugin's context keeps to the cap the budget set on it (`context_cap`), in place of the
+proportional split. `importance_mismatch` counts a context found over its cap two reports on. The vectors of engine-core-diff,
+engine-run-diff and engine-audio-diff were recorded again from the Rust core
+([developer guide](../developer-guide.md#the-engine-cores-vectors)): the first two because the
+victims change on purpose, the third only for the two counters a node's activity gained (its
+samples replay unchanged against the old vectors with the activity's digest cut to its old size).
+
+Tests: `engine-core-importance` models the scenario in every placement: pool with both in one
+worker, 16 piano voices for an excess of 15, the lead none; apart with the device short, 13 piano,
+the lead none; apart with the lead's own lane over, the lead's 3 released, the piano none; one
+shared instance, 10 (its one cost per voice prices the piano against the lead); in process, 16; a
+piano without the report, 24, the lead none; 2,000 blocks with a new note every 25, no flapping and
+no mismatch.
+
+Cost: the helper's report for 128 voices (list and write) takes 1.1 µs a block on the Mac (5.5 µs
+before: a log10 in every comparison, now one per voice); the A53's is step 7's to measure.
 
 ## Ruled out
 

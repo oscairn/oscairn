@@ -4,7 +4,7 @@
 //! lanes. Everything is sized when the plan is built: a block allocates nothing.
 
 use crate::bindings::oscairn_voice_budget_importance_t as Listed;
-use crate::budget::{Activity, Budget, Entry};
+use crate::budget::{self, Activity, Budget, Entry, Heard};
 use crate::event::*;
 use crate::route::{self, Context, Zones, UNTAGGED};
 use crate::{Route, Routes, Shared};
@@ -140,6 +140,8 @@ pub struct Rendered<'a> {
     pub notes: &'a [VoiceNote],
     pub sent: &'a [Event],
     pub importance: &'a [Listed],
+    /// The engine's sound ID of each of the step's contexts, by index (an importance report names its lists by them).
+    pub contexts: &'a [u32],
 }
 
 pub struct Notes {
@@ -180,7 +182,7 @@ impl Notes {
     /// a MIDI-dialect plugin's notes too, which a note-off ends.
     pub fn new(mut steps: Vec<Step>, lanes: usize) -> Notes {
         let mut entries: Vec<Entry> = Vec::new();
-        for step in &mut steps {
+        for (index, step) in steps.iter_mut().enumerate() {
             let Some(activity) = step.activity else { continue };
             for source in &step.sources {
                 let zone = source.zones.first();
@@ -189,6 +191,8 @@ impl Notes {
                 let rest = !entries.iter().any(|e| std::ptr::eq(&*e.cost, &*activity));
                 entries.push(Entry {
                     route: source.route,
+                    step: index,
+                    channel: source.channel,
                     cost: activity,
                     group,
                     rest,
@@ -202,6 +206,7 @@ impl Notes {
                     calm: 0,
                     probes: 0,
                     cost_at: 0.0,
+                    heard: None,
                 });
                 step.budgeted = true;
             }
@@ -214,8 +219,10 @@ impl Notes {
             }
         }
         let n = steps.len();
+        let mut budget = Budget::new(entries, lanes);
+        budget.gains = vec![1.0; n];
         Notes {
-            budget: Budget::new(entries, lanes),
+            budget,
             steps,
             timing: Timing::default(),
             budgeting: false,
@@ -279,7 +286,10 @@ impl Notes {
         heard: Option<&mut [i16]>,
         mut overflow: bool,
     ) -> (usize, bool) {
-        let Notes { steps, budget, .. } = self;
+        let Notes { steps, budget, timing, .. } = self;
+        if frames != 0 && timing.period > 0.0 {
+            budget.frame_us = timing.period / frames as f32;
+        }
         let Some(step) = steps.get(s) else { return (0, overflow) };
         let mut m = Merged { out, heard, n: 0, channel: -1 };
         keys.sort_unstable_by_key(|k| (k.time, k.after_notes, k.order));
@@ -406,6 +416,7 @@ impl Notes {
                                 rs[source.route].set_loudness(n.note_id, n.channel, n.key, n.loudness, source.channel);
                             }
                         }
+                        hear(budget, s, step, r);
                     }
                 }
             }
@@ -426,6 +437,15 @@ impl Notes {
         }
     }
 
+    /// Whether the budget runs this block.
+    pub fn budgeting(&self) -> bool {
+        self.budgeting
+    }
+    /// How many sound contexts step `s` plays (a shared instance's parts).
+    pub fn contexts(&self, s: usize) -> usize {
+        self.steps.get(s).map_or(0, |x| x.contexts.len())
+    }
+
     /// See notes_voice_limit (engine_core.h): the instance's limit and each sound context's, a context's the
     /// voices of its admitted notes and its share of the instance's room (or of its excess, over it), 0 for a
     /// context holding none (no limit of its own).
@@ -438,12 +458,44 @@ impl Notes {
             (notes as f32 * scale).ceil()
         };
         let all = admitted(None);
-        let limit = self.budget.voice_limit(rs, step.lane, a, voices, all);
+        let mut limit = self.budget.voice_limit(rs, step.lane, a, voices, all);
+        // An instance one part plays alone that lists its voices: the cap the budget set on its part, on the instance.
+        if let Some(cap) = step.contexts.is_empty().then(|| self.budget.step_cap(s)).flatten().filter(|&c| c != 0) {
+            limit = if limit == 0 { cap } else { limit.min(cap) };
+        }
         for (out, c) in contexts.iter_mut().zip(&step.contexts) {
+            // A context listing its voices keeps to the cap the budget set on it, by importance (RFC 0046); one that does
+            // not, its share of the instance's limit by its notes.
+            if let Some(cap) = self.budget.context_cap(s, c.channel) {
+                *out = cap;
+                continue;
+            }
             let own = admitted(Some(c.channel));
             *out = if limit == 0 || own == 0.0 { 0 } else { 1f32.max(own + ((limit as f32 - all) * own / all).floor()) as u32 };
         }
         limit
+    }
+
+    /// For the deadline: the lane furthest over its time this block (its time against its limit), and every lane
+    /// whose audio reaches it, whose voices free its time too (RFC 0046: only where taking them frees what is short).
+    fn mark_slowest(&mut self) {
+        self.budget.marked.fill(false);
+        let lanes = &self.budget.lanes;
+        let over = |l: &crate::budget::Lane| if l.limit > 0.0 && l.limit.is_finite() { l.took / l.limit } else { 0.0 };
+        let Some(slowest) = (0..lanes.len()).max_by(|&a, &b| over(&lanes[a]).total_cmp(&over(&lanes[b]))) else { return };
+        self.reach.fill(0.0);
+        for i in (0..self.steps.len()).rev() {
+            let Some(step) = self.steps.get(i) else { continue };
+            let reaches = step.lane == slowest || step.next.iter().any(|&(n, _)| self.reach.get(n).is_some_and(|&r| r > 0.0));
+            if reaches {
+                if let Some(r) = self.reach.get_mut(i) {
+                    *r = 1.0;
+                }
+                if let Some(m) = self.budget.marked.get_mut(step.lane) {
+                    *m = true;
+                }
+            }
+        }
     }
 
     /// A lost block on step `s`: its lane is marked, and every lane before it on the way, by the largest
@@ -497,6 +549,7 @@ impl Notes {
         if slack.is_finite() || self.lost_now {
             self.slack = (self.slack << 1 | u8::from(self.lost_now || slack <= self.timing.low_slack)) & 0xf;
             if self.slack.count_ones() >= 2 && self.slack & 1 != 0 {
+                self.mark_slowest();
                 self.budget.deadline(rs);
             }
         }
@@ -513,5 +566,57 @@ impl Notes {
                 a.lane_took.set(lane.took);
             }
         }
+    }
+}
+
+/// Step `s`'s importance report (oscairn.voice-budget draft 2) onto the budget's entries: each list on the first entry of
+/// the context it names (an instance one part plays alone: every list, merged, on its first entry), each voice by its
+/// tier and audibility before the part's gain; and the check that a context kept to the cap the budget set on it, two
+/// reports on (`importance_mismatch`).
+fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
+    let Some(a) = step.activity.as_deref() else { return };
+    // A weight of 1 costs the instance's voices over their weights in its voices (one cost per voice measured for all).
+    let weight = |w: f32, none: f32| if w.is_finite() && w > 0.0 { w.min(1e6) } else { none };
+    let (voices, weights) = r.importance.iter().fold((0f32, 0f32), |(v, w), l| (v + f32::from(l.voices), w + weight(l.weight, f32::from(l.voices))));
+    let unit = if weights > 0.0 { voices / weights } else { 1.0 };
+    let mut seen = 0u32; // the channels (bit 16: none) whose first entry took its lists
+    for e in budget.entries.iter_mut().filter(|e| e.step == s) {
+        let (channel, bit) = (e.channel, 1u32 << (e.channel.clamp(-1, 15) + 1));
+        let first = step.contexts.is_empty() && seen == 0 || !step.contexts.is_empty() && seen & bit == 0;
+        seen |= if step.contexts.is_empty() { 1 } else { bit };
+        let mine = |l: &&Listed| step.contexts.is_empty() || step.contexts.iter().zip(r.contexts).any(|(c, &id)| c.channel == channel && id == l.context);
+        let mut lists = r.importance.iter().filter(mine).peekable();
+        if !first || lists.peek().is_none() {
+            e.heard = None;
+            continue;
+        }
+        let mut h = Heard { unit, ..Heard::default() };
+        for l in lists {
+            h.voices += u32::from(l.voices);
+            for v in l.least.iter().take(usize::from(l.count).min(budget::LEAST)) {
+                let struck = if v.flags & 1 != 0 { budget::STRUCK } else { 0 }; // OSCAIRN_VOICE_BUDGET_STRUCK
+                let level = if v.level_db.is_finite() { v.level_db.clamp(-120.0, 24.0) } else { -120.0 };
+                let x = (v.tier.min(budget::KEY_HELD) | struck, budget::audibility(level, f32::from(v.age_ms)), weight(v.weight, 1.0));
+                // Kept ascending: the least important LEAST of every list.
+                // In the plugin's order: the tier, then one just struck after the others, then audibility.
+                let rank = |t: u8| (t & !budget::STRUCK) << 1 | u8::from(t & budget::STRUCK != 0);
+                let at = h.least[..h.count].partition_point(|y| rank(y.0) < rank(x.0) || rank(y.0) == rank(x.0) && y.1 <= x.1);
+                if at < budget::LEAST {
+                    h.count = (h.count + 1).min(budget::LEAST);
+                    h.least.copy_within(at..h.count - 1, at + 1);
+                    h.least[at] = x;
+                }
+            }
+        }
+        if let Some(was) = e.heard {
+            (h.checked, h.check_in) = (was.checked, was.check_in.saturating_sub(1));
+            if h.checked != 0 && h.check_in == 0 {
+                if e.cap != 0 && h.voices > e.cap {
+                    a.importance_mismatch.fetch_add(1, Relaxed);
+                }
+                h.checked = 0;
+            }
+        }
+        e.heard = Some(h);
     }
 }

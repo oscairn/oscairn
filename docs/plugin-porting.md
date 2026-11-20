@@ -215,7 +215,7 @@ are missed (a worker's allowance, the callback's time in the engine's process; R
 guard), budget or none, and the lanes together no more than the budget (with none, 80% of a
 block) on each audio core, so notes give way before a block is ever missed and a worker is not
 restarted for load (RFC 0018). A lane's notes give way only for its own limit; past the lanes'
-total, they give way on the lane where a note costs most. Notes fade (a few milliseconds); a note
+total, the least important voices of any lane give way (RFC 0046), as many as the excess. Notes fade (a few milliseconds); a note
 is choked at once only when its lane's block would otherwise be missed. For a
 plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
 first ([Behaving well](#behaving-well)); after blocks are lost it also holds the notes it gives such a
@@ -250,28 +250,84 @@ instance each get their own limit (their notes' voices and a share of the room);
 worker alike. The calls and the order to give voices up in:
 [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md).
 
-**Draft 2: how much each voice matters (RFC 0046).** So the host can weigh a pedaled piano note
-against a lead synth's held one, an instrument offering `oscairn.voice-budget/draft-2` reports after
-each block, through `importance`, each sound context's 16 least important voices, least important
-first, and how many voices it sounds. Every plugin uses one scale: a voice's tier (0 released or
-under -60 dBFS at the plugin's output, 1 held only by a pedal, 2 key held, 3 struck under 50 ms
-ago), then its level at the plugin's output in dBFS (the sound's own output level included) less a
-decibel per second of age, at most ten. Voices the order never gives up (a held mono key, held
-voices within the part's reserve) are not listed. When the host lowers a context's limit by n, the
-plugin must give up, at its next block, exactly the n voices it listed first. The SDK does it all:
+#### Publishing the importance list (draft 2, RFC 0046)
 
-- On `oscairn::contexts::Engine` (sound-contexts-plugin.hpp): add `Engine::importance` as the table's
-  fifth entry and return the table for both `OSCAIRN_EXT_VOICE_BUDGET` (draft 2) and
-  `OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1`. The helper tracks each voice's age (from `steady_time`) and
-  whether a pedal holds it; make `loudness(const Voice&)` the voice's gain at the plugin's output,
-  the sound's output level included.
-- With your own voice pool (voice-budget-plugin.hpp): fill each `Candidate`'s `pedaled` (key up, a
-  pedal holding it) and `ageMs` (since its note-on, from your frame count) beside `held` and
-  `loudness`; keep an `oscairn::voices::Importance<>` and from `importance` call
-  `list(count, get, limits)` over the same candidates `victim()` sees, then `write(out, capacity)`.
-  `victim()` and the list share one order, so a context lowered by n gives up the n it listed.
-  Keep each context within its own limit (`limits.of(context, selected).limit`) as well as the
-  instance's.
+So the host can weigh a pedaled piano note against a lead synth's held one in another part, an
+instrument offering `oscairn.voice-budget/draft-2` reports after each block, through `importance`,
+each sound context's 16 least important voices, least important first, and how many it sounds. The
+host then takes the least important voices among those whose removal frees the time that is short
+(the lane's own thread when one thread is over, any part's when the device's cores are), by
+lowering a context's limit: never by fading your notes. Everything below is the SDK's; the Basic
+Synth and the test fixture (`core/engine/tests/voice_fixture.cpp`) are the references.
+
+**What a listed voice is.** Your unit of giving up: the same thing your voice limit and
+`active_voices` count, since the host lowers that limit by the entries it takes. A sampler that
+gives a note up whole (one slot starting all its layers) lists notes; a VA or FM engine whose voice
+is one note's oscillators lists voices. Never list a part of a unit you cannot give up alone. Units
+of unequal cost carry a `weight` (`Candidate::weight`): the unit's cost against your others, in any
+measure you have (the layers or oscillators it runs: a 16-layer piano note 16, a one-layer note 1).
+The host measures one cost per voice for the instance and shares it by weight; leave 1 where units
+cost alike.
+
+**What a voice's level is.** `Candidate::loudness`, linear: envelope level × velocity gain × volume
+expression × the sound's own output level, 1 being the voice's sample or oscillator at nominal full
+scale. Work it out from what the voice already holds; no pass over its samples. The host adds the
+part's gain in the mix; the tier (released, pedaled, key held), the just-struck flag (under 50 ms)
+and the age come from `held`, `pedaled` and `ageMs`, never from the level.
+
+**The calls, with sound-contexts-plugin.hpp** (`oscairn::contexts::Engine`):
+
+```cpp
+static const oscairn_plugin_voice_budget_t budget{Engine::honorsVolume, Engine::setLimits,
+    Engine::activeVoices, Engine::voiceNotes, Engine::importance};
+// in get_extension: the same table for both drafts
+if(!std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET) || !std::strcmp(id, OSCAIRN_EXT_VOICE_BUDGET_DRAFT_1)) return &budget;
+// in your Engine (Derived), beside render:
+double loudness(const Voice& v) const; // as above
+float weight(const Voice& v) const;    // its layers or oscillators; default 1
+```
+
+The helper records on each voice whether a pedal holds it and when it started (from
+`steady_time`), keeps every context within its limit at the start of each block (the quietest by
+the order fading over the choke time), and builds the list after each block.
+
+**The calls, with your own voice pool** (voice-budget-plugin.hpp):
+
+```cpp
+oscairn::voices::Limits limits;          // set_limits: limits.set(limit, contexts, count)
+oscairn::voices::Importance<> report;    // audio thread
+oscairn::voices::Candidate candidate(const Unit& u) const
+{   // context, selected, held (key down), ending (already fading), mono, loudness, age (larger newer),
+    // pedaled (key up, a pedal holding it), ageMs (since its note-on, from your frame count), weight
+    return {u.context, u.selected, u.keyDown, u.fading, false, u.envelope * u.velocity * u.volume * outputLevel,
+            u.started, !u.keyDown && u.pedal, double(frames - u.startFrame) * 1000.0 / rate, float(u.layers)};
+}
+// At the start of each block: each context, then the instance, within its limit.
+for each context c: while(sounding(c) > limits.of(c, selected).limit) fadeOut(oscairn::voices::victim(n, get, limits, oscairn::voices::none, c));
+while(limits.limit && sounding() > limits.limit) fadeOut(oscairn::voices::victim(n, get, limits, oscairn::voices::none));
+// importance, called by the host right after each process(), on the audio thread:
+report.list(n, get, limits);             // get(i): &candidates[i], or nullptr for a free slot
+return report.write(out, capacity);
+```
+
+`get` must describe the same units `victim()` sees, so build the candidates once per call from your
+units' state at the end of the block. `list()` is one pass, no sort: each unit's key is worked out
+once and kept only if it beats the 16th kept (1.1 µs a block for 128 units on the Mac).
+
+**"Must drop exactly what it listed."** When the host lowers a context's limit from the voices you
+reported (plus the notes it has sent you since) by n, at the start of your next block you give up
+the n units you listed first, by fading them out (2 to 5 ms), and no others. `victim()` with no
+voice incoming picks them in that order, since the list and `victim()` share one key; an engine
+that keeps its own order instead must keep that order identical to its list. A unit already fading
+is not counted in `voices` and is not listed. Never give up a unit the order protects (a held mono
+key, held keys within the part's reserve): they are never listed, so the host never asks.
+
+**The mismatch counter.** Two reports after it lowered a context's limit, the host checks that the
+context sounds no more voices than that limit. A miss counts once in the node's
+`importance_mismatch`, shown as `mismatch` in `engine.timing`'s worker `guard`; Oscairn's tests fail
+on any, and on the keyboard it should stay 0. The host goes on regardless: a plugin that does not
+keep to its own list only costs its own sound, the host fading its notes from outside as the
+backstop once it stays over its limit.
 
 ### Instant Performance changes
 

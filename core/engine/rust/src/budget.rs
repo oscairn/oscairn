@@ -1,7 +1,13 @@
 //! The voice budget (RFC 0018 option B, per lane as RFC 0045; once VoiceBudget in core/engine/src/NoteRoute.h) and the node
 //! costs it reads (Graph::Activity). Counts the C++ scans for are popcounts of the routes' maps.
+//!
+//! Which voices go is one order over every part (RFC 0046): a voice's tier (released, held by a pedal, key held, just
+//! struck), its part's priority, then how much it is heard in the mix. And one rule says where they may come from: only
+//! where taking them frees the time that is short. A lane over its own time (its thread's block) gives up voices on that
+//! lane alone: its own engine's, and in a pool or a shared instance its neighbors'. Voices on other lanes go only when the
+//! device is out of core time as a whole (the lanes' total), and then only as many as the excess.
 
-use crate::route::FADE_STEPS;
+use crate::route::{NoteRoute, FADE_STEPS};
 use crate::{Route, Routes, Shared};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
@@ -48,6 +54,7 @@ pub struct Activity {
     pub lost: AtomicU64,
     pub faded_for_deadline: AtomicU64,
     pub unfit: AtomicU64,
+    pub importance_mismatch: AtomicU64,
 }
 
 /// The blocks a plugin that gives up its own voices may sound more than its limit before its notes
@@ -97,6 +104,8 @@ impl Activity {
 /// wait for the next); cost_at, its cost per voice when the ceiling was set.
 pub struct Entry {
     pub route: Route,
+    pub step: usize,
+    pub channel: i16,
     pub cost: Shared<Activity>,
     pub group: usize,
     pub rest: bool,
@@ -110,6 +119,65 @@ pub struct Entry {
     pub calm: u32,
     pub probes: u8,
     pub cost_at: f32,
+    /// Its sound context's importance report (draft 2), on the entry its context's report is kept on; None for none.
+    pub heard: Option<Heard>,
+}
+
+/// A sound context's least important voices as its plugin last listed them (oscairn.voice-budget draft 2), each by
+/// its tier, audibility before the part's gain and priority, and weight (its cost against the instance's other voices);
+/// unit, the cost of a weight of 1 in the instance's voices (their count over their weights); how many were given up
+/// since (by lowering its context's limit, which the plugin keeps to by the same order) and their weights, and the limit
+/// that set, to check it was kept.
+#[derive(Clone, Copy, Default)]
+pub struct Heard {
+    pub voices: u32,
+    pub count: usize,
+    pub least: [(u8, f32, f32); LEAST],
+    pub unit: f32,
+    pub taken: usize,
+    pub freed: f32,
+    pub admitted: u32, // voices of notes admitted since its report, which the plugin now sounds too
+    pub checked: u32, // the cap to check at the report after next (0 none), and the blocks until then
+    pub check_in: u8,
+}
+pub const LEAST: usize = 16;
+
+/// RFC 0046's scale (voice-budget-plugin.hpp's): a voice struck this recently is not judged by its level; below
+/// INAUDIBLE_DB a voice counts as released; each second of age counts as AGED_DB_PER_S quieter, up to AGED_MOST_S.
+pub const STRUCK_MS: f32 = 50.0;
+pub const INAUDIBLE_DB: f32 = -60.0;
+const AGED_DB_PER_S: f32 = 1.0;
+const AGED_MOST_S: f32 = 10.0;
+/// A note whose plugin reports no level is heard at the middle of the range, by its velocity.
+const UNKNOWN_DB: f32 = -24.0;
+/// One key orders every voice: the tier above all, a part's highest and lowest held keys (the bass and the melody of a
+/// chord) last within the held tier, then the part's priority, then a note just struck above the others of its tier and
+/// priority, then audibility.
+const TIER: f32 = 100_000.0;
+const OUTER: f32 = 30_000.0;
+const PRIORITY: f32 = 2000.0;
+const STRUCK_ABOVE: f32 = 1000.0;
+pub const RELEASED: u8 = 0;
+pub const PEDALED: u8 = 1;
+pub const KEY_HELD: u8 = 2;
+/// A tier's flag: struck under STRUCK_MS ago.
+pub const STRUCK: u8 = 0x80;
+
+/// A voice's place in the order: lower goes first.
+pub fn key(tier: u8, priority: u8, audibility: f32) -> f32 {
+    let struck = if tier & STRUCK != 0 { STRUCK_ABOVE } else { 0.0 };
+    TIER * f32::from((tier & !STRUCK).min(KEY_HELD)) + PRIORITY * f32::from(priority.min(10)) + struck + (100.0 + audibility).clamp(0.0, 999.0)
+}
+/// Its level in the mix less its age's share.
+pub fn audibility(level_db: f32, age_ms: f32) -> f32 {
+    level_db - (age_ms.max(0.0) / 1000.0 * AGED_DB_PER_S).min(AGED_MOST_S * AGED_DB_PER_S)
+}
+pub fn db(gain: f32) -> f32 {
+    if gain > 1e-6 {
+        (20.0 * gain.log10()).clamp(-120.0, 24.0)
+    } else {
+        -120.0
+    }
 }
 
 impl Entry {
@@ -128,6 +196,11 @@ impl Entry {
         }
         (self.ceiling, self.cost_at, self.calm) = (limit, self.cost.note_now(), 0);
         self.cap = (limit - 1).max(1);
+    }
+    /// The voices its context sounds, with those of notes admitted since its report, less those given up since; 0
+    /// without a report.
+    fn listed_left(&self) -> u32 {
+        self.heard.map_or(0, |h| (h.voices + h.admitted).saturating_sub(h.taken as u32))
     }
 }
 
@@ -158,6 +231,7 @@ pub struct Lane {
     pub hold: u8,   // blocks before the next note goes for its losses
     pub since: u32, // blocks since its last loss, plus one; 0 for none yet
     pub worst: f32, // its recent worst block's time: the largest, falling 1 % a block (12n)
+    pub settle: u8, // blocks before it is judged against its limit again, after listed voices on it went
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -167,7 +241,9 @@ enum Counting {
     Ending, // and those choked, until they end
 }
 
-type Victim = Option<(usize, usize)>; // entry, slot
+type Victim = Option<(usize, usize)>; // entry, slot; LISTED for the next voice its context's report lists
+/// A Victim's slot for a voice of a reporting context: its context gives up the voice it listed next.
+pub const LISTED: usize = usize::MAX;
 
 pub struct Budget {
     pub entries: Vec<Entry>,
@@ -175,13 +251,25 @@ pub struct Budget {
     pub lanes: Vec<Lane>,
     device_over: bool,
     device_hold: u32,
+    /// Each step's largest gain to the graph's outputs at the live gains (a part's level and the mix), linear.
+    pub gains: Vec<f32>,
+    /// Microseconds a frame, for the notes' ages.
+    pub frame_us: f32,
+    /// The lanes a deadline's give-up may take from (MARKED): the one furthest over its time and those feeding it.
+    pub marked: Vec<bool>,
 }
+/// choose's `lane` for the lanes `marked` names.
+pub const MARKED: usize = usize::MAX;
 
 const SOFT: f32 = 0.85; // stealing starts here, so fades have time
 /// After notes fade for the total, the blocks it waits before judging it again.
 const DEVICE_HOLD_BLOCKS: u32 = 8;
 /// After a voice goes for a lane's lost blocks, the blocks before the next: its fade (5 ms).
 const LOSS_HOLD_BLOCKS: u8 = 2;
+/// After listed voices go on a lane, the blocks before it is judged against its limit again: the plugin gives them up at
+/// its next block (a block on where they went at a later step's note-on) and its report drops them at once, while the
+/// lane's time, the median of five blocks, follows in three.
+const SETTLE_BLOCKS: u8 = 3;
 /// A loss this close after the lane's last (2 s) counts as losses going on, however far apart: a chain near the
 /// callback's deadline loses blocks one at a time.
 const LOSS_MEMORY_BLOCKS: u32 = 750;
@@ -197,7 +285,18 @@ const COST_DRIFT: f32 = 0.25;
 
 impl Budget {
     pub fn new(entries: Vec<Entry>, lanes: usize) -> Budget {
-        Budget { groups: vec![NO_GROUP; entries.len()], entries, lanes: vec![Lane::default(); lanes.max(1)], device_over: false, device_hold: 0 }
+        let steps = entries.iter().map(|e| e.step + 1).max().unwrap_or(0);
+        let lanes = lanes.max(1);
+        Budget {
+            groups: vec![NO_GROUP; entries.len()],
+            entries,
+            lanes: vec![Lane::default(); lanes],
+            device_over: false,
+            device_hold: 0,
+            gains: vec![1.0; steps],
+            frame_us: 0.0,
+            marked: vec![false; lanes],
+        }
     }
     fn lane(&self, lane: usize) -> Lane {
         self.lanes.get(lane).copied().unwrap_or_default()
@@ -217,6 +316,10 @@ impl Budget {
                 Counting::Fading => r.used.and_not(r.stolen).count() + r.stolen.and(r.fading).iter().filter(|&i| r.slot(i).faded < FADE_STEPS).count() as u32,
             };
             total += n as f32 * e.cost.note_now();
+            if counting != Counting::Ending {
+                // Listed voices given up: no longer counted, their fades a block away.
+                total -= e.heard.map_or(0.0, |h| h.freed * h.unit) * self.voice_cost(e);
+            }
         }
         total
     }
@@ -247,25 +350,50 @@ impl Budget {
     /// within its limit too, whose limit `give_up` then lowers; and none from a part down to its last voice (the
     /// floor the loss and deadline rules hold: its limit at 1, or one note left).
     fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool) -> Victim {
-        self.choose_on(rs, lane, reserved, costed, owned, false, None)
+        self.choose_on(rs, lane, reserved, costed, owned, false, None, owned)
     }
     /// choose for the soft limit's fades (a note-on, a block past the limit, the lanes' total): a lane's estimate may
     /// pass its soft limit whatever the part does (the time of the plugins beside it in the lane, not its notes), and
     /// giving every note up would not bring it under, so a connection's last note is never chosen, as the loss rules
     /// leave it (only `choke`, for a block that would be missed, takes it).
     fn choose_soft(&mut self, rs: &Routes, lane: Option<usize>) -> Victim {
-        self.choose_on(rs, lane, false, true, false, true, None)
+        self.choose_on(rs, lane, false, true, false, true, None, true)
     }
-    /// choose, from `node`'s connections alone when given; `last`: each connection keeps its last note.
+    /// choose, from `node`'s connections alone when given; `last`: each connection keeps its last note. The least
+    /// important voice by RFC 0046's key: of the notes the host holds, and with `listed`, of the voices a plugin listed
+    /// (draft 2) while it keeps to its limits; a plugin giving up its own voices without listing them is left to its
+    /// limit unless `owned`. Ties: a plugin that honors the volume expression, then the oldest note.
     #[allow(clippy::too_many_arguments)]
-    fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, last: bool, node: Option<*const Activity>) -> Victim {
+    fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, last: bool, node: Option<*const Activity>, listed: bool) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
-        let (mut best_rank, mut best_priority, mut best_honors, mut best_velocity, mut best_id) = (0, 0u8, false, 0f32, 0i32);
+        let (mut best_key, mut best_honors, mut best_id) = (0f32, false, 0i32);
+        // A context whose whole list went with voices left unlisted: those are at least as important as its last listed,
+        // and may be less than any other; nothing above that goes until its next report lists them.
+        let mut unlisted = f32::INFINITY;
         for (k, e) in self.entries.iter().enumerate() {
             let a = &e.cost;
-            let within = a.voice_limit.load(Relaxed) != 0 && a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
-            if lane.is_some_and(|l| l != e.lane) || node.is_some_and(|n| !std::ptr::eq(&**a, n)) || (costed && a.note_now() <= 0.0) || (!owned && a.own_voices.load(Relaxed) && within) {
+            let elsewhere = lane.is_some_and(|l| if l == MARKED { !self.marked.get(e.lane).copied().unwrap_or(false) } else { l != e.lane });
+            if elsewhere || node.is_some_and(|n| !std::ptr::eq(&**a, n)) || (costed && a.note_now() <= 0.0) {
+                continue;
+            }
+            let keeping = a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
+            if e.heard.is_some() && a.own_voices.load(Relaxed) && keeping {
+                // Its context's next listed voice, never its last.
+                if let Some(h) = e.heard.filter(|h| listed && h.count == LEAST && h.taken >= h.count && e.listed_left() > 1) {
+                    let (tier, heard, _) = h.least[LEAST - 1];
+                    unlisted = unlisted.min(key(tier, e.priority, heard + self.gain_db(e)));
+                }
+                if let Some(x) = listed.then(|| self.listed_key(e, true)).flatten() {
+                    if best.is_none() || x < best_key {
+                        best = Some((k, LISTED));
+                        (best_key, best_honors, best_id) = (x, true, i32::MIN);
+                    }
+                }
+                continue;
+            }
+            let within = a.voice_limit.load(Relaxed) != 0 && keeping;
+            if !owned && a.own_voices.load(Relaxed) && within {
                 continue;
             }
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
@@ -274,38 +402,88 @@ impl Budget {
             }
             let honors = a.honors_volume.load(Relaxed);
             for i in r.used.and_not(r.stolen).iter() {
-                let s = r.slot(i);
-                let rank = if r.held.has(i) {
-                    if !reserved && g.held <= u32::from(e.reserve) {
-                        continue;
-                    }
-                    if g.held > 2 && (s.key == g.low || s.key == g.high) {
-                        2
-                    } else {
-                        1
-                    }
-                } else {
-                    0
-                };
-                let better = best.is_none()
-                    || if rank != best_rank {
-                        rank < best_rank
-                    } else if e.priority != best_priority {
-                        e.priority < best_priority
-                    } else if rank != 0 && honors != best_honors {
-                        honors
-                    } else if s.velocity != best_velocity {
-                        s.velocity < best_velocity
-                    } else {
-                        s.id < best_id
-                    };
+                if r.held.has(i) && !reserved && g.held <= u32::from(e.reserve) {
+                    continue;
+                }
+                let (x, id) = (self.note_key(r, e, &g, i), r.slot(i).id);
+                let better = best.is_none() || if x != best_key { x < best_key } else if honors != best_honors { honors } else { id < best_id };
                 if better {
                     best = Some((k, i));
-                    (best_rank, best_priority, best_honors, best_velocity, best_id) = (rank, e.priority, honors, s.velocity, s.id);
+                    (best_key, best_honors, best_id) = (x, honors, id);
                 }
             }
         }
-        best
+        best.filter(|_| best_key <= unlisted)
+    }
+    /// Entry `e`'s part gain to the outputs, in dB.
+    fn gain_db(&self, e: &Entry) -> f32 {
+        db(self.gains.get(e.step).copied().unwrap_or(1.0))
+    }
+    /// A note the host holds, by RFC 0046's key: its tier from what the host knows (the key, the pedal, its age), its level
+    /// the plugin's report where it gives one (else the middle of the range, by its velocity), in the mix.
+    fn note_key(&self, r: &NoteRoute, e: &Entry, g: &Group, i: usize) -> f32 {
+        let s = r.slot(i);
+        let age = r.age(i) as f32 * self.frame_us / 1000.0;
+        let reported = e.cost.own_voices.load(Relaxed);
+        let level = if reported { db(s.velocity) } else { UNKNOWN_DB + db(s.velocity) };
+        let held = r.held.has(i);
+        let struck = self.frame_us > 0.0 && age < STRUCK_MS;
+        let tier = if !struck && reported && level < INAUDIBLE_DB {
+            RELEASED
+        } else if held {
+            KEY_HELD
+        } else if r.pedaled(i) {
+            PEDALED
+        } else {
+            RELEASED
+        };
+        let outer = tier == KEY_HELD && g.held > 2 && (s.key == g.low || s.key == g.high);
+        let tier = if struck { tier | STRUCK } else { tier };
+        key(tier, e.priority, audibility(level + self.gain_db(e), age)) + if outer { OUTER } else { 0.0 }
+    }
+    /// The next voice entry `e`'s context listed, by the key: None when none is left to give (or, with `last`, its last).
+    fn listed_key(&self, e: &Entry, last: bool) -> Option<f32> {
+        let h = e.heard?;
+        if h.taken >= h.count || (last && e.listed_left() <= 1) {
+            return None;
+        }
+        let (tier, heard, _) = h.least[h.taken];
+        Some(key(tier, e.priority, heard + self.gain_db(e)))
+    }
+    /// A voice's cost on entry `e`'s node.
+    fn voice_cost(&self, e: &Entry) -> f32 {
+        let scale = e.cost.per_note_scale.get();
+        e.cost.note_now() / if scale > 0.0 { scale } else { 1.0 }
+    }
+    /// What giving victim `v` up frees, by the estimates.
+    fn victim_cost(&self, (k, i): (usize, usize)) -> f32 {
+        self.entries.get(k).map_or(0.0, |e| match e.heard.filter(|h| i == LISTED && h.taken < h.count) {
+            Some(h) => h.least[h.taken].2 * h.unit * self.voice_cost(e),
+            None if i == LISTED => self.voice_cost(e),
+            None => e.cost.note_now(),
+        })
+    }
+    /// A listed voice of entry `k`'s context goes: its context's cap a voice lower, which the plugin keeps to by giving
+    /// up the voice it listed next; for lost blocks or the deadline (`trouble`) as trouble, so its way back probes.
+    fn take_listed(&mut self, k: usize, trouble: bool) {
+        let Some(e) = self.entries.get_mut(k) else { return };
+        if let Some(l) = self.lanes.get_mut(e.lane) {
+            l.settle = SETTLE_BLOCKS;
+        }
+        let before = e.listed_left();
+        let Some(h) = e.heard.as_mut() else { return };
+        h.freed += h.least.get(h.taken).map_or(1.0, |x| x.2);
+        h.taken += 1;
+        if trouble {
+            e.trouble(before);
+        } else {
+            let cap = before.saturating_sub(1).max(1);
+            e.cap = if e.cap == 0 { cap } else { e.cap.min(cap) };
+            e.calm = 0;
+        }
+        if let Some(h) = e.heard.as_mut() {
+            (h.checked, h.check_in) = (e.cap, 2);
+        }
     }
     /// The plugins at rest and each part's reserved held notes alone.
     fn reserves(&mut self, rs: &Routes, lane: usize) -> f32 {
@@ -358,10 +536,13 @@ impl Budget {
         }
     }
     /// Gives the victim up, fading from `at`; its node's activity, for the count.
-    fn steal(&self, rs: &mut Routes, (k, i): (usize, usize), at: u32) -> Option<&Activity> {
-        let e = self.entries.get(k)?;
-        rs[e.route].steal(i, at);
-        Some(&e.cost)
+    fn steal(&mut self, rs: &mut Routes, (k, i): (usize, usize), at: u32) -> Option<&Activity> {
+        if i == LISTED {
+            self.take_listed(k, false);
+        } else {
+            rs[self.entries.get(k)?.route].steal(i, at);
+        }
+        Some(&self.entries.get(k)?.cost)
     }
     /// Before a note into route `me` at `time` passes on: under its lane's soft limit, notes fade to
     /// make room for it; only what would miss the lane's block is choked.
@@ -374,8 +555,21 @@ impl Budget {
         if limit <= 0.0 {
             return;
         }
-        // A plugin that gives up its own voices keeps the new note within its limit itself.
-        let cost = if mine.cost.own_voices.load(Relaxed) { 0.0 } else { mine.cost.note_now() };
+        // A plugin that gives up its own voices keeps the new note within its limit itself; one listing its voices is
+        // limited only where the budget took them (its limit is at least what it sounds), so its new note is made room for:
+        // one of its voices (what its limit counts: a sampler's note, a synth's voice) at the instance's cost per voice.
+        let (step, channel) = (mine.step, mine.channel);
+        let listing = self.entries.iter().position(|e| e.step == step && e.channel == channel && e.heard.is_some());
+        let cost = match listing {
+            Some(_) => self.voice_cost(mine),
+            None if mine.cost.own_voices.load(Relaxed) => 0.0,
+            None => mine.cost.note_now(),
+        };
+        // That voice counts with its context's listed ones until the next report has it, so a cap set meanwhile (below
+        // too) leaves it the note just admitted.
+        if let Some(h) = listing.and_then(|l| self.entries.get_mut(l)).and_then(|e| e.heard.as_mut()) {
+            h.admitted += 1;
+        }
         while self.estimate(rs, lane, Counting::Kept) + cost > SOFT * limit {
             let Some(v) = self.choose_soft(rs, Some(lane)) else { break };
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == me) { time } else { 0 };
@@ -402,7 +596,7 @@ impl Budget {
             return;
         }
         while self.node_notes(rs, k) >= cap {
-            let Some(v) = self.choose_on(rs, None, false, false, false, false, Some(node)) else { break };
+            let Some(v) = self.choose_on(rs, None, false, false, false, false, Some(node), false) else { break };
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == self.entries[k].route) { time } else { 0 };
             if let Some(a) = self.steal(rs, v, at) {
                 a.stolen.fetch_add(1, Relaxed);
@@ -417,6 +611,10 @@ impl Budget {
         // Twice running: one block over may be the thread held up from outside, or a burst admitted.
         let again = std::mem::replace(&mut l.over, total > l.limit);
         let limit = l.limit;
+        if l.settle != 0 {
+            l.settle -= 1;
+            return;
+        }
         if limit <= 0.0 || total <= limit || !again {
             return;
         }
@@ -435,8 +633,8 @@ impl Budget {
         self.choke(rs, lane, scale, 0.0, None, 0, false);
     }
     /// After a block whose lanes together took more than `total` microseconds, in it and the one
-    /// before: notes fade, each from the lane where giving one up frees the most time, until the
-    /// excess (less the notes already fading) is covered.
+    /// before: the device is out of core time as a whole, so any lane's voice frees what is short. The least
+    /// important voices go, wherever they are, until the excess (less the notes already fading) is covered.
     pub fn device(&mut self, rs: &mut Routes, total: f32) {
         let took: f32 = self.lanes.iter().map(|l| l.took).sum();
         let again = std::mem::replace(&mut self.device_over, took > total);
@@ -453,19 +651,11 @@ impl Budget {
             // given up already, until they end
         }
         while excess > 0.0 {
-            let mut best: Victim = None;
-            let mut most = 0.0;
-            for i in 0..self.lanes.len() {
-                if let Some(v) = self.choose_soft(rs, Some(i)) {
-                    let each = self.entries.get(v.0).map_or(0.0, |e| e.cost.note_now());
-                    if each > most {
-                        (best, most) = (Some(v), each);
-                    }
-                }
-            }
-            let Some(a) = best.and_then(|v| self.steal(rs, v, 0)) else { return };
+            let Some(v) = self.choose_soft(rs, None) else { return };
+            let each = self.victim_cost(v);
+            let Some(a) = self.steal(rs, v, 0) else { return };
             a.stolen_for_device.fetch_add(1, Relaxed);
-            excess -= most;
+            excess -= each;
             self.device_hold = DEVICE_HOLD_BLOCKS;
         }
     }
@@ -473,6 +663,10 @@ impl Budget {
     /// (it chooses the voice: their levels, layers and streams are its to know); else the note fades.
     /// Its node's activity, for the count.
     fn give_up(&mut self, rs: &mut Routes, (k, i): (usize, usize)) -> Option<&Activity> {
+        if i == LISTED {
+            self.take_listed(k, true);
+            return Some(&self.entries.get(k)?.cost);
+        }
         let own = self.entries.get(k)?.cost.own_voices.load(Relaxed);
         let held = if own { 0 } else { self.node_notes(rs, k) };
         let e = self.entries.get_mut(k)?;
@@ -516,10 +710,12 @@ impl Budget {
             }
         }
     }
-    /// The engine's own time is running out (the callback's slack, or blocks lost): a voice goes across every
-    /// lane, quietest released first.
+    /// The engine's own time is running out (the callback's slack, or blocks lost): the least important voice goes
+    /// where it frees what is short: with the device out of core time, from any lane; else from the lanes `marked` (the
+    /// one furthest over its time and those feeding it).
     pub fn deadline(&mut self, rs: &mut Routes) {
-        if let Some(a) = self.choose(rs, None, false, false, true).and_then(|v| self.give_up(rs, v)) {
+        let lane = if self.device_over { None } else { Some(MARKED) };
+        if let Some(a) = self.choose(rs, lane, false, false, true).and_then(|v| self.give_up(rs, v)) {
             a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
@@ -544,7 +740,11 @@ impl Budget {
                 continue;
             }
             let l = self.lanes.get(e.lane).copied().unwrap_or_default();
-            let limit = if e.cost.own_voices.load(Relaxed) { e.cost.voice_limit.load(Relaxed) } else { held };
+            let limit = match e.heard {
+                Some(h) => h.voices,
+                None if e.cost.own_voices.load(Relaxed) => e.cost.voice_limit.load(Relaxed),
+                None => held,
+            };
             if slack_low || l.losses != 0 || (l.limit > 0.0 && l.took > SOFT * l.limit) {
                 e.calm = 0;
                 continue;
@@ -571,18 +771,30 @@ impl Budget {
     /// admitted and the room the soft limit leaves at its cost per voice (the estimate counts the admitted
     /// already), never fewer than those admitted unless the lane is measured over its limit, and then at
     /// most a quarter fewer than it sounds a block; 0 for no limit (no budget, or no cost measured).
+    /// A node whose contexts list their voices (draft 2) is never cut by its lane's room: the budget takes its voices by
+    /// lowering each context's own limit (`context_cap`), so its limit is at least the voices it sounds.
     pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
-        let cap = self.entries.iter().filter(|e| e.cap != 0 && std::ptr::eq(&*e.cost, node)).map(|e| e.cap).min().unwrap_or(u32::MAX);
-        self.limit_for(rs, lane, node, voices, admitted).map_or(0, |l| l.min(cap))
+        let mine = || self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node));
+        let listed = mine().any(|e| e.heard.is_some());
+        let cap = if listed { u32::MAX } else { mine().filter(|e| e.cap != 0).map(|e| e.cap).min().unwrap_or(u32::MAX) };
+        self.limit_for(rs, lane, node, voices, if listed { admitted.max(voices as f32) } else { admitted }, listed).map_or(0, |l| l.min(cap))
     }
-    fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> Option<u32> {
+    /// The cap on the context a step's `channel` plays, where its plugin lists its voices (0: none).
+    pub fn context_cap(&self, step: usize, channel: i16) -> Option<u32> {
+        self.entries.iter().find(|e| e.step == step && e.channel == channel && e.heard.is_some()).map(|e| e.cap)
+    }
+    /// The cap on a step that one part plays alone, where its plugin lists its voices.
+    pub fn step_cap(&self, step: usize) -> Option<u32> {
+        self.entries.iter().find(|e| e.step == step && e.heard.is_some()).map(|e| e.cap)
+    }
+    fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32, listed: bool) -> Option<u32> {
         let each = node.note_now() / node.per_note_scale.get();
         let l = self.lane(lane);
         if l.limit <= 0.0 || each <= 0.0 {
             return None;
         }
         let room = ((SOFT * l.limit - self.estimate(rs, lane, Counting::Kept)) / each).floor();
-        let least = if l.over { (voices as f32 * 0.75).floor() } else { admitted };
+        let least = if l.over && !listed { (voices as f32 * 0.75).floor() } else { admitted };
         // Held below 2^16 voices, as a cost near 0 makes the room huge.
         Some(65536f32.min(1f32.max(least).max(admitted + room)) as u32)
     }
@@ -602,5 +814,20 @@ mod tests {
         cheap.per_note.set(1e-7);
         cheap.per_note_scale.set(1.0);
         assert_eq!(budget.voice_limit(&crate::Routes(()), 0, &cheap, 10, 10.0), 65536);
+    }
+
+    /// RFC 0046's key: the tier above all (a quiet held key above a loud pedaled note), then the part's priority, then
+    /// how much it is heard; a note just struck above the others of its tier and priority.
+    #[test]
+    fn importance_key_orders_tier_priority_audibility() {
+        assert!(key(PEDALED, 10, 0.0) < key(KEY_HELD, 0, -50.0));
+        assert!(key(KEY_HELD, 5, 0.0) < key(KEY_HELD | STRUCK, 5, -90.0));
+        assert!(key(KEY_HELD | STRUCK, 4, 0.0) < key(KEY_HELD, 5, -90.0));
+        assert!(key(RELEASED | STRUCK, 10, 0.0) < key(PEDALED, 0, -90.0));
+        assert!(key(KEY_HELD, 10, 0.0) + OUTER > key(KEY_HELD | STRUCK, 10, 0.0));
+        assert!(key(PEDALED, 4, 0.0) < key(PEDALED, 5, -80.0));
+        assert!(key(RELEASED, 5, -30.0) < key(RELEASED, 5, -20.0));
+        assert!(audibility(-20.0, 5000.0) < audibility(-20.0, 1000.0));
+        assert_eq!(audibility(-20.0, 60_000.0), audibility(-20.0, 10_000.0));
     }
 }

@@ -1270,6 +1270,7 @@ const _: () = {
 };
 pub type oscairn_voice_budget_note_t = oscairn_voice_budget_note;
 pub const OSCAIRN_VOICE_BUDGET_LEAST: _bindgen_ty_25 = 16;
+pub const OSCAIRN_VOICE_BUDGET_STRUCK: _bindgen_ty_25 = 1;
 pub type _bindgen_ty_25 = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]

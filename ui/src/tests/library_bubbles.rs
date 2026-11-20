@@ -90,6 +90,27 @@ fn bubbles_show_many_entries_to_a_line() {
     assert!(s.e.calls.is_empty());
 }
 
+// A section heading in bubbles is a compact label (caption sized, no touch-high line), so a section's tags sit further up
+// the first view than rows of touch-tall headings (the C2 fix: the tags were folding early); the heading is still shown
+// (and still folds, the fold test of its own), List view does not change. At 1280x720 with nothing folded the number of
+// tag bubbles visible rises.
+#[test]
+fn a_heading_is_compact_and_more_tags_are_above_the_fold() {
+    let mut s = tagged("c2-heading");
+    let ui = s.ui();
+    let lib = ui.global::<LibraryState>();
+    assert!(!lib.get_bubbles());
+    let list_tags = tags_in_view(&ui);
+    press_view_button(&mut s); // bubbles
+    assert!(lib.get_side_rows().iter().any(|r| r.kind == 4), "a heading is still in the first view");
+    let bubble_tags = tags_in_view(&ui);
+    eprintln!("C2 at 1280x720: {list_tags} tag bubbles as lines, {bubble_tags} as bubbles");
+    assert!(bubble_tags > list_tags, "more tags above the fold as bubbles: {list_tags} then {bubble_tags}");
+    // A touch-tall heading row left only a tag line or two above the fold; the compact heading has to fit more of the tags.
+    assert!(bubble_tags >= 5, "the compact heading fits {bubble_tags} tag bubbles, where a touch-tall heading row left 3");
+    lib_png(&s, "c2-bubbles-compact-heading");
+}
+
 // The cursor among bubbles: right and left along a line, down and up to the nearest across on the next line, right past the last of a
 // line to the list, up from the first line to the tabs; the dial goes one bubble at a time over headings; a press chooses as in the
 // list (a library alone, tags together).

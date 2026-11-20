@@ -190,18 +190,19 @@ namespace oscairn::voices
         struct List { oscairn_voice_budget_importance_t out{}; std::array<Ranked, OSCAIRN_VOICE_BUDGET_LEAST> least{}; };
         std::array<List, Contexts> lists{};
         uint32_t count = 0;
+        bool truncated = false; // the last list() or write() left a context out: past Contexts, or past the host's capacity
 
         template<class Get>
         void list(size_t voices, Get&& get, const Limits& limits)
         {
-            count = 0;
+            count = 0; truncated = false;
             HeldCount held(voices, get);
             for(size_t i = 0; i < voices; ++i)
             {
                 const Candidate* c = get(i);
                 if(!c || c->ending) continue;
                 List* l = find(c->context);
-                if(!l) continue;
+                if(!l) { truncated = true; continue; }
                 ++l->out.voices;
                 l->out.weight += c->weight > 0 ? c->weight : 1.f;
                 if(kept(*c, limits, held, none)) continue;
@@ -220,7 +221,7 @@ namespace oscairn::voices
                 for(uint32_t i = 0; i < n; ++i)
                 {
                     const auto& r = l.least[i];
-                    l.out.least[i] = {r.tier, uint8_t(r.struck ? OSCAIRN_VOICE_BUDGET_STRUCK : 0), uint16_t(std::clamp(r.c.ageMs, 0.0, 65535.0)), r.db, r.c.weight > 0 ? r.c.weight : 1.f};
+                    l.out.least[i] = {r.tier, uint8_t(r.struck ? OSCAIRN_VOICE_BUDGET_STRUCK : 0), uint16_t(r.c.ageMs >= 0 ? std::min(r.c.ageMs, 65535.0) : 0.0) /* NaN or unknown: 0 */, r.db, r.c.weight > 0 ? r.c.weight : 1.f};
                 }
             }
         }
@@ -250,10 +251,11 @@ namespace oscairn::voices
             }
             return best ? int(best->index) : victim(voices, get, limits, none, only);
         }
-        uint32_t write(oscairn_voice_budget_importance_t* out, uint32_t capacity) const noexcept
+        uint32_t write(oscairn_voice_budget_importance_t* out, uint32_t capacity) noexcept
         {
             const uint32_t n = out ? std::min(count, capacity) : 0;
             for(uint32_t i = 0; i < n; ++i) out[i] = lists[i].out;
+            truncated = truncated || n < count;
             return n;
         }
 

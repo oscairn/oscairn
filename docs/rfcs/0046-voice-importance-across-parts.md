@@ -33,7 +33,7 @@ Checked when built and tested; the sections below say how.
       recorded again ([the decision](#c-the-hosts-decision), [as built](#as-built-steps-3-to-5));
       tested by `engine-core-importance` (the scenario modeled in every placement)
 - [x] 4. Thread-bound or device-bound told apart from the worker's wake wait, run and CPU time
-      ([which limit](#which-limit-is-binding)); `heldOff` and `mismatch` in `engine.timing`
+      ([which limit](#which-limit-is-binding)); `heldOff` and `importanceMismatch` in `engine.timing`
 - [x] 5. Tests: the owner's scenario in every placement mode and in process, through real workers
       (`voice-importance-scenario`); a plugin without the report; no flapping over 2,000 blocks;
       idle cost ([as built](#as-built-steps-3-to-5))
@@ -183,13 +183,13 @@ typedef struct oscairn_voice_budget_least
     uint8_t  flags;    // OSCAIRN_VOICE_BUDGET_STRUCK: struck under 50 ms ago
     uint16_t age_ms;   // since note-on, saturating at 65,535
     float    level_db; // the voice's gain now at the instance's output, dBFS: envelope, velocity,
-                       // volume expression and the sound's own output level; -120 for silence
+                       // volume expression and the sound's own output level; -120 for silence; at most +24
     float    weight;   // its cost against the context's other voices (layers, oscillators); 0: 1
 } oscairn_voice_budget_least_t;
 
 typedef struct oscairn_voice_budget_importance
 {
-    uint32_t context; // a sound context's ID, or OSCAIRN_VOICE_BUDGET_SELECTED
+    uint32_t context; // a sound context's ID; without sound contexts one list, under any ID (the SDK uses 0)
     uint16_t voices;  // its voices sounding now, those already fading out not counted
     uint16_t count;   // entries in least, at most OSCAIRN_VOICE_BUDGET_LEAST
     float    weight;  // the sum of its sounding voices' weights; 0: voices
@@ -353,7 +353,7 @@ each only while it still sounds in its slot (the same note-on serial, not fading
 rule 1 now), and works the order out only beyond them; a listed voice that ended or whose slot a
 new note took is skipped, not mis-dropped. The host checks it: on the next report the context's `voices` must be at or
 under the limit, and no listed survivor older than a block may score below the highest score the
-host chose to drop; a miss is counted (`importance_mismatch` in `engine.timing`, per node) and
+host chose to drop; a miss is counted (`importanceMismatch` in `engine.timing`, per node; `importance_mismatch` in the core) and
 fails the tests, and the host goes on (a lying engine costs only its own sound).
 
 #### Which limit is binding
@@ -640,7 +640,7 @@ What it took besides the order:
 
 A listing plugin's context keeps to the cap the budget set on it (`context_cap`), in place of the
 proportional split. `importance_mismatch` counts a context found over its cap two reports on, in
-`engine.timing` as `mismatch` (expected 0), beside `heldOff`. The vectors of engine-core-diff,
+`engine.timing` as `importanceMismatch` (expected 0), beside `heldOff`. The vectors of engine-core-diff,
 engine-run-diff and engine-audio-diff were recorded again from the Rust core
 ([developer guide](../developer-guide.md#the-engine-cores-vectors)): the first two because the
 victims change on purpose, the third only for the two counters a node's activity gained (its

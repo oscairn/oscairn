@@ -151,7 +151,8 @@ typedef struct oscairn_voice_budget_least
 // A context's importance report (draft 2).
 typedef struct oscairn_voice_budget_importance
 {
-    uint32_t context; // a sound context's ID, or OSCAIRN_VOICE_BUDGET_SELECTED for a plugin without contexts
+    uint32_t context; // a sound context's ID; a plugin without sound contexts lists one, under the ID it describes
+                      // its voices with (the SDK's examples use 0, its one sound, whose settings Limits::of(0, true) reads)
     uint16_t voices;  // its voices sounding, those fading out not counted
     uint16_t count;   // entries in least
     float    weight;  // the sum of its sounding voices' weights; 0: voices (each 1)

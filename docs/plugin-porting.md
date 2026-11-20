@@ -337,7 +337,7 @@ key, held keys within the part's reserve): they are never listed, so the host ne
 
 **The mismatch counter.** Two reports after it lowered a context's limit, the host checks that the
 context sounds no more voices than that limit. A miss counts once in the node's
-`importance_mismatch`, shown as `mismatch` in `engine.timing`'s worker `guard`; Oscairn's tests fail
+`importance_mismatch`, shown as `importanceMismatch` in `engine.timing`'s worker `guard`; Oscairn's tests fail
 on any, and on the keyboard it should stay 0. The host goes on regardless: a plugin that does not
 keep to its own list only costs its own sound, the host fading its notes from outside as the
 backstop once it stays over its limit.

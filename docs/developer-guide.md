@@ -150,8 +150,14 @@ files hold the outputs of the C++ reference the core was ported from and proven 
 deleted; each file's header names the reference's commit (`bd57eed7`), the seeds, the sizes and the
 floating-point conditions. That reference cannot be run again without checking out `271f6e9a`, the last commit with
 it and its record mode. `engine-core.vec` and `engine-run.vec` were since recorded from the Rust core at `022702d9`,
-whose change is the only one from the reference: a plugin on a lane a block late has its cost per note measured
-against the notes of the block it rendered, the block before.
+whose change was the first from the reference: a plugin on a lane a block late has its cost per note measured
+against the notes of the block it rendered, the block before. All three were recorded again at `c111f159`, for
+[RFC 0046](rfcs/0046-voice-importance-across-parts.md), accepted by the owner: the budget takes the least important
+voices among those that free the time that is short, by one importance order, in place of the lane where a voice
+frees the most time, and a listing plugin's caps count the notes admitted since its report (`engine-core.vec`,
+`engine-run.vec`); `engine-audio.vec` only because a node's activity gained two counters (`importance_mismatch`,
+`held_off`), which its digest includes: its samples replayed unchanged against the vectors before, with the
+activity's digest cut to its old size.
 
 The conditions record and replay share: the core is always built `cargo --release`; the tests and `vectors_math.c`
 are built `-ffp-contract=off`; and the test executables define `exp`, `log1p` and `pow` themselves

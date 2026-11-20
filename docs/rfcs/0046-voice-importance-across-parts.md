@@ -284,7 +284,10 @@ struck for 50 ms plus one block, protected a block longer, never less) is never 
 
 Packed (budget.rs `key`): `S = 100,000 × tier + 2,000 × priority + 1,000 × struck + clamp(100 + m,
 0, 999)`, lower going first; a part's highest and lowest held keys (the bass and the melody of a
-chord) add 30,000, last within the held tier.
+chord) add 30,000, last within the held tier. A voice ringing out of the last Performance (its
+connection draining, RFC 0021) takes 60,000 off (2026-11-20): below every live voice of its tier,
+above the tier under it. Voices ringing out beside the incoming sounds in an instance the new
+Performance took over are listed under the incoming node and keep their tier: not yet told apart.
 
 **Who applies the part's gain.** The engine knows its voice's level including the sound's own
 output level; it cannot know the mixer. The host knows the gain from the instrument's output to

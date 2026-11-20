@@ -1444,6 +1444,22 @@ rings on through the change; without the fix the master stays 12 dB high and the
 under a tenth. Here the tail fell 11 dB, not to silence as on the unit; what took it to silence
 there was not reproduced.
 
+Reviewed 2026-11-20. The fade waits until its 0 has played two blocks before the faded plugins go (a
+control-thread tick held past the fade's end cut them at the last tick's level), chokes retiring
+sounds only when the last change was itself the fade (a seamless change during the fade keeps its
+own tail), and is one at a time: a change while one fades rings out whole, the load guard shedding
+voices if the CPU runs out. `control-performance-switch` checks the ramp with the device's 20 ms
+tick and with a tick held up. The unit's evidence (2), a Sampler Performance to one on another
+instrument plugin with A's instances gone at once, is not a separate fault: a Sampler through a
+Delay with a pedaled chord, to a Basic Synth Performance, keeps A's instance ringing as without a
+change, a key only A plays sounds nothing after it, and A goes once the pedal lifts, with and
+without the converter's level-0 send. A send raised from 0 compiles back in without a click; to an
+empty bus that plays where the part does it shares the part's fader route again, so that fader is
+heard at `graph.commit` (which the app sends after each edit), not live: a route per set of live
+gains would fix it. Under overload (RFC 0046) a voice ringing out of the last Performance (a
+draining connection) ranks below every live voice of its tier and above the tier under it; voices
+ringing out beside the incoming sounds in an instance taken over are not yet told apart.
+
 **A library click** prepares the Performance first, as the Setlist does ahead
 (`performance.prepare`), and opens it (`library.load`) once that is done, both in the app's job off
 the interface thread; the engine answers the views between the two, and the open only publishes.

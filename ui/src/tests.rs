@@ -1303,3 +1303,41 @@ fn applying_a_theme_sets_every_property() {
     // Held per window: the other one still has what it had.
     assert_eq!(other.ui.global::<crate::Theme>().get_radius(), 6., "a theme applied to one window is not another's");
 }
+
+// A meter that changes every tick (the device sees the load about once a second) repaints only the
+// meter's own rows in the resource section, on the Library screen as on Home: one frame per change,
+// no pixel outside the section changes, and the section and the tempo beside it never move (the
+// figures are in fixed-width boxes, so a changing value does not lay the bar out again). Setting the
+// same figure again draws nothing. C4 of the library idle series (docs/rust-ui.md: a changing meter
+// must repaint only itself, and idle means nothing drawn).
+#[test]
+fn a_meter_update_stays_in_the_meter_area_while_the_values_change() {
+    for screen in [0, 13] {
+        let mut s = Screen::new();
+        settings(&s.ui, Show::Both, Show::Both);
+        meters(&s.ui, 1, 30);
+        s.ui.set_screen(screen);
+        s.ui.global::<Bar>().set_performance("Dusk Choir".into());
+        s.ui.global::<Bar>().set_tempo("120.0 BPM".into());
+        s.frame();
+        assert_eq!(s.frame(), None, "at rest screen {screen}");
+        let section = s.resources();
+        let mut seen = Vec::new();
+        for cpu in [1, 74, 75, 89, 90, 100, 42, 7] {
+            // A change of the value and of the level color (crossing 75% and 90%) both stay in the meter rows.
+            let before = s.pixels.clone();
+            meters(&s.ui, cpu, (cpu * 3) % 100);
+            let repainted = s.frame().expect("a change draws");
+            assert!(within(repainted, section), "screen {screen} cpu {cpu}: repainted {repainted:?}, the section is {section:?}");
+            // The region is the meter's own rows, not the whole section: it starts right of the labels' column
+            // (the labels never change), so a re-laid-out bar (a region the width of the section) fails here.
+            assert!(repainted.0 > section.0 && repainted.1 > 0 && repainted.3 < section.1 + section.3, "cpu {cpu}: repainted {repainted:?} is the whole section {section:?}");
+            assert_eq!(changed_outside(&before, &s.pixels, section), 0, "cpu {cpu}");
+            seen.push((s.ui.get_resources_x(), s.ui.get_resources_width(), s.ui.get_tempo_x()));
+            meters(&s.ui, cpu, (cpu * 3) % 100);
+            assert_eq!(s.frame(), None, "screen {screen} cpu {cpu} set again");
+        }
+        // A changing figure never moves the section or the tempo (fixed-width columns and digit cells).
+        assert!(seen.windows(2).all(|w| w[0] == w[1]), "screen {screen}: the section or tempo moved: {seen:?}");
+    }
+}

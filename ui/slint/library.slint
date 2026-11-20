@@ -8,11 +8,14 @@
 import { Theme, TabBar, TabLabel, Field, Cursor, FitText, Button, Section } from "theme.slint";
 import { Row, ScrollBar, SettingData, PartState } from "part.slint";
 
-// Where a sidebar line is in the view: its line (counted from the view's first), and for bubbles its place along it.
+// Where a sidebar line is in the view: its line (counted from the view's first), and for bubbles its place along it,
+// its top in the view and its height (a heading line is a compact label, a bubble line a touch target).
 export struct SideGeo {
     line: int,
     x: length,
     w: length,
+    y: length,
+    h: length,
 }
 
 export global LibraryState {
@@ -44,6 +47,8 @@ export global LibraryState {
     // Each line's place in the view, and the width the sidebar's entries have (set here, read by the lines' layout).
     in property <[SideGeo]> side-geo;
     in-out property <length> side-room: 280px;
+    // The height the sidebar has to show its lines (set here from the window; read by the entries' layout).
+    in-out property <length> side-height: 0px;
     // The list with the sidebar at its left (the kinds), else the list as the other screens have it.
     in property <bool> list-only;
     in property <[SettingData]> side-rows;
@@ -177,15 +182,15 @@ export component Library inherits Rectangle {
     property <length> side-height: max(0px, root.content-height - Theme.footer(LibraryState.compact) - Theme.gap);
     // Bubbles are as far apart as the dense gap (a joined theme has no gap between its lines, but pills are apart).
     property <length> step-gap: LibraryState.bubbles ? Theme.dense(Theme.gap, LibraryState.compact) : root.gap;
-    property <int> side-per-view: max(1, floor((root.side-height + root.step-gap) / (Theme.touch + root.step-gap)));
+    // The lines that fit are the Rust layout's (their heights vary: a heading is compact); it writes them to the state, read here.
+    property <int> side-per-view: LibraryState.side-per-view;
     // What the entries share across: the sidebar less its lane (kept in bubbles whether or not a bar shows, so that the lines
     // that wrap do not change with the bar) and the overlap the rows take.
     property <length> side-room: max(0px, root.side-width - (LibraryState.bubbles || root.side-long ? Theme.scroll-lane - Theme.scroll-overlap : 0px));
     changed side-room => { LibraryState.side-room = root.side-room; LibraryState.side-resized(); }
+    changed side-height => { LibraryState.side-height = root.side-height; LibraryState.side-resized(); }
     property <bool> side-long: LibraryState.side-total > root.side-per-view;
-    changed side-per-view => { LibraryState.side-per-view = root.side-per-view; LibraryState.side-resized(); }
     init => {
-        LibraryState.side-per-view = root.side-per-view;
         LibraryState.side-room = root.side-room;
     }
     out property <length> tabs-width: min(tabs.natural, root.width * 0.55);
@@ -334,9 +339,9 @@ export component Library inherits Rectangle {
     for row[i] in LibraryState.side-rows: Rectangle {
         property <SideGeo> geo: LibraryState.side-geo[i];
         x: Theme.margin + (LibraryState.bubbles ? self.geo.x : 0px);
-        y: root.content-y + (LibraryState.bubbles ? self.geo.line : i) * (Theme.touch + root.step-gap);
+        y: root.content-y + (LibraryState.bubbles ? self.geo.y : i * (Theme.touch + root.step-gap));
         width: LibraryState.bubbles ? self.geo.w : root.side-room;
-        height: Theme.touch;
+        height: LibraryState.bubbles ? self.geo.h : Theme.touch;
         if row.kind == 4: Heading {
             width: parent.width;
             height: parent.height;

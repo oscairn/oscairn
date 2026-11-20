@@ -35,7 +35,8 @@ impl Side {
     }
 }
 
-/// An entry with its place: the line it is on and, along the line, where it starts and how wide it is (logical pixels).
+/// An entry with its place: the line it is on and, along the line, where it starts and how wide it is, the line's top
+/// in the list and the line's height (logical pixels; a heading line is compact, a bubble line a touch target).
 #[derive(Clone)]
 pub(super) struct Cell {
     pub side: Side,
@@ -43,6 +44,8 @@ pub(super) struct Cell {
     pub line: usize,
     pub x: f32,
     pub w: f32,
+    pub top: f32,
+    pub h: f32,
 }
 
 /// How wide `text` is at `size`, estimated from the typeface's proportions (Inter): a narrow letter, a wide one, a capital, the rest.
@@ -97,28 +100,35 @@ impl Screen {
 
     /// What the layout needs of the window: the width the entries share, the padding, the gap between bubbles, the type and a
     /// touch target (the window's own numbers; the usual ones where there is no window).
-    fn side_metrics(&self) -> (f32, f32, f32, f32, f32, f32) {
-        let Some(ui) = self.ui.upgrade() else { return (280., 10., 4., 16., 13., 44.) };
+    fn side_metrics(&self) -> (f32, f32, f32, f32, f32, f32, f32) {
+        let Some(ui) = self.ui.upgrade() else { return (280., 10., 4., 16., 13., 4., 44.) };
         let t = ui.global::<crate::Theme>();
-        (ui.global::<LibraryState>().get_side_room(), t.get_pad(), t.get_gap(), t.get_body(), t.get_small(), t.get_touch())
+        (ui.global::<LibraryState>().get_side_room(), t.get_pad(), t.get_gap(), t.get_body(), t.get_small(), t.get_pad_tight(), t.get_touch())
     }
 
     /// The entries with their places: a line each, or as bubbles that wrap (a heading, and the line of "No tags", alone on theirs).
+    /// A heading's line is a compact label high, a bubble's line a touch target; both are placed top to bottom here, in the same
+    /// order as the window draws them.
     pub(super) fn side_cells(&self) -> Vec<Cell> {
         let entries = self.side_entries();
-        let (room, pad, gap, body, small, touch) = self.side_metrics();
+        let (room, pad, gap, body, small, pad_tight, touch) = self.side_metrics();
         if !self.bubbles {
-            return entries.into_iter().enumerate().map(|(i, (side, data))| Cell { side, data, line: i, x: 0., w: room }).collect();
+            return entries.into_iter().enumerate().map(|(i, (side, data))| Cell { side, data, line: i, x: 0., w: room, top: 0., h: touch }).collect();
         }
-        let (mut line, mut x, mut open) = (0, 0f32, false);
+        let step = self.ui.upgrade().map_or(gap, |ui| ui.global::<crate::Theme>().invoke_dense(gap, self.compact));
+        let head_h = small + 2. * pad_tight;
+        let (mut line, mut x, mut top, mut line_h, mut open) = (0, 0f32, 0f32, 0f32, false);
         let mut out = Vec::with_capacity(entries.len());
         for (side, data) in entries {
+            let h = if side.whole_line() { head_h } else { touch };
             if side.whole_line() {
                 if open {
+                    top += line_h + step;
                     line += 1;
                     open = false;
                 }
-                out.push(Cell { side, data, line, x: 0., w: room });
+                out.push(Cell { side, data, line, x: 0., w: room, top, h });
+                top += h + step;
                 line += 1;
                 x = 0.;
                 continue;
@@ -126,10 +136,14 @@ impl Screen {
             let dot = if data.tinted { small * 0.7 + gap } else { 0. };
             let w = (text_width(&data.label, body) + 2. * pad + dot).clamp(touch, room.max(touch));
             if open && x + w > room + 0.01 {
+                top += line_h + step;
                 line += 1;
                 x = 0.;
             }
-            out.push(Cell { side, data, line, x, w });
+            if !open {
+                line_h = h;
+            }
+            out.push(Cell { side, data, line, x, w, top, h });
             x += w + gap;
             open = true;
         }
@@ -146,7 +160,30 @@ impl Screen {
         lib.set_side_rows(ModelRc::from(self.side_rows.clone()));
         lib.set_side_geo(ModelRc::from(self.side_geo.clone()));
         let cells = if self.side_visible() { self.side_cells() } else { vec![] };
-        let (per, n) = (lib.get_side_per_view().max(1) as usize, cells.len());
+        // How many lines fit: the sidebar's lines vary (a heading is compact, a bubble a touch target), so the first view
+        // takes the lines it can show, newest from its top; the Rust layout is the source of the count (read back here).
+        let side = lib.get_side_height();
+        let per = if self.bubbles {
+            let (mut fit, mut last) = (0, None);
+            for c in &cells {
+                if last == Some(c.line) {
+                    continue;
+                }
+                if c.top + c.h > side + 0.01 {
+                    break;
+                }
+                fit += 1;
+                last = Some(c.line);
+            }
+            fit.max(1)
+        } else {
+            // List view: every line a touch target, one line an entry, as before.
+            let t = ui.global::<crate::Theme>();
+            let step = t.invoke_dense(t.invoke_gap_between(t.get_gap()), self.compact);
+            std::cmp::max(1, ((side + step) / (t.get_touch() + step)) as usize)
+        };
+        lib.set_side_per_view(per as i32);
+        let (per, n) = (per, cells.len());
         let lines = cells.last().map_or(0, |c| c.line + 1);
         let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);
         let last = lines.saturating_sub(1) / per * per;
@@ -160,7 +197,8 @@ impl Screen {
         let (focus, at) = (self.side_focus, at);
         let page: Vec<(usize, &Cell)> = cells.iter().enumerate().skip(self.side_page).take_while(|(_, c)| c.line < first + per).collect();
         let shown: Vec<SettingData> = page.iter().map(|(i, c)| SettingData { cursor: focus && at == Some(*i), ..c.data.clone() }).collect();
-        let geo: Vec<SideGeo> = page.iter().map(|(_, c)| SideGeo { line: (c.line - first) as i32, x: c.x, w: c.w }).collect();
+        let top0 = page.first().map_or(0., |(_, c)| c.top);
+        let geo: Vec<SideGeo> = page.iter().map(|(_, c)| SideGeo { line: (c.line - first) as i32, x: c.x, w: c.w, y: c.top - top0, h: c.h }).collect();
         crate::setlist::update(&self.side_rows, shown);
         if self.side_geo.iter().ne(geo.iter().cloned()) {
             self.side_geo.set_vec(geo);

@@ -898,6 +898,22 @@ int main(int argc, char** argv)
             check(t.ringOutRoutes() == 0, "older tail: the ring-out routes go once B's sound is discarded: " + std::to_string(t.ringOutRoutes()));
         }
 
+        // Graph::ringOut when one of the outgoing chain's plugins was taken over by the incoming
+        // Performance: the synth plays into a Delay that rings out and into another plugin taken over
+        // (not carried, added again under a new ID). The way into the Delay still rings out of the
+        // ring-out buffer (two channels), the other is left out and counted; before, one such way
+        // left none at all.
+        {
+            Graph g(48000, frames);
+            const auto synth = g.add(argv[1]), fx = g.add(argv[3]), taken = g.add(argv[3]);
+            g.connectAudio(synth, fx); g.connectAudio(fx, graphOutput); g.connectAudio(synth, taken); g.connectAudio(taken, graphOutput); g.commit();
+            Graph next(48000, frames);
+            next.carryOver(g, {fx});
+            const auto now = next.add(g.node(synth).host); next.add(g.node(taken).host);
+            const auto lost = next.ringOut(g, synth, now);
+            check(next.ringOutRoutes(now) == 2 && lost == 2, "ring out: a way into a plugin taken over is left out, the others ring: " + std::to_string(next.ringOutRoutes(now)) + " routes, " + std::to_string(lost) + " left out");
+        }
+
         // The owner's rule: at a Performance change, notes held by the keys or the pedal keep ringing,
         // never a cut, whatever the two Performances' chains after the instrument are. A note held by
         // the pedal through a change from A (the synth through an effect inserted after it, or sending
@@ -985,3 +1001,4 @@ int main(int argc, char** argv)
     std::printf("ok: Performance switches measured\n");
     return 0;
 }
+

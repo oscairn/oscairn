@@ -254,21 +254,23 @@ namespace oscairn
             if(const auto z=current.noteZones_.find(edge);z!=current.noteZones_.end())noteZones_[key]=z->second;
         }
     }
-    void Graph::ringOut(const Graph& current,NodeId from,NodeId node) {
-        const auto it=nodes_.find(node);if(it==nodes_.end() || !it->second.host->ringsOut())return;
-        const auto mains=it->second.host->mainAudioPorts(false);if(mains.empty())return;
-        std::vector<AudioConnection> routes;
+    size_t Graph::ringOut(const Graph& current,NodeId from,NodeId node) {
+        const auto it=nodes_.find(node);if(it==nodes_.end() || !it->second.host->ringsOut())return 0;
+        const auto mains=it->second.host->mainAudioPorts(false);if(mains.empty())return 0;
+        std::vector<AudioConnection> routes;size_t lost=0;
         for(auto r:current.audioRoutes_){
             if(r.from.node!=from || r.from.port!=mains.front() || r.from.channel>=2)continue;
-            const auto to=nodes_.find(r.to.node);
-            if(r.to.node!=graphOutput && (to==nodes_.end() || !to->second.retiring))return; // not all the outgoing chain: none
             for(auto& slot:r.live){r.gain*=current.liveGain(slot);slot=0;}
+            const auto to=nodes_.find(r.to.node);
+            // No longer the outgoing chain (taken over): left out, the others ring; one that carries nothing is no loss.
+            if(r.to.node!=graphOutput && (to==nodes_.end() || !to->second.retiring)){if(r.gain!=0)++lost;continue;}
             r.from={node,ringOutPort,r.from.channel};routes.push_back(r);
         }
         for(auto r:current.audioRoutes_) // the earlier tail, fading out through its own chain
             if(r.from.node==from && r.from.port==ringOutPort && r.from.channel<2 && (r.to.node==graphOutput || nodes_.contains(r.to.node)))
                 {r.from={node,ringOutPort,r.from.channel+2};routes.push_back(r);}
         connectAudioBatch(routes);
+        return lost;
     }
     void Graph::dropRingOut(NodeId node,bool older) { std::erase_if(audioRoutes_,[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort && (!older || r.from.channel>=2);}); }
     size_t Graph::ringOutRoutes(NodeId node) const { return size_t(std::count_if(audioRoutes_.begin(),audioRoutes_.end(),[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort;})); }

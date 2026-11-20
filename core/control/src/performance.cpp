@@ -1521,7 +1521,12 @@ void Session::open(Prepared& p,bool seamless) {
     // the incoming node, keeping their sound; a cut releases them.
     // Its outgoing sounds ring out through the outgoing chain, by the plugin's ring-out buffer.
     // Only one change's tail carries over: one still ringing out of it is cut at the cue (chokes).
-    if(seamless)for(const auto& b:p.beside){next->takeNotes(graph_,b->was,b->now);next->ringOut(graph_,b->was,b->now);b->chokes=graph_.ringOutRoutes(b->was)!=0;}
+    if(seamless)for(const auto& b:p.beside){next->takeNotes(graph_,b->was,b->now);
+        // A way out of the outgoing chain into a plugin this Performance took over is left out: the rest rings, said.
+        if(const auto lost=next->ringOut(graph_,b->was,b->now)){const auto n=nodes_.find(b->was);
+            p.notices.push_back("the last Performance's notes ring out without part of their chain: "+(n==nodes_.end()?std::string("a plugin"):n->second)+" also played into a plugin this Performance took over");
+            std::fprintf(stderr,"oscairn: %s\n",p.notices.back().c_str());}
+        b->chokes=graph_.ringOutRoutes(b->was)!=0;}
     // The outgoing nodes of shared engines it claimed select the Default at the cue, so new notes never
     // reach their sounds, which go once idle: their held notes keep their voices, and a cut drops them (RFC 0021).
     std::vector<std::shared_ptr<PluginHost>> outgoingShared;

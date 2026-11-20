@@ -164,9 +164,10 @@ namespace oscairn
         /// output to nodes carried over (retiring) or to the outputs become routes from `node`'s
         /// ring-out channels 0 and 1, live gains frozen as carryOver freezes them, so its retiring
         /// sounds ring out through the outgoing chain; `from`'s own from channels 0 and 1 (an earlier
-        /// change's tail, which the plugin chokes) come along from channels 2 and 3. None when any
-        /// goes elsewhere, or `node` does not ring out.
-        void ringOut( const Graph& current, NodeId from, NodeId node );
+        /// change's tail, which the plugin chokes) come along from channels 2 and 3. A route to a node
+        /// no longer ringing out (the incoming Performance took it over) is left out and the others
+        /// are made; returns how many such routes carried sound. None when `node` does not ring out.
+        size_t ringOut( const Graph& current, NodeId from, NodeId node );
         /// Removes `node`'s ring-out routes (once its retiring sounds are gone), or with `older` only
         /// those from channels 2 and 3 (once the older tail has faded); takes effect at commit().
         void dropRingOut( NodeId node, bool older = false );

@@ -1306,9 +1306,11 @@ channels after the plugin's own (`Graph::ringOutChannels`), present only for a p
 main output port as routes from the incoming node's ring-out channels 0 and 1: to the outgoing Performance's nodes carried over (its effects,
 ringing out as in any seamless change) and to the outputs, with their live gains frozen as
 `carryOver` freezes the carried routes' (the part's level as it was at the cue). An outgoing part
-with no effects therefore has its tail go straight to where it played, at its level. All or
-nothing: when a route goes to a node the incoming Performance took over (it is no longer the
-outgoing chain), none is made and the tail plays as before. A cut makes none either.
+with no effects therefore has its tail go straight to where it played, at its level. A route to
+a node the incoming Performance took over (it is no longer the outgoing chain) is left out and
+the others are made, and the change says so in a notice ("the last Performance's notes ring out
+without part of their chain"); until 2026-11-19 one such route left none at all and the tail
+played through the incoming chain. A cut makes none.
 
 **A second change while a tail rings.** Decided by the owner: only one tail carries over. When the
 outgoing node itself has ring-out routes (a first change's tail still rings), `Graph::ringOut` also
@@ -1396,11 +1398,12 @@ synth through an inserted effect (the Delay, or the fixture's plain effect), sen
 a bus, or two parts sharing one instance through Delays; B with the same synth and effect
 plugins, the same synth and another effect or none, or another synth and the same effect. In
 every one the note sounds in the 40 blocks after the change and 1.5 s on exactly as without a
-change, and B then sounds as a fresh load. The all-or-nothing rule above is not reached at a
+change, and B then sounds as a fresh load. A route into a node taken over is not reached at a
 change: an instance a held note sounds through, and every node it sends to, is busy
 (`Session::freeInstances`), so none is taken over, and an effect offering effect contexts gets a
-new context while its old node rings out. Were it reached, the tail would play through the
-incoming chain (the plugin's main output), not stop. What does cut held notes is admission: a
+new context while its old node rings out. `control-performance-switch` checks `Graph::ringOut`
+itself with such a route: the way into the Delay ringing out is made, the other left out and
+counted. What does cut held notes is admission: a
 change is seamless only while the open Performance, at full cost (its busiest figures and all its
 memory, however few notes still ring), and the incoming one, at full cost too (even where its
 sounds go beside the open instance, whose memory is then counted twice), fit one block's CPU

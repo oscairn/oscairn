@@ -41,7 +41,8 @@ extern "C" {
  *   apply on the next block that runs. Past the limit, the plugin gives up voices at
  *   the start of the next block, in its own order; a new note past it takes a voice the same way.
  *
- *   active_voices [audio-thread, after process()]: the voices sounding now (fading ones included),
+ *   active_voices [audio-thread, after process()]: the voices sounding now (fading ones included;
+ *   in draft 2 the units importance lists, so notes for an engine that gives a note up only whole),
  *   and the plugin's estimate of one voice's cost in microseconds a block at the current block
  *   size (0: no estimate). The host measures the instance's time either way, and uses the count
  *   to share it per voice rather than per note.
@@ -57,7 +58,9 @@ extern "C" {
  *   OSCAIRN_VOICE_BUDGET_LEAST least important voices in the order below, least important first,
  *   and how many voices it sounds; at most `capacity` contexts, returns how many it wrote. A voice
  *   rule 1 keeps is not listed. When the host then lowers a context's limit by n, the plugin gives
- *   up the n voices it listed first, at the start of its next block: the host checks it.
+ *   up the n voices it listed first, at the start of its next block: the host checks it. So the
+ *   plugin MUST tell each listed unit from a later one in the same slot (the SDK helper does it
+ *   by a note-on serial, never a frame stamp or a time).
  *   A listed voice is the plugin's unit of giving up, the same thing its limit and active_voices
  *   count (a sampler's note with all its layers, a synth's voice), never a part of one.
  *   Units, not weight, are what is counted: `voices`, a context's limit, the instance limit and the
@@ -66,10 +69,11 @@ extern "C" {
  *   cost relative to the others (the layers or oscillators it runs; 0 counts as 1), and a
  *   context's `weight` the sum over the units it counts in `voices` (0: `voices`, every unit 1).
  *   The host turns weight into time: the instance's measured time above rest divided by its
- *   contexts' total weight, times the entry's weight. So the unit must be what the limit counts:
- *   an engine whose limit counts its engine voices (a VA counting a unison note of width w as w)
- *   lists engine voices, weight 1 each, a note of width w as up to w entries; one that can give a
- *   note up only whole counts its limit in notes and lists the note once, weight w.
+ *   contexts' total weight, times the entry's weight. So the unit must be what the limit counts.
+ *   An engine whose notes hold several engine voices it does not give up one by one (unison
+ *   copies, a sampler's layers) counts notes: one entry per note, its `weight` the engine voices
+ *   or layers the note runs, and its limits and active_voices in notes. An engine that gives up
+ *   one layer or copy alone may count those instead, each an entry of its own.
  *   `age_ms` and the struck flag are taken at the end of the block the report follows (the
  *   instant the next block starts, when a lowered limit applies).
  *   `level_db` is cheap and the same in every plugin: 20 log10 of the product of the voice's

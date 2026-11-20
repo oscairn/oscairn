@@ -212,8 +212,8 @@ A context's entry is 204 bytes; 16 contexts are 3,264 bytes in the shared block 
 
 **A listed voice is the engine's unit of giving up**: the same thing its voice limit and
 `active_voices` count, since the host lowers that limit by the entries it takes. The Sampler's unit
-is a note (one slot starting up to 16 layers), the VA's and FM's a voice; never a layer of a note
-the engine gives up whole. Units differ in cost (a 16-layer piano note and a one-layer one), so
+is a note (one slot starting up to 16 layers), the VA's a note too (its unison copies go with it),
+the FM's a voice; never a layer of a note the engine gives up whole. Units differ in cost (a 16-layer piano note and a one-layer one), so
 each entry carries a **weight**: its cost against the context's other units, in whatever measure
 the engine has (the layers or oscillators it runs; 0 counts as 1), and each context the sum of its
 sounding units' weights. The host still measures one cost per voice for the instance (its time
@@ -225,9 +225,11 @@ times that. An engine whose units cost alike leaves the weights at 1.
 instance limit and the `n` the host lowers a limit by all count units, the thing the engine's
 limit counts today, and each listed entry is one unit; weight is only the host's estimate of a
 unit's cost. So `limit - n` is exact for every engine. The unit must therefore be what the limit
-counts: the VA's limit counts its engine voices (a unison note of width w counts w), so its unit is
-an engine voice, weight 1, and a note of width w lists as up to w entries; an engine that can give
-a note up only whole counts its limit in notes and lists the note once, weight w. The host keeps to
+counts. An engine whose notes hold several engine voices it does not give up one by one (the VA's
+unison copies, a sampler's layers) counts notes: one entry per note, its weight the engine voices
+or layers the note runs (a unison note of width w: w), and its limits and `active_voices` in notes
+(the SDK owner's second review); one that gives up a layer or copy alone may count those instead,
+each an entry of its own. The host keeps to
 this already: a context's cap is its reported voices plus the notes admitted since less the
 entries taken (`Heard`), and weight enters only the time an entry frees (`victim_cost`).
 
@@ -351,7 +353,11 @@ and A released at -40 dB, struck 48 ms ago, list as [B, A]; a block later A is n
 the order alone takes A). `Importance::next()` gives up the listed voices first, in listed order,
 each only while it still sounds in its slot (the same note-on serial, not fading out, not kept by
 rule 1 now), and works the order out only beyond them; a listed voice that ended or whose slot a
-new note took is skipped, not mis-dropped. The host checks it: on the next report the context's `voices` must be at or
+new note took is skipped, not mis-dropped. So `age` must be a note-on serial unique to each note a
+slot holds, never a frame stamp or a time (two notes struck on one frame would share it); the
+helper asserts on a reused one in a debug build. Past the instance limit, across contexts, it takes
+the first listed of each by `victim()`'s order, the tier before the part's priority, as the host's
+key ranks them. The host checks it: on the next report the context's `voices` must be at or
 under the limit, and no listed survivor older than a block may score below the highest score the
 host chose to drop; a miss is counted (`importanceMismatch` in `engine.timing`, per node; `importance_mismatch` in the core) and
 fails the tests, and the host goes on (a lying engine costs only its own sound).

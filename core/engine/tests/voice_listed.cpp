@@ -52,6 +52,18 @@ int main()
     check(report.next(v.size(), get, limits) == 0, "A replaced: the held key, listed third");
     v[0].ending = true;
     check(report.next(v.size(), get, limits) == 3, "past the list: victim()'s, the new note");
+
+    // Past the instance limit, across contexts, the order's tier before the part's priority (SDK v3): a released voice of a
+    // priority-5 part goes before a held key of a priority-0 part, as the host's key ranks them.
+    oscairn_voice_budget_context_t parts[2]{};
+    parts[0].context = 1; parts[0].priority = 0; parts[1].context = 2; parts[1].priority = 5;
+    Limits two; two.set(0, parts, 2);
+    v = {}; live = {true, true, false, false};
+    v[0] = {1, false, true, false, false, gain(-6), 1, false, 3000};
+    v[1] = {2, false, false, false, false, gain(-6), 2, false, 3000};
+    Importance<> across;
+    across.list(v.size(), get, two);
+    check(victim(v.size(), get, two, none) == 1 && across.next(v.size(), get, two) == 1, "the instance limit: the released voice of the higher-priority part first");
     if(!failures) std::printf("ok: the helper gives up what it listed, in its listed order\n");
     return failures ? 1 : 0;
 }

@@ -264,16 +264,19 @@ Synth and the test fixture (`core/engine/tests/voice_fixture.cpp`) are the refer
 
 **What a listed voice is.** Your unit of giving up: the same thing your voice limit and
 `active_voices` count, since the host lowers that limit by the entries it takes. A sampler that
-gives a note up whole (one slot starting all its layers) lists notes; a VA or FM engine whose voice
-is one note's oscillators lists voices. Never list a part of a unit you cannot give up alone. Units
+gives a note up whole (one slot starting all its layers) lists notes, and so does a VA whose
+unison copies go only with their note; an FM engine whose voice is one note's oscillators lists
+voices. Never list a part of a unit you cannot give up alone. Units
 of unequal cost carry a `weight` (`Candidate::weight`): the unit's cost against your others, in any
 measure you have (the layers or oscillators it runs: a 16-layer piano note 16, a one-layer note 1).
 The host measures one cost per voice for the instance and shares it by weight; leave 1 where units
 cost alike. **Units, not weight, are counted**: `voices`, your limits and the n the host lowers
 them by all count units, and each listed entry is one unit whatever its weight, so `limit - n` is
-exact. The unit must be what your limit counts: a VA whose limit counts engine voices (a unison
-note of width w as w) lists engine voices, weight 1, a note of width w as up to w entries; an engine
-that gives a note up only whole counts its limit in notes and lists the note once, weight w.
+exact. The unit must be what your limit counts. An engine whose notes hold several engine voices
+it does not give up one by one (unison copies, a sampler's layers) counts notes: one entry per note,
+its `weight` the engine voices or layers the note runs (a unison note of width w: w), and its limits
+and `active_voices` in notes. One that gives up a layer or copy alone may count those instead, each
+an entry of its own.
 
 **What a voice's level is.** `Candidate::loudness`, linear: envelope level × velocity gain × volume
 expression × the sound's own output level, 1 being the voice's sample or oscillator at nominal full
@@ -299,7 +302,10 @@ The helper records on each voice whether a pedal holds it and when it started (f
 `steady_time`), builds the list after each block, and keeps every context within its limit at the
 start of the next: past a lowered limit it fades the voices it listed, in listed order, while they
 still sound in their slots, then the least important by the order (`Importance::next()`), so a
-context lowered by n gives up exactly the n it listed first.
+context lowered by n gives up exactly the n it listed first. Past the instance limit it takes,
+across contexts, the first listed of each by the order: the tier first (released or inaudible,
+pedaled, key held), then the part's priority, so a released voice of a high-priority part goes
+before a held key of a low-priority one.
 
 **The calls, with your own voice pool** (voice-budget-plugin.hpp):
 
@@ -313,7 +319,8 @@ oscairn::voices::Candidate candidate(const Unit& u) const
             u.started, !u.keyDown && u.pedal, double(frames - u.startFrame) * 1000.0 / rate, float(u.layers)};
 }
 // At the start of each block: each context, then the instance, within its limit; what the last
-// report listed goes first, in listed order (age must identify the unit in its slot: a serial).
+// report listed goes first, in listed order (age MUST be a note-on serial unique to each note a
+// slot holds, never a frame stamp or a time; a debug build asserts on a reused one).
 for each context c: while(sounding(c) > limits.of(c, selected).limit) fadeOut(report.next(n, get, limits, c));
 while(limits.limit && sounding() > limits.limit) fadeOut(report.next(n, get, limits));
 // importance, called by the host right after each process(), on the audio thread:

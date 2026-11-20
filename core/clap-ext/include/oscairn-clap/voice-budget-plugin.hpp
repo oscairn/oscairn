@@ -20,21 +20,25 @@
 //     out from importance(). Fill each Candidate's pedaled and ageMs (since its note-on, from the
 //     plugin's own frame count) as well as held and loudness (its gain at the plugin's output,
 //     the sound's output level included), so the host ranks it on the same scale as every other
-//     plugin's (RFC 0046); and its age with a value that identifies the voice in its slot (a
-//     note-on serial). At a block's start, past a lowered limit, give up Importance::next()'s
+//     plugin's (RFC 0046); and its age, which MUST be a note-on serial unique to each note a slot
+//     holds (never a frame stamp or a time: two notes started on one frame would share it), since
+//     next() tells a listed voice from a later one in its slot by it. At a block's start, past a lowered limit, give up Importance::next()'s
 //     voice rather than victim()'s: the voices list() named, in the order it named them, while
 //     they still sound in their slots, then victim()'s. So a context the host lowers by n gives up
 //     exactly the n voices it listed first, though levels, ages and the 50 ms mark have moved
 //     since the list was made.
-// victim() gives up voices one at a time, so a layered note loses its quietest layer before
-// another note loses its only one when the layer is the quieter: keep a note's every voice a
-// Candidate with its own loudness.
+// victim() gives up voices one at a time. An engine that can give up one layer of a note alone may
+// keep each layer a Candidate with its own loudness, so a layered note loses its quietest layer
+// before another note loses its only one; an engine that gives a note up only whole (unison
+// copies, layers it cannot drop alone) makes the note one Candidate, its weight the engine voices
+// or layers it runs, and counts its limits and active_voices in notes.
 
 #pragma once
 #include <oscairn-clap/voice-budget.h>
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -92,7 +96,7 @@ namespace oscairn::voices
         uint32_t context = 0;
         bool selected = false, held = false, ending = false, mono = false;
         double loudness = 0;
-        uint64_t age = 0; // larger: newer
+        uint64_t age = 0; // larger: newer; a note-on serial, unique to each note a slot holds (next() needs it)
         bool pedaled = false;
         double ageMs = -1;
         float weight = 1;
@@ -228,7 +232,7 @@ namespace oscairn::voices
         // The voice to give up at a block's start, past a limit the host lowered (from context `only`
         // alone unless none): the first voice the last list() named that still sounds in its slot (the
         // same age, not fading out) and that rule 1 does not keep now; a context's in its listed order,
-        // across contexts the first of each by victim()'s order (priority, then the key). When none is
+        // across contexts the first of each by victim()'s order (tier, then priority, then the key). When none is
         // left, victim()'s. -1 when no voice may go.
         template<class Get>
         int next(size_t voices, Get&& get, const Limits& limits, uint32_t only = none)
@@ -244,8 +248,10 @@ namespace oscairn::voices
                     const Ranked& r = l.least[e];
                     const Candidate* c = r.index < voices ? get(r.index) : nullptr;
                     if(!c || c->ending || c->age != r.c.age || c->context != r.c.context || kept(*c, limits, held, none)) continue; // ended, replaced or kept since
+                    // Debug builds: the same note's age only grows, so a younger one here is another note with the listed one's serial.
+                    assert(!(c->ageMs >= 0 && r.c.ageMs >= 0 && c->ageMs + 1 < r.c.ageMs) && "age must be a note-on serial unique to each note a slot holds");
                     const uint8_t priority = limits.of(c->context, c->selected).priority;
-                    if(!best || priority < bestPriority || (priority == bestPriority && r.before(*best))) { best = &r; bestPriority = priority; }
+                    if(!best || (r.tier != best->tier ? r.tier < best->tier : priority != bestPriority ? priority < bestPriority : r.before(*best))) { best = &r; bestPriority = priority; }
                     break; // a context's first still sounding
                 }
             }

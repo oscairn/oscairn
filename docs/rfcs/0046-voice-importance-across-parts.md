@@ -657,16 +657,17 @@ and 2,000 blocks with new notes: the lead keeps both keys wherever the piano's v
 short, the piano loses nothing for the lead's own lane, no part goes silent.
 
 Through real workers (the fixture, a piano voice 15 µs, a lead voice 180, a 1,000 µs allowance;
-Mac, no block lost in any case):
+Mac, no block lost in any case; run again at 7f01e5e2 after the SDK owner's review, the first
+figure of each cell then, the second at c111f159):
 
 | Placement | Case | Piano voices given up (of 30) | Lead given up, keys kept | A part silent |
 |---|---|---|---|---|
-| pool, one process | same thread over | 7 | 0, 2 | no |
-| in process | same thread over | 12 | 0, 2 | no |
-| plugin / chain / pool, two processes | device out of core time | 8 / 9 / 8 | 0, 2 | no |
+| pool, one process | same thread over | 9 (7) | 0, 2 | no |
+| in process | same thread over | 12 (12) | 0, 2 | no |
+| plugin / chain / pool, two processes | device out of core time | 9 / 10 / 9 (8 / 9 / 8) | 0, 2 | no |
 | plugin / chain / pool, two processes | lead's own lane over | 0 | 2 of its 3 released, 2 | no |
 | plugin | piano without the report | 8 (host notes) | 0, 2 | no |
-| pool, one process | 2,000 blocks, a new note every 25 | 81 (9 + one per new note) | 0, 2 | no |
+| pool, one process | 2,000 blocks, a new note every 25 | 82 (81; about 9 + one per new note) | 0, 2 | no |
 
 Cost: the helper's report for 128 voices (list and write) takes 1.1 µs a block on the Mac (5.5 µs
 before: a log10 in every comparison, now one per voice); the A53's is step 7's to measure. At rest

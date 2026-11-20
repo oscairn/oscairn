@@ -331,7 +331,14 @@ Each block, after the measurements (`Notes::end`):
 
 **The contract, and its check.** Lowered from `voices` to `voices - n`, the engine gives up, at
 the start of its next block, the `n` voices it listed first, not others. The helper guarantees it
-(one key function). The host checks it: on the next report the context's `voices` must be at or
+by keeping the slots it listed, not by working the order out again: between the list (after block
+k) and the drop (at block k+1's start) ages, envelope levels, the 50 ms mark and the -60 dBFS floor
+move, so the order computed again can differ (the SDK owner's case: B released at -30 dB, 2 s old,
+and A released at -40 dB, struck 48 ms ago, list as [B, A]; a block later A is no longer struck and
+the order alone takes A). `Importance::next()` gives up the listed voices first, in listed order,
+each only while it still sounds in its slot (the same note-on serial, not fading out, not kept by
+rule 1 now), and works the order out only beyond them; a listed voice that ended or whose slot a
+new note took is skipped, not mis-dropped. The host checks it: on the next report the context's `voices` must be at or
 under the limit, and no listed survivor older than a block may score below the highest score the
 host chose to drop; a miss is counted (`importance_mismatch` in `engine.timing`, per node) and
 fails the tests, and the host goes on (a lying engine costs only its own sound).

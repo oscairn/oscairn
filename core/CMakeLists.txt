@@ -579,6 +579,10 @@ add_test(NAME voice-importance COMMAND oscairn-voice-importance-test $<TARGET_FI
 add_test(NAME voice-importance-workers COMMAND oscairn-voice-importance-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(voice-importance PROPERTIES TIMEOUT 60)
 set_tests_properties(voice-importance-workers PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000")
+# RFC 0046's contract in the helper: lowered by n, an engine gives up the n it listed first, though the order moved since.
+add_executable(oscairn-voice-listed-test engine/tests/voice_listed.cpp)
+target_link_libraries(oscairn-voice-listed-test PRIVATE oscairn_engine)
+add_test(NAME voice-importance-listed COMMAND oscairn-voice-listed-test)
 # A draft-1 engine, and a draft-2 table with a null importance, keep their voice budget against the host.
 add_executable(oscairn-voice-budget-draft1-test engine/tests/voice_budget_draft1.cpp)
 target_link_libraries(oscairn-voice-budget-draft1-test PRIVATE oscairn_engine)

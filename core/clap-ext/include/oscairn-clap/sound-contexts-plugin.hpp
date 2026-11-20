@@ -243,6 +243,13 @@ namespace oscairn::contexts
             for(size_t i = 0; i < VoiceCount; ++i) if(voices[i].active) candidates[i] = candidate(voices[i]);
             return oscairn::voices::victim(VoiceCount, [&](size_t i) { return voices[i].active ? &candidates[i] : nullptr; }, voiceLimits, incoming, only);
         }
+        // Past a lowered limit: the voices the last importance report listed first, then victim()'s.
+        int listedVictim(uint32_t only)
+        {
+            std::array<oscairn::voices::Candidate, VoiceCount> candidates{};
+            for(size_t i = 0; i < VoiceCount; ++i) if(voices[i].active) candidates[i] = candidate(voices[i]);
+            return importanceReport.next(VoiceCount, [&](size_t i) { return voices[i].active ? &candidates[i] : nullptr; }, voiceLimits, only);
+        }
         // A voice as the order sees it, now.
         oscairn::voices::Candidate candidate(const Voice& v)
         {
@@ -265,9 +272,9 @@ namespace oscairn::contexts
             {
                 const auto& c = contexts[slot]; if(!c.users.load(std::memory_order_acquire)) continue; // pinned, so its id is stable; prepared is the main thread's
                 const auto settings = voiceLimits.of(c.id, c.selected.load(std::memory_order_relaxed) != 0);
-                while(settings.limit && sounding(slot) > settings.limit) { const int i = voiceVictim(oscairn::voices::none, c.id); if(i < 0) break; fadeOut(i); }
+                while(settings.limit && sounding(slot) > settings.limit) { const int i = listedVictim(c.id); if(i < 0) break; fadeOut(i); }
             }
-            while(voiceLimits.limit && sounding() > voiceLimits.limit) { const int i = voiceVictim(oscairn::voices::none); if(i < 0) break; fadeOut(i); }
+            while(voiceLimits.limit && sounding() > voiceLimits.limit) { const int i = listedVictim(oscairn::voices::none); if(i < 0) break; fadeOut(i); }
         }
         double loudness(const Voice& v) const { return v.velocity * amplitude(v, 0); }
         float weight(const Voice&) const { return 1; }

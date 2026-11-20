@@ -290,8 +290,10 @@ float weight(const Voice& v) const;    // its layers or oscillators; default 1
 ```
 
 The helper records on each voice whether a pedal holds it and when it started (from
-`steady_time`), keeps every context within its limit at the start of each block (the quietest by
-the order fading over the choke time), and builds the list after each block.
+`steady_time`), builds the list after each block, and keeps every context within its limit at the
+start of the next: past a lowered limit it fades the voices it listed, in listed order, while they
+still sound in their slots, then the least important by the order (`Importance::next()`), so a
+context lowered by n gives up exactly the n it listed first.
 
 **The calls, with your own voice pool** (voice-budget-plugin.hpp):
 
@@ -304,9 +306,10 @@ oscairn::voices::Candidate candidate(const Unit& u) const
     return {u.context, u.selected, u.keyDown, u.fading, false, u.envelope * u.velocity * u.volume * outputLevel,
             u.started, !u.keyDown && u.pedal, double(frames - u.startFrame) * 1000.0 / rate, float(u.layers)};
 }
-// At the start of each block: each context, then the instance, within its limit.
-for each context c: while(sounding(c) > limits.of(c, selected).limit) fadeOut(oscairn::voices::victim(n, get, limits, oscairn::voices::none, c));
-while(limits.limit && sounding() > limits.limit) fadeOut(oscairn::voices::victim(n, get, limits, oscairn::voices::none));
+// At the start of each block: each context, then the instance, within its limit; what the last
+// report listed goes first, in listed order (age must identify the unit in its slot: a serial).
+for each context c: while(sounding(c) > limits.of(c, selected).limit) fadeOut(report.next(n, get, limits, c));
+while(limits.limit && sounding() > limits.limit) fadeOut(report.next(n, get, limits));
 // importance, called by the host right after each process(), on the audio thread:
 report.list(n, get, limits);             // get(i): &candidates[i], or nullptr for a free slot
 return report.write(out, capacity);
@@ -318,9 +321,11 @@ once and kept only if it beats the 16th kept (1.1 µs a block for 128 units on t
 
 **"Must drop exactly what it listed."** When the host lowers a context's limit from the voices you
 reported (plus the notes it has sent you since) by n, at the start of your next block you give up
-the n units you listed first, by fading them out (2 to 5 ms), and no others. `victim()` with no
-voice incoming picks them in that order, since the list and `victim()` share one key; an engine
-that keeps its own order instead must keep that order identical to its list. A unit already fading
+the n units you listed first, by fading them out (2 to 5 ms), and no others. `Importance::next()`
+picks them: the units it listed, in listed order, while each still sounds in its slot, then the
+order worked out again. Working the order out again alone (`victim()`) is not enough: levels, ages
+and the 50 ms mark move between the list and the drop, so it can pick another unit. An engine that
+keeps its own order instead must remember what it listed the same way. A unit already fading
 is not counted in `voices` and is not listed. Never give up a unit the order protects (a held mono
 key, held keys within the part's reserve): they are never listed, so the host never asks.
 

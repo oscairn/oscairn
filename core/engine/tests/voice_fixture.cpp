@@ -77,6 +77,13 @@ struct Plugin {
         for(size_t i=0;i<voices.size();++i)if(voices[i].active)candidates[i]=candidate(voices[i]);
         return oscairn::voices::victim(voices.size(),[&](size_t i){return voices[i].active?&candidates[i]:nullptr;},limits,incoming);
     }
+    // Past a lowered limit: the voices its last importance report listed first, then victim()'s (RFC 0046's contract).
+    int listed()
+    {
+        std::array<oscairn::voices::Candidate,128> candidates{};
+        for(size_t i=0;i<voices.size();++i)if(voices[i].active)candidates[i]=candidate(voices[i]);
+        return importance.next(voices.size(),[&](size_t i){return voices[i].active?&candidates[i]:nullptr;},limits);
+    }
     void fadeOut(int i){if(i<0)return;auto& v=voices[size_t(i)];v.held=false;if(!v.choking){v.choking=true;v.chokeLeft=chokeFrames;}}
     static Plugin& self(const clap_plugin_t* p){return *static_cast<Plugin*>(p->plugin_data);}
     void end(Voice& v,uint32_t at,const clap_output_events_t* out)
@@ -185,7 +192,7 @@ struct Plugin {
             auto& s=*static_cast<Plugin*>(p->plugin_data);
             float* left=b->audio_outputs[0].data32[0];float* right=b->audio_outputs[0].data32[1];
             s.frames=b->frames_count;
-            while(s.limit() && s.sounding()>s.limit()){const int i=s.victim(oscairn::voices::none);if(i<0)break;s.fadeOut(i);}
+            while(s.limit() && s.sounding()>s.limit()){const int i=s.listed();if(i<0)break;s.fadeOut(i);}
             std::fill_n(left,b->frames_count,0.f);std::fill_n(right,b->frames_count,0.f);
             uint32_t sounding=0,costly=0;for(const auto& v:s.voices){sounding+=v.active && v.channel!=s.costlyChannel;costly+=v.active && v.channel==s.costlyChannel;}
             const auto began=std::chrono::steady_clock::now();

@@ -20,8 +20,12 @@
 //     out from importance(). Fill each Candidate's pedaled and ageMs (since its note-on, from the
 //     plugin's own frame count) as well as held and loudness (its gain at the plugin's output,
 //     the sound's output level included), so the host ranks it on the same scale as every other
-//     plugin's (RFC 0046). The report and victim() share one order, so a context the host lowers by
-//     n gives up the n voices it listed first.
+//     plugin's (RFC 0046); and its age with a value that identifies the voice in its slot (a
+//     note-on serial). At a block's start, past a lowered limit, give up Importance::next()'s
+//     voice rather than victim()'s: the voices list() named, in the order it named them, while
+//     they still sound in their slots, then victim()'s. So a context the host lowers by n gives up
+//     exactly the n voices it listed first, though levels, ages and the 50 ms mark have moved
+//     since the list was made.
 // victim() gives up voices one at a time, so a layered note loses its quietest layer before
 // another note loses its only one when the layer is the quieter: keep a note's every voice a
 // Candidate with its own loudness.
@@ -169,10 +173,11 @@ namespace oscairn::voices
     template<size_t Contexts = OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS>
     struct Importance
     {
-        // A kept voice with its key worked out.
+        // A kept voice with its key worked out, and its slot, for next().
         struct Ranked
         {
             Candidate c{};
+            size_t index = 0;
             uint8_t tier = 0; bool struck = false; float db = -120; double audibility = 0;
             bool before(const Ranked& b) const noexcept
             {
@@ -199,7 +204,7 @@ namespace oscairn::voices
                 ++l->out.voices;
                 l->out.weight += c->weight > 0 ? c->weight : 1.f;
                 if(kept(*c, limits, held, none)) continue;
-                insert(*l, rank(*c));
+                insert(*l, rank(*c, i));
             }
             // Past its reserve a context lists only the held voices beyond it: the least important of them.
             for(uint32_t k = 0; k < count; ++k)
@@ -218,6 +223,32 @@ namespace oscairn::voices
                 }
             }
         }
+        // The voice to give up at a block's start, past a limit the host lowered (from context `only`
+        // alone unless none): the first voice the last list() named that still sounds in its slot (the
+        // same age, not fading out) and that rule 1 does not keep now; a context's in its listed order,
+        // across contexts the first of each by victim()'s order (priority, then the key). When none is
+        // left, victim()'s. -1 when no voice may go.
+        template<class Get>
+        int next(size_t voices, Get&& get, const Limits& limits, uint32_t only = none)
+        {
+            HeldCount held(voices, get);
+            const Ranked* best = nullptr; uint8_t bestPriority = 0;
+            for(uint32_t k = 0; k < count; ++k)
+            {
+                const auto& l = lists[k];
+                if(only != none && l.out.context != only) continue;
+                for(uint32_t e = 0; e < l.out.count; ++e)
+                {
+                    const Ranked& r = l.least[e];
+                    const Candidate* c = r.index < voices ? get(r.index) : nullptr;
+                    if(!c || c->ending || c->age != r.c.age || c->context != r.c.context || kept(*c, limits, held, none)) continue; // ended, replaced or kept since
+                    const uint8_t priority = limits.of(c->context, c->selected).priority;
+                    if(!best || priority < bestPriority || (priority == bestPriority && r.before(*best))) { best = &r; bestPriority = priority; }
+                    break; // a context's first still sounding
+                }
+            }
+            return best ? int(best->index) : victim(voices, get, limits, none, only);
+        }
         uint32_t write(oscairn_voice_budget_importance_t* out, uint32_t capacity) const noexcept
         {
             const uint32_t n = out ? std::min(count, capacity) : 0;
@@ -234,9 +265,9 @@ namespace oscairn::voices
             return &l;
         }
         // Its key as before() compares it, with its level worked out once.
-        static Ranked rank(const Candidate& c) noexcept
+        static Ranked rank(const Candidate& c, size_t index) noexcept
         {
-            Ranked r; r.c = c; r.db = levelDb(c.loudness); r.struck = c.struck();
+            Ranked r; r.c = c; r.index = index; r.db = levelDb(c.loudness); r.struck = c.struck();
             r.tier = !r.struck && r.db < inaudibleDb ? released : c.held ? keyHeld : c.pedaled ? Tier::pedaled : released;
             r.audibility = r.db - (c.ageMs > 0 ? std::min(c.ageMs / 1000 * agedDbPerSecond, agedSecondsMost * agedDbPerSecond) : 0);
             return r;

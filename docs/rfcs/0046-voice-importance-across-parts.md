@@ -221,6 +221,16 @@ above rest over `active_voices`, which no engine can estimate for the core it ru
 1 then costs that times the instance's voices over their total weight, and an entry its weight
 times that. An engine whose units cost alike leaves the weights at 1.
 
+**Units, not weight, are counted** (the SDK owner's review): `voices`, a context's limit, the
+instance limit and the `n` the host lowers a limit by all count units, the thing the engine's
+limit counts today, and each listed entry is one unit; weight is only the host's estimate of a
+unit's cost. So `limit - n` is exact for every engine. The unit must therefore be what the limit
+counts: the VA's limit counts its engine voices (a unison note of width w counts w), so its unit is
+an engine voice, weight 1, and a note of width w lists as up to w entries; an engine that can give
+a note up only whole counts its limit in notes and lists the note once, weight w. The host keeps to
+this already: a context's cap is its reported voices plus the notes admitted since less the
+entries taken (`Heard`), and weight enters only the time an entry frees (`victim_cost`).
+
 **The level is the cheap one, the same in every engine**: `level_db` is 20 log10 of the product of
 the voice's envelope level, its velocity gain, its volume expression and the sound's own output
 level, 0 dB being its sample or oscillator at nominal full scale; no pass over its samples (a
@@ -253,7 +263,10 @@ three parts, compared in order, which the host packs into one float:
 1. **Tier.** 0: released (key up, no pedal holding it), or inaudible (its level at the plugin's
    output below -60 dBFS: in a stage mix it is not heard; judged there, not after the part's gain,
    so the plugin's own order and the host's agree); 1: held only by the sustain or sostenuto
-   pedal; 2: key held. A voice **just struck** (younger than 50 ms) is never judged inaudible (an
+   pedal; 2: key held. A voice **just struck** (younger than 50 ms; a reported age is taken at the end of the block
+the report follows, the instant the next block starts and a lowered limit applies; the host's own
+notes, stamped at their block's start and so up to a block older than they have sounded, count as
+struck for 50 ms plus one block, protected a block longer, never less) is never judged inaudible (an
    attack is quiet at first) and goes after every other voice of its tier and part priority: a
    flag within its tier, not a tier above the held keys, so a held key always outranks a note
    struck and let go (the owner's first answer). A held voice of a mono or legato line and held

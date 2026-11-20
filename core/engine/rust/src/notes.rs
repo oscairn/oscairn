@@ -293,6 +293,7 @@ impl Notes {
         let Notes { steps, budget, timing, .. } = self;
         if frames != 0 && timing.period > 0.0 {
             budget.frame_us = timing.period / frames as f32;
+            budget.block_us = timing.period;
         }
         let Some(step) = steps.get(s) else { return (0, overflow) };
         let mut m = Merged { out, heard, n: 0, channel: -1 };

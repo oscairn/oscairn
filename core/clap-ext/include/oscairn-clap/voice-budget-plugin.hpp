@@ -84,8 +84,9 @@ namespace oscairn::voices
     // its gain now at the plugin's output, linear: envelope level x velocity gain x volume
     // expression x the sound's output level, 1 for its sample or oscillator at nominal full scale
     // (no pass over its samples). ageMs: since its note-on, below 0 when the plugin does not keep
-    // time. weight: its cost relative to the plugin's other voices (the layers or oscillators it
-    // runs).
+    // time; for the report, at the end of the block just rendered. weight: its cost relative to the
+    // plugin's other voices (the layers or oscillators it runs), the host's cost estimate only: a
+    // Candidate is one unit of the limit whatever its weight.
     struct Candidate
     {
         uint32_t context = 0;

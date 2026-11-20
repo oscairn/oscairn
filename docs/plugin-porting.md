@@ -269,13 +269,19 @@ is one note's oscillators lists voices. Never list a part of a unit you cannot g
 of unequal cost carry a `weight` (`Candidate::weight`): the unit's cost against your others, in any
 measure you have (the layers or oscillators it runs: a 16-layer piano note 16, a one-layer note 1).
 The host measures one cost per voice for the instance and shares it by weight; leave 1 where units
-cost alike.
+cost alike. **Units, not weight, are counted**: `voices`, your limits and the n the host lowers
+them by all count units, and each listed entry is one unit whatever its weight, so `limit - n` is
+exact. The unit must be what your limit counts: a VA whose limit counts engine voices (a unison
+note of width w as w) lists engine voices, weight 1, a note of width w as up to w entries; an engine
+that gives a note up only whole counts its limit in notes and lists the note once, weight w.
 
 **What a voice's level is.** `Candidate::loudness`, linear: envelope level × velocity gain × volume
 expression × the sound's own output level, 1 being the voice's sample or oscillator at nominal full
 scale. Work it out from what the voice already holds; no pass over its samples. The host adds the
 part's gain in the mix; the tier (released, pedaled, key held), the just-struck flag (under 50 ms)
-and the age come from `held`, `pedaled` and `ageMs`, never from the level.
+and the age come from `held`, `pedaled` and `ageMs`, never from the level. The report's ages are
+taken at the end of the block just rendered (the sound-contexts helper does it); the level is
+clamped to -120 to +24 dB.
 
 **The calls, with sound-contexts-plugin.hpp** (`oscairn::contexts::Engine`):
 

@@ -279,8 +279,9 @@ pub struct Budget {
     device_hold: u32,
     /// Each step's largest gain to the graph's outputs at the live gains (a part's level and the mix), linear.
     pub gains: Vec<f32>,
-    /// Microseconds a frame, for the notes' ages.
+    /// Microseconds a frame, for the notes' ages, and a block's, for their slack.
     pub frame_us: f32,
+    pub block_us: f32,
     /// The lanes a deadline's give-up may take from (MARKED): the one furthest over its time and those feeding it.
     pub marked: Vec<bool>,
 }
@@ -323,6 +324,7 @@ impl Budget {
             device_hold: 0,
             gains: vec![1.0; steps],
             frame_us: 0.0,
+            block_us: 0.0,
             marked: vec![false; lanes],
         }
     }
@@ -455,7 +457,8 @@ impl Budget {
         let reported = e.cost.own_voices.load(Relaxed);
         let level = if reported { db(s.velocity) } else { UNKNOWN_DB + db(s.velocity) };
         let held = r.held.has(i);
-        let struck = self.frame_us > 0.0 && age < STRUCK_MS;
+        // Its age counts from its block's start, up to a block more than it has sounded: protected a block longer, never less.
+        let struck = self.frame_us > 0.0 && age < STRUCK_MS + self.block_us / 1000.0;
         let tier = if !struck && reported && level < INAUDIBLE_DB {
             RELEASED
         } else if held {

@@ -414,7 +414,8 @@ namespace oscairn::contexts
             if(process->audio_outputs_count < 1 || process->audio_outputs[0].channel_count < 2)
                 return CLAP_PROCESS_ERROR;
             s.output = process->out_events; s.eventTime = 0; s.steadyTime = process->steady_time;
-            struct ClearOutput { Engine& s; ~ClearOutput() { s.output = nullptr; s.ringOut = nullptr; } } clearOutput{s}; // ring_out gives one process() its buffer
+            // ring_out gives one process() its buffer; the importance report after it takes the voices' ages at the block's end.
+            struct ClearOutput { Engine& s; uint32_t frames; ~ClearOutput() { s.output = nullptr; s.ringOut = nullptr; s.eventTime = frames; } } clearOutput{s, process->frames_count};
             s.applySelections(process->out_events);
             s.keepWithinLimits();
             const uint32_t frames = process->frames_count;

@@ -44,7 +44,7 @@ fn fit(c: Cursor, count: usize, per_page: usize) -> Cursor {
     let c = Cursor { count, per_page, at: c.at.map(|a| a.min(count.saturating_sub(1))), ..c };
     match c.at {
         Some(at) => c.to(at),
-        None => Cursor { first: if c.first >= count { 0 } else { c.first / per_page * per_page }, ..c },
+        None => Cursor { first: if c.first >= count { 0 } else { c.first }, ..c },
     }
 }
 
@@ -122,11 +122,11 @@ impl Browser {
         }
     }
 
-    /// The scroll bar asked for the view starting at row `first` (a touch only: it selects nothing, so the cursor drops).
+    /// The scroll bar or a finger drag asked for the view starting at row `first` (a touch only: it selects nothing,
+    /// so the cursor drops). A scroll keeps the exact row asked (the list may hold a partial page).
     pub fn scroll_to(&mut self, first: usize) {
-        let per = self.cursor.per_page.max(1);
-        let last = self.count.saturating_sub(1) / per * per;
-        self.cursor = Cursor { at: None, first: (first / per * per).min(last), ..self.cursor };
+        let last = self.count.saturating_sub(1);
+        self.cursor = Cursor { at: None, first: first.min(last), ..self.cursor };
         self.editing = false;
     }
 

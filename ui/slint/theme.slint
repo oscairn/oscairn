@@ -146,6 +146,8 @@ export global Theme {
     out property <length> scroll-overlap: pad;
     out property <length> scroll-gap: pad-tight;
     out property <length> scroll-lead: scroll-overlap + scroll-gap;
+    // A finger drag on a list's rows becomes a scroll (not a tap) once it has moved this far.
+    in-out property <length> scroll-drag-threshold: touch / 4;
     // Compact (the Library's): the spacing scale at its 0.7 step (ui/LIBRARY-APP.md), applied to the gaps between a list's rows and a
     // sidebar's entries and to the header's, and the footer line cut to the type's height. Never below the scale's own least (0.6 of
     // the unit) for the theme at hand, and the rows stay a touch target tall: the touch target (44) is not scaled.

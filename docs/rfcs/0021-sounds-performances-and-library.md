@@ -1411,6 +1411,20 @@ what rings out at what it holds now (its memory resident, its CPU at rest plus t
 sounding), a node prepared beside at its sounds' memory only, and hold the sum against the
 budget on every audio core as admission does.
 
+The unit (2026-11-19, FANTOM-07) then showed a cut with nothing logged in 32 of the owner's 87
+Performances: each has a part sending at level 0 to an empty bus the converter did not build,
+playing where the part does, so the send's wire and the part's fader wire are one route. Their
+live gains differed, so the route was baked: the part's fader and the master stopped moving live
+(`master.set` only staged an edit, and the takes before the change played 12 dB above the master
+set), and the change then took the outgoing tail from that level to the staged one. A send at
+level 0 is now left out of the routes (raising it compiles it back), so such a Performance
+compiles as it does without the send, which the unit heard ring out 2 of 2 where the unchanged
+copy cut 2 of 2. `control-performance-switch` builds that shape (the converter's unmuted level-0
+wire to a muted empty bus) and checks the master lowered is heard at once and the pedaled note
+rings on through the change; without the fix the master stays 12 dB high and the tail drops to
+under a tenth. Here the tail fell 11 dB, not to silence as on the unit; what took it to silence
+there was not reproduced.
+
 **A library click** prepares the Performance first, as the Setlist does ahead
 (`performance.prepare`), and opens it (`library.load`) once that is done, both in the app's job off
 the interface thread; the engine answers the views between the two, and the open only publishes.

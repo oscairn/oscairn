@@ -261,7 +261,14 @@ namespace oscairn
                 else liveGains->staticSends.insert({w.part, w.send});
             }
             const bool structural = (soloed.count({w.to, w.toPort}) && !w.solo) || !w.enabled || off.count(w.to) || rungOut.count(w.from);
-            const bool silent = structural || (liveWire ? w.fixedMute : w.mute);
+            // A part's send at level 0 carries nothing: it is left out, and raising it compiles it back (a static
+            // send). Kept, it shared a route with the part's fader wire where the bus is empty and plays where the
+            // part does (the converter's buses "not built yet"), mixing their live gains: the route was baked, so the
+            // part's fader and the master stopped moving live (master.set only staged an edit), and a Performance
+            // change then took the outgoing tail from the level it had to the level staged.
+            const bool unsentSend = own && w.send && w.level == 0;
+            if(unsentSend && liveGains) liveGains->staticSends.insert({w.part, w.send});
+            const bool silent = structural || unsentSend || (liveWire ? w.fixedMute : w.mute);
             const auto compiled = pairs(g, layout, w, 1);
             auto centred = w; centred.pan = 0;
             const auto unpanned = panSlots ? pairs(g, layout, centred, 1) : compiled; // the pan is the slots'

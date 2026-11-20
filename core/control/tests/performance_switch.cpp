@@ -186,7 +186,10 @@ namespace
     // effects (the Delay's feedback and wet, the fixture's gain).
     // With `pair`, two such parts, the keyboard's lower and upper halves, the second through an
     // insert alone: read, the two synths share one instance (formed on their own).
-    void chained(const fs::path& file, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false)
+    // With `empty`, the first part also sends at level 0 to an empty bus, muted at a quarter level, as the
+    // converter writes a bus it did not build ("Reverb (type 01 02, not built yet)"): a level-0 wire
+    // from the part straight to the outputs.
+    void chained(const fs::path& file, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false, bool empty = false)
     {
         Session s(48000, frames);
         auto effect = [&](const std::string& name, Effect e) {
@@ -207,6 +210,11 @@ namespace
                 const auto bus = s.addPart("Bus", {PartInput::Kind::Bus}); s.insertIntoPart(bus, 0, effect("send", send));
                 s.setSend(part, bus, .5);
             }
+            if(empty && !i)
+            {
+                const auto bus = s.addPart("Reverb (not built yet)", {PartInput::Kind::Bus});
+                s.setPartLevel(bus, .25, true); s.setSend(part, bus, 0);
+            }
             synths.push_back(n);
         }
         s.commit();
@@ -214,6 +222,14 @@ namespace
             check(s.selectSound(synths[i], s.prepareSound(synths[i], "Chained " + std::to_string(brightness) + " " + std::to_string(i), {{1, brightness}, {4, double(1 + i)}})), "select a sound");
         blocks(s, 2);
         s.savePerformance(file.string());
+        if(empty) // the converter writes the send wire to the muted bus unmuted, at level 0
+        {
+            auto bytes = state_files::read(file / "performance.json", 4 << 20); std::string text(bytes.begin(), bytes.end());
+            const std::string muted = "\"level\":0,\"pan\":0,\"mute\":true";
+            const auto at = text.find(muted); check(at != std::string::npos, "the send wire to the empty bus");
+            if(at != std::string::npos) text.replace(at, muted.size(), "\"level\":0,\"pan\":0,\"mute\":false");
+            state_files::write(file / "performance.json", text.data(), text.size());
+        }
     }
     struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
@@ -893,10 +909,11 @@ int main(int argc, char** argv)
             const auto synthCopy = temp.path / ("chain-synth" + fs::path(argv[1]).extension().string());
             fs::copy(argv[1], synthCopy, fs::copy_options::recursive);
             const Effect delay{argv[3]}, plain{argv[4], "org.kick.test.effect"}, none{};
-            auto perf = [&](const std::string& name, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false) {
-                const auto f = temp.path / ("chain-" + name); chained(f, synth, insert, send, brightness, setting, pair); return f;
+            auto perf = [&](const std::string& name, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false, bool empty = false) {
+                const auto f = temp.path / ("chain-" + name); chained(f, synth, insert, send, brightness, setting, pair, empty); return f;
             };
-            struct Case { std::string what; fs::path a, b; };
+            const auto aEmpty = perf("a-empty", argv[1], plain, delay, .3, .6, false, true);
+            struct Case { std::string what; fs::path a, b; bool master = false; };
             const auto aInsert = perf("a-insert", argv[1], delay, none, .3, .3), aPlain = perf("a-plain", argv[1], plain, none, .3, .6),
                        aSend = perf("a-send", argv[1], none, delay, .3, .3), aShared = perf("a-shared", argv[1], delay, delay, .3, .3, true);
             const std::vector<Case> cases{
@@ -910,7 +927,9 @@ int main(int argc, char** argv)
                 {"send (iii): another synth, same Delay", aSend, perf("b-send-synth", synthCopy.c_str(), none, delay, .8, .5)},
                 {"shared (i): two parts on one synth, same Delays", aShared, perf("b-shared-same", argv[1], delay, delay, .8, .5, true)},
                 {"shared (ii): two parts on one synth, the plain effect", aShared, perf("b-shared-other", argv[1], plain, plain, .8, .9, true)},
-                {"shared (iii): another synth, same Delays", aShared, perf("b-shared-synth", synthCopy.c_str(), delay, delay, .8, .5, true)}};
+                {"shared (iii): another synth, same Delays", aShared, perf("b-shared-synth", synthCopy.c_str(), delay, delay, .8, .5, true)},
+                {"empty bus: a level-0 send, another synth", aEmpty, perf("b-empty-synth", synthCopy.c_str(), none, delay, .8, .5), true},
+                {"empty bus: a level-0 send, same synth", aEmpty, perf("b-empty-same", argv[1], plain, delay, .8, .9), true}};
             auto energy = [](const Audio& a) { double e = 0; for(auto v : a.l) e += double(v) * v; return e; };
             for(const auto& c : cases)
             {
@@ -920,6 +939,16 @@ int main(int argc, char** argv)
                 {
                     load(*s, c.a); quiet(*s);
                     s->controller(64, 127); s->note(true, 60, .8); blocks(*s, 20); s->note(false, 60, 0); // held by the pedal
+                }
+                if(c.master)
+                {
+                    // The master lowered as the unit's switch test did (master.set, no graph.commit): it must be
+                    // heard at once, a live gain, in both; with the level-0 send it only staged an edit.
+                    Audio a, b; double was = 0, now = 0;
+                    for(int i = 0; i < 2; ++i) { a.run(t); was += energy(a); b.run(r); }
+                    for(auto* s : {&t, &r}) s->setMaster(.25, 0);
+                    for(int i = 0; i < 2; ++i) { a.run(t); now += energy(a); b.run(r); }
+                    check(now < .2 * was, "ring out, " + c.what + ": the master lowered is heard at once: " + std::to_string(was) + ", then " + std::to_string(now));
                 }
                 load(t, c.b);
                 Audio x, y; double early = 0, late = 0, earlyA = 0, lateA = 0, dip = 1e9;

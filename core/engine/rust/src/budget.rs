@@ -169,6 +169,20 @@ pub fn key(tier: u8, priority: u8, audibility: f32) -> f32 {
     let struck = if tier & STRUCK != 0 { STRUCK_ABOVE } else { 0.0 };
     TIER * f32::from((tier & !STRUCK).min(KEY_HELD)) + PRIORITY * f32::from(priority.min(10)) + struck + (100.0 + audibility).clamp(0.0, 999.0)
 }
+/// A voice of the last Performance ringing out (a draining connection, RFC 0021): below every live voice of its tier, above
+/// the tier under it (a tier's keys span 0 to 52,000 above its base; this takes 60,000 off).
+const RETIRING: f32 = 60_000.0;
+/// Entry `e`'s voice by the key, a retiring one taken below the live voices of its tier.
+fn entry_key(e: &Entry, tier: u8, audibility: f32) -> f32 {
+    retiring(key(tier, e.priority, audibility), e.draining)
+}
+fn retiring(key: f32, draining: bool) -> f32 {
+    if draining {
+        key - RETIRING
+    } else {
+        key
+    }
+}
 /// Its level in the mix less its age's share.
 pub fn audibility(level_db: f32, age_ms: f32) -> f32 {
     level_db - (age_ms.max(0.0) / 1000.0 * AGED_DB_PER_S).min(AGED_MOST_S * AGED_DB_PER_S)
@@ -412,7 +426,7 @@ impl Budget {
                 // Its context's next listed voice, never its last.
                 if let Some(h) = e.heard.filter(|h| listed && h.count == LEAST && h.taken >= h.count && e.listed_left() > 1) {
                     let (tier, heard, _) = h.least[LEAST - 1];
-                    unlisted = unlisted.min(key(tier, e.priority, heard + self.gain_db(e)));
+                    unlisted = unlisted.min(entry_key(e, tier, heard + self.gain_db(e)));
                 }
                 if let Some(x) = listed.then(|| self.listed_key(e, true)).flatten() {
                     if best.is_none() || x < best_key {
@@ -470,7 +484,7 @@ impl Budget {
         };
         let outer = tier == KEY_HELD && g.held > 2 && (s.key == g.low || s.key == g.high);
         let tier = if struck { tier | STRUCK } else { tier };
-        key(tier, e.priority, audibility(level + self.gain_db(e), age)) + if outer { OUTER } else { 0.0 }
+        entry_key(e, tier, audibility(level + self.gain_db(e), age)) + if outer { OUTER } else { 0.0 }
     }
     /// The next voice entry `e`'s context listed, by the key: None when none is left to give (or, with `last`, its last).
     fn listed_key(&self, e: &Entry, last: bool) -> Option<f32> {
@@ -479,7 +493,7 @@ impl Budget {
             return None;
         }
         let (tier, heard, _) = h.least[h.taken];
-        Some(key(tier, e.priority, heard + self.gain_db(e)))
+        Some(entry_key(e, tier, heard + self.gain_db(e)))
     }
     /// A voice's cost on entry `e`'s node.
     fn voice_cost(&self, e: &Entry) -> f32 {
@@ -884,5 +898,17 @@ mod tests {
         assert!(key(RELEASED, 5, -30.0) < key(RELEASED, 5, -20.0));
         assert!(audibility(-20.0, 5000.0) < audibility(-20.0, 1000.0));
         assert_eq!(audibility(-20.0, 60_000.0), audibility(-20.0, 10_000.0));
+    }
+    /// A retiring tail's voice (the last Performance's, ringing out) goes before every live voice of its tier, however
+    /// loud and whatever its part's priority, and after every voice of the tier under it.
+    #[test]
+    fn retiring_voices_rank_below_live_ones_of_their_tier() {
+        for tier in [RELEASED, PEDALED, KEY_HELD] {
+            let top = retiring(key(tier | STRUCK, 10, 899.0) + if tier == KEY_HELD { OUTER } else { 0.0 }, true);
+            assert!(top < key(tier, 0, -100.0), "tier {tier}");
+            if tier > RELEASED {
+                assert!(retiring(key(tier, 0, -100.0), true) > key((tier - 1) | STRUCK, 10, 899.0), "tier {tier}");
+            }
+        }
     }
 }

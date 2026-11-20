@@ -89,6 +89,7 @@ namespace oscairn::voices
         uint8_t tier() const noexcept
         {
             if(ageMs >= 0 && ageMs < struckMs) return struck;
+            if(levelDb(loudness) < inaudibleDb) return released;
             return held ? keyHeld : pedaled ? Tier::pedaled : released;
         }
         // Its level less its age's share: the larger, the more it is heard.

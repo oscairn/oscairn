@@ -179,6 +179,42 @@ namespace
         blocks(s, 2);
         s.savePerformance(file.string());
     }
+    // An effect for chained: the Delay (by path) or the fixture's effect (path and plugin ID).
+    struct Effect { const char* path = nullptr; const char* id = nullptr; };
+    // One Basic Synth part on the whole keyboard playing one sound marked by `brightness`: through
+    // `insert` when given, and sending to a bus through `send` when given; `setting` sets the
+    // effects (the Delay's feedback and wet, the fixture's gain).
+    // With `pair`, two such parts, the keyboard's lower and upper halves, the second through an
+    // insert alone: read, the two synths share one instance (formed on their own).
+    void chained(const fs::path& file, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false)
+    {
+        Session s(48000, frames);
+        auto effect = [&](const std::string& name, Effect e) {
+            const auto fx = e.id ? s.add(name, e.path, e.id) : s.add(name, e.path);
+            if(e.id) check(s.setParameter(fx, 7, setting), "effect gain");
+            else check(s.setParameter(fx, 1, .25) && s.setParameter(fx, 2, setting) && s.setParameter(fx, 3, setting), "delay settings");
+            return fx;
+        };
+        std::vector<NodeId> synths;
+        for(int i = 0; i < (pair ? 2 : 1); ++i)
+        {
+            const auto n = s.add("synth " + std::to_string(i), synth);
+            PartInput keys; if(pair) keys.zones = {NoteZone{uint8_t(64 * i), uint8_t(64 * i + 63)}};
+            const auto part = s.addPart("Part " + std::to_string(i), keys); s.insertIntoPart(part, 0, n);
+            if(insert.path) s.insertIntoPart(part, 1, effect("insert " + std::to_string(i), insert));
+            if(send.path && !i)
+            {
+                const auto bus = s.addPart("Bus", {PartInput::Kind::Bus}); s.insertIntoPart(bus, 0, effect("send", send));
+                s.setSend(part, bus, .5);
+            }
+            synths.push_back(n);
+        }
+        s.commit();
+        for(size_t i = 0; i < synths.size(); ++i)
+            check(s.selectSound(synths[i], s.prepareSound(synths[i], "Chained " + std::to_string(brightness) + " " + std::to_string(i), {{1, brightness}, {4, double(1 + i)}})), "select a sound");
+        blocks(s, 2);
+        s.savePerformance(file.string());
+    }
     struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
     {
@@ -432,6 +468,8 @@ int main(int argc, char** argv)
         check(!s.estimate(a.string()).seamless, "B -> A cuts");
         w = load(s, a); report("B -> A, a cut", w);
         check(w.reused == 8 && w.loaded == 0 && w.kept == 0, "a cut takes over every free playing instance");
+        auto cutSaid = [&] { for(const auto& n : s.sessionStatus().notices) if(n.find("notes could not ring out") != std::string::npos) return true; return false; };
+        check(!cutSaid(), "a cut with nothing sounding says nothing of notes");
         // Off while this thread renders: a budget measures each block's wall time as its plugins' cost,
         // and this is no real-time thread, so on a loaded machine a block descheduled would count.
         s.setBudget({});
@@ -443,6 +481,7 @@ int main(int argc, char** argv)
         check(!s.estimate(b.string()).seamless, "A -> B cuts");
         w = load(s, b); report("A -> B, a cut, a note held", w);
         check(w.reused == 8 && w.loaded == 0 && s.leaving() == 0, "a cut takes over the sounding instance too, nothing rings out");
+        check(cutSaid(), "a cut of a held note is said: the last Performance's notes could not ring out");
         s.setBudget({});
         s.note(false, 40, 0);
         compare(s, b, "a cut with a note held"); quiet(s);
@@ -841,6 +880,66 @@ int main(int argc, char** argv)
             check(energy > 1e-3, "older tail: audible");
             quiet(t);
             check(t.ringOutRoutes() == 0, "older tail: the ring-out routes go once B's sound is discarded: " + std::to_string(t.ringOutRoutes()));
+        }
+
+        // The owner's rule: at a Performance change, notes held by the keys or the pedal keep ringing,
+        // never a cut, whatever the two Performances' chains after the instrument are. A note held by
+        // the pedal through a change from A (the synth through an effect inserted after it, or sending
+        // to one on a bus) to B: the same synth and effect plugins, both taken over (i); the same
+        // synth and another effect, or none (ii); another synth (a copy, loaded afresh) and the same
+        // effect (iii). The held note keeps sounding for 1.5 s, not gone in a block or two, and once it
+        // has rung out B sounds as B opened fresh.
+        {
+            const auto synthCopy = temp.path / ("chain-synth" + fs::path(argv[1]).extension().string());
+            fs::copy(argv[1], synthCopy, fs::copy_options::recursive);
+            const Effect delay{argv[3]}, plain{argv[4], "org.kick.test.effect"}, none{};
+            auto perf = [&](const std::string& name, const char* synth, Effect insert, Effect send, double brightness, double setting, bool pair = false) {
+                const auto f = temp.path / ("chain-" + name); chained(f, synth, insert, send, brightness, setting, pair); return f;
+            };
+            struct Case { std::string what; fs::path a, b; };
+            const auto aInsert = perf("a-insert", argv[1], delay, none, .3, .3), aPlain = perf("a-plain", argv[1], plain, none, .3, .6),
+                       aSend = perf("a-send", argv[1], none, delay, .3, .3), aShared = perf("a-shared", argv[1], delay, delay, .3, .3, true);
+            const std::vector<Case> cases{
+                {"insert (i): same synth, same Delay", aInsert, perf("b-insert-same", argv[1], delay, none, .8, .5)},
+                {"insert (i): same synth, same plain effect", aPlain, perf("b-plain-same", argv[1], plain, none, .8, .9)},
+                {"insert (ii): same synth, the plain effect", aInsert, perf("b-insert-other", argv[1], plain, none, .8, .9)},
+                {"insert (ii): same synth, dry", aInsert, perf("b-insert-dry", argv[1], none, none, .8, .5)},
+                {"insert (iii): another synth, same Delay", aInsert, perf("b-insert-synth", synthCopy.c_str(), delay, none, .8, .5)},
+                {"send (i): same synth, same Delay", aSend, perf("b-send-same", argv[1], none, delay, .8, .5)},
+                {"send (ii): same synth, the plain effect", aSend, perf("b-send-other", argv[1], none, plain, .8, .9)},
+                {"send (iii): another synth, same Delay", aSend, perf("b-send-synth", synthCopy.c_str(), none, delay, .8, .5)},
+                {"shared (i): two parts on one synth, same Delays", aShared, perf("b-shared-same", argv[1], delay, delay, .8, .5, true)},
+                {"shared (ii): two parts on one synth, the plain effect", aShared, perf("b-shared-other", argv[1], plain, plain, .8, .9, true)},
+                {"shared (iii): another synth, same Delays", aShared, perf("b-shared-synth", synthCopy.c_str(), delay, delay, .8, .5, true)}};
+            auto energy = [](const Audio& a) { double e = 0; for(auto v : a.l) e += double(v) * v; return e; };
+            for(const auto& c : cases)
+            {
+                // r stays on A, the same notes: the note as it sounds without a change.
+                Session t(48000, frames), r(48000, frames);
+                for(auto* s : {&t, &r})
+                {
+                    load(*s, c.a); quiet(*s);
+                    s->controller(64, 127); s->note(true, 60, .8); blocks(*s, 20); s->note(false, 60, 0); // held by the pedal
+                }
+                load(t, c.b);
+                Audio x, y; double early = 0, late = 0, earlyA = 0, lateA = 0, dip = 1e9;
+                for(int i = 0; i < 600; ++i)
+                {
+                    x.run(t); y.run(r);
+                    const double e = energy(x), ea = energy(y);
+                    if(i < 40) dip = std::min(dip, e / std::max(ea, 1e-30));
+                    if(i < 10) { early += e; earlyA += ea; }
+                    if(i >= 550 && i < 560) { late += e; lateA += ea; }
+                }
+                std::printf("ring out, %s: per 10 blocks, after the change %.4f then %.4f 1.5 s on; without it %.4f and %.4f; the least of a block's of the first 40 %.3f; %zu ring-out routes\n",
+                            c.what.c_str(), early, late, earlyA, lateA, dip, t.ringOutRoutes());
+                check(dip > .1 && late > .1 * lateA, "ring out, " + c.what + ": the pedaled note rings on through the change: the least block " + std::to_string(dip) + " of the note without it, 1.5 s on " + std::to_string(late) + " against " + std::to_string(lateA));
+                t.controller(64, 0);
+                for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1);
+                quiet(t);
+                check(!t.leaving(), "ring out, " + c.what + ": A's nodes gone once rung out");
+                compare(t, c.b, ("ring out, " + c.what + ": then B as a fresh load").c_str());
+            }
         }
 
         if(const char* real = std::getenv("OSCAIRN_SWITCH_PERFORMANCES"); real && *real)

@@ -275,7 +275,9 @@ never write the user's data folder.
   three heaviest plugins. The app shows a refused Performance's reason over the screen until OK,
   whatever asked for it (the last one reopened at the start, the Library, the Setlist, a file):
   "The Performance did not open" and the engine's words (`desktop-gaps`). A Performance that fits alone but not beside the one playing (and any
-  still ringing out) opens as a cut; the desktop says so after opening it. Nor is it prepared
+  still ringing out) opens as a cut; the desktop says so after opening it. When that cut a note held, pedaled or
+  heard in the last tenth of a second, `session.status`'s notices say "the last Performance's notes could not
+  ring out" and why (2026-11-19), so a cut is never silent. Nor is it prepared
   ahead (RFC 0021): `preparePerformance` returns false, and the Setlist app says it will open
   when cued.
 

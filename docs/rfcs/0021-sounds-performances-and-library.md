@@ -616,7 +616,8 @@ after; and gone at once on a panic (the fixture's `KICK_FIXTURE_STUCK`). Notes
 queued at the moment of the change are no longer dropped, so a release reaches the old plugins.
 Changing again while one still rings carries those too. A change that would not fit with both
 Performances in memory and CPU opens as a cut instead, and the desktop says so after opening
-it: admission, in [RFC 0025](0025-resource-budgets.md#status). `control-parts` checks a held note
+it: admission, in [RFC 0025](0025-resource-budgets.md#status); one that cut a note still sounding says so in a
+notice. `control-parts` checks a held note
 through the change, an edit to the new Performance leaving the old one ringing, a new note
 reaching only the new one and the old one going; `control-performance` checks a held note
 through the change and, once it has rung out, output identical to a fresh load.
@@ -1387,6 +1388,28 @@ the mean render time per block of 128 frames over the first 600 blocks after the
 
 So while a tail rings the extra cost is the outgoing effects', less than the separate instance a
 change between unrelated Performances keeps running; once the routes go, none.
+
+**Held notes across other chains (checked 2026-11-19).** The owner heard a Sampler Performance's
+held notes cut at a change, with memory at about half. `control-performance-switch` (and
+`-workers`, `-hosts`) now holds a note with the pedal from A to B for eleven pairs of chains: the
+synth through an inserted effect (the Delay, or the fixture's plain effect), sending to a Delay on
+a bus, or two parts sharing one instance through Delays; B with the same synth and effect
+plugins, the same synth and another effect or none, or another synth and the same effect. In
+every one the note sounds in the 40 blocks after the change and 1.5 s on exactly as without a
+change, and B then sounds as a fresh load. The all-or-nothing rule above is not reached at a
+change: an instance a held note sounds through, and every node it sends to, is busy
+(`Session::freeInstances`), so none is taken over, and an effect offering effect contexts gets a
+new context while its old node rings out. Were it reached, the tail would play through the
+incoming chain (the plugin's main output), not stop. What does cut held notes is admission: a
+change is seamless only while the open Performance, at full cost (its busiest figures and all its
+memory, however few notes still ring), and the incoming one, at full cost too (even where its
+sounds go beside the open instance, whose memory is then counted twice), fit one block's CPU
+budget and the memory ceiling together, where the open one alone may use the budget on every
+audio core. A cut that ends a note held, pedaled or heard now says so in a notice ("the last
+Performance's notes could not ring out"). Proposed for the estimates' rework, not built: price
+what rings out at what it holds now (its memory resident, its CPU at rest plus the voices still
+sounding), a node prepared beside at its sounds' memory only, and hold the sum against the
+budget on every audio core as admission does.
 
 **A library click** prepares the Performance first, as the Setlist does ahead
 (`performance.prepare`), and opens it (`library.load`) once that is done, both in the app's job off

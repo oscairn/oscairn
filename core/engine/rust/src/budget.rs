@@ -321,8 +321,8 @@ impl Lane {
     /// the time of the block that was lost.
     pub fn judge_held(&mut self) {
         let trouble = self.took > self.limit || self.lost_own;
-        let held_off = self.run - self.cpu > (1.0 - SOFT) * self.limit || self.wait > WAIT_SHARE * self.miss;
-        self.held = trouble && self.timed && self.limit.is_finite() && self.cpu <= self.limit && held_off;
+        let held_off = || self.run - self.cpu > (1.0 - SOFT) * self.limit || self.wait > WAIT_SHARE * self.miss;
+        self.held = trouble && self.timed && self.limit.is_finite() && self.cpu <= self.limit && held_off();
     }
 }
 

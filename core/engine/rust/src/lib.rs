@@ -878,4 +878,65 @@ mod tests {
             }
         }
     }
+
+    // Run asks the worker stamps after the block's finishes, only for a lane in trouble (Notes::time_lanes): its lanes come
+    // out as finish leaves them with the stamps given there (the core-diff vectors' way), held judged the same; a lane
+    // within its time is not asked.
+    #[test]
+    fn stamps_asked_late_judge_the_same() {
+        let timing = Timing { budget: 300.0, period: 2666.0, deadline: 2266.0, allowance: 1333.0, cores: 1.0, quiet_after: 256, low_slack: 0.0 };
+        let lanes_of = [0usize, 0, 1, 0];
+        let new = || Notes::new(lanes_of.iter().map(|&l| notes::Step::new(None, Vec::new(), Vec::new(), l, false, false, Vec::new())).collect(), 2);
+        let rendered = |took: f32, processed: bool, cpu: f32, wait: f32| Rendered {
+            took,
+            processed,
+            reset: false,
+            missed: false,
+            own_voices: false,
+            honors_volume: false,
+            voices: 0,
+            voice_cost: 0.0,
+            notes: &[],
+            sent: &[],
+            importance: &[],
+            contexts: &[],
+            cpu,
+            wait,
+        };
+        // Per case, each step's (took, rendered, cpu, wait): lane 0 over its time (its threads' CPU well short of it, by its own
+        // work, a stamp unknown beside a long wait to be woken) or within it.
+        let cases: [[(f32, bool, f32, f32); 4]; 4] = [
+            [(150.0, true, 40.0, 30.0), (140.0, true, 50.0, 0.0), (10.0, true, 9.0, 5.0), (20.0, false, 0.0, 0.0)],
+            [(150.0, true, 140.0, 3.0), (140.0, true, 130.0, 2.0), (10.0, true, 9.0, 5.0), (20.0, true, 19.0, 1.0)],
+            [(150.0, true, 0.0, 0.0), (140.0, true, -1.0, 0.0), (10.0, true, 9.0, 5.0), (20.0, true, 10.0, 900.0)],
+            [(30.0, true, 10.0, 900.0), (20.0, true, 10.0, 0.0), (10.0, true, 9.0, 5.0), (20.0, true, 10.0, 1.0)],
+        ];
+        let mut held = [false; 4];
+        for (k, case) in cases.iter().enumerate() {
+            let (mut given, mut late) = (new(), new());
+            given.begin(timing);
+            late.begin(timing);
+            for (s, &(took, processed, cpu, wait)) in case.iter().enumerate() {
+                given.finish(&mut Routes(()), s, &rendered(took, processed, if processed { cpu } else { 0.0 }, if processed { wait } else { 0.0 }));
+                late.finish(&mut Routes(()), s, &rendered(took, processed, 0.0, 0.0));
+            }
+            let mut asked = Vec::new();
+            late.time_lanes(|s| {
+                asked.push(s);
+                (case[s].3, case[s].2)
+            });
+            for (i, (g, l)) in given.budget.lanes.iter_mut().zip(late.budget.lanes.iter_mut()).enumerate() {
+                g.judge_held();
+                l.judge_held();
+                assert_eq!(g.held, l.held, "case {k} lane {i}: held");
+                held[k] |= g.held;
+                if g.took > g.limit {
+                    assert_eq!((g.cpu.to_bits(), g.timed, g.wait.to_bits()), (l.cpu.to_bits(), l.timed, l.wait.to_bits()), "case {k} lane {i}");
+                }
+            }
+            let troubled: Vec<usize> = (0..4).filter(|&s| case[s].1 && given.budget.lanes[lanes_of[s]].took > given.budget.lanes[lanes_of[s]].limit).collect();
+            assert_eq!(asked, troubled, "case {k}: asked only the rendered steps of a lane in trouble");
+        }
+        assert_eq!(held, [true, false, true, false], "held off a core, over by its own work, woken late, within its time");
+    }
 }

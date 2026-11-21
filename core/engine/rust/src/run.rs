@@ -537,7 +537,9 @@ impl Run {
         if notes.budgeting() {
             audio.reach(b.live_to, &mut notes.budget.gains);
         }
-        // The lanes judged, the callback's time left once the block is collected (RFC 0045's guard), the timing report kept.
+        // The worker stamps only where a lane's time is short (time_lanes); the lanes judged, the callback's time left once the
+        // block is collected (RFC 0045's guard), the timing report kept.
+        notes.time_lanes(|s| p.waited(s));
         notes.end(rs, if ends != 0 { micros(ends - p.now()) } else { f32::NAN });
         ok
     }
@@ -735,9 +737,6 @@ impl Run {
             wait: 0.0,
         };
         step.missed = missed;
-        if budgeting && processed {
-            (r.wait, r.cpu) = p.waited(s);
-        }
         if budgeting && step.budgeted && processed {
             (r.voices, r.voice_cost, r.notes) = p.voices(s);
             r.importance = p.importance(s);

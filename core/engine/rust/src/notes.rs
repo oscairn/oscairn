@@ -46,6 +46,8 @@ pub struct Step {
     live_before: u32,  // the notes live a block earlier: those of the block a late lane's plugin renders now
     cost: f32,         // its last block's usual time; an effect asleep, its cost awake
     awake: f32,        // an effect's usual time when it last ran awake
+    took: f32,         // this block's time as its host measured it, and whether it rendered: time_lanes' (budgeting)
+    rendered: bool,
 }
 
 impl Step {
@@ -74,6 +76,8 @@ impl Step {
             limit_before: 0,
             live_before: 0,
             cost: 0.0,
+            took: 0.0,
+            rendered: false,
             awake: 0.0,
         }
     }
@@ -383,6 +387,7 @@ impl Notes {
                 }
                 step.cost = usual.max(if step.awake > 0.0 { step.awake } else { a.rest_now() });
             }
+            (step.took, step.rendered) = (r.took, r.processed);
             if let Some(lane) = budget.lanes.get_mut(step.lane) {
                 lane.took += usual;
                 if !step.budgeted {
@@ -456,6 +461,28 @@ impl Notes {
         }
     }
 
+    /// The worker stamps of each rendered step on a lane in trouble this block (over its limit, or a block of its own lost),
+    /// as `waited` (Plugins::waited) gives them, which judge_held reads; asked only there, after the block's finishes: a
+    /// lane within its time needs neither (RFC 0046 step 4). The lane's sums worked out again as finish works them out
+    /// with the stamps given there, in plan order: the same values.
+    pub fn time_lanes(&mut self, mut waited: impl FnMut(usize) -> (f32, f32)) {
+        let trouble = |l: &crate::budget::Lane| l.took > l.limit || l.lost_own;
+        if !self.budgeting || !self.budget.lanes.iter().any(trouble) {
+            return;
+        }
+        for l in self.budget.lanes.iter_mut().filter(|l| trouble(l)) {
+            (l.cpu, l.timed, l.wait) = (0.0, false, 0.0);
+        }
+        for (s, step) in self.steps.iter().enumerate() {
+            let Some(lane) = self.budget.lanes.get_mut(step.lane).filter(|l| trouble(l)) else { continue };
+            let (wait, cpu) = if step.rendered { waited(s) } else { (0.0, 0.0) };
+            lane.cpu += if cpu > 0.0 { cpu } else { step.took };
+            lane.timed |= cpu > 0.0;
+            if wait > 0.0 {
+                lane.wait = if lane.wait > 0.0 { lane.wait.min(wait) } else { wait };
+            }
+        }
+    }
     /// Whether the budget runs this block.
     pub fn budgeting(&self) -> bool {
         self.budgeting

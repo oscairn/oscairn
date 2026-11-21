@@ -888,6 +888,116 @@ fn setlist_play_reached_by_the_bar_cursor() {
     assert_eq!(s.ui.get_screen(), 3, "Play");
 }
 
+// The whole Setlist walked with panel moves only: both setlist rows (the count the screen's own
+// setlists model declares) and every slot of the shown view (the count its slots model declares,
+// not hard-coded), plus Previous and Next and Play, each pressed and held to a real effect on the
+// fake engine or the shown screen — a setlist row opens (`setlists.get` for that id, the name in
+// the bar), a slot opens (`library.load` for that id, the row shows playing), Previous and Next
+// step to another slot, and Play opens Play. Nothing switches before the press.
+#[test]
+fn setlist_walked_with_panel_moves_only() {
+    let setlists = json!([{"id": "s1", "name": "Friday"}, {"id": "s2", "name": "Saturday"}]);
+    let doc = |id: &str, name: &str, slots: Vec<serde_json::Value>| json!({
+        "format": "oscairn.setlist", "version": 2, "info": {"id": id, "name": name}, "display": {"mode": "list"},
+        "pages": [{"name": "Set 1", "slots": serde_json::Value::Array(slots)}]});
+    let friday_slots: Vec<serde_json::Value> = (0..4).map(|i| json!({"id": format!("a{i}"), "name": format!("Song {i}"), "color": "", "label": ""})).collect();
+    let saturday_slots: Vec<serde_json::Value> = (0..4).map(|i| json!({"id": format!("b{i}"), "name": format!("Late {i}"), "color": "", "label": ""})).collect();
+    let mut f = Fixture::new("setlist-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ask = |f: &mut Fixture, what: &str| f.engine.try_request(std::time::Duration::from_secs(30)).unwrap_or_else(|| panic!("the shell sent no request: {what}"));
+    let settle = |f: &mut Fixture, setlist_id: &str, slots: &[serde_json::Value]| {
+        let mut quiet = 0;
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            quiet += 1;
+            assert!(quiet < 500, "settle never came quiet");
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "library.query" if r["params"]["type"] == "oscairn.setlist" => json!({"items": setlists.clone(), "total": 2}),
+                // The setlist's Performances: everything short of whole, so every slot opens (opens() checks the id in it).
+                "library.query" if r["params"]["limit"].as_u64() == Some(1000) => json!({"items": [], "total": 1}),
+                "library.query" => json!({"items": [], "total": 0}),
+                "setlists.get" => doc(setlist_id, if setlist_id == "s2" { "Saturday" } else { "Friday" }, slots.to_vec()),
+                "library.load" | "performance.prepare" => json!({}),
+                "controllers.view" | "packages.installed" => json!({"accepted": true}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": result})));
+            f.pump();
+        }
+    };
+    // Home → the Setlist, by panel moves only.
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // the first move shows the cursor
+    shell::act(Action::Move { pane: Some(0), by: 2 }); // the Setlist tile
+    assert_eq!(f.screen.ui.get_screen(), 0, "nothing opened until confirmed");
+    shell::act(Action::Confirm(None));
+    assert_eq!(f.screen.ui.get_screen(), 1, "the Setlist");
+    settle(&mut f, "s1", &friday_slots);
+    // Both setlist rows, counted from the screen's own setlists model: each pressed opens that
+    // setlist. The second row first (so the switch is real), then the first back.
+    let n_sets = f.screen.ui.global::<SetlistState>().get_setlists().row_count();
+    assert!(n_sets >= 2, "the screen declares two setlists: {n_sets}");
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // the first move shows the cursor on the first setlist
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // on to Saturday
+    shell::act(Action::Confirm(None));
+    let get = ask(&mut f, "open a setlist: confirm on a setlist row");
+    assert_eq!((get["method"].as_str(), get["params"]["id"].as_str()), (Some("setlists.get"), Some("s2")));
+    f.reply(&get, json!({"result": {"setlist": doc("s2", "Saturday", saturday_slots.clone())}}));
+    settle(&mut f, "s2", &saturday_slots);
+    assert_eq!(f.screen.ui.global::<SetlistState>().get_name().as_str(), "Saturday", "the second setlist row opened Saturday");
+    shell::act(Action::Move { pane: Some(0), by: -1 }); // back to Friday
+    shell::act(Action::Confirm(None));
+    let get = ask(&mut f, "open a setlist: confirm on a setlist row");
+    assert_eq!((get["method"].as_str(), get["params"]["id"].as_str()), (Some("setlists.get"), Some("s1")));
+    f.reply(&get, json!({"result": {"setlist": doc("s1", "Friday", friday_slots.clone())}}));
+    settle(&mut f, "s1", &friday_slots);
+    assert_eq!(f.screen.ui.global::<SetlistState>().get_name().as_str(), "Friday", "the first setlist row opened Friday");
+    // The slots: the count the screen's own slots model declares for the view, not hard-coded.
+    shell::act(Action::Move { pane: Some(1), by: 1 }); // the cursor onto the first slot
+    assert_eq!(f.screen.ui.get_screen(), 1, "moving to the slots switches nothing");
+    let shown = f.screen.ui.global::<SetlistState>().get_slots().row_count();
+    assert!(shown > 0, "the screen declares slots to walk");
+    // Previous and Next, from the first slot: each opens the slot it steps to.
+    shell::act(Action::Confirm(None));
+    let first = ask(&mut f, "the first slot (Confirm on the cursor's slot)");
+    assert_eq!(first["method"], "library.load");
+    f.reply(&first, json!({"result": {}}));
+    settle(&mut f, "s1", &friday_slots);
+    shell::act(Action::Page(1)); // Next
+    let next = ask(&mut f, "next slot (Page 1)");
+    assert_eq!(next["method"], "library.load");
+    assert_ne!(next["params"]["id"], first["params"]["id"], "Next steps to another slot");
+    f.reply(&next, json!({"result": {}}));
+    settle(&mut f, "s1", &friday_slots);
+    shell::act(Action::Page(-1)); // Previous
+    let prev = ask(&mut f, "prev slot (Page -1)");
+    assert_eq!(prev["method"], "library.load");
+    assert_eq!(prev["params"]["id"], first["params"]["id"], "Previous comes back");
+    f.reply(&prev, json!({"result": {}}));
+    settle(&mut f, "s1", &friday_slots);
+    // Every slot of the view, each pressed and held to what it does: it opens, the row shows playing.
+    let mut opened = 0;
+    for i in 0..shown {
+        shell::act(Action::Confirm(None));
+        let load = ask(&mut f, "slot loop: Confirm");
+        assert_eq!(load["method"], "library.load", "slot {i} opens");
+        assert_eq!(load["params"]["id"], friday_slots[i]["id"], "slot {i} is the one under the cursor");
+        f.reply(&load, json!({"result": {}}));
+        settle(&mut f, "s1", &friday_slots);
+        let at = f.screen.ui.global::<SetlistState>().get_slots().iter().position(|r| r.cursor).unwrap();
+        assert!(f.screen.ui.global::<SetlistState>().get_slots().row_data(at).unwrap().playing, "slot {i} is the one playing");
+        opened += 1;
+        shell::act(Action::Move { pane: Some(1), by: 1 });
+    }
+    assert_eq!(opened, shown, "every slot of the view was opened");
+    // Play, the screen's own action: the bar's cursor, Confirmed, shows Play.
+    shell::act(Action::Move { pane: Some(2), by: 1 }); // the bar's first stop, Back
+    shell::act(Action::Move { pane: Some(2), by: 1 }); // on to the Setlist's Play
+    assert_eq!(f.screen.ui.get_screen(), 1, "moving over Play switches nothing");
+    shell::act(Action::Confirm(None));
+    assert_eq!(f.screen.ui.get_screen(), 3, "Play");
+}
+
 /// The real engine (OSCAIRN_ENGINE, which ctest gives when the build has one) with no audio
 /// device, in folders of its own (never the user's), ended when dropped. None without one.
 struct RealEngine {

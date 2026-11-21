@@ -235,10 +235,12 @@ namespace oscairn
     void Graph::carryOver(const Graph& current,const std::set<NodeId>& ids) {
         for(const auto id:ids){if(nodes_.count(id))throw std::logic_error("a carried-over node ID is taken");auto node=current.nodes_.at(id);node.retiring=false;nodes_[id]=std::move(node);setRetiring(id,true);}
         nextId_=std::max(nextId_,current.nextId_); // a replacement prepared ahead: the current graph may have added since
-        // Their live gains are frozen at what they are now: the slots are the next Performance's.
+        // Their live gains are frozen at what they are now: the slots are the next Performance's. Routes between the same
+        // channels through different live gains become one, their gains summed.
         for(auto r:current.audioRoutes_)if(ids.count(r.from.node) && (ids.count(r.to.node) || r.to.node==graphOutput)){
             for(auto& slot:r.live){r.gain*=current.liveGain(slot);slot=0;}
-            audioRoutes_.push_back(r);}
+            const auto same=std::find_if(audioRoutes_.begin(),audioRoutes_.end(),[&](const auto& x){return x.from==r.from && x.to==r.to && x.channels==r.channels && x.live==r.live;});
+            if(same!=audioRoutes_.end())same->gain+=r.gain;else audioRoutes_.push_back(r);}
         for(const auto& [edge,route]:current.noteEdges_)if(ids.count(edge.second) && (ids.count(edge.first) || edge.first==graphInput)){
             noteEdges_.emplace(edge,route);draining_.insert(edge);
             if(const auto z=current.noteZones_.find(edge);z!=current.noteZones_.end())noteZones_[edge]=z->second;}
@@ -264,7 +266,10 @@ namespace oscairn
             const auto to=nodes_.find(r.to.node);
             // No longer the outgoing chain (taken over): left out, the others ring; one that carries nothing is no loss.
             if(r.to.node!=graphOutput && (to==nodes_.end() || !to->second.retiring)){if(r.gain!=0)++lost;continue;}
-            r.from={node,ringOutPort,r.from.channel};routes.push_back(r);
+            r.from={node,ringOutPort,r.from.channel};
+            // Ways through different live gains, frozen, are one route: their gains summed (connecting both would keep the last).
+            const auto same=std::find_if(routes.begin(),routes.end(),[&](const auto& x){return x.from==r.from && x.to==r.to && x.channels==r.channels;});
+            if(same!=routes.end())same->gain+=r.gain;else routes.push_back(r);
         }
         for(auto r:current.audioRoutes_) // the earlier tail, fading out through its own chain
             if(r.from.node==from && r.from.port==ringOutPort && r.from.channel<2 && (r.to.node==graphOutput || nodes_.contains(r.to.node)))
@@ -439,8 +444,8 @@ namespace oscairn
             for(uint32_t i=0;i<c.channels;++i)
             {
                 AudioConnection channel=c;channel.channels=1;channel.from.channel+=i;channel.to.channel+=i;
-                auto existing=std::find_if(next.begin(),next.end(),[&](const auto& r){return r.from==channel.from && r.to==channel.to;});
-                if(existing!=next.end()){existing->gain=c.gain;existing->live=c.live;}
+                auto existing=std::find_if(next.begin(),next.end(),[&](const auto& r){return r.from==channel.from && r.to==channel.to && r.live==channel.live;});
+                if(existing!=next.end())existing->gain=c.gain;
                 else
                 {
                     if(next.size()==maxAudioConnections)throw std::invalid_argument("Audio connection limit exceeded");
@@ -456,6 +461,16 @@ namespace oscairn
         resolve(c.from,true,c.channels);resolve(c.to,false,c.channels);
         std::erase_if(audioRoutes_,[&](const AudioConnection& r) {
             return r.from.node==c.from.node && r.to.node==c.to.node &&
+                r.from.port==c.from.port && r.to.port==c.to.port &&
+                r.from.channel>=c.from.channel && r.from.channel-c.from.channel<c.channels &&
+                r.to.channel>=c.to.channel && r.to.channel-c.to.channel==r.from.channel-c.from.channel;
+        });
+    }
+    void Graph::disconnectRoute(const AudioConnection& c)
+    {
+        resolve(c.from,true,c.channels);resolve(c.to,false,c.channels);
+        std::erase_if(audioRoutes_,[&](const AudioConnection& r) {
+            return r.from.node==c.from.node && r.to.node==c.to.node && r.live==c.live &&
                 r.from.port==c.from.port && r.to.port==c.to.port &&
                 r.from.channel>=c.from.channel && r.from.channel-c.from.channel<c.channels &&
                 r.to.channel>=c.to.channel && r.to.channel-c.to.channel==r.from.channel-c.from.channel;

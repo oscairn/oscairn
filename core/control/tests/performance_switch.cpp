@@ -1102,21 +1102,60 @@ int main(int argc, char** argv)
             std::printf("send raised from 0, %s: its largest step coming in %.5f against the note's own %.5f\n", what.c_str(), step, steady);
             check(step <= steady, "send raised from 0, " + what + ": no click as it comes in: a step of " + std::to_string(step) + " against the note's " + std::to_string(steady));
             check(after > 0, "send raised from 0, " + what + ": the note still sounds");
-            // shortcut: to an empty bus that plays where the part does, the raised send and the part's fader are one route
-            // again, mixing their live gains, so it is baked and the fader is heard at graph.commit (the app commits after
-            // every edit), not at once; a route per live-gain set would keep it live, if the converter's empty buses stay.
+            // To an empty bus that plays where the part does, the raised send and the part's fader are two routes, each live
+            // (one route per set of live gains): both heard at once, nothing staged.
             Audio a; double was = 0, now = 0;
             for(int i = 0; i < 2; ++i) { a.run(t); was += energyOf(a); }
             t.setPartLevel(part, .25, false);
-            if(emptyBus) t.commit();
             for(int i = 0; i < 2; ++i) { a.run(t); now += energyOf(a); }
-            check(now < .2 * was, "send raised from 0, " + what + ": the part's fader lowered is heard (at once but to an empty bus): " + std::to_string(was) + ", then " + std::to_string(now));
+            check(now < .2 * was && !t.graphState().staged, "send raised from 0, " + what + ": the part's fader lowered is heard at once, nothing staged: " + std::to_string(was) + ", then " + std::to_string(now));
             t.setMaster(.25, 0);
-            if(emptyBus) t.commit();
             was = now; now = 0;
             for(int i = 0; i < 2; ++i) { a.run(t); now += energyOf(a); }
-            check(now < .2 * was, "send raised from 0, " + what + ": the master lowered is heard (at once but to an empty bus): " + std::to_string(was) + ", then " + std::to_string(now));
+            check(now < .2 * was && !t.graphState().staged, "send raised from 0, " + what + ": the master lowered is heard at once, nothing staged: " + std::to_string(was) + ", then " + std::to_string(now));
         }
+        // Master and part faders are live gains whatever the wiring (the owner's "# Organ", graph.get staged after master.set:
+        // its parts send to the converter's empty bus at 0.0003 and 0.00025). A part sending to that empty bus (muted at a
+        // quarter level) at 0.0003, at 0, or not at all, and the bus unmuted: master.set and the part's level heard in the next
+        // block with no graph.commit, nothing staged; and the level heard then is the level a fresh load of the same mix gives.
+        for(const double send : {.0003, 0., -1.})
+            for(const bool unmuted : {false, true})
+            {
+                const std::string what = (send > 0 ? std::string("a 0.0003 send") : send == 0 ? std::string("a level-0 send") : std::string("no send")) + (unmuted ? " to an empty bus playing" : " to a muted empty bus");
+                const auto file = temp.path / ("live-" + std::to_string(int(send * 1e4)) + (unmuted ? "-on" : "-off"));
+                uint32_t part = 0, bus = 0;
+                {
+                    Session s(48000, frames);
+                    const auto n = s.add("synth", argv[1]); part = s.addPart("Organ"); s.insertIntoPart(part, 0, n);
+                    bus = s.addPart("Reverb (type 01 21, not built yet)", {PartInput::Kind::Bus}); s.setPartLevel(bus, .25, !unmuted);
+                    if(send >= 0) s.setSend(part, bus, send);
+                    s.setPartLevel(part, .86, false); s.setMaster(.497, 0); s.commit();
+                    check(s.selectSound(n, s.prepareSound(n, "Organ", {{1, .5}})), "select a sound");
+                    blocks(s, 2); s.savePerformance(file.string());
+                }
+                // t moves its levels; u, the same opened alike, does not: their energies' ratio, block for block, is the change.
+                Session t(48000, frames), u(48000, frames);
+                for(auto* s : {&t, &u}) { load(*s, file); quiet(*s); s->note(true, 48, .8); blocks(*s, 40); }
+                check(!t.graphState().staged, what + ": nothing staged as it opens");
+                Audio a, c;
+                auto ratio = [&] { double mine = 0, still = 0; for(int i = 0; i < 4; ++i) { a.run(t); c.run(u); if(i >= 2) { mine += energyOf(a); still += energyOf(c); } } return mine / still; };
+                const double before = ratio();
+                t.setMaster(.12, 0);
+                const double master = ratio() / before;
+                t.setPartLevel(part, .43, false);
+                const double both = ratio() / before;
+                // Energies: the gains squared, .12/.497, then also .43/.86 (the send, the bus's level and the part's sum scale with the fader).
+                const double m = std::pow(.12 / .497, 2);
+                check(std::abs(master / m - 1) < 1e-3 && std::abs(both / (m * .25) - 1) < 1e-3 && !t.graphState().staged,
+                      what + ": master.set and the part's level heard in the next block, no graph.commit, nothing staged: " + std::to_string(master / m) + ", " + std::to_string(both / (m * .25)));
+                // The level then, against a fresh load of the mix with these levels: equal within float rounding.
+                const auto moved = temp.path / ("live-moved-" + std::to_string(int(send * 1e4)) + (unmuted ? "-on" : "-off"));
+                t.commit(); t.savePerformance(moved.string());
+                Session r(48000, frames);
+                load(r, moved); quiet(r); r.note(true, 48, .8); blocks(r, 52); // as many blocks after the note as t has played
+                Audio b; double mine = 0, fresh = 0; for(int i = 0; i < 2; ++i) { a.run(t); b.run(r); mine += energyOf(a); fresh += energyOf(b); }
+                check(std::abs(mine - fresh) <= 1e-6 * fresh, what + ": the level heard is a fresh load's: " + std::to_string(mine) + " against " + std::to_string(fresh));
+            }
 
         ::setenv("OSCAIRN_AUDIO_CORES", "3", 1); // the FANTOM-07's: estimates and the lanes' total as on the unit
         // The ring-out fit rule (RFC 0021, 2026-11-19): a change rings out when the incoming Performance and the

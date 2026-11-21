@@ -163,8 +163,8 @@ impl Screen {
         // How many lines fit: the sidebar's lines vary (a heading is compact, a bubble a touch target), so the first view
         // takes the lines it can show, newest from its top; the Rust layout is the source of the count (read back here).
         let side = lib.get_side_height();
-        let per = if self.bubbles {
-            let (mut fit, mut last) = (0, None);
+        let (per, view_h) = if self.bubbles {
+            let (mut fit, mut last, mut bottom) = (0, None, 0f32);
             for c in &cells {
                 if last == Some(c.line) {
                     continue;
@@ -174,15 +174,19 @@ impl Screen {
                 }
                 fit += 1;
                 last = Some(c.line);
+                bottom = bottom.max(c.top + c.h);
             }
-            fit.max(1)
+            (fit.max(1), bottom)
         } else {
             // List view: every line a touch target, one line an entry, as before.
             let t = ui.global::<crate::Theme>();
             let step = t.invoke_dense(t.invoke_gap_between(t.get_gap()), self.compact);
-            std::cmp::max(1, ((side + step) / (t.get_touch() + step)) as usize)
+            let per = std::cmp::max(1, ((side + step) / (t.get_touch() + step)) as usize);
+            (per, per as f32 * (t.get_touch() + step) - step)
         };
         lib.set_side_per_view(per as i32);
+        // The scroll bar's track is as tall as the lines the view shows, not the room they have.
+        lib.set_side_view_h(view_h);
         let (per, n) = (per, cells.len());
         let lines = cells.last().map_or(0, |c| c.line + 1);
         let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);

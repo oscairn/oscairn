@@ -55,6 +55,8 @@ export global LibraryState {
     in property <int> side-total;
     in property <int> side-first;
     in-out property <int> side-per-view: 1;
+    // The height of the lines the sidebar's view shows (the Rust layout's): the scroll bar's track.
+    in-out property <length> side-view-h: 0px;
     callback side-tapped(int);
     callback side-scrolled(int);
     callback side-resized();
@@ -204,6 +206,7 @@ export component Library inherits Rectangle {
     changed side-room => { LibraryState.side-room = root.side-room; LibraryState.side-resized(); }
     changed side-height => { LibraryState.side-height = root.side-height; LibraryState.side-resized(); }
     property <bool> side-long: LibraryState.side-total > root.side-per-view;
+    out property <length> side-track-h: side-bar.height;
     init => {
         LibraryState.side-room = root.side-room;
     }
@@ -377,12 +380,12 @@ export component Library inherits Rectangle {
             tapped => { LibraryState.side-tapped(i); }
         }
     }
-    ScrollBar {
+    side-bar := ScrollBar {
         visible: root.side-long && LibraryState.list-only;
         x: Theme.margin + root.side-width - Theme.scroll-lane;
         y: root.content-y;
         width: Theme.scroll-lane;
-        height: root.side-height;
+        height: min(root.side-height, LibraryState.side-view-h);
         total: LibraryState.side-total;
         first: LibraryState.side-first;
         per-view: root.side-per-view;

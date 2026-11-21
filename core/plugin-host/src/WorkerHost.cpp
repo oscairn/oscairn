@@ -57,6 +57,10 @@ namespace oscairn
 
         std::atomic<uint64_t> requests{0}; // the requests made to any worker (workerRequests)
         std::atomic<uint64_t> failures{0}; // worker processes failed (workerFailures)
+        // Held from making a descriptor until it is close-on-exec, and around each spawn: a worker started by another thread
+        // meanwhile (a supervisor's restart beside a load) inherited another worker's socket, so that worker's death closed
+        // nothing and a request to it waited out the whole reply timeout (control-performance-switch-stress-hosts hung).
+        std::mutex& descriptorMutex() { static std::mutex m; return m; }
 
         // OSCAIRN_WORKER_REST (realtime.h's workerRest), read as the engine starts: 0 calls every worker every block, as
         // before resting; which of the others may rest, the graph says (Graph's rest call).
@@ -201,10 +205,13 @@ namespace oscairn
                 setRate(rate);
                 records = std::filesystem::temp_directory_path() / ("oscairn-worker-" + std::to_string(getpid()) + "-" + std::to_string(counter.fetch_add(1)));
                 const std::string name = "/osc-" + std::to_string(getpid()) + "-bell-" + std::to_string(counter.fetch_add(1));
-                bellFd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-                if(bellFd < 0) throw std::runtime_error("Cannot create a worker's doorbell");
+                {
+                    std::lock_guard descriptors(descriptorMutex());
+                    bellFd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+                    if(bellFd < 0) throw std::runtime_error("Cannot create a worker's doorbell");
+                    fcntl(bellFd, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
+                }
                 shm_unlink(name.c_str());
-                fcntl(bellFd, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
                 void* memory = ftruncate(bellFd, off_t(sizeof(Doorbell))) == 0 ? mmap(nullptr, sizeof(Doorbell), PROT_READ | PROT_WRITE, MAP_SHARED, bellFd, 0) : MAP_FAILED;
                 if(memory == MAP_FAILED) { close(bellFd); throw std::runtime_error("Cannot map a worker's doorbell"); }
                 dirtyPages(memory, sizeof(Doorbell)); // no first write faults on the audio thread (Worker.h)
@@ -272,19 +279,24 @@ namespace oscairn
             void start()
             {
                 int pair[2];
-                if(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) throw std::runtime_error("Cannot create a worker socket");
+                int spawned = 0;
+                {
+                    // Both ends close-on-exec before any spawn can see them; the worker's end reaches it as descriptor 3 (a dup2 target is not close-on-exec).
+                    std::lock_guard descriptors(descriptorMutex());
+                    if(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) throw std::runtime_error("Cannot create a worker socket");
+                    fcntl(pair[0], F_SETFD, FD_CLOEXEC); fcntl(pair[1], F_SETFD, FD_CLOEXEC);
 #ifdef SO_NOSIGPIPE
-                const int one = 1; setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); setsockopt(pair[1], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+                    const int one = 1; setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); setsockopt(pair[1], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
 #endif
-                fcntl(pair[0], F_SETFD, FD_CLOEXEC);
-                socket = pair[0];
-                posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
-                posix_spawn_file_actions_adddup2(&actions, pair[1], 3);
-                // The policy's memory limit also goes to the worker, which on Linux makes it an address-space backstop.
-                std::string fd = "3", limit = std::to_string(policyLimit), place = std::to_string(slot); char* argv[]{program.data(), fd.data(), limit.data(), place.data(), nullptr};
-                const int spawned = posix_spawn(&pid, program.c_str(), &actions, nullptr, argv, environ);
-                posix_spawn_file_actions_destroy(&actions);
-                close(pair[1]);
+                    socket = pair[0];
+                    posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
+                    posix_spawn_file_actions_adddup2(&actions, pair[1], 3);
+                    // The policy's memory limit also goes to the worker, which on Linux makes it an address-space backstop.
+                    std::string fd = "3", limit = std::to_string(policyLimit), place = std::to_string(slot); char* argv[]{program.data(), fd.data(), limit.data(), place.data(), nullptr};
+                    spawned = posix_spawn(&pid, program.c_str(), &actions, nullptr, argv, environ);
+                    posix_spawn_file_actions_destroy(&actions);
+                    close(pair[1]);
+                }
                 if(spawned != 0) { close(socket); socket = -1; pid = 0; throw std::runtime_error("Cannot start plugin worker " + program); }
                 reaped = false;
                 joinCgroup(); // before it loads anything, so the plugin is charged to its own cgroup
@@ -511,10 +523,13 @@ namespace oscairn
                 const std::string name = "/osc-" + std::to_string(getpid()) + "-" + std::to_string(Process::counter.fetch_add(1));
                 try
                 {
-                    shm_ = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-                    if(shm_ < 0) throw std::runtime_error("Cannot create worker shared memory");
+                    {
+                        std::lock_guard descriptors(descriptorMutex());
+                        shm_ = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+                        if(shm_ < 0) throw std::runtime_error("Cannot create worker shared memory");
+                        fcntl(shm_, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
+                    }
                     shm_unlink(name.c_str());
-                    fcntl(shm_, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
                     if(ftruncate(shm_, off_t(bytes_)) != 0) throw std::runtime_error("Cannot size worker shared memory");
 #ifdef __linux__
                     // Its pages taken now: with /dev/shm full the plugin is refused here, not the engine

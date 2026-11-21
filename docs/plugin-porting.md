@@ -323,7 +323,8 @@ oscairn::voices::Candidate candidate(const Unit& u) const
 // slot holds, never a frame stamp or a time; a debug build asserts on a reused one).
 for each context c: while(sounding(c) > limits.of(c, selected).limit) fadeOut(report.next(n, get, limits, c));
 while(limits.limit && sounding() > limits.limit) fadeOut(report.next(n, get, limits));
-// importance, called by the host right after each process(), on the audio thread:
+// importance, called by the host right after each process() in which active_voices is not 0, on the audio thread
+// (with no voice sounding no context is: the host takes that block's report as empty):
 report.list(n, get, limits);             // get(i): &candidates[i], or nullptr for a free slot
 return report.write(out, capacity);
 ```

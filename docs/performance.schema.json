@@ -371,6 +371,28 @@
       "items": { "$ref": "#/$defs/PhysicalControl" },
       "description": "Extra inputs (a lever's axis: lever:1) the Performance has unlinked from the logical control the device links them to by default (wheel:1 for the pitch wheel and the lever's side to side, wheel:2 for the mod wheel and its push): each is then a control of its own, assignable like any other. Kept on a device without the control, where it does nothing. Absent: every extra input stays linked"
     },
+    "physicalControls": {
+      "type": "object",
+      "maxProperties": 256,
+      "description": "Settings of the physical controls themselves, by logical identity, each stored only when not the default (absent: none). An assignable switch's latch (button:N or footswitch:N): true, the default, each press toggles what it plays; false, momentary, on only while held. A property of the control: it applies to every assignment the control drives",
+      "propertyNames": { "pattern": "^(button|footswitch):[1-9][0-9]{0,2}$" },
+      "additionalProperties": {
+        "type": "object",
+        "properties": { "latch": { "type": "boolean" } },
+        "additionalProperties": false
+      }
+    },
+    "input": {
+      "type": "object",
+      "description": "The Performance's input settings, each stored only when not the default (absent: all defaults)",
+      "properties": {
+        "aftertouch": {
+          "enum": ["channel", "poly"],
+          "description": "channel (the default): a key's pressure becomes its channel's, the highest of that channel's keys', so the parts get channel pressure whatever the source sends; poly: key pressure reaches the parts per note where the source sends it, channel pressure otherwise. Either way a part takes it only by its receive setting (aftertouch)"
+        }
+      },
+      "additionalProperties": false
+    },
     "lock": {
       "type": "object",
       "description": "The plugin builds it was saved with (RFC 0006): for each plugin and platform, the build's digest, so an archive or a device can tell it has exactly that build",

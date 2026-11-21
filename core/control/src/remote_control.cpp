@@ -1027,6 +1027,11 @@ namespace oscairn
     } }
     std::vector<AssignmentOverride> RemoteControl::assignments() const {auto doc=impl_->call("assignments.get");return assignmentsFrom(field(doc.get(),"result"));}
     std::vector<std::string> RemoteControl::unlinked() const {auto doc=impl_->call("assignments.get");std::vector<std::string> out;for(auto a:array(field(field(doc.get(),"result"),"unlinked")))out.push_back(string(a));return out;}
+    std::vector<std::string> RemoteControl::momentary() const {auto doc=impl_->call("assignments.get");std::vector<std::string> out;const auto controls=field(field(doc.get(),"result"),"physicalControls");
+        for(auto* e=static_cast<const json_object_s*>(controls->payload)->start;e;e=e->next)if(const auto l=detail::member(e->value,"latch");l && l->type==json_type_false)out.emplace_back(e->name->string,e->name->string_size);return out;}
+    void RemoteControl::latch(const std::string& control,bool latch){impl_->call("assignments.latch","{\"control\":"+quote(control)+",\"latch\":"+(latch?"true":"false")+'}');impl_->refresh();}
+    bool RemoteControl::polyAftertouch() const {auto doc=impl_->call("input.get");return string(field(field(doc.get(),"result"),"aftertouch"))=="poly";}
+    void RemoteControl::setPolyAftertouch(bool poly){impl_->call("input.set",std::string("{\"aftertouch\":\"")+(poly?"poly":"channel")+"\"}");impl_->refresh();}
     void RemoteControl::link(const std::string& control,bool linked){impl_->call("assignments.link","{\"control\":"+quote(control)+",\"linked\":"+(linked?"true":"false")+'}');impl_->refresh();}
     void RemoteControl::assign(const std::string& control,const Assignment& t,uint32_t part,bool passes)
     {

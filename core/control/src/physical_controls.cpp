@@ -282,6 +282,7 @@ namespace oscairn
                 r.target = b.slots[i]; r.label = b.labels[i]; r.bank = b.name; r.group = g; r.index = i;
                 if(i < group.functions.size()) r.label = r.function = group.functions[i];
                 if(i < group.follows.size()) r.follows = group.follows[i];
+                r.momentary = std::binary_search(s.momentary.begin(), s.momentary.end(), r.control);
                 if(i < group.rest.size()) r.rest = group.rest[i];
                 if(r.target.kind != Assignment::Kind::None) r.layer = b.layer;
                 if(!screen) overridden(r); // screen knobs play what the screen shows
@@ -367,6 +368,17 @@ namespace oscairn
     }
 
     void Session::syncUnlinked() { controllers_->setUnlinked({unlinked_.begin(), unlinked_.end()}); }
+
+    void Session::latch(const std::string& control, bool latch)
+    {
+        if(!validPhysicalControl(control) || !pressControl(control)) throw std::invalid_argument("only a button:N or footswitch:N latches or not");
+        const auto at = std::lower_bound(momentary_.begin(), momentary_.end(), control);
+        const bool listed = at != momentary_.end() && *at == control;
+        if(latch && listed) momentary_.erase(at);
+        else if(!latch && !listed) momentary_.insert(at, control);
+        else return;
+        controllers_->invalidate();
+    }
 
     PartInput Session::inputFor(const Part& part, const std::vector<AssignmentOverride>& assignments) const
     {

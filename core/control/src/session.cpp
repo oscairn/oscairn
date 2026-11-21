@@ -4,6 +4,7 @@
 #include "oscairn/sound_context.h"
 
 #include "oscairn/library.h"
+#include "oscairn/midi_input.h"
 #include "sheredom/json.h"
 #include "JsonInput.h"
 
@@ -316,6 +317,45 @@ namespace oscairn
     {
         if( value < 0 || value > 127 || channel < 0 || channel > 15 ) throw std::invalid_argument( "invalid pressure or channel" );
         return enqueue( kick::clap::Event::midi( uint8_t( 0xd0 | channel ), uint8_t( value ), 0 ), builtInSource );
+    }
+
+    // Channel aftertouch made of key pressure (a source's 0xA0, or the pressure expression midiToClap makes of it): a key's pressure
+    // becomes its channel's, the highest of that channel's keys', sent only when that changes. A note's end clears its key.
+    // shortcut: one table across sources and ports, and a key released while pressed leaves the channel's value until the next pressure; per source if two poly keyboards share a channel.
+    bool Session::foldPressure( kick::clap::Event& event ) noexcept
+    {
+        const auto* h = event.header();
+        if( h->space_id != CLAP_CORE_EVENT_SPACE_ID ) return true;
+        int port = 0, channel = -1, key = -1, value = 0;
+        if( h->type == CLAP_EVENT_NOTE_EXPRESSION )
+        {
+            const auto& x = *reinterpret_cast<const clap_event_note_expression_t*>( h );
+            if( x.expression_id != CLAP_NOTE_EXPRESSION_PRESSURE || x.key < 0 ) return true;
+            port = x.port_index; channel = x.channel; key = x.key; value = int( std::lround( std::clamp( x.value, 0.0, 1.0 ) * 127 ) );
+        }
+        else if( h->type == CLAP_EVENT_MIDI )
+        {
+            const auto& m = *reinterpret_cast<const clap_event_midi_t*>( h );
+            const int kind = m.data[0] & 0xf0;
+            if( kind == 0x80 || ( kind == 0x90 && m.data[2] == 0 ) ) { keyPressure_[m.data[0] & 15][m.data[1] & 127] = 0; return true; }
+            if( kind != 0xa0 ) return true;
+            port = m.port_index; channel = m.data[0] & 15; key = m.data[1] & 127; value = m.data[2] & 127;
+        }
+        else if( h->type == CLAP_EVENT_NOTE_OFF || h->type == CLAP_EVENT_NOTE_CHOKE )
+        {
+            const auto& n = *reinterpret_cast<const clap_event_note_t*>( h );
+            if( n.channel >= 0 && n.channel < 16 && n.key >= 0 && n.key < 128 ) keyPressure_[size_t( n.channel )][size_t( n.key )] = 0;
+            return true;
+        }
+        else return true;
+        if( channel < 0 || channel > 15 || key > 127 ) return true;
+        auto& keys = keyPressure_[size_t( channel )];
+        keys[size_t( key )] = uint8_t( value );
+        const uint8_t top = *std::max_element( keys.begin(), keys.end() );
+        if( top == pressureSent_[size_t( channel )] ) return false;
+        pressureSent_[size_t( channel )] = top;
+        const uint8_t bytes[2]{ uint8_t( 0xd0 | channel ), top };
+        return midiToClap( bytes, 2, h->time, event, int16_t( port ) );
     }
 
     bool Session::enqueue( const kick::clap::Event& event, uint8_t source )
@@ -1023,6 +1063,13 @@ namespace oscairn
                 continue; // a duplicate input's (RFC 0024)
             mergedSources_[count] = sources.empty() ? untaggedSource : sources[i];
             merged_[count++] = events[i];
+        }
+        if( !polyAftertouch_.load( std::memory_order_relaxed ) ) // input.aftertouch channel, the default
+        {
+            size_t kept = 0;
+            for( size_t i = 0; i < count; ++i )
+                if( foldPressure( merged_[i] ) ) { merged_[kept] = merged_[i]; mergedSources_[kept++] = mergedSources_[i]; }
+            count = kept;
         }
         for( size_t i = 0; i < count; ++i ) holdKeys( merged_[i], mergedSources_[i] );
 

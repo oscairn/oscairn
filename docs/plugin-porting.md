@@ -63,7 +63,9 @@ An `oscairn.ui` extension without `param_hint` is ignored, not refused.
 - **Notes:** the host offers CLAP notes, MIDI and MPE, and converts at the plugin's
   boundary. A plugin that only reads MIDI, or only CLAP notes, works.
 - **Hardware MIDI input:** from a keyboard or controller, a plugin gets notes, polyphonic
-  aftertouch and channel pressure (as CLAP notes and the pressure note expression, or as MIDI),
+  aftertouch and channel pressure (as CLAP notes and the pressure note expression, or as MIDI;
+  key pressure only in a Performance whose `input.aftertouch` is `poly`: by default it arrives
+  as channel pressure, the highest of the channel's keys'),
   and, as MIDI, pitch bend and the performance controllers: CC 1 mod wheel, CC 2 breath,
   CC 4 foot, CC 11 expression, CC 64–67 (sustain, portamento, sostenuto and soft pedals),
   CC 120 all sound off and CC 123 all notes off. Other controllers and program changes do

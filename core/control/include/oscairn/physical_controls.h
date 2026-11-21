@@ -46,6 +46,7 @@ namespace oscairn
         std::vector<std::pair<uint32_t, std::string>> scenes;
         std::map<NodeId, AssignableNode> nodes;
         std::vector<AssignmentOverride> overrides;
+        std::vector<std::string> momentary; // the switches on only while held (Session::momentary)
         ScreenPage screen;
     };
     // From a graph state; `parameters` gives a node's parameters (Control::parameters, or a cache
@@ -91,6 +92,7 @@ namespace oscairn
         size_t group = 0; uint32_t index = 0; // its group, in the order given, and its place there
         std::string function;         // a standard controller passed to every part when nothing is assigned ("modulation")
         bool passes = false;          // the Performance's assignment (target) passes the function on to every part as well
+        bool momentary = false;       // a switch on only while held, not toggled by each press
         std::vector<std::pair<uint32_t, Assignment>> parts; // a control with a function: what each part's Sound assigns it to
         std::string follows;          // an extra input (a lever's axis): the logical control it drives unless the Performance unlinks it; empty: none
         double rest = std::numeric_limits<double>::quiet_NaN(); // its rest position, 0 to 1, when it is sprung; NaN: it stays where it is left

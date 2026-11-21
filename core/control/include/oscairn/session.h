@@ -335,6 +335,10 @@ namespace oscairn
         std::vector<std::string> unlinked() const override { return unlinked_; }
         void link( const std::string& control, bool linked ) override;
         void syncUnlinked(); // the controllers' copy of unlinked_
+        std::vector<std::string> momentary() const override { return momentary_; }
+        void latch( const std::string& control, bool latch ) override;
+        bool polyAftertouch() const override { return polyAftertouch_.load( std::memory_order_relaxed ); }
+        void setPolyAftertouch( bool poly ) override { polyAftertouch_.store( poly, std::memory_order_relaxed ); }
 
         struct MidiClockEvent
         {
@@ -527,6 +531,8 @@ namespace oscairn
             std::pair<double, double> master{1, 0};
             std::map<NodeId, std::string> roles;
             std::vector<std::string> unlinked;
+            std::vector<std::string> momentary;
+            bool polyAftertouch = false;
         };
         struct ParameterChange { NodeId node; uint32_t param; double from, to; };
         struct Step
@@ -713,6 +719,8 @@ namespace oscairn
         void openPerformance(const std::string& directory); // loadPerformance's work: a failure is counted there
         std::vector<AssignmentOverride> assignments_; // physical controls' overrides (physical_controls.cpp)
         std::vector<std::string> unlinked_;           // extra inputs the Performance has unlinked from the controls they follow, sorted (physical_controls.cpp)
+        std::vector<std::string> momentary_;          // its switches set not to latch: on only while held, sorted (physical_controls.cpp)
+        std::atomic<bool> polyAftertouch_{ false };   // its input.aftertouch: poly passes key pressure per note; channel (false) folds it (foldPressure)
         uint32_t nextMacro_ = 1;
         bool staged_ = false;
         bool rampGains_ = false; // the next commit is played (a control moved): its gains ramp
@@ -815,6 +823,8 @@ namespace oscairn
             Claimed claimed;                      // its nodes on the playing Performance's shared engines
             Timing::Open stats;                   // engine.timing's open: its counts and the read's times
             std::vector<std::string> unlinked;    // the extra inputs it unlinks
+            std::vector<std::string> momentary;   // its switches on only while held (`physicalControls`)
+            bool polyAftertouch = false;          // its `input.aftertouch` is poly
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.
@@ -983,5 +993,9 @@ namespace oscairn
         int64_t nextPulse_ = 0;
         std::array<kick::clap::Event, noteQueueCapacity + maxInputEvents + 1> merged_{};
         std::array<uint8_t, noteQueueCapacity + maxInputEvents + 1> mergedSources_{};
+        // Audio thread: channel aftertouch made of key pressure, each channel's keys' last pressure and the value sent on.
+        std::array<std::array<uint8_t, 128>, 16> keyPressure_{};
+        std::array<uint8_t, 16> pressureSent_{};
+        bool foldPressure( kick::clap::Event& event ) noexcept; // false: nothing to send
     };
 }

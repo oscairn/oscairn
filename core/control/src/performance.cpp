@@ -744,7 +744,9 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
                            :std::any_of(parts_.begin(),parts_.end(),[&](const Part& p){return p.id==t.id;});
             if(here)assigned.push_back("{\"control\":"+quote(o.control)+",\"kind\":"+quote(assignmentKinds[size_t(t.kind)])+",\"id\":"+std::to_string(t.id)+part+(o.passes?",\"passes\":true":"")+'}');}
         for(const auto& at:untouched_)if(keys.count(at.node))parameters.push_back("{\"node\":"+quote(keys.at(at.node))+",\"param\":"+std::to_string(at.param)+'}');
-        head="{\"format\":\"oscairn.performance\",\"version\":13,\"info\":";tail=",\"libraries\":"+join(named)+",\"transport\":{\"tempo\":"+numeric(tempo_.load())+",\"clockSource\":"+quote(clockSource_.load()==Transport::ClockSource::Internal?"internal":"midi")+"},\"audioInputs\":"+ports(graph.audioLayout.inputs)+",\"audioOutputs\":"+ports(graph.audioLayout.outputs)+",\"nodes\":"+join(nodes)+",\"wires\":"+join(wires)+",\"parts\":"+join(parts)+",\"mappings\":"+join(mappings)+",\"pads\":"+padsText(padMap_)+",\"key\":"+keyText(key_)+",\"master\":"+masterText(masterLevel_,masterPan_)+",\"scenes\":"+join(scenes)+",\"sceneUntouched\":"+join(parameters)+",\"scene\":"+std::to_string(scene_)+",\"controls\":"+join(controls)+",\"assignments\":"+join(assigned)+",\"unlinked\":"+join([&]{std::vector<std::string> u;for(const auto& c:unlinked_)u.push_back(quote(c));return u;}())+",\"lock\":"+lockText+"}\n";
+        head="{\"format\":\"oscairn.performance\",\"version\":13,\"info\":";tail=",\"libraries\":"+join(named)+",\"transport\":{\"tempo\":"+numeric(tempo_.load())+",\"clockSource\":"+quote(clockSource_.load()==Transport::ClockSource::Internal?"internal":"midi")+"},\"audioInputs\":"+ports(graph.audioLayout.inputs)+",\"audioOutputs\":"+ports(graph.audioLayout.outputs)+",\"nodes\":"+join(nodes)+",\"wires\":"+join(wires)+",\"parts\":"+join(parts)+",\"mappings\":"+join(mappings)+",\"pads\":"+padsText(padMap_)+",\"key\":"+keyText(key_)+",\"master\":"+masterText(masterLevel_,masterPan_)+",\"scenes\":"+join(scenes)+",\"sceneUntouched\":"+join(parameters)+",\"scene\":"+std::to_string(scene_)+",\"controls\":"+join(controls)+",\"assignments\":"+join(assigned)+(unlinked_.empty()?std::string():",\"unlinked\":"+join([&]{std::vector<std::string> u;for(const auto& c:unlinked_)u.push_back(quote(c));return u;}()))
+            +(momentary_.empty()?std::string():",\"physicalControls\":{"+[&]{std::string o;for(const auto& c:momentary_)o+=(o.empty()?"":",")+quote(c)+":{\"latch\":false}";return o;}()+'}')
+            +(polyAftertouch_.load()?",\"input\":{\"aftertouch\":\"poly\"}":"")+",\"lock\":"+lockText+"}\n";
     }
     info.hash=contentHash(head+tail,bundle.temporary.path/"nodes");
     const auto out=head+infoText()+tail;
@@ -1008,7 +1010,7 @@ bool Session::preparePerformance(const std::string& directory) {
 std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vector<Free> free) {
     Timing::Open stats;const auto loads=pluginInstancesLoaded();const auto began=std::chrono::steady_clock::now();
     validateTree(root);const auto doc=document(root);V d=doc.get();
-    fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","unlinked","lock"});
+    fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","unlinked","physicalControls","input","lock"});
     const auto pads=padsFrom(field(d,"pads"));const auto key=keyFrom(field(d,"key"));const auto master=masterFrom(field(d,"master"));
     if(text(field(d,"format"))!="oscairn.performance" || integer(field(d,"version"))!=13)bad("unsupported format version");
     fields(field(d,"info"),{"id","name","description","tags","color","revision","parent","hash","origin"});const auto info=readInfo(root/"performance.json","oscairn.performance");
@@ -1460,6 +1462,18 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if(!validPhysicalControl(name) || std::find(unlinked.begin(),unlinked.end(),name)!=unlinked.end())bad("invalid or duplicate unlinked control");
         unlinked.push_back(std::move(name));}
     std::sort(unlinked.begin(),unlinked.end());
+    // The switches set not to latch (momentary), and the Performance's input settings: each stored only when not the default.
+    std::vector<std::string> momentary;
+    if(const V pc=member(d,"physicalControls")){
+        if(pc->type!=json_type_object)bad("physicalControls is an object of controls");
+        std::set<std::string> seen;
+        for(auto* e=static_cast<const json_object_s*>(pc->payload)->start;e;e=e->next){
+            std::string name(e->name->string,e->name->string_size);
+            if(!validPhysicalControl(name) || !pressControl(name) || !seen.insert(name).second)bad("only a button:N or footswitch:N latches or not, once");
+            fields(e->value,{"latch"});if(const V l=member(e->value,"latch");l && !boolean(l))momentary.push_back(std::move(name));}
+        std::sort(momentary.begin(),momentary.end());}
+    bool polyAftertouch=false;
+    if(const V in=member(d,"input")){fields(in,{"aftertouch"});if(const V a=member(in,"aftertouch")){const auto mode=text(a);if(mode!="channel" && mode!="poly")bad("input.aftertouch is channel or poly");polyAftertouch=mode=="poly";}}
     std::set<std::pair<NodeId,uint32_t>> mappings;
     for(auto m:array(field(d,"mappings"),4096)){fields(m,{"from","lane","to","param"});const auto from=node(field(m,"from")),lane=integer(field(m,"lane"));if(!mappings.emplace(from,lane).second)bad("duplicate parameter mapping");next->mapParamTarget(from,lane,node(field(m,"to")),integer(field(m,"param")));}
     // Last, once the whole document has been read: the playing instances taken over get their state.
@@ -1474,7 +1488,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     for(const auto& s:saved)if(std::find(taken.begin(),taken.end(),s.node)==taken.end())putBack(s); // let go for a fresh one: it plays on
     auto prepared=std::make_unique<Prepared>(Prepared{root,stamp(root),std::move(next),pads,info,std::move(lock),tempo,clock=="internal"?Transport::ClockSource::Internal:Transport::ClockSource::MidiClock,
         std::move(disabled),std::move(names),std::move(wires),std::move(parts),nextPart,nextWire,std::move(scenes),std::move(untouched),nextScene,selectedScene,mappingScene,std::move(macros),nextMacro,std::move(assignments),key,master.first,master.second,std::move(roles),std::move(notices),std::move(taken),std::move(warm),std::move(origins),reused,kept,{}});
-    prepared->unlinked=std::move(unlinked);
+    prepared->unlinked=std::move(unlinked);prepared->momentary=std::move(momentary);prepared->polyAftertouch=polyAftertouch;
     prepared->beside=std::move(beside);prepared->claimed.contexts.swap(onPlaying.contexts);prepared->claimed.sounds.swap(onPlaying.sounds);
     stats.name=info.name;stats.reused=reused;stats.kept=kept;stats.loaded=pluginInstancesLoaded()-loads;
     stats.read=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
@@ -1552,7 +1566,7 @@ void Session::open(Prepared& p,bool seamless) {
         for(auto& c:p.claimed.contexts)try{if(!c->select())std::fprintf(stderr,"oscairn: an incoming shared sound not selected: the plugin's queue is full\n");}
             catch(const std::exception& e){std::fprintf(stderr,"oscairn: an incoming shared sound not selected: %s\n",e.what());}
         p.claimed.sounds.clear();
-        nodes_.swap(p.names);observed_.swap(observed);parts_.swap(p.parts);wires_.swap(wires);disabled_.swap(disabled);rungOut_.swap(rungOut);leaving_.swap(leaving);nextPart_=p.nextPart;nextWire_=p.nextWire;padMap_=p.pads;key_=p.key;masterLevel_=p.masterLevel;masterPan_=p.masterPan;roles_.swap(p.roles);notices_.swap(p.notices);heldPads_={};scenes_.swap(p.scenes);untouched_.swap(p.untouched);scene_=p.selectedScene;mappingScene_=p.mappingScene;transition_.reset();pendingScene_.reset();nextScene_=p.nextScene;macros_.swap(p.macros);assignments_.swap(p.assignments);unlinked_=p.unlinked;syncUnlinked();nextMacro_=p.nextMacro;pending_.clear();commandCount_=0;outputDrops_.clear();parameterRevisions_.clear();valueRevisions_.clear();staged_=false;
+        nodes_.swap(p.names);observed_.swap(observed);parts_.swap(p.parts);wires_.swap(wires);disabled_.swap(disabled);rungOut_.swap(rungOut);leaving_.swap(leaving);nextPart_=p.nextPart;nextWire_=p.nextWire;padMap_=p.pads;key_=p.key;masterLevel_=p.masterLevel;masterPan_=p.masterPan;roles_.swap(p.roles);notices_.swap(p.notices);heldPads_={};scenes_.swap(p.scenes);untouched_.swap(p.untouched);scene_=p.selectedScene;mappingScene_=p.mappingScene;transition_.reset();pendingScene_.reset();nextScene_=p.nextScene;macros_.swap(p.macros);assignments_.swap(p.assignments);unlinked_=p.unlinked;syncUnlinked();momentary_=p.momentary;polyAftertouch_.store(p.polyAftertouch);nextMacro_=p.nextMacro;pending_.clear();commandCount_=0;outputDrops_.clear();parameterRevisions_.clear();valueRevisions_.clear();staged_=false;
         tempo_.store(p.tempo);clockSource_.store(p.clock);playing_.store(false);loaded_.swap(loaded);reused_+=p.reused;keptStates_+=p.kept;
         ++revision_;sequence_+=2;history_.swap(history);
     });
@@ -1934,7 +1948,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
     record(); // an edit waiting for its step comes first: the import is a step of its own
     if(directory.empty() || directory.find('\0')!=std::string::npos)bad("invalid directory");
     const auto root=fs::canonical(directory);validateTree(root);const auto doc=document(root);V d=doc.get();
-    fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","unlinked","lock"});
+    fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","unlinked","physicalControls","input","lock"});
     mergeLock(readLock(d));
     if(text(field(d,"format"))!="oscairn.performance" || integer(field(d,"version"))!=13)bad("unsupported format version");
     fields(field(d,"info"),{"id","name","description","tags","color","revision","parent","hash","origin"});

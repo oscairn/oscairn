@@ -429,8 +429,8 @@ namespace oscairn
         /// Whether the node, with the plugin it has now, is in the last plan committed or published
         /// (control thread): what is queued for it reaches it.
         bool planned( NodeId node ) const;
-        /// RFC 0045's plugin groups: whether the node renders in the round trip of the nodes its audio comes from, in the
-        /// last plan committed or published (control thread).
+        /// RFC 0045's plugin groups: whether the node renders in the round trip of the nodes its audio comes from (fed by
+        /// nothing, of a group of its own process), in the last plan committed or published (control thread).
         bool grouped( NodeId node ) const;
 
         /// Frees plans the audio thread has finished with.

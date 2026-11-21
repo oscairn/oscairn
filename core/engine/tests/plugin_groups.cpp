@@ -372,6 +372,18 @@ namespace
         check(lane("a1") == lane("b1") && lane("a2") == lane("b2") && lane("a1") != lane("a2") && lane("bus1") == lane("bus2") && lane("bus1") != lane("a1") && lane("bus1") != lane("a2")
               && w2.graph.grouped(w2.nodes["b1"]) && w2.graph.grouped(w2.nodes["b2"]) && w2.graph.grouped(w2.nodes["bus2"]) && !w2.graph.grouped(w2.nodes["bus1"]),
               "two on a bus, chain: each part's inserts one process and round trip, the bus its own, entered from both parts");
+        // Two buses nothing feeds (ST Final's part 6: its sends at 0, left out of the plan; the document's wires still place
+        // them with the part's inserts): in their round trip, not a wave of their own (a second wake of the worker each block).
+        Wide w3; place(Policy::chain);
+        w3.plan({"i", "a", "b", "bus1", "bus2"}, {{"i", "a"}, {"a", "b"}, {"b", "bus1"}, {"b", "bus2"}});
+        w3.add("i", "org.kick.test.midi"); w3.graph.connectNotes(graphInput, w3.nodes["i"]);
+        for(const char* n : {"a", "b", "bus1", "bus2"}) w3.add(n, "org.kick.test.effect");
+        w3.wire("i", "a"); w3.wire("a", "b"); w3.toPort("b", 1); w3.toPort("bus1", 0); w3.toPort("bus2", 2);
+        w3.graph.commit();
+        const auto lane3 = [&](const char* n) { return w3.graph.host(w3.nodes[n]).lane(); };
+        check(lane3("bus1") == lane3("a") && lane3("bus2") == lane3("a") && w3.graph.grouped(w3.nodes["b"]) && w3.graph.grouped(w3.nodes["bus1"]) && w3.graph.grouped(w3.nodes["bus2"]),
+              "buses nothing feeds, chain: in their part's inserts' process and round trip");
+        for(uint32_t b = 0; b < 50; ++b) w3.play(b, notes(b));
     }
 
     // chain: one part's chain process killed mid-play: only that part goes silent, and it comes back, every plugin of the

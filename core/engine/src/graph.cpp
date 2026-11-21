@@ -734,8 +734,10 @@ namespace oscairn
         // and lanes come from earlier waves, joins that group's wave, so the group's blocks cross to the worker once
         // and render there in order, each node's input mixed in the worker (WorkerHost::startGrouped). Not where the
         // core's state would differ there: a played change's ramps (ramped), ring-out routes, retiring nodes, blocks
-        // past the worker's buffer.
-        std::map<NodeId, uint32_t> wave;
+        // past the worker's buffer. A groupable node nothing feeds (a bus whose send is at 0, left out of the plan) in a
+        // process where a group renders rides that group's wave (a floor on its own): its block crosses to the worker in
+        // the group's round trip, not one of its own (two more wake-ups each block).
+        std::map<NodeId, uint32_t> wave, floors;
         std::map<NodeId, NodeId> groupOf; // a groupable node's group, by its first node
         auto hostOf = [&]( NodeId id ) -> const PluginHost* {
             const auto* host = nodes_.at( id ).host.get();
@@ -746,43 +748,68 @@ namespace oscairn
             const auto* host = hostOf( id );
             return host && host->groupable() && host->lane() && !nodes_.at( id ).retiring
                 && std::none_of( audioRoutes_.begin(), audioRoutes_.end(), [&]( const auto& r ) { return ( leadOf( r.from.node ) == id && r.from.port == ringOutPort ) || ( r.to.node == id && r.to.port == ringOutPort ); } ); };
-        for( size_t i = 0; i < order.size(); ++i )
-        {
-            uint32_t w = 0;
-            for( const auto* edges : { &std::as_const(audioDependencies), &std::as_const(noteDependencies), &std::as_const( mappingEdges ) } )
-                for( const auto& e : *edges )
-                    if( e.second == order[i] && internal( e ) )
-                        w = std::max( w, wave.at( e.first ) + 1 );
-            uint32_t apart = 0; // one past the waves of earlier nodes sharing its engine
-            for( size_t j = 0; j < i; ++j )
-                if( nodes_.at( order[j] ).effectGroup == nodes_.at( order[i] ).effectGroup || nodes_.at( order[j] ).host == nodes_.at( order[i] ).host )
-                    apart = std::max( apart, wave.at( order[j] ) + 1 );
-            w = std::max( w, apart );
-            if( grouping && groupable( order[i] ) )
+        auto waves = [&] {
+            wave.clear(); groupOf.clear();
+            for( size_t i = 0; i < order.size(); ++i )
             {
-                groupOf[order[i]] = order[i];
-                std::optional<NodeId> group;
-                bool joins = true;
-                for( const auto& e : audioDependencies )
-                    if( e.second == order[i] )
-                    {
-                        const auto g = groupOf.find( e.first );
-                        if( !internal( e ) || g == groupOf.end() || ( group && *group != g->second ) || hostOf( e.first )->lane() != hostOf( order[i] )->lane() ) { joins = false; break; }
-                        group = g->second;
-                    }
-                uint32_t routes = 0;
-                for( const auto& r : audioRoutes_ ) if( r.to.node == order[i] ) routes += r.channels;
-                if( joins && group && routes <= PluginHost::maxGroupRoutes )
+                uint32_t w = 0;
+                if( const auto f = floors.find( order[i] ); f != floors.end() ) w = f->second;
+                for( const auto* edges : { &std::as_const(audioDependencies), &std::as_const(noteDependencies), &std::as_const( mappingEdges ) } )
+                    for( const auto& e : *edges )
+                        if( e.second == order[i] && internal( e ) )
+                            w = std::max( w, wave.at( e.first ) + 1 );
+                uint32_t apart = 0; // one past the waves of earlier nodes sharing its engine
+                for( size_t j = 0; j < i; ++j )
+                    if( nodes_.at( order[j] ).effectGroup == nodes_.at( order[i] ).effectGroup || nodes_.at( order[j] ).host == nodes_.at( order[i] ).host )
+                        apart = std::max( apart, wave.at( order[j] ) + 1 );
+                w = std::max( w, apart );
+                if( grouping && groupable( order[i] ) )
                 {
-                    const uint32_t at = wave.at( *group );
-                    for( const auto* edges : { &std::as_const( noteDependencies ), &std::as_const( mappingEdges ) } )
-                        for( const auto& e : *edges )
-                            if( e.second == order[i] && internal( e ) && wave.at( e.first ) >= at ) joins = false;
-                    if( joins && apart <= at ) { w = at; groupOf[order[i]] = *group; }
+                    groupOf[order[i]] = order[i];
+                    std::optional<NodeId> group;
+                    bool joins = true;
+                    for( const auto& e : audioDependencies )
+                        if( e.second == order[i] )
+                        {
+                            const auto g = groupOf.find( e.first );
+                            if( !internal( e ) || g == groupOf.end() || ( group && *group != g->second ) || hostOf( e.first )->lane() != hostOf( order[i] )->lane() ) { joins = false; break; }
+                            group = g->second;
+                        }
+                    uint32_t routes = 0;
+                    for( const auto& r : audioRoutes_ ) if( r.to.node == order[i] ) routes += r.channels;
+                    if( joins && group && routes <= PluginHost::maxGroupRoutes )
+                    {
+                        const uint32_t at = wave.at( *group );
+                        for( const auto* edges : { &std::as_const( noteDependencies ), &std::as_const( mappingEdges ) } )
+                            for( const auto& e : *edges )
+                                if( e.second == order[i] && internal( e ) && wave.at( e.first ) >= at ) joins = false;
+                        if( joins && apart <= at ) { w = at; groupOf[order[i]] = *group; }
+                    }
                 }
+                wave[order[i]] = w;
             }
-            wave[order[i]] = w;
-        }
+        };
+        waves();
+        std::vector<std::pair<NodeId, NodeId>> riders; // a node fed by nothing, and a node of its process's group whose wave it rides
+        auto fed = [&]( NodeId id ) {
+            auto into = [&]( const std::vector<std::pair<NodeId, NodeId>>& edges ) { return std::any_of( edges.begin(), edges.end(), [&]( const auto& e ) { return e.second == id; } ); };
+            return into( audioDependencies ) || into( noteDependencies ) || into( mappingEdges ); };
+        if( grouping )
+            for( const NodeId id : order )
+            {
+                if( !groupable( id ) || fed( id ) ) continue;
+                // Where its process renders nothing fed in its own wave: the earliest later wave where it does.
+                std::optional<NodeId> anchor;
+                bool alone = true;
+                for( const NodeId x : order )
+                {
+                    if( x == id || !groupable( x ) || !fed( x ) || hostOf( x )->lane() != hostOf( id )->lane() ) continue;
+                    if( wave.at( x ) == wave.at( id ) ) alone = false;
+                    if( wave.at( x ) > wave.at( id ) && ( !anchor || wave.at( x ) < wave.at( *anchor ) ) ) anchor = x;
+                }
+                if( alone && anchor ) { floors[id] = wave.at( *anchor ); riders.push_back( { id, *anchor } ); }
+            }
+        if( !floors.empty() ) waves();
         std::stable_sort( order.begin(), order.end(), [&]( NodeId a, NodeId b ) { return wave.at( a ) < wave.at( b ); } );
 
         auto plan = std::make_unique<Plan>();
@@ -854,6 +881,7 @@ namespace oscairn
                 }
                 plan->grouped.push_back(plan->steps[i].id);
             }
+        for( const auto& [id, anchor] : riders ) if( wave.at( id ) == wave.at( anchor ) ) plan->grouped.push_back( id );
         for( const auto& [edge,state] : noteEdges_ )
         {
             const auto [from,to]=edge;

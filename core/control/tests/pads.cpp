@@ -106,18 +106,12 @@ namespace
         check(render(PadAssignment::Pressure::Channel, true) != plain, "channel pressure reaches the synth");
     }
 
-    // input.aftertouch: channel (the default) makes a key's pressure its channel's, so pressure on a key not held still brightens the
-    // held note; poly passes it per note, so only the held key's does. A part whose receive setting leaves out aftertouch gets
+    // input.aftertouch: poly (the default) passes a key's pressure per note, so only the held key's brightens the held note; channel
+    // makes a key's pressure its channel's, so pressure on a key not held still does. A part whose receive setting leaves out aftertouch gets
     // neither. The pressure comes as a keyboard's does (midiToClap's pressure expression), or as a pad's (MIDI 0xA0).
-    void aftertouch(const char* synth)
+    void aftertouch(const char* synth, const fs::path& root)
     {
-        auto render = [&](bool poly, int key, bool receive, bool pad = false) {
-            Session s(48000, frames);
-            const auto n = s.add("synth", synth);
-            const auto p = s.addPart("A"); s.insertIntoPart(p, 0, n); s.commit();
-            if(!receive) { auto in = s.parts()[0].input; in.functions = withFunctionReceive(0, Function::Aftertouch, PedalReceive::None); s.setPartInput(p, in); s.commit(); }
-            s.setPolyAftertouch(poly);
-            check(s.polyAftertouch() == poly, "the mode reads back");
+        auto play = [&](Session& s, int key, bool pad) {
             if(pad) { PadMap map; map.assignments[0][0].note = key; map.assignments[0][0].pressure = PadAssignment::Pressure::Poly; s.setPadMap(map); }
             Audio x; std::vector<float> all;
             s.note(true, 57, .8);
@@ -135,6 +129,35 @@ namespace
             }
             return all;
         };
+        auto render = [&](bool poly, int key, bool receive, bool pad = false) {
+            Session s(48000, frames);
+            const auto n = s.add("synth", synth);
+            const auto p = s.addPart("A"); s.insertIntoPart(p, 0, n); s.commit();
+            if(!receive) { auto in = s.parts()[0].input; in.functions = withFunctionReceive(0, Function::Aftertouch, PedalReceive::None); s.setPartInput(p, in); s.commit(); }
+            s.setPolyAftertouch(poly);
+            check(s.polyAftertouch() == poly, "the mode reads back");
+            return play(s, key, pad);
+        };
+        // A Performance as a file: saved with the mode left alone (nothing written) or set to channel, then opened in a new session.
+        auto opened = [&](bool channel, int key) {
+            const auto folder = (root / ((channel ? "aftertouch-channel" : "aftertouch-default") + std::to_string(key))).string();
+            {
+                Session s(48000, frames);
+                const auto n = s.add("synth", synth, "org.oscairn.basic-synth");
+                const auto p = s.addPart("A"); s.insertIntoPart(p, 0, n); s.commit();
+                if(channel) { s.setPolyAftertouch(false); s.commit(); }
+                s.savePerformance(folder);
+            }
+            std::ifstream in(fs::path(folder) / "performance.json"); const std::string document(std::istreambuf_iterator<char>(in), {});
+            check(!document.empty() && (document.find(R"("input":{"aftertouch":"channel"})") != std::string::npos) == channel && (document.find(R"("input":{"aftertouch")") != std::string::npos) == channel, "the file names the mode only when it is channel");
+            Session t(48000, frames);
+            t.loadPerformance(folder);
+            check(t.polyAftertouch() == !channel, "a Performance without the field opens as poly, one that says channel as channel");
+            return play(t, key, false);
+        };
+        const auto file = opened(false, -1);
+        check(opened(false, 64) == file && opened(false, 57) != file, "a Performance without input.aftertouch passes key pressure per note: a key not held changes nothing, the held key's brightens its note");
+        check(opened(true, 64) != opened(true, -1), "a Performance whose input.aftertouch is channel folds: a key not held pressed brightens the held note");
         const auto plain = render(false, -1, true);
         check(render(false, 64, true) != plain, "channel: a key not held pressed brightens the held note");
         check(render(true, 64, true) == plain, "poly: a key not held pressed changes nothing");
@@ -151,17 +174,18 @@ namespace
         auto document = [&](const char* name) { s.savePerformance((root / name).string()); std::ifstream in(root / name / "performance.json"); return std::string(std::istreambuf_iterator<char>(in), {}); };
         const auto plain = document("plain");
         check(plain.find("\"input\"") == std::string::npos && plain.find("physicalControls") == std::string::npos && plain.find("unlinked") == std::string::npos, "defaults are not stored");
-        s.setPolyAftertouch(true); s.latch("button:2", false); s.latch("footswitch:1", false); s.commit();
+        check(s.polyAftertouch(), "a new Performance's aftertouch is poly");
+        s.setPolyAftertouch(false); s.latch("button:2", false); s.latch("footswitch:1", false); s.commit();
         const auto set = document("set");
-        check(set.find(R"("input":{"aftertouch":"poly"})") != std::string::npos && set.find(R"("physicalControls":{"button:2":{"latch":false},"footswitch:1":{"latch":false}})") != std::string::npos, "poly and two momentary switches are stored");
+        check(set.find(R"("input":{"aftertouch":"channel"})") != std::string::npos && set.find(R"("physicalControls":{"button:2":{"latch":false},"footswitch:1":{"latch":false}})") != std::string::npos, "channel and two momentary switches are stored");
         bool refused = false; try { s.latch("knob:1", false); } catch(const std::invalid_argument&) { refused = true; }
         check(refused, "a knob has no latch");
         Session t(48000, frames);
         t.loadPerformance((root / "set").string());
-        check(t.polyAftertouch() && t.momentary() == std::vector<std::string>{"button:2", "footswitch:1"}, "read back");
-        t.latch("button:2", true); t.setPolyAftertouch(false); t.commit(); t.service();
-        check(!t.polyAftertouch() && t.momentary() == std::vector<std::string>{"footswitch:1"}, "set back");
-        check(t.undo() && t.polyAftertouch() && t.momentary().size() == 2, "and undone");
+        check(!t.polyAftertouch() && t.momentary() == std::vector<std::string>{"button:2", "footswitch:1"}, "read back");
+        t.latch("button:2", true); t.setPolyAftertouch(true); t.commit(); t.service();
+        check(t.polyAftertouch() && t.momentary() == std::vector<std::string>{"footswitch:1"}, "set back");
+        check(t.undo() && !t.polyAftertouch() && t.momentary().size() == 2, "and undone");
     }
 
     void saving(const char* fixture, const fs::path& root)
@@ -186,7 +210,7 @@ int main(int argc, char** argv)
         fills();
         playing(argv[1]);
         pressure(argv[2]);
-        aftertouch(argv[2]);
+        aftertouch(argv[2], temp.path);
         saving(argv[1], temp.path);
         inputAndSwitches(argv[1], temp.path);
     }

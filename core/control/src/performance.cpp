@@ -746,7 +746,7 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
         for(const auto& at:untouched_)if(keys.count(at.node))parameters.push_back("{\"node\":"+quote(keys.at(at.node))+",\"param\":"+std::to_string(at.param)+'}');
         head="{\"format\":\"oscairn.performance\",\"version\":13,\"info\":";tail=",\"libraries\":"+join(named)+",\"transport\":{\"tempo\":"+numeric(tempo_.load())+",\"clockSource\":"+quote(clockSource_.load()==Transport::ClockSource::Internal?"internal":"midi")+"},\"audioInputs\":"+ports(graph.audioLayout.inputs)+",\"audioOutputs\":"+ports(graph.audioLayout.outputs)+",\"nodes\":"+join(nodes)+",\"wires\":"+join(wires)+",\"parts\":"+join(parts)+",\"mappings\":"+join(mappings)+",\"pads\":"+padsText(padMap_)+",\"key\":"+keyText(key_)+",\"master\":"+masterText(masterLevel_,masterPan_)+",\"scenes\":"+join(scenes)+",\"sceneUntouched\":"+join(parameters)+",\"scene\":"+std::to_string(scene_)+",\"controls\":"+join(controls)+",\"assignments\":"+join(assigned)+(unlinked_.empty()?std::string():",\"unlinked\":"+join([&]{std::vector<std::string> u;for(const auto& c:unlinked_)u.push_back(quote(c));return u;}()))
             +(momentary_.empty()?std::string():",\"physicalControls\":{"+[&]{std::string o;for(const auto& c:momentary_)o+=(o.empty()?"":",")+quote(c)+":{\"latch\":false}";return o;}()+'}')
-            +(polyAftertouch_.load()?",\"input\":{\"aftertouch\":\"poly\"}":"")+",\"lock\":"+lockText+"}\n";
+            +(polyAftertouch_.load()?"":",\"input\":{\"aftertouch\":\"channel\"}")+",\"lock\":"+lockText+"}\n";
     }
     info.hash=contentHash(head+tail,bundle.temporary.path/"nodes");
     const auto out=head+infoText()+tail;
@@ -1488,7 +1488,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             if(!validPhysicalControl(name) || !pressControl(name) || !seen.insert(name).second)bad("only a button:N or footswitch:N latches or not, once");
             fields(e->value,{"latch"});if(const V l=member(e->value,"latch");l && !boolean(l))momentary.push_back(std::move(name));}
         std::sort(momentary.begin(),momentary.end());}
-    bool polyAftertouch=false;
+    bool polyAftertouch=true; // poly unless the Performance says channel
     if(const V in=member(d,"input")){fields(in,{"aftertouch"});if(const V a=member(in,"aftertouch")){const auto mode=text(a);if(mode!="channel" && mode!="poly")bad("input.aftertouch is channel or poly");polyAftertouch=mode=="poly";}}
     std::set<std::pair<NodeId,uint32_t>> mappings;
     for(auto m:array(field(d,"mappings"),4096)){fields(m,{"from","lane","to","param"});const auto from=node(field(m,"from")),lane=integer(field(m,"lane"));if(!mappings.emplace(from,lane).second)bad("duplicate parameter mapping");next->mapParamTarget(from,lane,node(field(m,"to")),integer(field(m,"param")));}

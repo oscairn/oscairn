@@ -388,7 +388,7 @@
       "properties": {
         "aftertouch": {
           "enum": ["channel", "poly"],
-          "description": "channel (the default): a key's pressure becomes its channel's, the highest of that channel's keys', so the parts get channel pressure whatever the source sends; poly: key pressure reaches the parts per note where the source sends it, channel pressure otherwise. Either way a part takes it only by its receive setting (aftertouch)"
+          "description": "poly (the default, never written): key pressure reaches the parts per note where the source sends it, channel pressure otherwise, so a keybed with channel pressure only plays the same either way; channel: a key's pressure becomes its channel's, the highest of that channel's keys', so the parts get channel pressure whatever the source sends. Either way a part takes it only by its receive setting (aftertouch)"
         }
       },
       "additionalProperties": false

@@ -968,13 +968,13 @@ void partsClient(const char* plugin,const char* delay)
         check(remote.graphState().parts[0].input.reserve==2 && remote.graphState().parts[0].input.priority==9,"its reserve and priority too");
         check(remote.graphState().parts[0].input.pedals==withPedalReceive(0,Pedal::Sustain,PedalReceive::None),"and whose pedals it takes");
         check(remote.graphState().parts[0].input.functions==withFunctionReceive(withFunctionReceive(0,Function::PitchBend,PedalReceive::None),Function::Modulation,PedalReceive::Own),"and whether it takes pitch bend and the mod wheel, by the same receive object");
-        remote.link("lever:1",false);remote.latch("button:1",false);remote.setPolyAftertouch(true);
+        remote.link("lever:1",false);remote.latch("button:1",false);remote.setPolyAftertouch(false);
         {Assignment level;level.kind=Assignment::Kind::PartLevel;level.id=part;remote.assign("wheel:2",level,0,true);}
-        check(remote.unlinked()==std::vector<std::string>{"lever:1"} && remote.momentary()==std::vector<std::string>{"button:1"} && remote.polyAftertouch(),"an unlinked lever, a momentary switch and poly aftertouch set and read back over the socket");
+        check(remote.unlinked()==std::vector<std::string>{"lever:1"} && remote.momentary()==std::vector<std::string>{"button:1"} && !remote.polyAftertouch(),"an unlinked lever, a momentary switch and channel aftertouch set and read back over the socket");
         check(!remote.assignments().empty() && remote.assignments().back().passes && remote.assignments().back().part==0,"and a Performance's assignment that passes the wheel's function on");
         {bool refused=false;try{remote.latch("knob:1",false);}catch(const std::exception&){refused=true;}check(refused,"only a switch latches or not");}
-        remote.link("lever:1",true);remote.latch("button:1",true);remote.setPolyAftertouch(false);remote.assign("wheel:2",{});
-        check(remote.unlinked().empty() && remote.momentary().empty() && !remote.polyAftertouch(),"and back to the defaults");
+        remote.link("lever:1",true);remote.latch("button:1",true);remote.setPolyAftertouch(true);remote.assign("wheel:2",{});
+        check(remote.unlinked().empty() && remote.momentary().empty() && remote.polyAftertouch(),"and back to the defaults");
         check(remote.controller(64,127) && remote.controller(64,0,3),"a sustain pedal sent over the socket (notes.controller)");
         {bool refused=false;try{remote.controller(123,0);}catch(const std::exception&){refused=true;}check(refused,"all notes off is notes.panic's, not notes.controller's");}
         // Splits over the socket: a split at the end, a lane's Mix and zones, a third lane.

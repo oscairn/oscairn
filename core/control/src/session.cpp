@@ -1066,7 +1066,7 @@ namespace oscairn
             mergedSources_[count] = sources.empty() ? untaggedSource : sources[i];
             merged_[count++] = events[i];
         }
-        if( !polyAftertouch_.load( std::memory_order_relaxed ) ) // input.aftertouch channel, the default
+        if( !polyAftertouch_.load( std::memory_order_relaxed ) ) // input.aftertouch channel, only where the Performance says so (poly is the default)
         {
             size_t kept = 0;
             for( size_t i = 0; i < count; ++i )

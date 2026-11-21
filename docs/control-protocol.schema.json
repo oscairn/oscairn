@@ -6519,7 +6519,7 @@
                     "channel",
                     "poly"
                   ],
-                  "description": "channel (the default) folds key pressure into channel pressure; poly passes it per note"
+                  "description": "poly (the default) passes key pressure per note; channel folds it into channel pressure, only where a Performance says so"
                 }
               },
               "required": [

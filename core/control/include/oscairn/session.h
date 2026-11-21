@@ -535,7 +535,7 @@ namespace oscairn
             std::map<NodeId, std::string> roles;
             std::vector<std::string> unlinked;
             std::vector<std::string> momentary;
-            bool polyAftertouch = false;
+            bool polyAftertouch = true;
         };
         struct ParameterChange { NodeId node; uint32_t param; double from, to; };
         struct Step
@@ -725,7 +725,7 @@ namespace oscairn
         std::vector<AssignmentOverride> assignments_; // physical controls' overrides (physical_controls.cpp)
         std::vector<std::string> unlinked_;           // extra inputs the Performance has unlinked from the controls they follow, sorted (physical_controls.cpp)
         std::vector<std::string> momentary_;          // its switches set not to latch: on only while held, sorted (physical_controls.cpp)
-        std::atomic<bool> polyAftertouch_{ false };   // its input.aftertouch: poly passes key pressure per note; channel (false) folds it (foldPressure)
+        std::atomic<bool> polyAftertouch_{ true };    // its input.aftertouch: poly (the default) passes key pressure per note; channel (false) folds it (foldPressure)
         uint32_t nextMacro_ = 1;
         bool staged_ = false;
         bool rampGains_ = false; // the next commit is played (a control moved): its gains ramp
@@ -829,7 +829,7 @@ namespace oscairn
             Timing::Open stats;                   // engine.timing's open: its counts and the read's times
             std::vector<std::string> unlinked;    // the extra inputs it unlinks
             std::vector<std::string> momentary;   // its switches on only while held (`physicalControls`)
-            bool polyAftertouch = false;          // its `input.aftertouch` is poly
+            bool polyAftertouch = true;           // its `input.aftertouch` is poly (the default, so too when left out)
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.

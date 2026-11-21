@@ -879,8 +879,8 @@ namespace oscairn
         // in momentary(), on only while held. latch(control, false) takes a button:N or footswitch:N; an edit, saved (`physicalControls`).
         virtual std::vector<std::string> momentary() const = 0;
         virtual void latch( const std::string& control, bool latch ) = 0;
-        // The Performance's `input.aftertouch`: channel (false, the default) folds a key's pressure into its channel's, the highest of
-        // the channel's keys'; poly passes it on per note. Either way a part takes it only by its receive setting (`aftertouch`).
+        // The Performance's `input.aftertouch`: poly (true, the default) passes a key's pressure on per note; channel folds it into its channel's, the highest of
+        // the channel's keys', and holds only where a Performance says so. Either way a part takes it only by its receive setting (`aftertouch`).
         virtual bool polyAftertouch() const = 0;
         virtual void setPolyAftertouch( bool poly ) = 0;
         virtual void assign( const std::string& control, const Assignment& target, uint32_t part = 0, bool passes = false ) = 0; // part: that part's Sound's own assignment, which replaces the control's function (pitch bend, CC 1...) for that part's instruments unless passes

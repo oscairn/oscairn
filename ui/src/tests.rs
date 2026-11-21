@@ -866,6 +866,28 @@ fn setlist_at_rest_costs_no_request_and_no_frame() {
     assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
 }
 
+// Play from the Setlist without touch: a walk with panel moves only from Home onto the Setlist,
+// then the bar's cursor (the third pane, `move:2`) onto the screen's own Play action, Confirm
+// opens Play; nothing switches until the press.
+#[test]
+fn setlist_play_reached_by_the_bar_cursor() {
+    let mut f = Fixture::new("setlist-play");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.reopened();
+    let s = &mut f.screen;
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // the first move shows the cursor on the first tile
+    shell::act(Action::Move { pane: Some(0), by: 2 }); // Setlist
+    assert_eq!(s.ui.get_screen(), 0, "nothing opened until confirmed");
+    shell::act(Action::Confirm(None));
+    assert_eq!(s.ui.get_screen(), 1, "the Setlist");
+    shell::act(Action::Move { pane: Some(2), by: 1 }); // the bar's first stop, Back
+    shell::act(Action::Move { pane: Some(2), by: 1 }); // on to the Setlist's Play
+    assert_eq!(s.ui.get_screen(), 1, "moving in the bar switches nothing");
+    shell::act(Action::Confirm(None));
+    assert_eq!(s.ui.get_screen(), 3, "Play");
+}
+
 /// The real engine (OSCAIRN_ENGINE, which ctest gives when the build has one) with no audio
 /// device, in folders of its own (never the user's), ended when dropped. None without one.
 struct RealEngine {

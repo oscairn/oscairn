@@ -1321,6 +1321,7 @@ impl App {
     /// What the screen shown offers the bar besides undo, redo and save.
     fn screen_tools(&self) -> Vec<topbar::Tool> {
         match self.screen {
+            Screen::Setlist => self.setlist.bar_tools(),
             Screen::Routing => self.routing.bar_tools(),
             Screen::Mixer => self.mixer.bar_tools(),
             Screen::Params => self.params.bar_tools(),
@@ -1460,6 +1461,7 @@ impl App {
     /// The screen's own action `i` of the bar.
     fn run_tool(&mut self, i: usize) {
         match self.screen {
+            Screen::Setlist => self.go(Screen::Play),
             Screen::Routing => self.on_routing(|r| r.tap_tool(i as i32)),
             Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
             Screen::Params => self.params_act(|p| p.search_tap()),

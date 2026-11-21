@@ -350,6 +350,8 @@ pub struct Budget {
     pub block_us: f32,
     /// The lanes a deadline's give-up may take from (MARKED): the one furthest over its time and those feeding it.
     pub marked: Vec<bool>,
+    /// The entries holding a report (`heard`): with none, nothing reads one (a budget at rest asks no entry).
+    pub listing: usize,
 }
 /// A thread woken this share of its time late was held off its core: the device's time is short, not its own.
 const WAIT_SHARE: f32 = 0.25;
@@ -392,6 +394,7 @@ impl Budget {
             frame_us: 0.0,
             block_us: 0.0,
             marked: vec![false; lanes],
+            listing: 0,
         }
     }
     fn lane(&self, lane: usize) -> Lane {
@@ -414,9 +417,9 @@ impl Budget {
                 }
             };
             total += n as f32 * e.cost.note_now();
-            if counting != Counting::Ending {
+            if let Some(h) = e.heard.as_ref().filter(|_| counting != Counting::Ending) {
                 // Listed voices given up: no longer counted, their fades a block away.
-                total -= e.heard.as_ref().map_or(0.0, |h| h.freed * h.unit) * self.voice_cost(e);
+                total -= h.freed * h.unit * self.voice_cost(e);
             }
         }
         total
@@ -896,16 +899,22 @@ impl Budget {
     /// lowering each context's own limit (`context_cap`), so its limit is at least the voices it sounds.
     pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
         let mine = || self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node));
-        let listed = mine().any(|e| e.heard.is_some());
+        let listed = self.listing != 0 && mine().any(|e| e.heard.is_some());
         let cap = if listed { u32::MAX } else { mine().filter(|e| e.cap != 0).map(|e| e.cap).min().unwrap_or(u32::MAX) };
         self.limit_for(rs, lane, node, voices, if listed { admitted.max(voices as f32) } else { admitted }, listed).map_or(0, |l| l.min(cap))
     }
     /// The cap on the context a step's `channel` plays, where its plugin lists its voices (0: none).
     pub fn context_cap(&self, step: usize, channel: i16) -> Option<u32> {
+        if self.listing == 0 {
+            return None;
+        }
         self.entries.iter().find(|e| e.step == step && e.channel == channel && e.heard.is_some()).map(|e| e.cap)
     }
     /// The cap on a step that one part plays alone, where its plugin lists its voices.
     pub fn step_cap(&self, step: usize) -> Option<u32> {
+        if self.listing == 0 {
+            return None;
+        }
         self.entries.iter().find(|e| e.step == step && e.heard.is_some()).map(|e| e.cap)
     }
     fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32, listed: bool) -> Option<u32> {

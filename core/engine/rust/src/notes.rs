@@ -432,7 +432,10 @@ impl Notes {
                                 rs[source.route].set_loudness(n.note_id, n.channel, n.key, n.loudness, source.channel);
                             }
                         }
-                        hear(budget, s, step, r);
+                        // No lists and no entry holding one: nothing to take or let go (a budget at rest scans no entry).
+                        if !r.importance.is_empty() || budget.listing != 0 {
+                            hear(budget, s, step, r);
+                        }
                     }
                 }
             }
@@ -612,13 +615,14 @@ fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
         let mine = |l: &&Listed| step.contexts.is_empty() || step.contexts.iter().zip(r.contexts).any(|(c, &id)| c.channel == channel && id == l.context);
         let mut lists = r.importance.iter().filter(mine).peekable();
         if !first || lists.peek().is_none() {
-            e.heard = None;
+            budget.listing -= usize::from(e.heard.take().is_some());
             continue;
         }
         // Taken in place each block; ranked only when a voice is to be chosen (Heard::rank): a budget not giving voices up
         // copies the entries and reads a count.
         let (checked, check_in) = e.heard.as_ref().map_or((0, 0), |w| (w.checked, w.check_in.saturating_sub(1)));
         let had = e.heard.is_some();
+        budget.listing += usize::from(!had);
         let h = e.heard.get_or_insert_with(Heard::default);
         h.begin(unit);
         for l in lists {

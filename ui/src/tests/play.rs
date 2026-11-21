@@ -4,6 +4,7 @@
 
 use super::bar::{play_on_the_shell, request_in};
 use super::*;
+use std::time::Duration;
 
 fn status(f: &mut Fixture, inputs: serde_json::Value) {
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.1, "midiInputs": inputs}})));
@@ -117,4 +118,25 @@ fn an_empty_performance_says_so() {
     f.screen.frame();
     f.screen.save("play-empty");
     png(&f.screen, "play-empty");
+}
+
+// A performance instrument: with Play shown and nothing happening, it asks nothing and draws nothing. The meters
+// played while Play is shown (parts.meters, 100 ms apart) are answered with silence until the asking stops.
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut f = play_on_the_shell("play-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), play_graph());
+    // The meters stop after two seconds of quiet: answer them with silence and let that quiet pass.
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(100));
+        slint::platform::update_timers_and_animations();
+        while let Some(request) = f.engine.try_request(Duration::from_millis(20)) {
+            f.reply(&request, json!({"result": {"meters": []}}));
+        }
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    std::thread::sleep(Duration::from_millis(300));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(Duration::from_millis(500)).is_none(), "nothing is asked at rest");
 }

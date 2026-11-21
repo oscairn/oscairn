@@ -125,6 +125,13 @@ namespace oscairn
     {
         BlockTiming roundTrip, collect, wake, run, cpu;
         std::atomic<uint32_t> starts{0}; // warmUp()s: its node's blocks late from here are its start's, not "too slow" (WorkerHost)
+        // The engine side's work for its blocks, which engine-cost-budget holds per block to recorded budgets: blocks
+        // handed to the worker, bytes copied between the engine and the shared block, and the system calls made for them
+        // (a doorbell's wake, a sleep on the block's end). Counted only in that test's own build of the plugin host
+        // (OSCAIRN_COST_COUNTERS, WorkerHost.cpp); 0 in the engine. One writer, the node's audio thread; mutable: a const
+        // report copy counts too.
+        mutable std::atomic<uint64_t> handed{0}, copied{0}, wakes{0}, sleeps{0};
+        static void add(std::atomic<uint64_t>& c, uint64_t n) noexcept { c.store(c.load(std::memory_order_relaxed) + n, std::memory_order_relaxed); }
         void reset() noexcept { roundTrip.reset(); collect.reset(); wake.reset(); run.reset(); cpu.reset(); }
         void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); cpu.warmUp(); starts.fetch_add(1, std::memory_order_relaxed); }
     };

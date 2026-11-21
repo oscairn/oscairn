@@ -208,6 +208,7 @@ impl NoteRoute {
         }
     }
     pub fn slot(&self, i: usize) -> &Slot {
+        crate::work::add(crate::work::SLOTS, 1);
         &self.slots[i % SLOTS]
     }
     fn pedal_of(&self, s: &Slot) -> u8 {

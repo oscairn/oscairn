@@ -41,6 +41,14 @@
 
 extern char** environ;
 
+// The engine side's work per block (WorkerTiming's handed, copied, wakes, sleeps), counted only in the copy of the plugin
+// host engine-cost-budget builds (OSCAIRN_COST_COUNTERS): the engine carries no counting.
+#ifdef OSCAIRN_COST_COUNTERS
+#define OSCAIRN_COUNT(counter, n) WorkerTiming::add(timing_.counter, n)
+#else
+#define OSCAIRN_COUNT(counter, n) ((void)0)
+#endif
+
 namespace oscairn
 {
     namespace
@@ -1159,6 +1167,7 @@ namespace oscairn
                             if(c < routes[i].sourceChannels && routes[i].sourceOutputs[c]) std::copy_n(routes[i].sourceOutputs[c], frames, source.audioOut(c));
                             else std::fill_n(source.audioOut(c), frames, 0.f);
                         source.shared_->published = source.shared_->published + 1;
+                        OSCAIRN_COUNT(copied, uint64_t(source.outChannels_) * frames * sizeof(float));
                     }
                 group_ = routes; groupCount_ = n; groupLost_ = lost;
                 const bool started = startProcess(inputs, ni, outputs, no, frames, events, count, transport);
@@ -1362,6 +1371,7 @@ namespace oscairn
                         if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
                         else std::fill_n(audioIn(c), frames, 0.f);
                     }
+                OSCAIRN_COUNT(copied, groupCount_ * sizeof(s.fused[0]) + (groupCount_ ? 0 : uint64_t(inChannels_) * frames * sizeof(float)));
                 uint32_t kept = 0;
                 if(replayAgain_.exchange(false, std::memory_order_relaxed)) replay_ = true;
                 // A panic drops a block's controllers, the replay with them: one reaching this block (or the block it was in) has it sent again.
@@ -1376,6 +1386,7 @@ namespace oscairn
                     else sysexDrops_.fetch_add(1, std::memory_order_relaxed);
                 }
                 carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0;
+                OSCAIRN_COUNT(copied, kept * sizeof(s.events[0]) + (transport ? sizeof(s.transport) : 0));
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
                 if(restedBlocks_ || restedSent_) { s.restedBlocks = restedBlocks_; s.restedFrames = restedFrames_; restedSent_ = restedBlocks_ != 0; restedBlocks_ = restedFrames_ = 0; } // written only while there is something to tell
                 called_.store(called_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); // one writer: no locked add
@@ -1391,10 +1402,11 @@ namespace oscairn
                 requestedAt_.store(sent_.time_since_epoch().count(), std::memory_order_release);
                 requested_.store(++sequence_, std::memory_order_release);
                 s.request.store(sequence_, std::memory_order_release);
+                OSCAIRN_COUNT(handed, 1);
                 // One doorbell for all the worker's nodes (RFC 0045): a system call only while its audio thread sleeps.
                 auto& bell = *process()->bell;
                 bell.ring.fetch_add(1, std::memory_order_seq_cst);
-                if(bell.sleeping.load(std::memory_order_seq_cst)) wake(bell.ring);
+                if(bell.sleeping.load(std::memory_order_seq_cst)) { wake(bell.ring); OSCAIRN_COUNT(wakes, 1); }
                 startedOutputs_ = outputs; startedChannels_ = no; startedFrames_ = frames; startedOffset_ = offset;
                 return true;
             }
@@ -1436,6 +1448,7 @@ namespace oscairn
                 // The round trip as this thread sees it: done when first found done, or given up.
                 // Asleep on done, saying so: the worker makes the wake-up's system call only then (Shared::waiting).
                 auto sleep = [&] {
+                    OSCAIRN_COUNT(sleeps, 1);
                     s.waiting.store(1, std::memory_order_relaxed);
                     std::atomic_thread_fence(std::memory_order_seq_cst);
                     const bool woke = waitWhileEqual(s.done, sequence_ - 1, left);
@@ -1459,6 +1472,7 @@ namespace oscairn
                 for(uint32_t c = 0; c < no; ++c)
                 {
                     if(!outputs[c]) continue;
+                    OSCAIRN_COUNT(copied, frames * sizeof(float));
                     if(c < outChannels_) std::copy_n(audioOut(c), frames, outputs[c]);
                     else std::fill_n(outputs[c], frames, 0.f);
                     for(uint32_t f = 0; f < frames && faded_ + f < fadeFrames_; ++f) outputs[c][f] *= float(faded_ + f) / float(fadeFrames_);
@@ -1474,6 +1488,7 @@ namespace oscairn
                     const double cost = s.voiceCost;
                     voiceCost_ = std::isfinite(cost) && cost > 0 ? std::min(cost, 1e6) : 0;
                     voiceNoteCount_ = std::min<uint32_t>(s.voiceNoteCount, maxVoiceNotes);
+                    OSCAIRN_COUNT(copied, voiceNoteCount_ * sizeof(voiceNotes_[0]));
                     for(uint32_t i = 0; i < voiceNoteCount_; ++i)
                     {
                         auto& n = voiceNotes_[i] = s.voiceNotes[i];
@@ -1512,6 +1527,7 @@ namespace oscairn
                     auto weight = [](float w, float none) { return std::isfinite(w) && w > 0 ? std::min(w, 1e6f) : none; };
                     c.weight = weight(c.weight, float(c.voices));
                     std::copy_n(from.least, c.count, c.least);
+                    OSCAIRN_COUNT(copied, sizeof(c) - sizeof(c.least) + c.count * sizeof(c.least[0]));
                     for(uint32_t k = 0; k < c.count; ++k)
                     {
                         auto& v = c.least[k];
@@ -1536,6 +1552,7 @@ namespace oscairn
                     auto& time = reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time;
                     time = late ? offset : time + offset;
                     ++outputCount_;
+                    OSCAIRN_COUNT(copied, sizeof(e));
                 }
             }
             // A block not heard (RFC 0045): each channel's last sample heard fades to zero over about 1 ms, then

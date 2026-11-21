@@ -635,6 +635,7 @@ fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
     let (voices, weights) = r.importance.iter().fold((0f32, 0f32), |(v, w), l| (v + f32::from(l.voices), w + weight(l.weight, f32::from(l.voices))));
     let unit = if weights > 0.0 { voices / weights } else { 1.0 };
     let mut seen = 0u32; // the channels (bit 16: none) whose first entry took its lists
+    crate::work::add(crate::work::ENTRIES, budget.entries.len());
     for e in budget.entries.iter_mut().filter(|e| e.step == s) {
         let (channel, bit) = (e.channel, 1u32 << (e.channel.clamp(-1, 15) + 1));
         let first = step.contexts.is_empty() && seen == 0 || !step.contexts.is_empty() && seen & bit == 0;

@@ -8,6 +8,7 @@
 //! device is out of core time as a whole (the lanes' total), and then only as many as the excess.
 
 use crate::route::{NoteRoute, FADE_STEPS};
+use crate::work;
 use crate::{Route, Routes, Shared};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
@@ -181,6 +182,7 @@ impl Heard {
     /// An entry into `least`, kept ascending: the least important LEAST of every list, in the plugin's order: the tier,
     /// then one just struck after the others, then audibility.
     fn insert(&mut self, (tier, flags, age_ms, level_db, weight): (u8, u8, u16, f32, f32)) {
+        work::add(work::RANKED, 1);
         let struck = if flags & 1 != 0 { STRUCK } else { 0 }; // OSCAIRN_VOICE_BUDGET_STRUCK
         let level = if level_db.is_finite() { level_db.clamp(-120.0, 24.0) } else { -120.0 };
         let weight = if weight.is_finite() && weight > 0.0 { weight.min(1e6) } else { 1.0 };
@@ -397,6 +399,11 @@ impl Budget {
             listing: 0,
         }
     }
+    /// The entries, for a pass over them (counted in test builds: work::ENTRIES).
+    fn scan(&self) -> std::slice::Iter<'_, Entry> {
+        work::add(work::ENTRIES, self.entries.len());
+        self.entries.iter()
+    }
     fn lane(&self, lane: usize) -> Lane {
         self.lanes.get(lane).copied().unwrap_or_default()
     }
@@ -404,7 +411,7 @@ impl Budget {
     /// What the lane's plugins are estimated to cost now: at rest, and their notes at each node's cost per note.
     fn estimate(&self, rs: &Routes, lane: usize, counting: Counting) -> f32 {
         let mut total = self.lane(lane).others;
-        for e in self.entries.iter().filter(|e| e.lane == lane) {
+        for e in self.scan().filter(|e| e.lane == lane) {
             let r = &rs[e.route];
             if e.rest {
                 total += e.cost.rest_now();
@@ -427,6 +434,7 @@ impl Budget {
     /// Each group's held notes (every lane's), or one lane's with their cost.
     fn count_held(&mut self, rs: &Routes, lane: Option<usize>) {
         self.groups.fill(NO_GROUP);
+        work::add(work::ENTRIES, self.entries.len());
         for e in self.entries.iter().filter(|e| lane.is_none_or(|l| l == e.lane)) {
             let r = &rs[e.route];
             let Some(g) = self.groups.get_mut(e.group) else { continue };
@@ -466,6 +474,7 @@ impl Budget {
     /// limit unless `owned`. Ties: a plugin that honors the volume expression, then the oldest note.
     #[allow(clippy::too_many_arguments)]
     fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, last: bool, node: Option<*const Activity>, listed: bool) -> Victim {
+        work::add(work::ENTRIES, self.entries.len());
         for h in self.entries.iter_mut().filter_map(|e| e.heard.as_mut()) {
             h.rank();
         }
@@ -475,7 +484,7 @@ impl Budget {
         // A context whose whole list went with voices left unlisted: those are at least as important as its last listed,
         // and may be less than any other; nothing above that goes until its next report lists them.
         let mut unlisted = f32::INFINITY;
-        for (k, e) in self.entries.iter().enumerate() {
+        for (k, e) in self.scan().enumerate() {
             let a = &e.cost;
             let elsewhere = lane.is_some_and(|l| if l == MARKED { !self.marked.get(e.lane).copied().unwrap_or(false) } else { l != e.lane });
             if elsewhere || node.is_some_and(|n| !std::ptr::eq(&**a, n)) || (costed && a.note_now() <= 0.0) {
@@ -598,7 +607,7 @@ impl Budget {
     fn reserves(&mut self, rs: &Routes, lane: usize) -> f32 {
         self.count_held(rs, Some(lane));
         let mut total = self.lane(lane).others;
-        for e in self.entries.iter().filter(|e| e.lane == lane && e.rest) {
+        for e in self.scan().filter(|e| e.lane == lane && e.rest) {
             total += e.cost.rest_now();
         }
         for (g, e) in self.groups.iter().zip(&self.entries).filter(|(g, _)| g.held != 0) {
@@ -609,7 +618,7 @@ impl Budget {
     /// The oldest note still fading out, which a choke finishes.
     fn fading_note(&self, rs: &Routes, lane: usize) -> Victim {
         let mut best: Option<(usize, usize, i32)> = None;
-        for (k, e) in self.entries.iter().enumerate().filter(|(_, e)| e.lane == lane && e.cost.note_now() > 0.0) {
+        for (k, e) in self.scan().enumerate().filter(|(_, e)| e.lane == lane && e.cost.note_now() > 0.0) {
             let r = &rs[e.route];
             for i in r.stolen.and(r.fading).iter() {
                 let s = r.slot(i);
@@ -656,7 +665,7 @@ impl Budget {
     /// Before a note into route `me` at `time` passes on: under its lane's soft limit, notes fade to
     /// make room for it; only what would miss the lane's block is choked.
     pub fn admit(&mut self, rs: &mut Routes, me: Route, time: u32) {
-        let Some(k) = self.entries.iter().position(|e| e.route == me) else { return };
+        let Some(k) = self.scan().position(|e| e.route == me) else { return };
         self.capped(rs, k, time);
         let Some(mine) = self.entries.get(k) else { return };
         let lane = mine.lane;
@@ -668,7 +677,7 @@ impl Budget {
         // limited only where the budget took them (its limit is at least what it sounds), so its new note is made room for:
         // one of its voices (what its limit counts: a sampler's note, a synth's voice) at the instance's cost per voice.
         let (step, channel) = (mine.step, mine.channel);
-        let listing = self.entries.iter().position(|e| e.step == step && e.channel == channel && e.heard.is_some());
+        let listing = self.scan().position(|e| e.step == step && e.channel == channel && e.heard.is_some());
         let cost = match listing {
             Some(_) => self.voice_cost(mine),
             None if mine.cost.own_voices.load(Relaxed) => 0.0,
@@ -700,7 +709,7 @@ impl Budget {
     /// The notes the host holds for entry `k`'s node (unreleased or released, not given up), across its connections.
     fn node_notes(&self, rs: &Routes, k: usize) -> u32 {
         let Some(node) = self.entries.get(k).map(|e| &*e.cost) else { return 0 };
-        self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| rs[e.route].voiced().and_not(rs[e.route].stolen).count()).sum()
+        self.scan().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| rs[e.route].voiced().and_not(rs[e.route].stolen).count()).sum()
     }
     /// 12m: before a note into entry `k` passes on, a plugin that does not give up its own voices, its node capped after
     /// lost blocks or the deadline, keeps under its cap: its node's quietest released note fades first, so a note
@@ -709,7 +718,7 @@ impl Budget {
         let Some(node) = self.entries.get(k).map(|e| &*e.cost as *const Activity) else { return };
         // SAFETY: the node's activity lives as long as the plan's entries, which this borrows.
         let own = unsafe { &*node }.own_voices.load(Relaxed);
-        let cap = self.entries.iter().filter(|e| e.cap != 0 && std::ptr::eq(&*e.cost, node)).map(|e| e.cap).min().unwrap_or(0);
+        let cap = self.scan().filter(|e| e.cap != 0 && std::ptr::eq(&*e.cost, node)).map(|e| e.cap).min().unwrap_or(0);
         if own || cap == 0 {
             return;
         }
@@ -827,7 +836,7 @@ impl Budget {
                     }
                 }
                 None => {
-                    for e in self.entries.iter().filter(|e| e.lane == i && rs[e.route].used.any()) {
+                    for e in self.scan().filter(|e| e.lane == i && rs[e.route].used.any()) {
                         e.cost.unfit.fetch_add(1, Relaxed);
                     }
                 }
@@ -853,6 +862,7 @@ impl Budget {
     /// limit's margin of `deadline`. Without the measurements (no slack, no cost, no lane limit), only after
     /// FORGET_BLOCKS healthy, at the probe's pace.
     pub fn recover(&mut self, rs: &Routes, slack_low: bool, room: Option<f32>, deadline: f32) {
+        work::add(work::ENTRIES, self.entries.len());
         for k in 0..self.entries.len() {
             if self.entries.get(k).is_none_or(|e| e.cap == 0) {
                 continue;
@@ -898,7 +908,7 @@ impl Budget {
     /// A node whose contexts list their voices (draft 2) is never cut by its lane's room: the budget takes its voices by
     /// lowering each context's own limit (`context_cap`), so its limit is at least the voices it sounds.
     pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
-        let mine = || self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node));
+        let mine = || self.scan().filter(|e| std::ptr::eq(&*e.cost, node));
         let listed = self.listing != 0 && mine().any(|e| e.heard.is_some());
         let cap = if listed { u32::MAX } else { mine().filter(|e| e.cap != 0).map(|e| e.cap).min().unwrap_or(u32::MAX) };
         self.limit_for(rs, lane, node, voices, if listed { admitted.max(voices as f32) } else { admitted }, listed).map_or(0, |l| l.min(cap))
@@ -908,14 +918,14 @@ impl Budget {
         if self.listing == 0 {
             return None;
         }
-        self.entries.iter().find(|e| e.step == step && e.channel == channel && e.heard.is_some()).map(|e| e.cap)
+        self.scan().find(|e| e.step == step && e.channel == channel && e.heard.is_some()).map(|e| e.cap)
     }
     /// The cap on a step that one part plays alone, where its plugin lists its voices.
     pub fn step_cap(&self, step: usize) -> Option<u32> {
         if self.listing == 0 {
             return None;
         }
-        self.entries.iter().find(|e| e.step == step && e.heard.is_some()).map(|e| e.cap)
+        self.scan().find(|e| e.step == step && e.heard.is_some()).map(|e| e.cap)
     }
     fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32, listed: bool) -> Option<u32> {
         let each = node.note_now() / node.per_note_scale.get();

@@ -11,6 +11,7 @@ mod event;
 mod notes;
 mod route;
 mod run;
+mod work;
 
 use audio::{Audio, Bus};
 use bindings::*;

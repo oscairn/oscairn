@@ -402,6 +402,30 @@ add_test(NAME engine-core-pool COMMAND oscairn-core-pool-test)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --workspace --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)
+# The per-block cost budgets (docs/developer-guide.md): work counted, not timed. The core's (run.rs, cost_budget: entries,
+# slots, ranking, calls into the C++; counters compiled in cargo's test build only) and the worker round trips' engine side.
+add_test(NAME engine-cost-budget-core COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
+    ${SAMPLEPACK_CARGO} test --release --locked --offline --lib --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" cost_budget -- --nocapture
+    WORKING_DIRECTORY "${engine_core_crate}")
+set_tests_properties(engine-cost-budget-core PROPERTIES TIMEOUT 300)
+# The engine side's counters compiled into copies of the plugin host and the engine for that test alone
+# (OSCAIRN_COST_COUNTERS): the engine and the worker carry none.
+foreach(lib oscairn_plugin_host oscairn_engine)
+    get_target_property(sources ${lib} SOURCES)
+    get_target_property(links ${lib} LINK_LIBRARIES)
+    get_target_property(includes ${lib} INCLUDE_DIRECTORIES)
+    list(TRANSFORM links REPLACE "^oscairn_plugin_host$" oscairn_plugin_host_counted)
+    add_library(${lib}_counted STATIC ${sources})
+    target_include_directories(${lib}_counted PUBLIC ${includes})
+    target_link_libraries(${lib}_counted PUBLIC ${links})
+    target_compile_definitions(${lib}_counted PRIVATE $<TARGET_PROPERTY:${lib},COMPILE_DEFINITIONS> OSCAIRN_COST_COUNTERS=1)
+    target_compile_options(${lib}_counted PRIVATE $<TARGET_PROPERTY:${lib},COMPILE_OPTIONS>)
+endforeach()
+add_executable(oscairn-cost-budget-test engine/tests/cost_budget.cpp)
+target_link_libraries(oscairn-cost-budget-test PRIVATE oscairn_engine_counted)
+add_dependencies(oscairn-cost-budget-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME engine-cost-budget COMMAND oscairn-cost-budget-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(engine-cost-budget PROPERTIES TIMEOUT 120)
 
 add_executable(oscairn-write-failure-test engine/tests/write_failure.cpp)
 target_link_libraries(oscairn-write-failure-test PRIVATE oscairn_engine)

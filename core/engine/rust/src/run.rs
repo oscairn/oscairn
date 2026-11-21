@@ -1055,4 +1055,240 @@ mod tests {
             }
         }
     }
+
+    // engine-cost-budget-core: the core's work per block at rest and with keys held, counted (crate::work, and the calls
+    // into the C++ here), held to recorded budgets (docs/developer-guide.md, "Per-block cost budgets"): a change that adds
+    // per-block work fails on any machine. Eight instruments on lanes of their own that give up their own voices (the
+    // core bench's shape); held, four of them list their voices (draft 2) while the budget gives none up.
+    thread_local!(static CALLS: Cell<[u64; 5]> = const { Cell::new([0; 5]) }); // voices, importance, waited, set_limits, took
+    thread_local!(static HELD: Cell<bool> = const { Cell::new(false) });
+    fn call(k: usize) {
+        CALLS.with(|c| {
+            let mut v = c.get();
+            v[k] += 1;
+            c.set(v);
+        });
+    }
+    extern "C" fn always(_: *mut c_void, _: u32) -> bool {
+        true
+    }
+    extern "C" fn never(_: *mut c_void, _: u32) -> bool {
+        false
+    }
+    extern "C" fn counted_voices(_: *mut c_void, _: u32, cost: *mut f64, _: *mut *const VoiceNote, n: *mut u32) -> u32 {
+        call(0);
+        // SAFETY: the run's places to write.
+        unsafe { (*cost, *n) = (2.0, 0) };
+        if HELD.with(Cell::get) {
+            30
+        } else {
+            0
+        }
+    }
+    extern "C" fn counted_importance(_: *mut c_void, s: u32, lists: *mut *const crate::bindings::oscairn_voice_budget_importance_t) -> u32 {
+        call(1);
+        thread_local!(static LIST: crate::bindings::oscairn_voice_budget_importance_t = {
+            // SAFETY: a plain C struct, all zeros a valid value.
+            let mut l: crate::bindings::oscairn_voice_budget_importance_t = unsafe { std::mem::zeroed() };
+            (l.context, l.voices, l.count, l.weight) = (SELECTED, 30, 16, 30.0);
+            for (i, v) in l.least.iter_mut().enumerate() {
+                (v.tier, v.age_ms, v.level_db, v.weight) = (1, 100 * i as u16, -20.0 - i as f32, 1.0);
+            }
+            l
+        });
+        if !HELD.with(Cell::get) || s >= 4 {
+            return 0;
+        }
+        // SAFETY: the run's place to write; the list lives as long as the thread.
+        LIST.with(|l| unsafe { *lists = l });
+        1
+    }
+    extern "C" fn counted_waited(_: *mut c_void, _: u32, cpu: *mut f32) -> f32 {
+        call(2);
+        // SAFETY: the run's place to write.
+        unsafe { *cpu = 20.0 };
+        5.0
+    }
+    extern "C" fn counted_limits(_: *mut c_void, _: u32, _: u32, _: *const VoiceContext, _: u32) {
+        call(3);
+    }
+    extern "C" fn counted_took(_: *mut c_void, _: u32) -> f64 {
+        call(4);
+        30.0
+    }
+
+    #[test]
+    fn cost_budget() {
+        const STEPS: usize = 8;
+        let w = World { sent: Vec::new(), clock: Cell::new(1_000_000) };
+        let activity: [Activity; STEPS] = std::array::from_fn(|_| Activity::default());
+        for a in &activity {
+            a.rest.set(-1.0);
+            a.per_note.set(-1.0);
+            a.per_note_scale.set(1.0);
+        }
+        let zones = Zones::default();
+        let routes: [*mut NoteRoute; STEPS] = std::array::from_fn(|_| rust_core_route_new(1, 1, 64));
+        let sources: [oscairn_source; STEPS] = std::array::from_fn(|s| oscairn_source {
+            route: routes[s],
+            zones: &zones,
+            peers: std::ptr::null(),
+            peer_count: 0,
+            channel: -1,
+            draining: false,
+            from: -1,
+        });
+        let steps: [oscairn_step; STEPS] = std::array::from_fn(|s| oscairn_step {
+            activity: std::ptr::from_ref(&activity[s]).cast_mut(),
+            sources: &sources[s],
+            source_count: 1,
+            contexts: std::ptr::null(),
+            context_count: 0,
+            lane: s as u32,
+            in_process: false,
+            late_lane: false,
+            next: std::ptr::null(),
+            next_count: 0,
+            host: std::ptr::null::<u8>().wrapping_add(s + 1).cast(),
+            id: s as u32,
+            harmony: -1,
+            lane_routes: std::ptr::null(),
+            lane_route_count: 0,
+            lanes_in: false,
+            may_rest: false,
+        });
+        let outs: [oscairn_audio_route; STEPS] = std::array::from_fn(|s| oscairn_audio_route { source: s as i32, from: 0, to: 0, gain: 1.0, live: [1, 0, 0, 0] });
+        let audio_steps: [oscairn_audio_step; STEPS] = std::array::from_fn(|s| oscairn_audio_step {
+            host: std::ptr::null::<u8>().wrapping_add(s + 1).cast(),
+            inputs: 0,
+            outputs: 2,
+            metered: 2,
+            peaks: std::ptr::null_mut(),
+            activity: std::ptr::null_mut(),
+            routes: std::ptr::null(),
+            route_count: 0,
+            buses: std::ptr::null(),
+            bus_count: 0,
+        });
+        let plugins = oscairn_plugins {
+            context: std::ptr::from_ref(&w).cast_mut().cast(),
+            sent: Some(sent),
+            start: Some(play),
+            render: Some(play),
+            finish: Some(always),
+            late: Some(never),
+            panic: Some(nothing),
+            kept: Some(always),
+            was_reset: Some(never),
+            asleep: Some(never),
+            own_voices: Some(always),
+            honors_volume: Some(never),
+            missed: Some(zero),
+            took: Some(counted_took),
+            voices: Some(counted_voices),
+            importance: Some(counted_importance),
+            set_limits: Some(counted_limits),
+            sound: Some(sound),
+            parameters: Some(parameters),
+            listen: Some(listen),
+            now: Some(now),
+            deadline: Some(deadline),
+            helpers: Some(helpers),
+            rest: Some(never_rest),
+            waited: Some(counted_waited),
+        };
+        let mut budgeted = [false; STEPS];
+        // SAFETY: arrays that outlive the run; its notes and audio freed after it.
+        let (notes, audio, run) = unsafe {
+            let notes = rust_core_notes_new(steps.as_ptr(), STEPS as u32, STEPS as u32, budgeted.as_mut_ptr());
+            let audio = rust_core_audio_new(audio_steps.as_ptr(), STEPS as u32, outs.as_ptr(), STEPS as u32, 0, 2, 128);
+            let run = rust_core_run_new(notes, audio, steps.as_ptr(), budgeted.as_ptr(), STEPS as u32, [STEPS as u32].as_ptr(), 1, std::ptr::null(), 0, std::ptr::null(), 0, std::ptr::null(), 0);
+            (notes, audio, run)
+        };
+        let (beat, live, mut out) = (Event::header(40, 0, 1001, 0, 0), [1f32; 256], [0f32; 256]);
+        let (mut next_id, mut drops, mut midi, mut midi_count) = (0u32, 0u64, [NO_MIDI; 64], 0u32);
+        let o = out.as_mut_ptr();
+        let outputs = [o, o.wrapping_add(128)];
+        let mut block = |input: &[Event]| {
+            midi_count = 0;
+            let b = oscairn_run_block {
+                inputs: std::ptr::null(),
+                ni: 0,
+                outputs: outputs.as_ptr(),
+                no: 2,
+                frames: 128,
+                fade: 48,
+                events: input.as_ptr(),
+                count: input.len() as u32,
+                tags: std::ptr::null(),
+                params: std::ptr::null(),
+                param_count: 0,
+                beat: &beat,
+                panic_input: false,
+                panic_notes: false,
+                listening: false,
+                parallel: true,
+                deadlines: true,
+                transport_wake: false,
+                timing: Timing { budget: 800.0, period: 2666.0, deadline: 2266.0, allowance: 1333.0, cores: 3.0, quiet_after: 256, low_slack: 0.0 },
+                deadline: 1_000_000_000_000,
+                worth: 1e9,
+                live_from: live.as_ptr(),
+                live_to: live.as_ptr(),
+                next_id: &mut next_id,
+                drops: &mut drops,
+                midi: midi.as_mut_ptr(),
+                midi_count: &mut midi_count,
+            };
+            // SAFETY: a live run and the arrays above, for the call.
+            unsafe { rust_core_run_block(run, &b, &plugins) };
+        };
+        // Per block over `blocks` blocks: entries visited, slots read, voices ranked, then the calls (voices, importance,
+        // waited, set_limits, took).
+        let measure = |blocks: u32, block: &mut dyn FnMut(&[Event])| {
+            crate::work::COUNTS.with(|c| c.set([0; 3]));
+            CALLS.with(|c| c.set([0; 5]));
+            for _ in 0..blocks {
+                block(&[]);
+            }
+            let (work, calls) = (crate::work::COUNTS.with(Cell::get), CALLS.with(Cell::get));
+            let per = |n: u64| n.div_ceil(u64::from(blocks));
+            [per(work[0]), per(work[1]), per(work[2]), per(calls[0]), per(calls[1]), per(calls[2]), per(calls[3]), per(calls[4])]
+        };
+        for _ in 0..100 {
+            block(&[]);
+        }
+        let rest = measure(200, &mut block);
+        HELD.with(|h| h.set(true));
+        for k in 0..30i16 {
+            block(&[Event::note(true, 40 + k, 0.8, 0, 0, 0)]);
+        }
+        for _ in 0..100 {
+            block(&[]);
+        }
+        let held = measure(200, &mut block);
+        let gave: u64 = activity.iter().map(|a| a.stolen.load(Relaxed) + a.stolen_for_device.load(Relaxed) + a.hard_chokes.load(Relaxed)).sum();
+        // SAFETY: made above, freed once, the run before its notes and audio.
+        unsafe {
+            rust_core_run_free(run);
+            rust_core_audio_free(audio);
+            rust_core_notes_free(notes);
+            for r in routes {
+                rust_core_route_free(r);
+            }
+        }
+        let names = ["entries", "slots", "ranked", "voices calls", "importance calls", "waited calls", "set_limits calls", "took calls"];
+        // The budgets per block (docs/developer-guide.md): raise one only on purpose, saying why in the commit.
+        const REST: [u64; 8] = [136, 0, 0, 16, 8, 0, 0, 8];
+        const HELD_BUDGET: [u64; 8] = [232, 0, 0, 16, 8, 0, 0, 8];
+        println!("cost per block at rest {rest:?}, held {held:?} ({names:?}); voices given up {gave}");
+        assert_eq!(gave, 0, "the budget gave nothing up: the counts are those of a budget not acting");
+        for (i, name) in names.iter().enumerate() {
+            assert!(rest[i] <= REST[i], "at rest, {name} per block: {} over its budget {}", rest[i], REST[i]);
+            assert!(held[i] <= HELD_BUDGET[i], "keys held, {name} per block: {} over its budget {}", held[i], HELD_BUDGET[i]);
+        }
+    }
+    extern "C" fn never_rest(_: *mut c_void, _: u32, _: u32) -> bool {
+        false
+    }
 }

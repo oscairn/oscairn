@@ -181,6 +181,34 @@ vectors recorded from the Rust core itself (`oscairn-core-diff-test record FILE 
 after which the header names `rust_core_` and that commit), with the reason in the commit and a review of that
 reason. A change meant to keep the behavior keeps the vectors: if they fail, the change is wrong, not the vectors.
 
+#### Per-block cost budgets
+
+The owner's rule for the engine thread: a feature that is not acting costs nothing measurable, at rest above all.
+Wall time cannot hold a gate to that (this Mac's thread times are bimodal, a CI runner's are anyone's), so two tests
+count the work a block does and fail when a count passes its recorded budget, on any machine:
+
+| Test | What it counts, per block | Budget at rest | Budget with keys held |
+| --- | --- | --- | --- |
+| `engine-cost-budget-core` (`core/engine/rust/src/run.rs`, `cost_budget`: eight instruments on lanes of their own that give up their own voices, the core bench's shape; held, 30 keys each and four of them listing their voices) | budget entries visited by a pass over them; note slots read (`NoteRoute::slot`); listed voices ranked; calls into the C++: `voices`, `importance`, `waited`, `set_limits`, `took` | 136, 0, 0; 16, 8, 0, 0, 8 | 232, 0, 0; 16, 8, 0, 0, 8 |
+| `engine-cost-budget` (`core/engine/tests/cost_budget.cpp`: five voice-fixture instruments each through an insert, chain placement, a sixth kept warm) | blocks handed to workers; bytes copied between the engine and the shared blocks; system calls for them (a doorbell's wake, a sleep on the block's end) | 10, 15,360, 20 | 10, 19,380, 20 |
+
+Both also hold the budget to giving nothing up while they count (a budget acting does more, on purpose), the system
+calls to at most a wake and a sleep a block handed, and the instance kept warm to no work at all. The core's counters
+(`core/engine/rust/src/work.rs`) are compiled in cargo's test build only (`cargo test`); the engine side's, four per
+node in `WorkerTiming` (`handed`, `copied`, `wakes`, `sleeps`), only in the copies of the plugin host and the engine
+the test is linked to (`oscairn_plugin_host_counted`, `oscairn_engine_counted`, built with `OSCAIRN_COST_COUNTERS`):
+the engine and the worker count nothing.
+
+A budget is raised only on purpose: the commit that raises one says which, from what to what, and why that work is
+worth it per block; the budget is the constant beside the test's assertions (`REST`, `HELD_BUDGET` in `cost_budget`;
+`restBudget`, `heldBudget` in `cost_budget.cpp`) and the table above, changed together. A count that went down is
+lowered in the same change, so the next rise shows.
+For the time a change costs, `oscairn-rest-bench` (`tools/engine-bench`; `oscairn-rest-bench WORKER VOICE_FIXTURE
+[PARTS] [SECONDS] [warm]`) prints the engine thread's CPU and user time, syscalls and context switches per block at
+rest; compare two builds by alternating runs, by their minimum, or count the instructions of `rust_core_run_block`
+under callgrind (`valgrind --tool=callgrind --collect-atstart=no --toggle-collect=rust_core_run_block`, Linux), which
+do not move between runs.
+
 ### Tools
 
 Programs in `tools/`, and the ones built beside the tests, for plugin work:

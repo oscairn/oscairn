@@ -149,3 +149,34 @@ fn polish_4_pictures() {
         }
     }
 }
+
+// The sidebar's scroll track is as tall as the lines its view shows, measured against the lines the window draws (the rows' own
+// places), not against the formula that sizes the track: the room under the last line is not track. List and bubbles, normal and Compact.
+#[test]
+fn the_sidebar_track_ends_at_the_last_line_of_the_view() {
+    for (bubbles, compact) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut s = tagged("compact-track");
+        let ui = s.ui();
+        // The choices are kept in library-view.txt, so a screen starts as the last one left them.
+        if ui.global::<LibraryState>().get_bubbles() != bubbles {
+            press_tool(&mut s, 2);
+        }
+        if ui.global::<LibraryState>().get_compact() != compact {
+            press_tool(&mut s, 1);
+        }
+        let (t, lib) = (ui.global::<crate::Theme>(), ui.global::<LibraryState>());
+        assert_eq!((lib.get_bubbles(), lib.get_compact()), (bubbles, compact));
+        let drawn = if bubbles {
+            lib.get_side_geo().iter().map(|g| g.y + g.h).fold(0., f32::max)
+        } else {
+            let n = lib.get_side_rows().row_count() as f32;
+            let step = t.invoke_dense(t.get_list_gap(), compact);
+            n * (t.get_touch() + step) - step
+        };
+        let track = ui.get_side_track_h();
+        eprintln!("track bubbles {bubbles} compact {compact}: lines drawn to {drawn}, track {track}, long {}", lib.get_side_total() > lib.get_side_per_view());
+        // (As bubbles the tags of the fixture all fit the view: the bar is not shown, its track is still the view's lines.)
+        assert!(drawn > 0. && (bubbles || lib.get_side_total() > lib.get_side_per_view()), "the list scrolls, for the test to mean something");
+        assert!((track - drawn).abs() < 0.5, "bubbles {bubbles} compact {compact}: the track is {track}, the lines end at {drawn}");
+    }
+}

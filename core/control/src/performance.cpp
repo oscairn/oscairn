@@ -896,7 +896,9 @@ size_t Session::ringOutRoutes() const { size_t n=0;for(const auto& node:graph_.d
 // take over (RFC 0021), when it could be; else removed. Not while an audition holds what it set aside.
 void Session::keepWarm(NodeId n) {
     const auto loaded=loaded_.find(n);
-    if(audition_ || loaded==loaded_.end() || graph_.host(n).effectResources() || !graph_.host(n).failure().empty()){graph_.remove(n);return;}
+    // A worker that died meanwhile answers nothing (effectResources would throw out of service()): such a node is removed.
+    const auto unkept=[&]{if(!graph_.host(n).failure().empty())return true;try{return graph_.host(n).effectResources().has_value();}catch(const std::exception&){return true;}};
+    if(audition_ || loaded==loaded_.end() || unkept()){graph_.remove(n);return;}
     warm_.push_back({0,graph_.release(n),loaded->second,false,std::chrono::steady_clock::now()});
     if(!memoryClasses() && warm_.size()>warmLimit){bool first=true;letGo([&](const Free&){return std::exchange(first,false);});}
 }
@@ -987,7 +989,7 @@ std::vector<Session::Free> Session::freeInstances(bool all) const {
         const auto loaded=loaded_.find(n);if(busy.count(n) || loaded==loaded_.end())continue;
         auto host=graph_.node(n).host;
         // Engines offering effect contexts go by slice 1; a failed plugin or a stand-in never.
-        if(host->effectResources() || !host->failure().empty())continue;
+        if(!host->failure().empty() || host->effectResources())continue;
         out.push_back({n,std::move(host),loaded->second});
     }
     return out;
@@ -1108,7 +1110,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         for(const auto& [n,name]:nodes_){
             const auto loaded=loaded_.find(n);if(loaded==loaded_.end() || std::find(taken.begin(),taken.end(),n)!=taken.end())continue;
             const auto host=graph_.node(n).host;const auto& h=*host;
-            if(!h.preparesSnapshots() || h.effectResources() || !h.failure().empty() || (leading && SoundContext::busParameter(h)!=CLAP_INVALID_ID))continue;
+            if(!h.preparesSnapshots() || !h.failure().empty() || h.effectResources() || (leading && SoundContext::busParameter(h)!=CLAP_INVALID_ID))continue;
             if(!w && !(w=want(plugin)))return std::nullopt;
             if(!same(*w,h,loaded->second) || integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())continue;
             try{checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());}catch(const std::exception&){continue;}

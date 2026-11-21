@@ -413,7 +413,9 @@ namespace oscairn
                 Reader r; r.data = std::move(reply); r.at = 1; return r;
             }
 
-            std::string failure() const { std::lock_guard lock(failureMutex); return failureText; }
+            // A worker whose connection broke under a request has failed, though its supervisor may not have seen it yet: so said
+            // at once, so an open that reads again skips its instances and its notice names their nodes.
+            std::string failure() const { std::lock_guard lock(failureMutex); return failureText.empty() && broken.load() ? "Plugin worker connection lost" : failureText; }
             void fail(const std::string& why)
             {
                 { std::lock_guard lock(failureMutex); reason = why; failureText = why; }

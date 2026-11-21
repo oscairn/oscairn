@@ -77,7 +77,6 @@ pub struct Slot {
     source: u8,
     pub faded: u8,
     midi: bool,
-    voice_ended: bool,
     born: u64, // the route's frames at its note-on, for its age
 }
 
@@ -164,6 +163,7 @@ pub struct NoteRoute {
     pub held: Bits,
     pub stolen: Bits,
     pub fading: Bits, // used, with a fade step or choke due (fade_at >= 0)
+    ended: Bits,      // used, held keys whose voices the plugin ended (they keep their slots for their releases)
     pub pedal: [[u8; 16]; 16],
     clap: [bool; 16],
     ports: u32,
@@ -195,6 +195,7 @@ impl NoteRoute {
             held: Bits::default(),
             stolen: Bits::default(),
             fading: Bits::default(),
+            ended: Bits::default(),
             pedal: [[0; 16]; 16],
             clap: std::array::from_fn(|p| clap_ports >> p & 1 != 0),
             ports,
@@ -221,6 +222,7 @@ impl NoteRoute {
         self.held = Bits::default();
         self.stolen = Bits::default();
         self.fading = Bits::default();
+        self.ended = Bits::default();
         self.pedal = [[0; 16]; 16];
         self.held_keys = [0; 2];
         self.held_count = [0; 128];
@@ -250,6 +252,7 @@ impl NoteRoute {
         self.used.unset(i);
         self.stolen.unset(i);
         self.fading.unset(i);
+        self.ended.unset(i);
     }
     fn set_fade(&mut self, i: usize, at: i32) {
         self.slots[i % SLOTS].fade_at = at;
@@ -295,11 +298,7 @@ impl NoteRoute {
     /// The notes whose voices the plugin has not ended: a held key whose voice ended keeps its slot for its key's release
     /// and costs nothing (giving it up frees nothing), so the budget leaves it out.
     pub fn voiced(&self) -> Bits {
-        let mut b = self.used;
-        for i in self.used.iter().filter(|&i| self.slot(i).voice_ended) {
-            b.unset(i);
-        }
-        b
+        self.used.and_not(self.ended)
     }
 
     /// A NOTE_END: a voice ended. A held key keeps its slot, so its release still goes out.
@@ -312,7 +311,7 @@ impl NoteRoute {
             let s = self.slot(i);
             if (id < 0 || s.id == id) && (port < 0 || i16::from(s.port) == port) && (channel < 0 || s.channel == channel) && (key < 0 || s.key == key) {
                 if self.held.has(i) {
-                    self.slots[i % SLOTS].voice_ended = true
+                    self.ended.set(i)
                 } else {
                     self.drop_slot(i)
                 }
@@ -701,7 +700,7 @@ fn play(
     let r = &mut rs[me];
     // Full: a held note whose voice already ended gives its slot up, its key's release first.
     if r.used.full() {
-        if let Some(i) = r.used.iter().find(|&i| r.slot(i).voice_ended) {
+        if let Some(i) = r.used.and(r.ended).iter().next() {
             if emit(&r.release(i, time, false)) {
                 r.drop_slot(i);
             }
@@ -734,7 +733,6 @@ fn play(
         source: cx.source,
         faded: 0,
         midi,
-        voice_ended: false,
         born: r.frames,
     };
     r.volume[i % SLOTS] = 1.0;
@@ -769,7 +767,8 @@ fn note_off(r: &mut NoteRoute, e: &Event, midi: bool, choke: bool, emit: &mut im
             continue;
         }
         // A note whose voice already ended needs only the key's release, once.
-        if s.voice_ended && sent {
+        let ended = r.ended.has(i);
+        if ended && sent {
             r.drop_slot(i);
             continue;
         }
@@ -780,7 +779,7 @@ fn note_off(r: &mut NoteRoute, e: &Event, midi: bool, choke: bool, emit: &mut im
         out.set_f64(NOTE_VELOCITY, e.f64_at(NOTE_VELOCITY));
         out.set_flags(e.flags());
         ok = emit(&out) && ok;
-        if s.voice_ended || choke || (!r.takes_clap(&s) && !sustained) {
+        if ended || choke || (!r.takes_clap(&s) && !sustained) {
             r.drop_slot(i);
         }
     }

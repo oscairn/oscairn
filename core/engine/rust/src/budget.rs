@@ -796,11 +796,11 @@ impl Budget {
     /// FORGET_BLOCKS healthy, at the probe's pace.
     pub fn recover(&mut self, rs: &Routes, slack_low: bool, room: Option<f32>, deadline: f32) {
         for k in 0..self.entries.len() {
-            let held = self.node_notes(rs, k);
-            let Some(e) = self.entries.get_mut(k) else { continue };
-            if e.cap == 0 {
+            if self.entries.get(k).is_none_or(|e| e.cap == 0) {
                 continue;
             }
+            let held = self.node_notes(rs, k);
+            let Some(e) = self.entries.get_mut(k) else { continue };
             if !rs[e.route].used.any() {
                 (e.cap, e.ceiling, e.calm, e.probes) = (0, 0, 0, 0);
                 continue;

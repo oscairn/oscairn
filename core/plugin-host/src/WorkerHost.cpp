@@ -291,9 +291,19 @@ namespace oscairn
                     socket = pair[0];
                     posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
                     posix_spawn_file_actions_adddup2(&actions, pair[1], 3);
+                    // And nothing else: a descriptor another part of the process left inheritable (a popen's pipe) kept open in a
+                    // worker for its life would hold that pipe or socket open after its owner closed it.
+                    posix_spawnattr_t attributes; posix_spawnattr_init(&attributes);
+#if defined(__APPLE__)
+                    for(int std = 0; std < 3; ++std) posix_spawn_file_actions_addinherit_np(&actions, std);
+                    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+                    posix_spawn_file_actions_addclosefrom_np(&actions, 4);
+#endif
                     // The policy's memory limit also goes to the worker, which on Linux makes it an address-space backstop.
                     std::string fd = "3", limit = std::to_string(policyLimit), place = std::to_string(slot); char* argv[]{program.data(), fd.data(), limit.data(), place.data(), nullptr};
-                    spawned = posix_spawn(&pid, program.c_str(), &actions, nullptr, argv, environ);
+                    spawned = posix_spawn(&pid, program.c_str(), &actions, &attributes, argv, environ);
+                    posix_spawnattr_destroy(&attributes);
                     posix_spawn_file_actions_destroy(&actions);
                     close(pair[1]);
                 }

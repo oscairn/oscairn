@@ -41,8 +41,9 @@ extern "C" {
  *   apply on the next block that runs. Past the limit, the plugin gives up voices at
  *   the start of the next block, in its own order; a new note past it takes a voice the same way.
  *
- *   active_voices [audio-thread, after process()]: the voices sounding now (fading ones included;
- *   in draft 2 the units importance lists, so notes for an engine that gives a note up only whole),
+ *   active_voices [audio-thread, after process()]: the voices sounding now, including those fading
+ *   out after being given up (in draft 2 the units importance lists, so notes for an engine that
+ *   gives a note up only whole),
  *   and the plugin's estimate of one voice's cost in microseconds a block at the current block
  *   size (0: no estimate). The host measures the instance's time either way, and uses the count
  *   to share it per voice rather than per note.
@@ -56,9 +57,12 @@ extern "C" {
  *
  *   importance [audio-thread, after process()] (draft 2; RFC 0046): for each context sounding, its
  *   OSCAIRN_VOICE_BUDGET_LEAST least important voices in the order below, least important first,
- *   and how many voices it sounds; at most `capacity` contexts, returns how many it wrote. A voice
+ *   and how many voices it sounds (`voices` counts the units it keeps: one fading out after being
+ *   given up is neither counted nor listed, so a host compares a limit with `voices`, not with
+ *   active_voices); at most `capacity` contexts, returns how many it wrote. A voice
  *   rule 1 keeps is not listed. When the host then lowers a context's limit by n, the plugin gives
- *   up the n voices it listed first, at the start of its next block: the host checks it. So the
+ *   up the n voices it listed first, at the start of its next block: the host checks it. It gives
+ *   up its listed voices first when it makes room for a new note at a limit too. So the
  *   plugin MUST tell each listed unit from a later one in the same slot (the SDK helper does it
  *   by a note-on serial, never a frame stamp or a time).
  *   A listed voice is the plugin's unit of giving up, the same thing its limit and active_voices
@@ -157,7 +161,7 @@ typedef struct oscairn_voice_budget_importance
 {
     uint32_t context; // a sound context's ID; a plugin without sound contexts lists one, under the ID it describes
                       // its voices with (the SDK's examples use 0, its one sound, whose settings Limits::of(0, true) reads)
-    uint16_t voices;  // its voices sounding, those fading out not counted
+    uint16_t voices;  // the units it keeps: one fading out after being given up is not counted (active_voices counts it) and not listed
     uint16_t count;   // entries in least
     float    weight;  // the sum of its sounding voices' weights; 0: voices (each 1)
     oscairn_voice_budget_least_t least[OSCAIRN_VOICE_BUDGET_LEAST]; // least important first

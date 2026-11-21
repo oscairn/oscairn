@@ -37,6 +37,7 @@ namespace fs = std::filesystem;
 namespace
 {
     int failures = 0;
+    const char* stage = "setup"; // where an exception came from, for the FAIL line
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
     constexpr uint32_t frames = 128;
 
@@ -162,7 +163,7 @@ int main(int argc, char** argv)
         // OSCAIRN_RINGOUT_RUNS: the runs (default 20), the cases in turn; OSCAIRN_RINGOUT_PACE_US: a block's pace.
         {
             const auto big = temp.path / "big", organ = temp.path / "organ", organ2 = temp.path / "organ-2", piano = temp.path / "piano";
-            bigShape(big, argv[1], argv[2], argv[3]); organShape(organ, argv[1], argv[2], argv[3]); organShape(organ2, argv[1], argv[2], argv[3]); pianoShape(piano, argv[1]);
+            stage = "the ring-out race's Performances"; bigShape(big, argv[1], argv[2], argv[3]); organShape(organ, argv[1], argv[2], argv[3]); organShape(organ2, argv[1], argv[2], argv[3]); pianoShape(piano, argv[1]);
             const char* runsText = std::getenv("OSCAIRN_RINGOUT_RUNS");
             const char* paceText = std::getenv("OSCAIRN_RINGOUT_PACE_US");
             const int runs = runsText ? std::max(1, std::atoi(runsText)) : 20, pace = paceText ? std::max(50, std::atoi(paceText)) : 300;
@@ -196,6 +197,7 @@ int main(int argc, char** argv)
             // within a minute the later kills here count.
             if(!placementPolicy().worker.empty() && !placementPolicy().hosts)
             {
+                stage = "the ring-out race's restart";
                 auto serve = [&](size_t untilBlock) { while(block.load(std::memory_order_acquire) < untilBlock) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } };
                 t.loadPerformance(big.string()); serve(block.load() + 100);
                 t.controller(64, 127); t.note(true, 60, .8); serve(block.load() + 40); t.note(false, 60, 0);
@@ -213,7 +215,7 @@ int main(int argc, char** argv)
                 {
                     t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     const auto f = t.sessionStatus().failures; why = f.empty() ? "" : f[0].reason;
-                    if(!why.empty()) continue;
+                    if(!why.empty() || i < 60) continue; // a supervisor sees its worker's death within a tick, then restarts it
                     try
                     {
                         there.clear();
@@ -231,13 +233,15 @@ int main(int argc, char** argv)
                 serve(block.load() + 100);
             }
 #endif
+            stage = "the ring-out race";
             for(int run = 0; run < runs; ++run)
             {
                 const auto& c = cases[size_t(run) % cases.size()];
                 const int tickMs = 2 + int(rng() % 24);
                 auto serve = [&](size_t untilBlock) { while(block.load(std::memory_order_acquire) < untilBlock) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(tickMs)); } };
                 t.setBudget(run % 3 ? Session::Budget{4, 0} : Session::Budget{}); // mostly with a budget: the estimate, the fit rule and measuring on, as on a device
-                t.loadPerformance(c.a.string());
+                try { t.loadPerformance(c.a.string()); }
+                catch(const std::exception& e) { check(false, std::string(c.what) + ": the first Performance opens: " + e.what()); continue; }
                 serve(block.load() + 100);
                 t.allNotesOff(); serve(block.load() + 40);
                 t.controller(64, 127);
@@ -270,6 +274,7 @@ int main(int argc, char** argv)
         }
 
 #ifndef _WIN32
+        stage = "the worker-kill rounds";
         // A Performance whose workers were given up (on the unit: failed as too slow, again and
         // again): the next one opens on instances of its own, not into the failed shared engines and
         // effect engines, which refused every later Performance using those plugins ("cannot restore
@@ -389,6 +394,7 @@ int main(int argc, char** argv)
         }
 #endif
 
+        stage = "the stress";
         Session s(48000, frames);
         std::atomic<bool> stop{false};
         std::atomic<uint64_t> rendered{0};
@@ -474,7 +480,7 @@ int main(int argc, char** argv)
         check(rendered > 0, "the audio thread rendered");
         std::printf("%d switches: %d opened (%d prepared ahead), %d refused, %llu blocks, %d workers killed\n", switches, opened, prepared, refused, (unsigned long long)rendered.load(), killed.load());
     }
-    catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
+    catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s (in %s)\n", e.what(), stage); return 1; }
     if(failures) return 1;
     std::printf("ok: Performances switched under a rendering audio thread\n");
     return 0;

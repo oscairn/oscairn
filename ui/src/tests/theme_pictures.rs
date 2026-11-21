@@ -207,3 +207,19 @@ fn polish_1_play_pictures() {
         }
     }
 }
+
+// The drawn scroll thumb's corner is the scaled one (D1): the pixel just inside the thumb's top-left corner is the thumb's color,
+// where the full corner (6 px, nearly half the thumb's width) would leave it the track's.
+#[test]
+fn the_scroll_thumb_corner_is_drawn_scaled() {
+    let mut s = super::owner::scene("scaled-thumb", 10);
+    let ui = s.ui();
+    s.f.screen.frame();
+    let t = ui.global::<crate::Theme>();
+    let k = ui.window().scale_factor();
+    let x = (ui.get_list_x() + ui.get_lane_x() + t.get_scroll_lead()) * k;
+    let y = (ui.get_list_y() + t.get_margin() + ui.get_thumb_y()) * k;
+    let at = |dx: f32, dy: f32| s.f.screen.pixels[(y + dy).ceil() as usize * s.f.screen.w + (x + dx).ceil() as usize];
+    let (corner, inside) = (at(1., 1.), at(t.get_scroll_bar() * k / 2., 8.));
+    assert_eq!(corner, inside, "the thumb's corner pixel is the thumb's: {corner:?} against {inside:?}");
+}

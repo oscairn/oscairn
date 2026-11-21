@@ -476,6 +476,9 @@ if(UNIX)
     # The engine thread's CPU per block for a session shaped like the unit's heavy take (tools/engine-bench).
     add_executable(oscairn-session-bench ../tools/engine-bench/session_bench.cpp)
     target_link_libraries(oscairn-session-bench PRIVATE oscairn_engine)
+    # The engine thread's CPU, syscalls and context switches per block at rest, instruments idle, one kept warm or not.
+    add_executable(oscairn-rest-bench ../tools/engine-bench/rest_bench.cpp)
+    target_link_libraries(oscairn-rest-bench PRIVATE oscairn_engine)
 endif()
 
 # RFC 0034: parts rendered at the same time render exactly what they render one after another.

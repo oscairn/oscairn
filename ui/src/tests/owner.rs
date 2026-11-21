@@ -4,6 +4,7 @@
 //! are written to dir as owner-N-before/after.png.
 
 use super::library::rows;
+use super::library_bubbles::press_tool;
 use super::library_fake::stored;
 use super::library_shell::Shelf;
 use super::*;
@@ -158,6 +159,30 @@ fn the_scroll_bar_shows_where_the_view_is_in_the_list() {
         shell::act(Action::Move { pane: None, by: 100_000 });
         s.f.screen.frame();
         assert!((ui.get_thumb_y() + ui.get_thumb_h() - track).abs() < 0.01, "{n}: at the foot {} {}", ui.get_thumb_y(), ui.get_thumb_h());
+    }
+}
+
+// The main list's scroll track is as tall as the rows its view shows (per-view touch rows and the gaps between them), measured
+// against the rows' own places, not against the formula that sizes the track: the room leftover below the last row is not track.
+// Normal and Compact.
+#[test]
+fn the_main_list_s_track_ends_at_the_last_row_of_its_view() {
+    for compact in [false, true] {
+        let mut s = scene("owner-track", 300);
+        let ui = s.ui();
+        if ui.global::<crate::LibraryState>().get_compact() != compact {
+            press_tool(&mut s, 1);
+        }
+        let (t, st) = (ui.global::<crate::Theme>(), ui.global::<crate::PartState>());
+        assert_eq!(ui.global::<crate::LibraryState>().get_compact(), compact);
+        assert!(st.get_rows_per_view() > 1, "a list long enough for a track");
+        let gap = t.invoke_dense(t.get_list_gap(), compact);
+        let per = st.get_rows_per_view() as f32;
+        // The view's rows: each a touch target with the gap between them, the last row's bottom is where the track ends.
+        let drawn = per * (t.get_touch() + gap) - gap;
+        let track = ui.get_track_h();
+        eprintln!("compact {compact}: rows {per} end at {drawn}, track {track}");
+        assert!((track - drawn).abs() < 0.5, "compact {compact}: the track is {track}, the rows the view shows end at {drawn}");
     }
 }
 

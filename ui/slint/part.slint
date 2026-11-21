@@ -307,6 +307,8 @@ export component Part inherits Rectangle {
     property <length> list-width: root.list-only ? self.width - 2 * Theme.margin : (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;
     out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
+    // The height of the lines the list's view shows (per-view touch rows and the gaps between them): the scroll bar's track.
+    property <length> list-view-h: max(0px, root.per-view * (Theme.touch + root.gap) - root.gap);
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
     // A finger drag on a row scrolls the list: the anchor (the state the drag began at) and the row pitch it follows.
     property <bool> dz-on: false;
@@ -328,6 +330,7 @@ export component Part inherits Rectangle {
     out property <length> thumb-h: bar.thumb-h;
     out property <length> thumb-y: bar.thumb-y;
     out property <length> lane-x: root.list-width - root.lane + Theme.margin;
+    out property <length> track-h: bar.height;
     property <length> line: Theme.body + Theme.margin;
     // A lane's key range as the strip over the keyboard, over the panel's lines.
     property <length> strip-height: StripState.shown ? Theme.body + Theme.pad-narrow + Theme.touch + Theme.pad : 0px;
@@ -355,7 +358,7 @@ export component Part inherits Rectangle {
         x: root.lane-x;
         y: root.list-y;
         width: Theme.scroll-lane;
-        height: root.list-height;
+        height: min(root.list-height, root.list-view-h);
         total: PartState.total;
         first: PartState.first;
         per-view: root.per-view;

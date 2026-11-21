@@ -469,6 +469,10 @@ if(UNIX)
     # RFC 0034: a graph block's time, serial and parallel (tools/graph-bench).
     add_executable(oscairn-graph-bench ../tools/graph-bench/graph_bench.cpp)
     target_link_libraries(oscairn-graph-bench PRIVATE oscairn_control)
+    # RFC 0046: the voice budget's cost per block with held notes, reporting or not (tools/engine-bench).
+    add_executable(oscairn-core-bench ../tools/engine-bench/core_bench.cpp)
+    target_link_libraries(oscairn-core-bench PRIVATE oscairn_engine)
+    add_test(NAME engine-core-bench COMMAND oscairn-core-bench --check)
 endif()
 
 # RFC 0034: parts rendered at the same time render exactly what they render one after another.

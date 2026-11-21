@@ -563,6 +563,12 @@ impl Screen {
         self.step(by);
     }
 
+    /// The screen's own action the top bar carries: Play, which opens Play (the footer's button
+    /// plays it by touch; the bar's cursor reaches it without).
+    pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
+        vec![crate::topbar::Tool::new("Play")]
+    }
+
     /// The Performance's library ID in the slot playing, as the JUCE Setlist sends it to Play.
     pub fn playing(&self) -> Option<&str> {
         self.setlist.as_ref()?.slot(self.current?).map(|s| s.id.as_str()).filter(|id| !id.is_empty())

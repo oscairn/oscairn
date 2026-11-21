@@ -352,11 +352,16 @@ namespace oscairn
             Reader exchange(const std::string& message)
             {
                 requests.fetch_add(1, std::memory_order_relaxed);
-                try { send(socket, message); } catch(const std::exception&) { broken.store(true); throw; }
+                // A connection that broke under a request is the worker failing, counted now (workerFailures): an open reads
+                // again only when the count rose during its pass (Session::readTaking), and the supervisor may have counted
+                // this worker's death just before the pass began, its instance still offered (the stress test's
+                // "cannot restore ...: connection lost").
+                auto broke = [&] { broken.store(true); failures.fetch_add(1, std::memory_order_relaxed); };
+                try { send(socket, message); } catch(const std::exception&) { broke(); throw; }
                 for(;;)
                 {
                     std::string reply;
-                    try { reply = receive(socket); } catch(const WorkerTimeout& e) { lost(e); } catch(const std::exception&) { broken.store(true); throw; }
+                    try { reply = receive(socket); } catch(const WorkerTimeout& e) { lost(e); } catch(const std::exception&) { broke(); throw; }
                     if(!reply.empty() && reply[0] == Reserve)
                     {
                         Reader r; r.data = std::move(reply); r.at = 1;
@@ -2504,10 +2509,10 @@ namespace oscairn
                     : placementGroup().key.empty() ? nullptr : pool().chain(placementGroup(), program, sampleRate, maxFrames, memoryLimit);
         if(process && [&] { std::lock_guard lock(process->control); return process->failed.load(); }())
             process = nullptr; // a host that failed since it was picked: a worker of its own instead
-        const bool pooled = process != nullptr;
+        bool pooled = process != nullptr;
         if(!pooled) process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit); // a worker of its own
         std::shared_ptr<PluginHost> host;
-        try
+        auto attempt = [&]
         {
             std::lock_guard lock(process->control);
             if(process->failed.load()) throw std::runtime_error(process->failure()); // failed in the moment since
@@ -2516,13 +2521,22 @@ namespace oscairn
             auto engine = std::make_shared<const Engine>(Engine{path, id, r.data.substr(r.at + 4)});
             host = std::make_shared<WorkerHost>(process, r, std::move(engine), true);
             process->fitLimit(!pooled);
-        }
+        };
+        try { attempt(); }
         catch(...)
         {
             // A plugin that took a shared host down as it loaded, or kept it from answering (failed by the lost reply), gets
             // a worker of its own from then on; the host's supervisor restarts it with the others.
             if(pooled && (process->broken.load() || process->failed.load())) pool().crashedIn(id);
-            throw;
+            if(!pooled || !process->broken.load()) throw;
+            // A host that died under the load: whether the plugin took it down cannot be told from here, as the host may have
+            // been dying already (killed from outside, failed at a switch, not yet seen by its supervisor). So it loads once
+            // more in that worker of its own: a plugin that crashes as it loads takes that down too and stands in, as before;
+            // one that met a dead host loads. Before, it stood in (a Performance opened with a silent plugin keeping no
+            // values: the stress test's "no parameter"). One that hung the host (no reply) is not loaded again.
+            process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit);
+            pooled = false;
+            attempt();
         }
         if(!pooled)
         {

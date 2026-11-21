@@ -322,7 +322,8 @@ namespace oscairn
     std::chrono::milliseconds workerServiceInterval() noexcept;
     // The requests made to workers since the engine started, a service's among them (any thread).
     uint64_t workerRequests() noexcept;
-    // Worker processes failed since the engine started (crashed, hung, too slow, over memory, a reply lost); any thread.
+    // Worker processes failed since the engine started (crashed, hung, too slow, over memory, a reply lost); a request
+    // whose connection broke counts too, at once, before the supervisor counts the death; any thread.
     uint64_t workerFailures() noexcept;
     // RFC 0045, Linux only, false elsewhere: while the engine's audio device runs, a PM QoS request
     // for no CPU wake-up latency: `device` held open with a 32-bit 0 written, so idle cores stay out

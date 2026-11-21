@@ -156,6 +156,15 @@ namespace oscairn
             // keyboard lights. Read from the last rendered block.
             struct HeldNotes { uint8_t source = 0; std::vector<uint8_t> keys; bool operator==(const HeldNotes&) const = default; };
             std::vector<HeldNotes> heldNotes;
+            // Since the engine started, each way the last Performances' sound ended other than by ringing out, so a run on a
+            // device names the way (the owner's rule: held notes ring on; a cut is never silent): changes opened at once for
+            // memory with a tail heard (cut), tails faded out in 150 ms for CPU (faded), an older tail choked by a later change
+            // (chokedOlder), ways out left out of a tail's chain (partial), tails ended by a panic (panicEnded), still sounding
+            // at ring-out's time limits (limitEnded), and at a fade's end (fadeEnded). All but a panic's and a fade's end come
+            // with a notice (the fade's when it begins). A plugin reset for a block its worker did not render (a control
+            // operation holding it) is engine.timing's workers' controlSilences.
+            struct RingOut { uint64_t cut = 0, faded = 0, chokedOlder = 0, partial = 0, panicEnded = 0, limitEnded = 0, fadeEnded = 0; bool operator==(const RingOut&) const = default; };
+            RingOut ringOut;
         };
         virtual SessionStatus sessionStatus() const = 0;
         // The host's audio device, for Settings (RFC 0024). Each output device, and each input device
@@ -287,6 +296,9 @@ namespace oscairn
                 uint64_t events = 0, mostEvents = 0;
                 // Its plugin said in its last block that it is asleep (CLAP_PROCESS_SLEEP), or the worker is down.
                 bool asleep = false;
+                // Since the last reset: blocks the worker did not render because a control operation held its plugin (a
+                // whole-state save or load): each silent, and the plugin reset after it (its events counted lost), ending its notes.
+                uint64_t controlSilences = 0;
             };
             std::vector<Worker> workers;
             // Each plugin instance loaded (RFC 0045's resident instances), once however many nodes

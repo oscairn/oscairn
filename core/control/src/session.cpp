@@ -469,7 +469,7 @@ namespace oscairn
             }
         }
         result.notices.insert(result.notices.end(), notices_.begin(), notices_.end()); // the host's (the audio device's) first
-        result.refusedLoads = refusedLoads_; result.refusal = refusal_;
+        result.refusedLoads = refusedLoads_; result.refusal = refusal_; result.ringOut = ringOut_;
         for( size_t source = 0; source < maxSources; ++source )
         {
             Control::SessionStatus::HeldNotes held{ uint8_t( source ), {} };
@@ -517,6 +517,7 @@ namespace oscairn
                 guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes; guard.fadedForLoss += c.stolenForLoss; guard.lost += c.lostBlocks; guard.fadedForDeadline += c.stolenForDeadline; guard.unfit += c.unfitBlocks; guard.importanceMismatch += c.importanceMismatch; guard.heldOff += c.heldOff;
             }
             t.workers.back().called = since(st.calledBlocks, base.calledBlocks); t.workers.back().rested = since(st.restedBlocks, base.restedBlocks); t.workers.back().asleep = host->asleep();
+            t.workers.back().controlSilences = since(st.controlSilences, base.controlSilences);
             {
                 const auto e = host->inputEvents(reset);
                 t.workers.back().events = since(e.total, eventsBase_.count(host) ? eventsBase_[host] : 0); t.workers.back().mostEvents = e.largest;

@@ -562,6 +562,7 @@ namespace oscairn
             for(const auto& port : ports) if(port.input == input.name) bindings[input.source].push_back({port.device, port.port});
         std::lock_guard lock(lock_);
         source.screen = screen_;
+        source.momentary = session_.momentary_;
         source_ = std::move(source);
         // A value a MIDI thread set since the moves were taken is newer than the model's.
         for(const auto& k : unapplied_) if(const auto it = values_.find(k); it != values_.end()) values[k] = it->second;

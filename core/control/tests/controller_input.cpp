@@ -436,6 +436,28 @@ namespace
         check(near(render(s), .5 * .2 + .25), "a scene that glides waits for the control thread too");
     }
 
+    // An assignable switch latches by default (each press toggles what it plays); set not to (Session::latch), it is on only while
+    // held, whatever it is assigned to.
+    void switches(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto a = s.add("a", fixture, "org.kick.test.synth");
+        const auto pa = s.addPart("A"); s.insertIntoPart(pa, 0, a); s.commit();
+        ControlGroup g{Role::Assign, "buttons", 2}; g.switches = true;
+        s.setControllers({g}, {}); s.service();
+        Assignment mute; mute.kind = Assignment::Kind::PartMute; mute.id = pa;
+        s.assign("button:1", mute); s.commit(); s.service();
+        auto press = [&](double v) { s.controllerControl("button:1", {ControlInput::Kind::Switch, v}); s.service(); return s.parts()[0].mute; };
+        check(press(1) && press(0), "latching: pressed, the part is muted, and released it stays muted");
+        check(!press(1) && !press(0), "pressed again, unmuted");
+        s.latch("button:1", false); s.commit(); s.service();
+        check(s.momentary() == std::vector<std::string>{"button:1"}, "the switch is momentary");
+        check(press(1) && !press(0), "momentary: muted only while held");
+        check(press(1) && !press(0), "and again");
+        s.latch("button:1", true); s.commit(); s.service();
+        check(press(1) && press(0), "latching again");
+    }
+
     // Identical controllers (RFC 0024): two inputs with one name are both the controller's port and
     // both play; set to another channel, the second is a profile of its own, with controls of its
     // own (numbered on) and so assignments of its own.
@@ -802,7 +824,7 @@ int main(int argc, char** argv)
         if(!failures) std::puts("ok: the built-in wheels reach a plugin as MIDI events whatever dialect it prefers");
         return failures ? 1 : 0;
     }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); loneWheels(argv[1], false); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); loneWheels(argv[1], false); navigation(); sceneButtons(argv[1]); switches(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

@@ -6446,6 +6446,105 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "assignments.latch"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "control": {
+                  "type": "string",
+                  "pattern": "^(button|footswitch):[1-9][0-9]{0,2}$"
+                },
+                "latch": {
+                  "type": "boolean",
+                  "description": "true (the default): each press toggles what the switch plays; false: momentary, on only while held"
+                }
+              },
+              "required": [
+                "control",
+                "latch"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "input.get"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "input.set"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "aftertouch": {
+                  "enum": [
+                    "channel",
+                    "poly"
+                  ],
+                  "description": "channel (the default) folds key pressure into channel pressure; poly passes it per note"
+                }
+              },
+              "required": [
+                "aftertouch"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "assignments.set"
             },
             "params": {

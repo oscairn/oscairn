@@ -542,7 +542,7 @@ namespace oscairn
                 {"apps.connect",Any},{"apps.request",Any},{"apps.answer",Any},{"apps.pong",Any},
                 {"notes.send",Play},{"notes.controller",Play},{"notes.panic",Play},{"transport.set",Play},{"scenes.select",Play},{"controls.set",Play},{"pads.play",Play},{"pads.pressure",Play},
                 {"transport.get",Play|Edit},{"graph.get",Play|Edit},{"params.list",Play|Edit},{"params.get",Play|Edit},{"params.text",Play|Edit},{"pads.get",Play|Edit},
-                {"assignments.get",Play|Edit},{"assignments.link",Edit},{"harmony.get",Play|Edit},{"parts.meters",Play|Edit},{"wires.meters",Play|Edit},{"sounds.get",Play|Edit},{"effects.resources",Play|Edit},
+                {"assignments.get",Play|Edit},{"assignments.link",Edit},{"assignments.latch",Edit},{"input.get",Play|Edit},{"input.set",Edit},{"harmony.get",Play|Edit},{"parts.meters",Play|Edit},{"wires.meters",Play|Edit},{"sounds.get",Play|Edit},{"effects.resources",Play|Edit},
                 {"state.info",Play|Edit},{"window.info",Play|Edit},{"presets.list",Play|Edit},{"properties.list",Play|Edit},{"properties.get",Play|Edit},
                 {"transport",Play|Edit},{"params.changed",Play|Edit},{"graph.changed",Play|Edit},{"controls.changed",Play|Edit},
                 {"graph.add",Edit},{"graph.remove",Edit},{"graph.replace",Edit},{"graph.connect",Edit},{"graph.disconnect",Edit},{"graph.map",Edit},{"graph.unmap",Edit},
@@ -619,7 +619,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","assignments.link","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","assignments.link","assignments.latch","input.get","input.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -1495,7 +1495,29 @@ namespace oscairn
                                   ",\"param\":" + std::to_string(o.target.param) + ",\"id\":" + std::to_string(o.target.id) + ",\"part\":" + std::to_string(o.part) + ( o.passes ? ",\"passes\":true" : "" ) + '}');
                 std::vector<std::string> unlinked;
                 for( const auto& u : c.unlinked() ) unlinked.push_back( quote( u ) );
-                return "{\"assignments\":" + join(out) + ",\"unlinked\":" + join(unlinked) + '}';
+                std::string controls;
+                for( const auto& m : c.momentary() ) controls += ( controls.empty() ? "" : "," ) + quote( m ) + ":{\"latch\":false}";
+                return "{\"assignments\":" + join(out) + ",\"unlinked\":" + join(unlinked) + ",\"physicalControls\":{" + controls + "}}";
+            }
+            if( method == "assignments.latch" )
+            {
+                fields(p,{"control","latch"});
+                try { c.latch(std::string(string(member(p,"control"))),boolean(member(p,"latch"))); }
+                catch( const std::invalid_argument& e ) { throw Failure{-32003,e.what()}; }
+                return R"({"accepted":true})";
+            }
+            if( method == "input.get" )
+            {
+                fields(p,{});
+                return std::string("{\"aftertouch\":\"") + ( c.polyAftertouch() ? "poly" : "channel" ) + "\"}";
+            }
+            if( method == "input.set" )
+            {
+                fields(p,{"aftertouch"});
+                const auto mode = string(member(p,"aftertouch"));
+                if( mode != "channel" && mode != "poly" ) throw Failure{-32602,"aftertouch is channel or poly"};
+                c.setPolyAftertouch( mode == "poly" );
+                return R"({"accepted":true})";
             }
             if( method == "assignments.link" )
             {

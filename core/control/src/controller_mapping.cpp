@@ -122,7 +122,7 @@ namespace oscairn
                 const bool on = in.value >= .5;
                 // A latching switch changes state on every press, so each message is a press.
                 if(t.kind == Assignment::Kind::Scene || t.kind == Assignment::Kind::Panic) { if(on || latch) out.push_back({r.control, t, 1}); continue; }
-                if(latch) out.push_back({r.control, t, on ? 1.0 : 0.0});
+                if(latch || r.momentary) out.push_back({r.control, t, on ? 1.0 : 0.0}); // the controller keeps the state, or on only while held
                 else if(on) out.push_back({r.control, t, now >= .5 ? 0.0 : 1.0});
                 continue;
             }

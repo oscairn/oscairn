@@ -211,3 +211,28 @@ fn polish_3_pictures() {
         lib_png(&s, &format!("polish-3-bubbles{suffix}"));
     }
 }
+
+// The top bar's meters on the Library as a user has it (rows, tags and a panel shown, not the empty screen): a changing
+// figure repaints a rectangle inside the resource section and no pixel outside it changes (the idle cost on a unit is
+// one full frame a second if anything else on the screen follows the meters).
+#[test]
+fn a_meter_update_on_the_filled_library_repaints_only_the_section() {
+    let mut s = tagged("meters-filled");
+    // The scene draws at a scale of 1.55: the region the renderer reports is in physical pixels.
+    let (x, _, w, h) = s.f.screen.resources();
+    let k = |v: i32| (v as f32 * 1.55).floor() as i32;
+    let section = (k(x), 0, k(w) + 2, k(h) + 2);
+    for (cpu, ram) in [(1, 30), (74, 31), (90, 31), (100, 95), (7, 5)] {
+        let before = s.f.screen.pixels.clone();
+        let bar = s.ui();
+        let bar = bar.global::<crate::Bar>();
+        bar.set_cpu(cpu);
+        bar.set_cpu_known(true);
+        bar.set_ram(ram);
+        bar.set_ram_known(true);
+        let repainted = s.f.screen.frame().expect("a change draws");
+        assert!(within(repainted, section), "{cpu}/{ram}: repainted {repainted:?}, the section is {section:?}");
+        assert_eq!(super::changed_outside(&before, &s.f.screen.pixels, section), 0);
+        assert_eq!(s.f.screen.frame(), None, "nothing more is drawn");
+    }
+}

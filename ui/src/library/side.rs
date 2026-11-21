@@ -160,21 +160,38 @@ impl Screen {
         lib.set_side_rows(ModelRc::from(self.side_rows.clone()));
         lib.set_side_geo(ModelRc::from(self.side_geo.clone()));
         let cells = if self.side_visible() { self.side_cells() } else { vec![] };
-        // How many lines fit: the sidebar's lines vary (a heading is compact, a bubble a touch target), so the first view
-        // takes the lines it can show, newest from its top; the Rust layout is the source of the count (read back here).
+        let n = cells.len();
+        let lines = cells.last().map_or(0, |c| c.line + 1);
+        let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);
+        let last = lines.saturating_sub(1);
+        // The first line of the view: the one the cursor is on is in it, else where the view was.
+        let first = match at {
+            Some(a) if self.side_focus => cells[a].line / self.side_cursor.per_page.max(1) * self.side_cursor.per_page.max(1),
+            _ => self.side_cursor.first.min(last),
+        };
+        // How many lines fit: the sidebar's lines vary (a heading is compact, a bubble a touch target), so a view fits the
+        // lines from its own first, not the list's first: a later view, all touch-tall bubbles, holds fewer lines than the
+        // first with its compact headings. The Rust layout is the source of the count (read back here), so nothing a view
+        // shows is drawn past the view's bottom at any scroll position.
         let side = lib.get_side_height();
         let (per, view_h) = if self.bubbles {
-            let (mut fit, mut last, mut bottom) = (0, None, 0f32);
+            let (mut fit, mut last_line, mut base, mut bottom) = (0usize, usize::MAX, 0f32, 0f32);
             for c in &cells {
-                if last == Some(c.line) {
+                if c.line < first {
                     continue;
                 }
-                if c.top + c.h > side + 0.01 {
+                if c.line == last_line {
+                    continue;
+                }
+                if fit == 0 {
+                    base = c.top;
+                }
+                if c.top - base + c.h > side + 0.01 {
                     break;
                 }
                 fit += 1;
-                last = Some(c.line);
-                bottom = bottom.max(c.top + c.h);
+                last_line = c.line;
+                bottom = c.top - base + c.h;
             }
             (fit.max(1), bottom)
         } else {
@@ -187,15 +204,6 @@ impl Screen {
         lib.set_side_per_view(per as i32);
         // The scroll bar's track is as tall as the lines the view shows, not the room they have.
         lib.set_side_view_h(view_h);
-        let (per, n) = (per, cells.len());
-        let lines = cells.last().map_or(0, |c| c.line + 1);
-        let at = self.side_cursor.at.map(|a| a.min(n.saturating_sub(1))).filter(|_| n > 0);
-        let last = lines.saturating_sub(1);
-        // The first line of the view: the one the cursor is on is in it, else where the view was.
-        let first = match at {
-            Some(a) if self.side_focus => cells[a].line / per * per,
-            _ => self.side_cursor.first.min(last),
-        };
         self.side_cursor = Cursor { at, count: n, per_page: per, first };
         self.side_page = cells.iter().position(|c| c.line >= first).unwrap_or(n);
         let (focus, at) = (self.side_focus, at);

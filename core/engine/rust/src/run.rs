@@ -137,6 +137,7 @@ pub struct Run {
     pub steps: Vec<Step>,
     parts: Vec<Part>,
     taps: Vec<Tap>,
+    ids: [u32; MAX_CONTEXTS], // scratch: a step's contexts' sound IDs, which its importance report names (finish)
     controls: Vec<Control>,
     waves: Vec<u32>,
     pub local: Vec<u32>,
@@ -313,6 +314,7 @@ impl Run {
             steps,
             parts,
             taps,
+            ids: [0; MAX_CONTEXTS],
             controls,
             waves: waves.to_vec(),
             local: vec![0; n],
@@ -718,8 +720,7 @@ impl Run {
         }
         let took = if budgeting { p.took(s) as f32 } else { 0.0 };
         let missed = p.missed(s);
-        let mut ids = [0u32; MAX_CONTEXTS]; // its contexts' sound IDs, which its importance report names
-        let step = &mut self.steps[s];
+        let (step, ids) = (&mut self.steps[s], &mut self.ids);
         let mut r = Rendered {
             took,
             processed,

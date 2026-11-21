@@ -712,7 +712,7 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     let names = f.screen.ui.global::<SetlistState>().get_setlists().iter().collect::<Vec<_>>();
     assert_eq!((names[0].cursor, names[0].shown), (true, true), "shown on the first setlist by the first move");
     // Cancel is Back in one step, with the cursors where they are: Home.
-f.navigation(nav(2, 2, pv, 1, 1));
+    f.navigation(nav(2, 2, pv, 1, 1));
     assert_eq!(f.screen.ui.get_screen(), 0);
 }
 

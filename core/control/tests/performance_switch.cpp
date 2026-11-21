@@ -647,11 +647,18 @@ int main(int argc, char** argv)
             const auto m = t.memoryState();
             check(m.opportunistic > 0 && m.committed > 0, "the warm instances' memory and G's measured: " + std::to_string(m.opportunistic) + ", " + std::to_string(m.committed));
             const auto workers = children();
-            b.device = m.committed + m.opportunistic - 1; // one byte short: the least recently used goes
+            // Short by half the least recently used one's memory: it goes, and only it. What the session holds reserved counts
+            // (the worker program's code, every worker's: workerCode), which a budget of committed and opportunistic alone,
+            // one byte short, left out: a code bigger than the instrument's memory (a sanitizer's worker) let two go. Half the
+            // instrument's memory either way, so readings that move between this one and the session's own decide nothing.
+            uint64_t oldest = 0;
+            for(const auto& i : t.engineTiming(false).instances) if(!i.inUse && i.plugin == instrument) oldest = i.memory;
+            b.device = m.reserved + m.committed + m.opportunistic - std::max<uint64_t>(1, oldest / 2);
             const auto at = std::chrono::steady_clock::now();
             t.setBudget(b);
             const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - at).count();
-            check(t.warmInstances() == 4 && listed(false).count(instrument) == 0 && listed(true) == used, "X's instrument, the least recently used, let go; G's in use kept");
+            check(t.warmInstances() == 4 && listed(false).count(instrument) == 0 && listed(true) == used, "X's instrument, the least recently used, let go; G's in use kept: " +
+                  std::to_string(t.warmInstances()) + " kept warm; committed " + std::to_string(m.committed) + ", opportunistic " + std::to_string(m.opportunistic) + ", X's " + std::to_string(oldest));
             bool ended = false;
             for(int i = 0; i < 50 && !ended; ++i) { ended = children() < workers; if(!ended) std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
             if(!placementPolicy().hosts) check(ended, "its worker ended in the background"); // a plugin host stays (RFC 0045)
@@ -672,7 +679,10 @@ int main(int argc, char** argv)
             Session::Budget room{64, 0, uint64_t(1) << 40, 0, 0, 0};
             u.setBudget(room); blocks(u, 2);
             const auto n = u.memoryState();
-            room.device = n.committed + u.estimate(c.string()).memory + n.opportunistic - instrumentBytes;
+            // Half the instrument's memory short of room for everything, what is reserved counted (as above): C fits beside its
+            // Samplers by that much, and with the instrument would not by as much. Without the reserve and exactly at the edge,
+            // a Sampler went too, or the instrument before anything was opened (ThreadSanitizer, 2 of 5).
+            room.device = n.reserved + n.committed + u.estimate(c.string()).memory + n.opportunistic - instrumentBytes / 2;
             u.setBudget(room);
             check(u.warmInstances() == 5, "all kept warm while nothing is opened");
             w = load(u, c); report("G -> C, room for C but not the instrument kept warm", w);

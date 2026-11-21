@@ -343,7 +343,10 @@ is not counted in `voices` and is not listed. Never give up a unit the order pro
 key, held keys within the part's reserve): they are never listed, so the host never asks.
 
 **The mismatch counter.** Two reports after it lowered a context's limit, the host checks that the
-context sounds no more voices than that limit. A miss counts once in the node's
+context sounds no more voices than any limit it was given since, while it still lists a voice it may
+give up (a context over its limit with nothing listed is kept by rule 1: a part's reserve, a held
+mono key). The host reads `voices` here, the units kept: `active_voices` counts the units fading out
+too, for the fade's time after each drop, and the host does not judge it against the limit. A miss counts once in the node's
 `importance_mismatch`, shown as `importanceMismatch` in `engine.timing`'s worker `guard`; Oscairn's tests fail
 on any, and on the keyboard it should stay 0. The host goes on regardless: a plugin that does not
 keep to its own list only costs its own sound, the host fading its notes from outside as the

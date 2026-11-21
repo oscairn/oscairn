@@ -406,7 +406,10 @@ impl Notes {
                 // its notes; one giving up its own voices is judged against its limit so even when its blocks are lost.
                 let voices = if r.voices == 0 || !r.processed { live } else { r.voices };
                 let limit = std::mem::replace(&mut step.limit_before, a.voice_limit.load(Relaxed));
-                a.over_limit.store(if limit != 0 && voices > limit { a.over_limit.load(Relaxed) + 1 } else { 0 }, Relaxed);
+                // A plugin listing its voices is judged by those it keeps (its report's): its active voices count the ones
+                // fading out too, a block or two past each it gave up.
+                let kept = if r.processed && !r.importance.is_empty() { r.importance.iter().map(|l| u32::from(l.voices)).sum() } else { voices };
+                a.over_limit.store(if limit != 0 && kept > limit { a.over_limit.load(Relaxed) + 1 } else { 0 }, Relaxed);
                 if r.processed {
                     a.own_voices.store(r.own_voices, Relaxed);
                     a.honors_volume.store(r.honors_volume, Relaxed);
@@ -633,7 +636,9 @@ fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
         if let Some(was) = e.heard {
             (h.checked, h.check_in) = (was.checked, was.check_in.saturating_sub(1));
             if h.checked != 0 && h.check_in == 0 {
-                if e.cap != 0 && h.voices > e.cap {
+                // A contract break: more voices than any cap it was given since, while it still lists one it may give up
+                // (with none listed, the SDK's rules keep them: a part's reserve, a held mono key).
+                if e.cap != 0 && h.voices > e.cap.max(h.checked) && h.count != 0 {
                     a.importance_mismatch.fetch_add(1, Relaxed);
                 }
                 h.checked = 0;

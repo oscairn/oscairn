@@ -657,11 +657,14 @@ What it took besides the order:
   (estimate, victims, a node's notes, the cost per voice's note count, the admitted voices).
 - **A listed held or pedaled voice goes for a new note only past the lane's limit** (the owner's rule:
   never while the lane is within it), as many as bring it back to the limit; a released one still
-  from the soft limit.
+  from the soft limit. A listing plugin is judged over its limit by the voices its report says it
+  keeps, not `active_voices`, which counts the ones fading out a block or two past each drop.
 
 A listing plugin's context keeps to the cap the budget set on it (`context_cap`), in place of the
 proportional split. `importance_mismatch` counts a context found over its cap two reports on, in
-`engine.timing` as `importanceMismatch` (expected 0), beside `heldOff`. The vectors of engine-core-diff,
+`engine.timing` as `importanceMismatch` (expected 0), beside `heldOff`: over every cap it was given
+since, while it still lists a voice it may give up (with none listed, the helper's rule 1 keeps them:
+a part's reserve, a held mono key). The vectors of engine-core-diff,
 engine-run-diff and engine-audio-diff were recorded again from the Rust core
 ([developer guide](../developer-guide.md#the-engine-cores-vectors)): the first two because the
 victims change on purpose, the third only for the two counters a node's activity gained (its

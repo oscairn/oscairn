@@ -615,26 +615,18 @@ fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
             e.heard = None;
             continue;
         }
-        let mut h = Heard { unit, ..Heard::default() };
+        // Taken in place each block; ranked only when a voice is to be chosen (Heard::rank): a budget not giving voices up
+        // copies the entries and reads a count.
+        let (checked, check_in) = e.heard.as_ref().map_or((0, 0), |w| (w.checked, w.check_in.saturating_sub(1)));
+        let had = e.heard.is_some();
+        let h = e.heard.get_or_insert_with(Heard::default);
+        h.begin(unit);
         for l in lists {
             h.voices += u32::from(l.voices);
-            for v in l.least.iter().take(usize::from(l.count).min(budget::LEAST)) {
-                let struck = if v.flags & 1 != 0 { budget::STRUCK } else { 0 }; // OSCAIRN_VOICE_BUDGET_STRUCK
-                let level = if v.level_db.is_finite() { v.level_db.clamp(-120.0, 24.0) } else { -120.0 };
-                let x = (v.tier.min(budget::KEY_HELD) | struck, budget::audibility(level, f32::from(v.age_ms)), weight(v.weight, 1.0));
-                // Kept ascending: the least important LEAST of every list.
-                // In the plugin's order: the tier, then one just struck after the others, then audibility.
-                let rank = |t: u8| (t & !budget::STRUCK) << 1 | u8::from(t & budget::STRUCK != 0);
-                let at = h.least[..h.count].partition_point(|y| rank(y.0) < rank(x.0) || rank(y.0) == rank(x.0) && y.1 <= x.1);
-                if at < budget::LEAST {
-                    h.count = (h.count + 1).min(budget::LEAST);
-                    h.least.copy_within(at..h.count - 1, at + 1);
-                    h.least[at] = x;
-                }
-            }
+            h.take(&l.least[..usize::from(l.count).min(budget::LEAST)]);
         }
-        if let Some(was) = e.heard {
-            (h.checked, h.check_in) = (was.checked, was.check_in.saturating_sub(1));
+        if had {
+            (h.checked, h.check_in) = (checked, check_in);
             if h.checked != 0 && h.check_in == 0 {
                 // A contract break: more voices than any cap it was given since, while it still lists one it may give up
                 // (with none listed, the SDK's rules keep them: a part's reserve, a held mono key).
@@ -644,6 +636,5 @@ fn hear(budget: &mut Budget, s: usize, step: &Step, r: &Rendered) {
                 h.checked = 0;
             }
         }
-        e.heard = Some(h);
     }
 }

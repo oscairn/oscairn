@@ -134,6 +134,9 @@ pub struct Heard {
     pub voices: u32,
     pub count: usize,
     pub least: [(u8, f32, f32); LEAST],
+    /// The report's entries as listed (tier, flags, age in ms, level, weight), while `least` is not ranked from them yet.
+    listed: [(u8, u8, u16, f32, f32); LEAST],
+    ranked: bool,
     pub unit: f32,
     pub taken: usize,
     pub freed: f32,
@@ -142,6 +145,55 @@ pub struct Heard {
     pub check_in: u8,
 }
 pub const LEAST: usize = 16;
+
+impl Heard {
+    /// A new report: nothing listed yet, nothing taken since; the cap check carried by the caller.
+    pub fn begin(&mut self, unit: f32) {
+        (self.voices, self.count, self.ranked, self.unit, self.taken, self.freed, self.admitted, self.checked, self.check_in) =
+            (0, 0, true, unit, 0, 0.0, 0, 0, 0);
+    }
+    /// A list's entries, least important first. While every entry fits they are kept as listed, ranked only when a voice
+    /// is to be chosen (`rank`); past LEAST they are ranked at once, as every list's least important LEAST are kept.
+    pub fn take(&mut self, least: &[crate::bindings::oscairn_voice_budget_least_t]) {
+        if (!self.ranked || self.count == 0) && self.count + least.len() <= LEAST {
+            for (to, v) in self.listed[self.count..].iter_mut().zip(least) {
+                *to = (v.tier, v.flags, v.age_ms, v.level_db, v.weight);
+            }
+            (self.count, self.ranked) = (self.count + least.len(), false);
+            return;
+        }
+        self.rank();
+        for v in least {
+            self.insert((v.tier, v.flags, v.age_ms, v.level_db, v.weight));
+        }
+    }
+    /// `least` ranked from the entries kept as listed, once per report.
+    pub fn rank(&mut self) {
+        if self.ranked {
+            return;
+        }
+        let (listed, n) = (self.listed, self.count);
+        (self.count, self.ranked) = (0, true);
+        for v in &listed[..n] {
+            self.insert(*v);
+        }
+    }
+    /// An entry into `least`, kept ascending: the least important LEAST of every list, in the plugin's order: the tier,
+    /// then one just struck after the others, then audibility.
+    fn insert(&mut self, (tier, flags, age_ms, level_db, weight): (u8, u8, u16, f32, f32)) {
+        let struck = if flags & 1 != 0 { STRUCK } else { 0 }; // OSCAIRN_VOICE_BUDGET_STRUCK
+        let level = if level_db.is_finite() { level_db.clamp(-120.0, 24.0) } else { -120.0 };
+        let weight = if weight.is_finite() && weight > 0.0 { weight.min(1e6) } else { 1.0 };
+        let x = (tier.min(KEY_HELD) | struck, audibility(level, f32::from(age_ms)), weight);
+        let rank = |t: u8| (t & !STRUCK) << 1 | u8::from(t & STRUCK != 0);
+        let at = self.least[..self.count].partition_point(|y| rank(y.0) < rank(x.0) || rank(y.0) == rank(x.0) && y.1 <= x.1);
+        if at < LEAST {
+            self.count = (self.count + 1).min(LEAST);
+            self.least.copy_within(at..self.count - 1, at + 1);
+            self.least[at] = x;
+        }
+    }
+}
 
 /// RFC 0046's scale (voice-budget-plugin.hpp's): a voice struck this recently is not judged by its level; below
 /// INAUDIBLE_DB a voice counts as released; each second of age counts as AGED_DB_PER_S quieter, up to AGED_MOST_S.
@@ -215,7 +267,7 @@ impl Entry {
     /// The voices its context sounds, with those of notes admitted since its report, less those given up since; 0
     /// without a report.
     fn listed_left(&self) -> u32 {
-        self.heard.map_or(0, |h| (h.voices + h.admitted).saturating_sub(h.taken as u32))
+        self.heard.as_ref().map_or(0, |h| (h.voices + h.admitted).saturating_sub(h.taken as u32))
     }
 }
 
@@ -364,7 +416,7 @@ impl Budget {
             total += n as f32 * e.cost.note_now();
             if counting != Counting::Ending {
                 // Listed voices given up: no longer counted, their fades a block away.
-                total -= e.heard.map_or(0.0, |h| h.freed * h.unit) * self.voice_cost(e);
+                total -= e.heard.as_ref().map_or(0.0, |h| h.freed * h.unit) * self.voice_cost(e);
             }
         }
         total
@@ -411,6 +463,9 @@ impl Budget {
     /// limit unless `owned`. Ties: a plugin that honors the volume expression, then the oldest note.
     #[allow(clippy::too_many_arguments)]
     fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, last: bool, node: Option<*const Activity>, listed: bool) -> Victim {
+        for h in self.entries.iter_mut().filter_map(|e| e.heard.as_mut()) {
+            h.rank();
+        }
         self.count_held(rs, None);
         let mut best: Victim = None;
         let (mut best_key, mut best_honors, mut best_id) = (0f32, false, 0i32);
@@ -426,7 +481,7 @@ impl Budget {
             let keeping = a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
             if e.heard.is_some() && a.own_voices.load(Relaxed) && keeping {
                 // Its context's next listed voice, never its last.
-                if let Some(h) = e.heard.filter(|h| listed && h.count == LEAST && h.taken >= h.count && e.listed_left() > 1) {
+                if let Some(h) = e.heard.as_ref().filter(|h| listed && h.count == LEAST && h.taken >= h.count && e.listed_left() > 1) {
                     let (tier, heard, _) = h.least[LEAST - 1];
                     unlisted = unlisted.min(entry_key(e, tier, heard + self.gain_db(e)));
                 }
@@ -490,7 +545,7 @@ impl Budget {
     }
     /// The next voice entry `e`'s context listed, by the key: None when none is left to give (or, with `last`, its last).
     fn listed_key(&self, e: &Entry, last: bool) -> Option<f32> {
-        let h = e.heard?;
+        let h = e.heard.as_ref()?;
         if h.taken >= h.count || (last && e.listed_left() <= 1) {
             return None;
         }
@@ -499,7 +554,7 @@ impl Budget {
     }
     /// The tier of the next voice entry `k`'s context listed (RELEASED when none is listed).
     fn listed_tier(&self, k: usize) -> u8 {
-        self.entries.get(k).and_then(|e| e.heard).filter(|h| h.taken < h.count).map_or(RELEASED, |h| h.least[h.taken].0 & !STRUCK)
+        self.entries.get(k).and_then(|e| e.heard.as_ref()).filter(|h| h.taken < h.count).map_or(RELEASED, |h| h.least[h.taken].0 & !STRUCK)
     }
     /// A voice's cost on entry `e`'s node.
     fn voice_cost(&self, e: &Entry) -> f32 {
@@ -508,7 +563,7 @@ impl Budget {
     }
     /// What giving victim `v` up frees, by the estimates.
     fn victim_cost(&self, (k, i): (usize, usize)) -> f32 {
-        self.entries.get(k).map_or(0.0, |e| match e.heard.filter(|h| i == LISTED && h.taken < h.count) {
+        self.entries.get(k).map_or(0.0, |e| match e.heard.as_ref().filter(|h| i == LISTED && h.taken < h.count) {
             Some(h) => h.least[h.taken].2 * h.unit * self.voice_cost(e),
             None if i == LISTED => self.voice_cost(e),
             None => e.cost.note_now(),
@@ -806,7 +861,7 @@ impl Budget {
                 continue;
             }
             let l = self.lanes.get(e.lane).copied().unwrap_or_default();
-            let limit = match e.heard {
+            let limit = match &e.heard {
                 Some(h) => h.voices,
                 None if e.cost.own_voices.load(Relaxed) => e.cost.voice_limit.load(Relaxed),
                 None => held,

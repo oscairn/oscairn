@@ -1579,7 +1579,8 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         if (s.voiceBudget) {
             s.activeVoices = s.voiceBudget->active_voices(s.plugin, &s.voiceCost);
             s.voiceNoteCount = std::min<uint32_t>(s.voiceBudget->notes(s.plugin, s.voiceNotes.data(), uint32_t(s.voiceNotes.size())), uint32_t(s.voiceNotes.size()));
-            if (s.reportsImportance) s.importanceCount = std::min<uint32_t>(s.voiceBudget->importance(s.plugin, s.importance.data(), uint32_t(s.importance.size())), uint32_t(s.importance.size()));
+            // With no voice sounding no context is (voice-budget.h): nothing to list, and the plugin's pass over its voices is saved.
+            if (s.reportsImportance) s.importanceCount = s.activeVoices ? std::min<uint32_t>(s.voiceBudget->importance(s.plugin, s.importance.data(), uint32_t(s.importance.size())), uint32_t(s.importance.size())) : 0;
         }
         s.blocks.fetch_add(1);
         const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();

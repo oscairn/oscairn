@@ -2978,7 +2978,10 @@ unsafe fn render(
         s.active_voices.set(p.call(v.active_voices, (s.voice_cost.as_ptr(),)));
         let (notes, capacity) = s.voice_notes.with(|n| (n.as_mut_ptr(), n.len() as u32));
         s.voice_note_count.set(p.call(v.notes, (notes, capacity)).min(capacity));
-        if s.reports_importance.get() {
+        // With no voice sounding no context is (voice-budget.h): nothing to list, and the plugin's pass over its voices is saved.
+        if s.reports_importance.get() && s.active_voices.get() == 0 {
+            s.importance_count.set(0);
+        } else if s.reports_importance.get() {
             let (lists, capacity) = s.importance.with(|n| (n.as_mut_ptr(), n.len() as u32));
             s.importance_count.set(p.call(v.importance, (lists, capacity)).min(capacity));
         }

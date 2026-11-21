@@ -330,7 +330,7 @@ if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
 endif()
 # The Performance-switch tests load and render many instances; a sanitizer slows that several
 # times over (control-performance-switch-workers took 183 s in a local ThreadSanitizer build).
-set(switch_timeout 240) # control-performance-switch-workers took 100 s on 2 CPUs (a container with --cpus 2) and timed out at 120 under load
+set(switch_timeout 120)
 if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set(switch_timeout 600)
 endif()

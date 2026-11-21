@@ -24,6 +24,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <poll.h>
 #include <spawn.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -61,6 +62,7 @@ namespace oscairn
         // meanwhile (a supervisor's restart beside a load) inherited another worker's socket, so that worker's death closed
         // nothing and a request to it waited out the whole reply timeout (control-performance-switch-stress-hosts hung).
         std::mutex& descriptorMutex() { static std::mutex m; return m; }
+        thread_local std::chrono::milliseconds replyStall{0}; // ReplyBound's, on this thread; 0: the reply timeout alone
 
         // OSCAIRN_WORKER_REST (realtime.h's workerRest), read as the engine starts: 0 calls every worker every block, as
         // before resting; which of the others may rest, the graph says (Graph's rest call).
@@ -326,7 +328,7 @@ namespace oscairn
             {
                 timeval start{std::max(30L, replySeconds), 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &start, sizeof start);
                 struct Shorter { int socket; long seconds; ~Shorter() { timeval t{seconds, 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t); } } shorter{socket, replySeconds};
-                return exchange(Writer().u8(uint8_t(Op::Load)).str(path).str(id).u64(memoryRoom).data);
+                return exchange(Writer().u8(uint8_t(Op::Load)).str(path).str(id).u64(memoryRoom).data, false);
             }
             // The worker's index of the node a failure is put down to (UINT32_MAX: none known), from its doorbell:
             // the thread that crashed (faulted), the audio thread that hung (rendering), the request not
@@ -348,8 +350,36 @@ namespace oscairn
                 throw std::runtime_error(why);
             }
 
-            // One request and its reply, answering the worker's asset and memory requests in between. Under control.
-            Reader exchange(const std::string& message)
+            // Under a ReplyBound (an open), until the reply can be read, the worker failed (lost) once it has made no progress
+            // for the bound: no CPU time used and, on Linux, its request thread neither running, runnable nor waiting on a disk.
+            // A worker stopped, or killed and not yet exited, so fails in a few hundred ms instead of the reply timeout (30 s
+            // per hung worker, which held a Performance open that long on stage); one busy restoring a large state keeps going.
+            // Under control.
+            void awaitReply()
+            {
+                const auto stall = replyStall;
+                const auto began = std::chrono::steady_clock::now();
+                auto still = began; double cpu = usage(pid, 0).cpu;
+                for(;;)
+                {
+                    pollfd p{socket, POLLIN, 0};
+                    const int n = poll(&p, 1, 20);
+                    if(n > 0 || (n < 0 && errno != EINTR)) return; // a reply, the connection closed or an error: receive says which
+                    const auto now = std::chrono::steady_clock::now();
+                    bool moving = false;
+                    if(const double c = usage(pid, 0).cpu; c != cpu) { cpu = c; moving = true; }
+#ifdef __linux__
+                    const auto stat = procText(pid, "stat"); // "pid (name) S ...": the main thread, which serves requests
+                    if(const auto at = stat.rfind(") "); at != std::string::npos && at + 2 < stat.size()) moving = moving || stat[at + 2] == 'R' || stat[at + 2] == 'D';
+#endif
+                    if(moving) still = now;
+                    if(now - still >= stall || now - began >= std::chrono::seconds(replySeconds)) lost(WorkerTimeout());
+                }
+            }
+
+            // One request and its reply, answering the worker's asset and memory requests in between; bounded: a ReplyBound
+            // on this thread applies (a load is not, which may take its full 30 s). Under control.
+            Reader exchange(const std::string& message, bool bounded = true)
             {
                 requests.fetch_add(1, std::memory_order_relaxed);
                 // A connection that broke under a request is the worker failing, counted now (workerFailures): an open reads
@@ -361,6 +391,7 @@ namespace oscairn
                 for(;;)
                 {
                     std::string reply;
+                    if(bounded && replyStall.count()) awaitReply();
                     try { reply = receive(socket); } catch(const WorkerTimeout& e) { lost(e); } catch(const std::exception&) { broke(); throw; }
                     if(!reply.empty() && reply[0] == Reserve)
                     {
@@ -2493,6 +2524,8 @@ namespace oscairn
     namespace { std::atomic<int64_t> serviceInterval{0}; }
     uint64_t workerRequests() noexcept { return requests.load(std::memory_order_relaxed); }
     uint64_t workerFailures() noexcept { return failures.load(std::memory_order_relaxed); }
+    ReplyBound::ReplyBound(std::chrono::milliseconds stall) noexcept : previous_(replyStall) { replyStall = stall; }
+    ReplyBound::~ReplyBound() { replyStall = previous_; }
     void setWorkerServiceInterval(std::chrono::milliseconds interval) noexcept { serviceInterval.store(interval.count(), std::memory_order_relaxed); }
     std::chrono::milliseconds workerServiceInterval() noexcept
     {

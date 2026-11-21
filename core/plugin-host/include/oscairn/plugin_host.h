@@ -405,6 +405,19 @@ namespace oscairn
     std::shared_ptr<PluginHost> loadPluginInWorker(const std::string& program, const std::string& path, const std::string& pluginId,
                                                    double sampleRate, uint32_t maxFrames, ProcessingMode mode = ProcessingMode::Realtime, uint64_t memoryLimit = 0,
                                                    uint64_t memoryRoom = 0);
+    // For its scope on this thread (an open: Session::readTaking), a request to a worker waits for its reply only while the
+    // worker makes progress: one that made none for `stall` (stopped, or killed and not yet exited) is failed as stopped
+    // answering, its instances then loaded afresh, instead of after the reply timeout (30 s). A load keeps its full time.
+    class ReplyBound
+    {
+    public:
+        explicit ReplyBound(std::chrono::milliseconds stall) noexcept;
+        ~ReplyBound();
+        ReplyBound(const ReplyBound&) = delete;
+        ReplyBound& operator=(const ReplyBound&) = delete;
+    private:
+        std::chrono::milliseconds previous_;
+    };
     // RFC 0045: a plugin's measured cost, a share of a block's time (0 to 1), by which its later
     // instances are placed among the plugin hosts; one never measured counts a tenth. The Session's
     // measurements set it. Any thread.

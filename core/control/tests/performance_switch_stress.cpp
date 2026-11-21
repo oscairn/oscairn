@@ -329,7 +329,9 @@ int main(int argc, char** argv)
                 // Not round 0 with plugin hosts: a fresh load picked into a stopped host waits out a load's full 30 s (no audio
                 // runs here to fail it for blocks missed), which is how any load into a hung host fares, not this case.
                 if(round == 0 && std::getenv("OSCAIRN_PLUGIN_HOSTS")) continue;
-                ::setenv("OSCAIRN_WORKER_REPLY_SECONDS", round == 0 ? "1" : "30", 1); // read as each worker process starts
+                // The reply timeout as on the unit (30 s): a restore into a stopped worker during an open waits only while it makes
+                // progress (ReplyBound), so round 0 opens in well under one timeout, not one per stopped worker.
+                ::unsetenv("OSCAIRN_WORKER_REPLY_SECONDS"); // read as each worker process starts
                 Session g(48000, frames);
                 g.loadPerformance(performances[0].string());
                 render(g, 8);
@@ -345,10 +347,14 @@ int main(int argc, char** argv)
                 std::thread killer; // round 1: killed while the open waits on them (or, should the open reach none in time, just before)
                 if(round == 1) killer = std::thread([&] { std::this_thread::sleep_for(std::chrono::milliseconds(300)); for(const int pid : pids) ::kill(pid, SIGKILL); });
                 std::string refused;
+                const auto asked = std::chrono::steady_clock::now();
                 try { g.loadPerformance(performances[1].string()); } catch(const std::exception& e) { refused = e.what(); }
+                const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - asked).count();
                 if(killer.joinable()) killer.join();
                 for(const int pid : pids) ::kill(pid, SIGCONT); // those the open did not fail answer again
                 check(refused.empty(), "a switch at a worker stopped (round " + std::to_string(round) + ") opens: " + refused);
+                std::printf("a switch at %zu workers stopped (round %d) opened in %.2f s\n", pids.size(), round, took);
+                check(took < 30, "and it waited out no reply timeout (30 s): " + std::to_string(took) + " s");
                 if(!refused.empty()) break;
                 bool state = true; std::string names;
                 for(const auto& [id, name] : g.graphState().names)

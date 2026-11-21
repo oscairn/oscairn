@@ -852,6 +852,8 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
     // an instance of it ("connection lost", or no reply in its timeout). The check then fails it as its supervisor would,
     // and the read starts again: its instances are skipped as any failed one's, its nodes loaded afresh with the
     // document's state. A pass is tried again only when a worker failed during it, at most once for each instance offered.
+    // One stopped or still dying fails within half a second of making no progress, not the reply timeout's 30 s each.
+    const ReplyBound bound(std::chrono::milliseconds(500));
     std::unique_ptr<Prepared> p;
     for(size_t pass=0;;++pass){const auto failures=workerFailures();
         try{p=read(root,free);break;}

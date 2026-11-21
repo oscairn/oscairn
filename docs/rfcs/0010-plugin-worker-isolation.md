@@ -326,12 +326,17 @@ Implemented 2026-10-30 in `WorkerHost.cpp` (native engines followed in step 5):
   by that; the next pass skips their instances as any failed one's, their nodes load afresh with
   the document's state, and the notice names them. A pass is read again only when a worker failed
   during it, at most once for each instance offered, so it ends; a plugin whose fresh load fails
-  too stands in, as any plugin that does not load. What it costs: a dying worker, a moment and
-  one more read; a hung one, its reply timeout (`OSCAIRN_WORKER_REPLY_SECONDS`, 30 s; a load
-  into a hung plugin host waits 30 s whatever it is) for each hung worker, unless its supervisor
-  fails it first for missed blocks (a quarter second) while audio plays. Tested by every worker
-  stopped at the switch, its requests unanswered in a 1 s timeout, and stopped then killed while
-  the open waits on it (`control-performance-switch-stress-workers`; `-hosts` the second only).
+  too stands in, as any plugin that does not load. A request whose connection broke counts as a
+  worker failure at once, and a fresh load into a plugin host that died under it loads once more
+  in a worker of its own (2026-11-21), so a host killed a moment before the open neither refuses
+  it nor leaves a stand-in. What it costs: a dying worker, a moment and one more read; a hung
+  one, during an open, half a second without progress (`ReplyBound`: no CPU time used and, on
+  Linux, its request thread neither running, runnable nor in a disk wait; a worker busy restoring
+  a large state keeps going, up to the reply timeout, `OSCAIRN_WORKER_REPLY_SECONDS`, 30 s) for
+  each hung worker, instead of the reply timeout each (2026-11-21); a load into a hung plugin
+  host still waits 30 s whatever it is. Tested by every worker stopped at the switch, opened in
+  under one reply timeout, and stopped then killed while the open waits on it
+  (`control-performance-switch-stress-workers`; `-hosts` the second only).
 - **Fade-in:** the restarted plugin's output fades in over 10 ms.
 - **Bounded:** at most 3 restarts a minute; after that the node stays silent and `failure()`
   says so ("…; not restarted: 3 restarts within a minute"). `Statistics::restarts` counts

@@ -162,7 +162,11 @@ review of RFC 0046: the host's own notes count as just struck for 50 ms plus one
 block's start, so their age runs up to a block ahead), which changes some victims; `engine-run.vec` and
 `engine-audio.vec` replay unchanged. `engine-core.vec` alone again at `d6b5b6a2`: a draining connection's voices (the
 last Performance ringing out) rank below every live voice of their tier, which changes some victims in plans with
-draining sources; `engine-run.vec` and `engine-audio.vec` replay unchanged.
+draining sources; `engine-run.vec` and `engine-audio.vec` replay unchanged. `engine-core.vec` alone again at
+`b6fa3f2b`: a held key whose voice its plugin ended no longer counts as a sounding note in the budget (with or without
+the importance report), a listed held or pedaled voice goes for a new note only past the lane's limit, and a listing
+plugin's over-limit count and its mismatch check read the voices it keeps; `engine-run.vec` and `engine-audio.vec`
+replay unchanged.
 
 The conditions record and replay share: the core is always built `cargo --release`; the tests and `vectors_math.c`
 are built `-ffp-contract=off`; and the test executables define `exp`, `log1p` and `pow` themselves

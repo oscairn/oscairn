@@ -51,7 +51,7 @@ fn answer(play: &mut crate::play::Screen, values: &[(u64, u32, f64)]) {
             let PlayRequest::Knobs(k) = r else { continue };
             let result = match (m, &k) {
                 ("params.list", Request::List(node)) => list(*node),
-                ("assignments.get", _) => json!({"assignments": []}),
+                ("assignments.get", _) => json!({"assignments": [], "unlinked": [], "physicalControls": {}}),
                 ("params.get", _) => json!({"values": values.iter().map(|(n, id, v)| json!({"node": n, "param": id, "value": v})).collect::<Vec<_>>()}),
                 ("params.text", Request::Text(..)) => json!({"text": format!("{:.2}", p["value"].as_f64().unwrap())}),
                 _ => json!({}),

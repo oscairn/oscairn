@@ -63,6 +63,7 @@ pub struct Audio {
     silent: Vec<u32>,   // each step's inputs no connection reaches, then the outputs'
     buses: Vec<Bus>,
     outputs: (Range<u32>, Range<u32>), // the outputs' connections and silent channels
+    reached: (Vec<(u8, f32)>, bool),   // the live slots the routes read, at their values when `reach` last worked (if it has)
 }
 
 /// `routes` added to `into`, each marked first into its channel or not; the channels of `channels`
@@ -117,6 +118,9 @@ impl Audio {
             .collect();
         let outputs = connect(&mut routes, &mut silent, outputs, channels, at);
         let buffers = Buffers::new(buffer as usize, max_frames as usize);
+        let mut slots: Vec<(u8, f32)> = routes.iter().flat_map(|r: &Route| r.c.live).filter(|&s| s != 0).map(|s| (s, 0.0)).collect();
+        slots.sort_unstable_by_key(|x| x.0);
+        slots.dedup_by_key(|x| x.0);
         Audio {
             inputs,
             channels,
@@ -129,6 +133,7 @@ impl Audio {
             silent,
             buses,
             outputs,
+            reached: (slots, false),
         }
     }
 
@@ -200,7 +205,17 @@ impl Audio {
     /// Each step's largest gain to the graph's outputs through its connections at the live gains `live` (a part's
     /// level and its mix): for the budget, which hears a part's voices in the mix (RFC 0046). Sources come before the
     /// steps they feed, so one pass back from the outputs.
-    pub fn reach(&self, live: &[f32], out: &mut [f32]) {
+    /// Worked out again only when a live gain the routes read moved (`out` is the same each call): unmoved, no pass.
+    pub fn reach(&mut self, live: &[f32], out: &mut [f32]) {
+        let now = |s: u8| live.get(usize::from(s)).copied().unwrap_or(1.0);
+        let (slots, done) = &mut self.reached;
+        if *done && slots.iter().all(|&(s, v)| now(s) == v) {
+            return;
+        }
+        for (s, v) in slots.iter_mut() {
+            *v = now(*s);
+        }
+        *done = true;
         out.fill(0.0);
         let gain = |c: &Connection| c.live.iter().filter(|&&s| s != 0).fold(c.gain.abs(), |g, &s| g * live.get(usize::from(s)).map_or(1.0, |v| v.abs()));
         let through = |r: &Route, from: f32, out: &mut [f32]| {
@@ -384,5 +399,42 @@ fn scale(from: &[f32], dest: &mut [f32], first: bool, g: f32) {
         (true, false) => dest.iter_mut().zip(from).for_each(|(d, x)| *d = x * g),
         (false, true) => dest.iter_mut().zip(from).for_each(|(d, x)| *d += x),
         (false, false) => dest.iter_mut().zip(from).for_each(|(d, x)| *d += x * g),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// reach works the gains out again when a live gain its routes read moves, and only then.
+    #[test]
+    fn reach_again_only_when_a_live_gain_moves() {
+        let outputs = [Connection { source: 0, from: 0, to: 0, gain: 0.5, live: [3, 0, 0, 0] }];
+        let step = StepIn {
+            host: std::ptr::null(),
+            inputs: 0,
+            outputs: 2,
+            metered: 2,
+            peaks: std::ptr::null_mut(),
+            activity: std::ptr::null_mut(),
+            routes: std::ptr::null(),
+            route_count: 0,
+            buses: std::ptr::null(),
+            bus_count: 0,
+        };
+        let mut audio = Audio::new(&[step], &outputs, 0, 2, 128);
+        let (mut live, mut out) = ([1f32; 8], [0f32; 1]);
+        live[3] = 0.5;
+        audio.reach(&live, &mut out);
+        assert_eq!(out[0], 0.25);
+        out[0] = 9.0;
+        audio.reach(&live, &mut out);
+        assert_eq!(out[0], 9.0, "unmoved: no pass");
+        live[2] = 0.1;
+        audio.reach(&live, &mut out);
+        assert_eq!(out[0], 9.0, "a slot no route reads moved: no pass");
+        live[3] = 1.0;
+        audio.reach(&live, &mut out);
+        assert_eq!(out[0], 0.5, "moved: worked out again");
     }
 }

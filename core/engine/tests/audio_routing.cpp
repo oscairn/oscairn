@@ -4,6 +4,7 @@
 #include "AllocationGuard.h"
 #include <array>
 #include <cmath>
+#include <limits>
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -116,5 +117,29 @@ int main(int argc,char** argv){try{
     Audio rescan;rescan.input[2].fill(99);check(rescan.run(changed),"initial layout before rescan");changed.host(changedNode).service();
     check(changed.describe().nodes[0].outputs[0].id==30,"rejected rescan preserves original port identities");
     check(!rescan.run(changed),"changed CLAP port layout fails instead of redirecting cue");rescan.expect({0,0,0,0,0});
+    // One route per set of live gains: two ways between the same channels through different live gains (a part's fader
+    // wire, and its send to a bus playing where the part does) are two routes, each scaled by its own slots, and they sum
+    // as one route baked to the same total would: within float rounding, not bit for bit (the slots' product is taken in
+    // float per route and the two added, where the baked route's one gain was summed in double). Reconnecting one keeps the
+    // other; disconnectRoute takes only its own.
+    {
+        Graph split(48000,64,ProcessingMode::Realtime,{},layout()),baked(48000,64,ProcessingMode::Realtime,{},layout());
+        const double fader=.7,send=.0003,bus=.25,master=.4973,fixed=.8;
+        split.setLiveGain(1,float(fader),false);split.setLiveGain(2,float(send),false);split.setLiveGain(3,float(master),false);split.setLiveGain(4,float(bus),false);
+        split.connectAudio({{graphInput,7,0},{graphOutput,100,0},1,fixed,{1,3,0,0}});
+        split.connectAudio({{graphInput,7,0},{graphOutput,100,0},1,fixed,{1,4,2,3}});
+        split.commit();
+        check(split.describe().audioRoutes.size()==2,"two ways through different live gains are two routes");
+        baked.connectAudio({{graphInput,7,0},{graphOutput,100,0},1,fixed*fader*master+fixed*fader*bus*send*master});baked.commit();
+        Audio a,b;
+        for(int i=0;i<3;++i){check(a.run(split) && b.run(baked),"render");}
+        float most=0;for(size_t f=0;f<64;++f)most=std::max(most,std::abs(a.output[0][f]-b.output[0][f]));
+        std::cout<<"live routes against one baked route: largest difference "<<most<<" at "<<b.output[0][63]<<'\n';
+        check(most<=4*std::numeric_limits<float>::epsilon()*std::abs(b.output[0][63]),"two live routes sum as one baked route, within float rounding");
+        split.connectAudio({{graphInput,7,0},{graphOutput,100,0},1,.5,{1,3,0,0}});
+        check(split.describe().audioRoutes.size()==2,"reconnecting one route updates its gain, the other stays");
+        split.disconnectRoute({{graphInput,7,0},{graphOutput,100,0},1,0,{1,4,2,3}});
+        check(split.describe().audioRoutes.size()==1 && split.describe().audioRoutes[0].gain==.5,"disconnectRoute takes its own route only");
+    }
     std::cout<<"ok: independent buses, sidechains, ranges, mixes, aliasing, live edits, JSON and mixed-format audio\n";return 0;
 }catch(const std::exception& e){forbidAllocation=false;std::cerr<<e.what()<<'\n';return 1;}}

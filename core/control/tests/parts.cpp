@@ -886,7 +886,7 @@ namespace
         s.setSend(keys, room, 1); s.setPartLevel(room, 1, true); s.commit();
         Audio x;
         s.note(true, 60, 1); x.run(s); check(near(x.l[0], .25), "a send into a muted empty bus adds nothing: " + std::to_string(x.l[0]));
-        s.setPartLevel(room, .5, false); s.commit(); x.run(s); check(near(x.l[0], .375), "at level 0.5 it adds half: " + std::to_string(x.l[0]));
+        s.setPartLevel(room, .5, false); s.commit(); x.run(s); check(near(x.l[frames - 1], .375), "at level 0.5 it adds half (a live gain: by the block's end): " + std::to_string(x.l[frames - 1]));
         s.setPartPan(room, -1); s.commit(); x.run(s); check(x.r[0] < x.l[0], "panned left with it");
         s.setPartPan(room, 0); s.setSend(keys, room, {}); s.setPartOutput(keys, room); s.commit(); x.run(s);
         check(near(x.l[0], .125), "a part playing into it plays at its level: " + std::to_string(x.l[0]));
@@ -925,7 +925,7 @@ namespace
         double sendLevel = -1; double sendWire = -1;
         for(const auto& p : s.parts()) if(p.id == keys) for(const auto& sd : p.sends) if(sd.bus == hall) sendLevel = sd.level;
         for(const auto& w : s.wires()) if(w.part == keys && w.send == hall) sendWire = w.level;
-        check(near(sendLevel, .8) && near(sendWire, .4) && near(x.l[0], .225), "the send wire shows the asked .4 past the bus's half: send " + std::to_string(sendLevel) + " wire " + std::to_string(sendWire) + " l " + std::to_string(x.l[0]));
+        check(near(sendLevel, .8) && near(sendWire, .4) && near(x.l[frames - 1], .225), "the send wire shows the asked .4 past the bus's half: send " + std::to_string(sendLevel) + " wire " + std::to_string(sendWire) + " l " + std::to_string(x.l[frames - 1]));
         // Sound passing through an empty bus meters on the bus.
         s.setSend(keys, hall, {}); s.setPartLevel(keys, 1, false); s.setPartLevel(room, 1, false); s.setPartLevel(hall, 1, false); s.commit();
         auto meter = [&](uint32_t part) { for(const auto& m : s.partMeters()) if(m.part == part) return m.peak; return -1.0; };

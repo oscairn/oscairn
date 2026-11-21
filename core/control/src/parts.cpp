@@ -206,10 +206,10 @@ namespace oscairn
         };
         using Key = std::tuple<NodeId, uint32_t, uint32_t, NodeId, uint32_t, uint32_t>;
         using Slots = std::array<uint8_t, 4>;
-        // Each route: its gain and live slots, and its gain all baked, for routes whose ways do not
-        // share their slots (then baked, and their faders compile plans).
-        struct Route { double gain = 0; Slots slots{}; double baked = 0; bool mixed = false; std::vector<uint32_t> faders, pans; std::vector<std::pair<uint32_t, uint32_t>> sends; bool started = false; };
-        std::map<Key, Route> audio;
+        // Each route, by its channels and its set of live gains: ways between the same channels through different live
+        // gains (a part's fader wire and its send to an empty bus that plays where the part does) are routes of their
+        // own, so every fader, send and the master stay live whatever the wiring; ways through the same ones sum.
+        std::map<std::pair<Key, Slots>, double> audio;
         // Note connections and their zones: none when any wire on the connection passes every note.
         std::map<std::pair<NodeId, NodeId>, std::vector<NoteZone>> notes;
         std::set<std::pair<NodeId, NodeId>> passAll, live; // live: a connection with a wire that takes new notes
@@ -261,11 +261,7 @@ namespace oscairn
                 else liveGains->staticSends.insert({w.part, w.send});
             }
             const bool structural = (soloed.count({w.to, w.toPort}) && !w.solo) || !w.enabled || off.count(w.to) || rungOut.count(w.from);
-            // A part's send at level 0 carries nothing: it is left out, and raising it compiles it back (a static
-            // send). Kept, it shared a route with the part's fader wire where the bus is empty and plays where the
-            // part does (the converter's buses "not built yet"), mixing their live gains: the route was baked, so the
-            // part's fader and the master stopped moving live (master.set only staged an edit), and a Performance
-            // change then took the outgoing tail from the level it had to the level staged.
+            // A part's send at level 0 carries nothing: it is left out, and raising it compiles it back (a static send).
             const bool unsentSend = own && w.send && w.level == 0;
             if(unsentSend && liveGains) liveGains->staticSends.insert({w.part, w.send});
             const bool silent = structural || unsentSend || (liveWire ? w.fixedMute : w.mute);
@@ -281,37 +277,25 @@ namespace oscairn
             for(size_t i = 0; i < compiled->size(); ++i)
             {
                 const auto& p = (*compiled)[i];
-                auto& r = audio[{w.from, w.fromPort, p.from, w.to, w.toPort, p.to}];
                 Slots s = slots;
                 size_t next = used;
                 if(panSlots) s[next++] = (*panSlots)[p.to ? 1 : 0];
                 if(sendSlot) s[next++] = sendSlot;
                 if(liveMaster) s[next] = masterSlots[layout.outputs.front().channels == 2 && p.to ? 1 : 0];
-                if(!r.started) { r.slots = s; r.started = true; }
-                else if(r.slots != s) r.mixed = true;
-                r.gain += (liveWire ? (sendSlot ? w.unsent : w.fixed) : w.level) * (*unpanned)[i].gain * (liveMaster ? 1 : master(w, Pair{p.from, p.to, 1}));
-                r.baked += (w.mute ? 0 : w.level) * master(w, p);
-                r.faders.insert(r.faders.end(), w.faders.begin(), w.faders.end());
-                if(panSlots) r.pans.push_back(w.part);
-                if(sendSlot) r.sends.push_back({w.part, w.send});
+                audio[{{w.from, w.fromPort, p.from, w.to, w.toPort, p.to}, s}] += (liveWire ? (sendSlot ? w.unsent : w.fixed) : w.level) * (*unpanned)[i].gain * (liveMaster ? 1 : master(w, Pair{p.from, p.to, 1}));
             }
         }
-        for(auto& [k, r] : audio)
-            if(r.mixed)
-            {
-                r.gain = r.baked; r.slots = {};
-                if(liveGains) { liveGains->staticFaders.insert(r.faders.begin(), r.faders.end()); liveGains->staticPans.insert(r.pans.begin(), r.pans.end()); liveGains->staticSends.insert(r.sends.begin(), r.sends.end()); if(std::get<3>(k) == graphOutput && !layout.outputs.empty() && std::get<4>(k) == layout.outputs.front().id) liveGains->staticMaster = true; }
-            }
         const auto present = g.describe();
-        std::map<Key, std::pair<double, Slots>> existing;
+        std::map<std::pair<Key, Slots>, double> existing;
         for(const auto& r : present.audioRoutes)
             if(!leaving.count(r.from.node) && !leaving.count(r.to.node))
-            for(uint32_t i = 0; i < r.channels; ++i) existing[{r.from.node, r.from.port, r.from.channel + i, r.to.node, r.to.port, r.to.channel + i}] = {r.gain, r.live};
-        auto connection = [](const Key& k, double gain, const Slots& slots) {
-            return AudioConnection{{std::get<0>(k), std::get<1>(k), std::get<2>(k)}, {std::get<3>(k), std::get<4>(k), std::get<5>(k)}, 1, gain, slots};
+            for(uint32_t i = 0; i < r.channels; ++i) existing[{{r.from.node, r.from.port, r.from.channel + i, r.to.node, r.to.port, r.to.channel + i}, r.live}] = r.gain;
+        auto connection = [](const std::pair<Key, Slots>& k, double gain) {
+            const auto& [c, slots] = k;
+            return AudioConnection{{std::get<0>(c), std::get<1>(c), std::get<2>(c)}, {std::get<3>(c), std::get<4>(c), std::get<5>(c)}, 1, gain, slots};
         };
-        for(const auto& [k, e] : existing) if(!audio.count(k)) g.disconnectAudio(connection(k, e.first, e.second));
-        for(const auto& [k, r] : audio) if(auto e = existing.find(k); e == existing.end() || e->second != std::pair{r.gain, r.slots}) g.connectAudio(connection(k, r.gain, r.slots));
+        for(const auto& [k, gain] : existing) if(!audio.count(k)) g.disconnectRoute(connection(k, gain));
+        for(const auto& [k, gain] : audio) if(auto e = existing.find(k); e == existing.end() || e->second != gain) g.connectAudio(connection(k, gain));
         for(auto& [e, zones] : notes) if(passAll.count(e)) zones.clear();
         for(const auto& e : present.notes) if(!notes.count(e) && !leaving.count(e.first) && !leaving.count(e.second)) g.disconnectNotes(e.first, e.second);
         for(const auto& [e, zones] : notes)

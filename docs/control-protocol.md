@@ -42,7 +42,10 @@ there is no automatic fold into master. Missing ports and invalid ranges reject 
 Audio routes have one identity per source/destination channel pair. Ranges expand into
 these pairs, so overlapping range and single-channel connections cannot duplicate a
 signal. Repeating a connection updates its gain; connections from different source
-channels still sum. `graph.get` always returns explicit single-channel routes (`channels: 1`).
+channels still sum. The parts' own routes are the one exception: a pair carries one route per set of live gains
+(a part's fader wire and its send to a bus that plays where it does, each scaled by its own faders, send and the
+master), so `graph.get` may list a pair more than once, each with its gain, which sum.
+`graph.get` always returns explicit single-channel routes (`channels: 1`).
 `graph.disconnect` removes the selected pairs regardless of gain; omit `gain` when
 disconnecting. Gain changes are staged until `graph.commit` and do not yet ramp.
 
@@ -146,10 +149,10 @@ request members.
 | `harmony.set` | `key`: `root` and `scale`, a name from `scales` or pitch classes including 0; with `part`, that part's own key, or null to follow the Performance's again | `{"accepted":true}`; an edit, staged until commit and undone with `edit.undo` (the part's own key and the Performance's). Plugins in a part read its key and the chord held on it through `oscairn.harmony` |
 | `parts.output` | `part`, and `bus` (play through that bus) or optional `port` (a graph output) | `{"accepted":true}` |
 | `parts.send` | `part`, `bus`, optional `level` (without one, the send is removed) | `{"accepted":true}`: a new level for an existing send is a live gain like `parts.level`'s (followed by `graph.changed`, for the views' wires), unless its routes share another wire's into a bus with no box, or come from an empty bus's send; adding or removing a send is an edit to commit |
-| `parts.level` | `part`, `level`, `mute`: its fader; sends are post-fader | `{"accepted":true}`: a live gain ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#instant-controls)): heard from the next block, ramped across it, with no plan compiled (`graph.commit` after it compiles none unless other edits are staged); a fader whose wires cannot be live stages an edit as before |
+| `parts.level` | `part`, `level`, `mute`: its fader; sends are post-fader | `{"accepted":true}`: a live gain ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#instant-controls)): heard from the next block, ramped across it, with no plan compiled (`graph.commit` after it compiles none unless other edits are staged), whatever the wiring: ways to one place through different live gains (the part's fader wire and its send to an empty bus that plays where it does, as the converter writes buses it did not build) are routes of their own, each live. Only a fader on a way with more than three faders on it (buses within buses), or on two ways an empty bus merges into one wire, stages an edit |
 | `parts.name` | `part`, `name` | `{"accepted":true}` |
 | `parts.pan` | `part`, `pan` (-1 left .. 1 right): where it plays; its sends keep their own | `{"accepted":true}`: a live gain like `parts.level`'s (each of the part's fader wires into a stereo input scaled by the part's left or right slot), unless a wire's pan also has a lane's or an empty bus's in it, or its wires cannot be live; then an edit to commit |
-| `master.set` | `level` (0..2, a gain) and `pan` (-1 left .. 1 right): the Performance's level and pan on its main output, after every part, bus and user wire playing there; `graph.get` gives them as `master`, and each scene its own | `{"accepted":true}`; a live gain like `parts.level`'s; an edit, undone with `edit.undo`, stored by scenes with the mix |
+| `master.set` | `level` (0..2, a gain) and `pan` (-1 left .. 1 right): the Performance's level and pan on its main output, after every part, bus and user wire playing there; `graph.get` gives them as `master`, and each scene its own | `{"accepted":true}`; a live gain like `parts.level`'s, always: every route into the main output carries the master's slot, whatever the wiring, so `graph.get`'s `staged` stays false (an engine before 2026-11-21 staged it where a part's send and fader shared a route, and an app committing after each move heard it only then); an edit, undone with `edit.undo`, stored by scenes with the mix |
 | `parts.solo` | `part`, `solo`: while any part is soloed, only soloed parts, the parts feeding them and the buses they feed are heard | `{"accepted":true}` |
 | `edit.undo`, `edit.redo` | omitted or `{}`: undoes the last edit, or redoes the last undone | `undo`, `redo`: what each would now do (empty: nothing) |
 | `edit.history` | omitted or `{}` | `undo`, `redo` labels, as above |

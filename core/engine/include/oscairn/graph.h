@@ -194,10 +194,14 @@ namespace oscairn
         /// the source cannot send or the destination cannot receive that kind of signal.
         void connectAudio( NodeId from, NodeId to );
         /// Explicit port IDs and channel ranges; gains sum without normalization.
-        /// Ranges expand to unique channel pairs. Reconnecting updates gain.
-        /// Disconnect removes the selected pairs regardless of gain.
+        /// Ranges expand to channel pairs, one route per pair and set of live gains (`live`): two ways
+        /// between the same channels through different live gains (a part's fader wire and its send to
+        /// a bus playing where it does) are two routes, each live. Reconnecting one updates its gain.
+        /// disconnectAudio removes the selected pairs regardless of gain and live gains;
+        /// disconnectRoute only the pairs with the connection's live gains.
         void connectAudio( const AudioConnection& connection );
         void disconnectAudio( const AudioConnection& connection );
+        void disconnectRoute( const AudioConnection& connection );
         /// With zones (at most NoteZones::capacity), only the notes a zone accepts pass, changed
         /// as it says; reconnecting replaces the zones and keeps held notes' releases.
         void connectNotes( NodeId from, NodeId to, const std::vector<NoteZone>& zones = {} );

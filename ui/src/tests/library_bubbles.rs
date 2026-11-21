@@ -7,6 +7,7 @@ use super::library_fake::stored;
 use super::library_layout::side_cursor;
 use super::library_shell::Shelf;
 use super::owner::{lib_png, scene};
+use std::collections::BTreeSet;
 use super::theme_pictures::{blue, orange};
 use super::*;
 use crate::LibraryState;
@@ -256,4 +257,101 @@ fn a_meter_update_on_the_filled_library_repaints_only_the_section() {
         assert_eq!(super::changed_outside(&before, &s.f.screen.pixels, section), 0);
         assert_eq!(s.f.screen.frame(), None, "nothing more is drawn");
     }
+}
+
+// The Bubbles view scrolled past its first screen builds its lines from ITS own start, not the list's first: a heading is a
+// compact label, a bubble touch-tall, so later views hold fewer lines than the first. With tags enough for three screens,
+// scrolled to the end by the dial and by a track tap, the last bubble is drawn whole, no bubble is drawn past the view's
+// bottom, and the dial reaches every tag.
+#[test]
+fn the_bubbles_view_scrolled_shows_lines_that_fit_its_own_start() {
+    let mut s = scene("d3-bubbles-scroll", 0);
+    // Tags enough for the sidebar to hold three screens of lines (the fixture's fourteen are one).
+    let names: Vec<String> = (0..90).map(|i| format!("tag{i:03}")).collect();
+    let refs: Vec<&str> = names.iter().map(|t| t.as_str()).collect();
+    s.e.items = vec![stored("performance", "p0", "Tagful").tags(&refs)];
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame();
+    s.f.screen.frame();
+    press_view_button(&mut s);
+    let ui = s.ui();
+    let lib = ui.global::<LibraryState>();
+    assert!(lib.get_bubbles());
+    let (total, per) = (lib.get_side_total(), lib.get_side_per_view().max(1));
+    eprintln!("d3 before: total lines {total}, the first view holds {per} ({} screens)", total / per);
+    assert!(total >= 3 * per, "the fixture holds three screens of lines: {total} lines, {per} a view");
+    let side = lib.get_side_height();
+    let shown_fit = |ui: &Shell| {
+        let lib = ui.global::<LibraryState>();
+        let geo = lib.get_side_geo();
+        let side = lib.get_side_height();
+        let mut past = Vec::new();
+        for i in 0..geo.row_count() {
+            let g = geo.row_data(i).unwrap();
+            if g.y + g.h > side + 0.5 {
+                let r = lib.get_side_rows().row_data(i).map(|r| r.label.to_string()).unwrap_or_default();
+                past.push(format!("{r}@{i} y={:.0} h={:.0} bottom={:.0}", g.y, g.h, g.y + g.h));
+            }
+        }
+        (past.len(), format!("{} of {} shown past the bottom ({side:.0}): {}", past.len(), geo.row_count(), past.join("; ")))
+    };
+    // To the last bubble by the dial: every tag is reached along the way (down from the bar's stop is the list, left
+    // from there is the sidebar).
+    shell::act(Action::Arrow { dx: 0, dy: 1 });
+    shell::act(Action::Arrow { dx: -1, dy: 0 });
+    assert_eq!(side_cursor(&ui).as_deref(), Some("Favorites"), "the sidebar, from the list");
+    let mut reached = BTreeSet::new();
+    for _ in 0..(total * 3) {
+        if let Some(label) = side_cursor(&ui) {
+            if label.starts_with("tag") {
+                reached.insert(label);
+            }
+        }
+        let (past, _msg) = shown_fit(&ui);
+        assert_eq!(past, 0, "dialed, {_msg}");
+        shell::act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(reached.len() == names.len(), "the dial reaches every tag bubble: {} of {}", reached.len(), names.len());
+    eprintln!("d3 after dial to the end: first {}", lib.get_side_first());
+    // The last tag is on the last line and whole.
+    let last_tag = format!("tag{:03}", names.len() - 1);
+    let geo = lib.get_side_geo();
+    let rows = lib.get_side_rows();
+    let at = (0..geo.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == last_tag.as_str()).unwrap_or(false)).expect("the last tag is shown");
+    let g = geo.row_data(at).unwrap();
+    assert!(g.y + g.h <= side + 0.5, "the last bubble is whole: y {} h {} of {side}", g.y, g.h);
+    // By a track tap: the scroll bar's seek at the very bottom asks for a first from the per-view it holds; drag it down
+    // until the view stops moving (the true end), exactly as a touch drag converges. Every view it lands on shows whole lines.
+    let mut reachable = -1;
+    let mut guard = 0;
+    loop {
+        let u = s.ui();
+        let lib = u.global::<LibraryState>();
+        let t = lib.get_side_total();
+        let p = lib.get_side_per_view().max(1);
+        let last = (t - p) / p * p; // the seek, f = 1 (a tap at the very bottom)
+        if last == reachable {
+            break;
+        }
+        reachable = last;
+        eprintln!("d3 track tap to first={last} (per-view {p})");
+        lib.invoke_side_scrolled(last);
+        s.serve();
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let (past, msg) = shown_fit(&ui);
+        assert_eq!(past, 0, "track tap to first={last}, {msg}");
+        guard += 1;
+        assert!(guard < 10, "the track tap does not settle at an end");
+    }
+    let u = s.ui();
+    let lib = u.global::<LibraryState>();
+    assert_eq!(lib.get_side_first(), reachable, "the drag ended at the last view");
+    let geo = lib.get_side_geo();
+    let rows = lib.get_side_rows();
+    let at = (0..geo.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == last_tag.as_str()).unwrap_or(false)).expect("the last tag is shown after tapping to the end");
+    let g = geo.row_data(at).unwrap();
+    assert!(g.y + g.h <= side + 0.5, "the last bubble is whole after a track tap: y {} h {} of {side}", g.y, g.h);
 }

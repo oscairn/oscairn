@@ -355,9 +355,11 @@ impl Budget {
                 total += e.cost.rest_now();
             }
             let n = match counting {
-                Counting::Ending => r.used.count(),
-                Counting::Kept => r.used.and_not(r.stolen).count(),
-                Counting::Fading => r.used.and_not(r.stolen).count() + r.stolen.and(r.fading).iter().filter(|&i| r.slot(i).faded < FADE_STEPS).count() as u32,
+                Counting::Ending => r.voiced().count(),
+                Counting::Kept => r.voiced().and_not(r.stolen).count(),
+                Counting::Fading => {
+                    r.voiced().and_not(r.stolen).count() + r.stolen.and(r.fading).iter().filter(|&i| r.slot(i).faded < FADE_STEPS).count() as u32
+                }
             };
             total += n as f32 * e.cost.note_now();
             if counting != Counting::Ending {
@@ -441,11 +443,11 @@ impl Budget {
                 continue;
             }
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
-            if (owned || last) && (if owned && a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) != 0 { a.voice_limit.load(Relaxed) <= 1 } else { r.used.and_not(r.stolen).count() <= 1 }) {
+            if (owned || last) && (if owned && a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) != 0 { a.voice_limit.load(Relaxed) <= 1 } else { r.voiced().and_not(r.stolen).count() <= 1 }) {
                 continue;
             }
             let honors = a.honors_volume.load(Relaxed);
-            for i in r.used.and_not(r.stolen).iter() {
+            for i in r.voiced().and_not(r.stolen).iter() {
                 if r.held.has(i) && !reserved && g.held <= u32::from(e.reserve) {
                     continue;
                 }
@@ -494,6 +496,10 @@ impl Budget {
         }
         let (tier, heard, _) = h.least[h.taken];
         Some(entry_key(e, tier, heard + self.gain_db(e)))
+    }
+    /// The tier of the next voice entry `k`'s context listed (RELEASED when none is listed).
+    fn listed_tier(&self, k: usize) -> u8 {
+        self.entries.get(k).and_then(|e| e.heard).filter(|h| h.taken < h.count).map_or(RELEASED, |h| h.least[h.taken].0 & !STRUCK)
     }
     /// A voice's cost on entry `e`'s node.
     fn voice_cost(&self, e: &Entry) -> f32 {
@@ -615,8 +621,17 @@ impl Budget {
         if let Some(h) = listing.and_then(|l| self.entries.get_mut(l)).and_then(|e| e.heard.as_mut()) {
             h.admitted += 1;
         }
-        while self.estimate(rs, lane, Counting::Kept) + cost > SOFT * limit {
+        loop {
+            let need = self.estimate(rs, lane, Counting::Kept) + cost;
+            if need <= SOFT * limit {
+                break;
+            }
             let Some(v) = self.choose_soft(rs, Some(lane)) else { break };
+            // A held or pedaled voice a plugin listed goes for a new note only past the lane's limit itself, as many as
+            // bring it back to the limit (the owner's rule); a released one from the soft limit, so fades have time.
+            if v.1 == LISTED && self.listed_tier(v.0) >= PEDALED && need <= limit {
+                break;
+            }
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == me) { time } else { 0 };
             if let Some(a) = self.steal(rs, v, at) {
                 a.stolen.fetch_add(1, Relaxed);
@@ -627,7 +642,7 @@ impl Budget {
     /// The notes the host holds for entry `k`'s node (unreleased or released, not given up), across its connections.
     fn node_notes(&self, rs: &Routes, k: usize) -> u32 {
         let Some(node) = self.entries.get(k).map(|e| &*e.cost) else { return 0 };
-        self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| rs[e.route].used.and_not(rs[e.route].stolen).count()).sum()
+        self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| rs[e.route].voiced().and_not(rs[e.route].stolen).count()).sum()
     }
     /// 12m: before a note into entry `k` passes on, a plugin that does not give up its own voices, its node capped after
     /// lost blocks or the deadline, keeps under its cap: its node's quietest released note fades first, so a note

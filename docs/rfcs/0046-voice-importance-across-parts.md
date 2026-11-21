@@ -111,7 +111,7 @@ block (`Notes::end`, notes.rs:474-500):
 
 | Rule | Trigger | Scope | Who picks | Code |
 |---|---|---|---|---|
-| Note-on (admit) | lane estimate + the new note past 85 % (`SOFT`) of the lane's limit | the lane | host, `choose_soft` | budget.rs:368-387 |
+| Note-on (admit) | lane estimate + the new note past 85 % (`SOFT`) of the lane's limit; a listed held or pedaled voice only past the limit itself | the lane | host, `choose_soft` | budget.rs:368-387 |
 | Lane over | lane measured past its limit two blocks running | the lane | host, `choose_soft` | budget.rs:415-436 |
 | Hard limit | estimate past the time before the lane's block is missed | the lane | host, choke (a click, last resort) | budget.rs:340-359 |
 | Lanes' total | sum of lanes past `budget × audio cores` two blocks running | every lane | host: the lane with the **highest cost per note** | budget.rs:440-471 |
@@ -646,6 +646,18 @@ What it took besides the order:
   blocks): a listing plugin drops them at its next block and its report at once, while the lane's
   time, the median of five blocks, follows in three. Without it the rule took again on the stale
   median (25 piano voices for an excess of 15).
+- **A held key whose voice ended costs nothing** (the unit, 2026-11-20, Sampler 0.9.7: pool with one
+  host, keys struck under the pedal and never let go, the lane at 870 of 1,066 µs: 61-65 notes given
+  up and the piano left at one voice, the lane at a third of its limit; chain heavy, 318 given up at
+  1,190 of 2,000 µs). A held key keeps its slot after its NOTE_END so its release still goes out
+  (route.rs `ended`), and the budget counted those slots as sounding notes: every voice the Sampler
+  gave up, ended by key assign Single or cut from its full pool stayed in the estimate at the cost
+  per voice measured over the voices it really sounds, so each new note found the lane over its soft
+  limit and took another, the estimate never falling. The budget now counts `NoteRoute::voiced`
+  (estimate, victims, a node's notes, the cost per voice's note count, the admitted voices).
+- **A listed held or pedaled voice goes for a new note only past the lane's limit** (the owner's rule:
+  never while the lane is within it), as many as bring it back to the limit; a released one still
+  from the soft limit.
 
 A listing plugin's context keeps to the cap the budget set on it (`context_cap`), in place of the
 proportional split. `importance_mismatch` counts a context found over its cap two reports on, in
@@ -656,13 +668,17 @@ victims change on purpose, the third only for the two counters a node's activity
 samples replay unchanged against the old vectors with the activity's digest cut to its old size).
 
 Tests: `engine-core-importance` models the scenario in every placement: pool with both in one
-worker, 16 piano voices for an excess of 15, the lead none; apart with the device short, 13 piano,
+worker, 8 piano voices (as many as bring the lane back to its limit), the lead none; apart with the device short, 13 piano,
 the lead none; apart with the lead's own lane over, the lead's 3 released, the piano none; one
 shared instance, 10 (its one cost per voice prices the piano against the lead); in process, 16; a
 piano without the report, 24, the lead none; 2,000 blocks with a new note every 25, no flapping and
-no mismatch. `voice-importance-scenario` plays it through real workers in plugin, chain (an insert
+no mismatch; the unit's take (its Notes.mid: keys never let go, the lane near 80 %, pool and chain
+heavy), none given up, and after a real overload the limit back and the new keys sounding.
+`voice-importance-scenario` plays it through real workers in plugin, chain (an insert
 after the lead), pool with one process and with two, and in process, a piano without the report,
-and 2,000 blocks with new notes: the lead keeps both keys wherever the piano's voices free what is
+2,000 blocks with new notes, and the unit's take in a worker of its own (43 keys never let go, the
+lane to 90 % of its limit: none given up; with a spike past the limit in the middle, the keys
+struck after it sound): the lead keeps both keys wherever the piano's voices free what is
 short, the piano loses nothing for the lead's own lane, no part goes silent.
 
 Through real workers (the fixture, a piano voice 15 µs, a lead voice 180, a 1,000 µs allowance;

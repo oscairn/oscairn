@@ -398,7 +398,7 @@ impl Notes {
                 }
             }
             if let (true, Some(a)) = (step.budgeted, &step.activity) {
-                let live: u32 = step.sources.iter().map(|s| rs[s.route].live()).sum();
+                let live: u32 = step.sources.iter().map(|s| rs[s.route].voiced().count()).sum();
                 // RFC 0045: a plugin a block late took this block's time on the block handed a call earlier, so its cost
                 // per note is measured against the notes live then; counted with this block's, a first note costs nothing.
                 let rendered = if step.late_lane { std::mem::replace(&mut step.live_before, live) } else { live };
@@ -467,7 +467,7 @@ impl Notes {
         let scale = a.per_note_scale.get();
         let admitted = |channel: Option<i16>| {
             let notes: u32 =
-                step.sources.iter().filter(|x| channel.is_none_or(|c| c == x.channel)).map(|x| rs[x.route].used.and_not(rs[x.route].stolen).count()).sum();
+                step.sources.iter().filter(|x| channel.is_none_or(|c| c == x.channel)).map(|x| rs[x.route].voiced().and_not(rs[x.route].stolen).count()).sum();
             (notes as f32 * scale).ceil()
         };
         let all = admitted(None);

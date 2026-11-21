@@ -292,6 +292,15 @@ impl NoteRoute {
     pub fn live(&self) -> u32 {
         self.used.count()
     }
+    /// The notes whose voices the plugin has not ended: a held key whose voice ended keeps its slot for its key's release
+    /// and costs nothing (giving it up frees nothing), so the budget leaves it out.
+    pub fn voiced(&self) -> Bits {
+        let mut b = self.used;
+        for i in self.used.iter().filter(|&i| self.slot(i).voice_ended) {
+            b.unset(i);
+        }
+        b
+    }
 
     /// A NOTE_END: a voice ended. A held key keeps its slot, so its release still goes out.
     pub fn ended(&mut self, e: &Event) {

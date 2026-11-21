@@ -13,6 +13,11 @@
 //     the lead's do not.
 //   - Pool with one process, 2,000 blocks, a new piano note every 25: the lead never touched, no part silent, and no more
 //     given up than the first excess and the new notes bring (no flapping).
+//   - The unit's take (notes/w27/voices-2026-11-20.md), a worker per plugin (the piano's lane its own, as in a chain; a
+//     pool's process keeps the environment it started with, so the fixture's settings could not differ): 30 piano keys struck and never let go under
+//     the pedal, then a new key every 40 blocks, the lane rising from 70 % to some 90 % of its limit: no voice given up while
+//     the lane's measured time stays within its limit. Then with a real overload (a spike past the limit) in the middle: the
+//     limit comes back after it, so the keys struck after it sound.
 // In every case no part goes silent and every plugin keeps to its caps. A claim a slow machine could fail by itself is
 // checked only when the guard counted no lost block on the part it is about; that the piano loses nothing for the lead's lane,
 // also only when it kept its 30 notes until the lead played (under ThreadSanitizer a piano voice costs some 30 us, not 15, and
@@ -41,12 +46,13 @@ void check(bool ok,const std::string& what){if(!ok){std::printf("FAIL: %s\n",wha
 
 enum class Mode { Plugin, Chain, PoolTogether, PoolApart, InProcess };
 const char* name(Mode m){switch(m){case Mode::Plugin:return "plugin";case Mode::Chain:return "chain";case Mode::PoolTogether:return "pool, one process";case Mode::PoolApart:return "pool, two processes";default:return "in process";}}
-enum class Case { SameThread, Device, OwnLane, NoReport, Held };
+enum class Case { SameThread, Device, OwnLane, NoReport, Held, Unit, UnitOverload };
 
 struct Seen
 {
     uint32_t pianoBefore=0,pianoLeft=0,leadLeft=0,fewestPiano=UINT32_MAX,fewestLead=UINT32_MAX;
     uint64_t pianoGave=0,leadGave=0,heldOff=0,mismatch=0,pianoLost=0,leadLost=0,pianoDeadline=0,leadDeadline=0; bool apart=false;
+    double laneMost=0,laneLimit=0; uint32_t pianoAfter=0; // the unit's take: the lane's largest measured time; the piano's voices after the overload
     bool calm() const { return pianoLost+leadLost+pianoDeadline+leadDeadline==0; } // the machine lost no block on either part
 };
 uint64_t gave(const Graph::NoteCost& c){return c.stolen+c.stolenForDevice+c.hardChokes+c.stolenForLoss+c.stolenForDeadline;}
@@ -59,8 +65,12 @@ Seen run(const char* fixture,const char* worker,Mode mode,Case c){
     setPlacementPolicy(policy);
     // A piano voice 15 us a block, a lead voice 180 (in the engine's process, whose lane has the callback's time, 37.5 and
     // 450): 30 pedaled and two held, 810 us, past a lane's limit (80 % of a 1,000 us allowance); five lead voices, 900.
-    const bool here=mode==Mode::InProcess;
-    setenv("OSCAIRN_FIXTURE_VOICE_US",here?"37.5":"15",1);setenv("OSCAIRN_FIXTURE_CHANNEL_US",here?"1:450":"1:180",1);
+    const bool here=mode==Mode::InProcess,unit=c==Case::Unit || c==Case::UnitOverload;
+    setenv("OSCAIRN_FIXTURE_VOICE_US",here?"37.5":unit?"12":"15",1);setenv("OSCAIRN_FIXTURE_CHANNEL_US",here?"1:450":"1:180",1);
+    // The unit's take: the piano's lane at rest 200 us, 30 keys 560 (70 % of 800), 43 at the end 716 (90 %); the overload:
+    // 250 us more a block for 100 blocks from its block 300 (past its limit, not its allowance).
+    if(unit)setenv("OSCAIRN_FIXTURE_BLOCK_US","200",1);
+    if(c==Case::UnitOverload)setenv("OSCAIRN_FIXTURE_SPIKE","300:100:250",1);
     setenv("OSCAIRN_FIXTURE_SUSTAIN","1",1);setenv("OSCAIRN_FIXTURE_DECAY_S","8",1);setenv("OSCAIRN_FIXTURE_EFFECT_US","20",1);
     const bool device=c==Case::Device || c==Case::NoReport;
     if(device)setenv("OSCAIRN_AUDIO_CORES","1",1);
@@ -73,7 +83,7 @@ Seen run(const char* fixture,const char* worker,Mode mode,Case c){
         return id?g.add(fixture,id):g.add(fixture);};
     const auto piano=add("piano",nullptr,c!=Case::NoReport),lead=add("lead",nullptr,true);
     const NodeId insert=mode==Mode::Chain?add("insert",effect,false):NodeId{};
-    for(const char* v:{"OSCAIRN_FIXTURE_VOICE_US","OSCAIRN_FIXTURE_CHANNEL_US","OSCAIRN_FIXTURE_SUSTAIN","OSCAIRN_FIXTURE_DECAY_S","OSCAIRN_FIXTURE_EFFECT_US","OSCAIRN_FIXTURE_VOICE_BUDGET","OSCAIRN_AUDIO_CORES"})unsetenv(v);
+    for(const char* v:{"OSCAIRN_FIXTURE_BLOCK_US","OSCAIRN_FIXTURE_SPIKE","OSCAIRN_FIXTURE_VOICE_US","OSCAIRN_FIXTURE_CHANNEL_US","OSCAIRN_FIXTURE_SUSTAIN","OSCAIRN_FIXTURE_DECAY_S","OSCAIRN_FIXTURE_EFFECT_US","OSCAIRN_FIXTURE_VOICE_BUDGET","OSCAIRN_AUDIO_CORES"})unsetenv(v);
     for(uint32_t p=0;p<2;++p){NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;z.priority=uint8_t(p?10:8);g.connectNotes(graphInput,p?lead:piano,{z});}
     g.connectAudio(piano,graphOutput);
     if(mode==Mode::Chain){g.connectAudio(lead,insert);g.connectAudio(insert,graphOutput);}else g.connectAudio(lead,graphOutput);
@@ -81,7 +91,7 @@ Seen run(const char* fixture,const char* worker,Mode mode,Case c){
     // The device's time: one core, a budget each lane is within (piano 450 us, lead 360) but not their sum (810).
     g.setVoiceBudget(device?700:-1);
     Seen seen;seen.apart=g.host(piano).lane()!=g.host(lead).lane() || mode==Mode::Plugin || mode==Mode::Chain;
-    const uint32_t blocks=c==Case::Held?2000:400;
+    const uint32_t blocks=c==Case::Held?2000:unit?700:400;
     std::exception_ptr error;
     std::thread([&]{
         worker::makeRealtime(frames/48000.0*1e6);
@@ -94,7 +104,22 @@ Seen run(const char* fixture,const char* worker,Mode mode,Case c){
                 // The pedal down; 30 piano notes struck and let go, one each two blocks, softer as they go.
                 if(b==10)e.push_back(Event::midi(0xb0,64,127));
                 if(b>=20 && b<80 && b%2==0)e.push_back(Event::note(true,30+int(b-20)/2,.9-.01*(b-20)/2,0,0));
-                if(b>=21 && b<81 && b%2==1)e.push_back(Event::note(false,30+int(b-21)/2,0,0,0));
+                if(!unit && b>=21 && b<81 && b%2==1)e.push_back(Event::note(false,30+int(b-21)/2,0,0,0));
+                if(unit){
+                    if(b>=100 && b<=580 && b%40==20)e.push_back(Event::note(true,70+int(b-100)/40,.6,0,0)); // never let go
+                    // The callback's deadline, as the audio device gives it: the core measures its slack, which a lowered
+                    // limit's way back reads (without it a voice comes back only after 10 s healthy).
+                    worker::callbackDeadline=std::chrono::steady_clock::now()+std::chrono::nanoseconds(int64_t(double(std::chrono::nanoseconds(period).count())*(1-worker::mixingReserve)));
+                    g.process(out,frames,nullptr,e.data(),uint32_t(e.size()));
+                    worker::callbackDeadline={};
+                    const auto cost=g.noteCost(piano);seen.laneMost=std::max(seen.laneMost,cost.laneTook);seen.laneLimit=cost.laneLimit;
+                    if(b==460)seen.pianoAfter=voices(g,piano);
+                    if(b>=30)seen.fewestPiano=std::min(seen.fewestPiano,voices(g,piano));
+                    seen.fewestLead=1; // no lead in this take
+                    if(b+1==blocks)seen.pianoLeft=voices(g,piano);
+                    next+=period;std::this_thread::sleep_until(next);
+                    continue;
+                }
                 // The lead from block 100: its own lane over, three struck and let go first; then two keys held.
                 const uint32_t first=c==Case::OwnLane?106:100;
                 if(c==Case::OwnLane && b>=100 && b<106 && b%2==0){e.push_back(Event::note(true,90+int(b-100),.8,0,1));e.push_back(Event::note(false,90+int(b-100),0,1,1));}
@@ -149,6 +174,16 @@ int main(int argc,char** argv){try{
         premised(o.leadLost==0,o.leadLeft>=2,std::string(name(m))+": the lead keeps its held keys");
     }
     leadKept(Mode::Plugin,measure(Mode::Plugin,Case::NoReport,"piano without the report"),"piano without the report");
+    {
+        const auto u=measure(Mode::Plugin,Case::Unit,"the unit's take");
+        std::printf("  the unit's take: lane at most %.0f of %.0f us, piano %u voices at the end, %llu given up\n",u.laneMost,u.laneLimit,u.pianoLeft,(unsigned long long)u.pianoGave);
+        premised(u.calm() && u.laneMost<=u.laneLimit,u.pianoGave==0 && u.pianoLeft==43,"the unit's take: nothing given up with the lane within its limit, all 43 keys sound");
+        const auto o=measure(Mode::Plugin,Case::UnitOverload,"the unit's take, overload");
+        std::printf("  overload: piano %u voices after it, %u at the end, %llu given up\n",o.pianoAfter,o.pianoLeft,(unsigned long long)o.pianoGave);
+        check(o.pianoGave>=1,"the unit's take, overload: the overload gives piano voices up");
+        // After it, a key every 40 blocks from block 460 to 580: four, each kept (the limit comes back).
+        premised(o.pianoLost==0 && o.pianoDeadline==0,o.pianoLeft+1>=o.pianoAfter+4,"the unit's take, overload: the limit comes back, the keys struck after it sound: "+std::to_string(o.pianoAfter)+" to "+std::to_string(o.pianoLeft));
+    }
     {
         const auto h=measure(Mode::PoolTogether,Case::Held,"2,000 blocks, new notes");
         // The first excess (some 12 voices) and at most two for each of the 72 new notes.

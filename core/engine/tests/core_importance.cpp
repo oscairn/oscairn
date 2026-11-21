@@ -15,6 +15,8 @@
 //   - The piano without the report (draft 1, the host's notes): the same order from what the host knows of its notes.
 //   - Held 2,000 blocks with a new piano note every 25: no flapping, the lead never touched, no part silent, and the
 //     plugins keep to the caps they are given (no importance_mismatch).
+//   - The unit's take (keys never let go under the pedal, the lane near 80 % of its limit; pool, and chain heavy): no voice
+//     given up while the lane is within its limit; after a real overload the limit comes back and new keys sound.
 //   oscairn-core-importance-test
 #include "../src/engine_core.h"
 #include "oscairn/graph.h"
@@ -51,8 +53,17 @@ struct Setup
     float allowance=1333.33f,budget=-1,cores=3;
     bool pianoReports=true;
     uint32_t blocks=400,newEvery=0; // a new piano note every newEvery blocks from 100 on (0: none)
+    // The unit's take (notes/w27/voices-2026-11-20.md): the lane's time at rest (its other plugins' too), a piano note's
+    // weight (the Sampler's layers), keys never let go under the pedal, key assign Single (a re-struck key ends its earlier
+    // note), the instance's voices (past them it cuts its oldest), the piano's notes by block (the default 30 when empty),
+    // and blocks where a piano voice costs busyUs (a real overload).
+    float restUs=10,pianoWeight=1;
+    bool pianoHeld=false,single=false;
+    uint32_t pool=128;
+    std::vector<std::pair<uint32_t,int16_t>> notes;
+    uint32_t busyFrom=0,busyTo=0;float busyUs=0;
 };
-struct Seen { uint32_t pianoLost=0,leadLost=0,pianoLeft=0,leadLeft=0,leadHeldLeft=0; bool oldestFirst=true; uint32_t fewestPiano=UINT32_MAX,fewestLead=UINT32_MAX; uint64_t mismatch=0,decisionsLate=0; float excessVoices=0,missingVoices=0; };
+struct Seen { uint32_t pianoLost=0,leadLost=0,pianoLeft=0,leadLeft=0,leadHeldLeft=0; bool oldestFirst=true; uint32_t fewestPiano=UINT32_MAX,fewestLead=UINT32_MAX; uint64_t mismatch=0,decisionsLate=0; float excessVoices=0,missingVoices=0; uint32_t lostWithin=0,pianoEnd=0; float laneMax=0; };
 
 // A modeled instance: its voices, each a note's; its contexts (a channel each); the sustain pedal by channel.
 struct Voice { bool on=false,held=false,pedaled=false; int32_t id=-1; int16_t channel=0,key=0; float db=0; uint32_t born=0; uint64_t order=0; };
@@ -61,6 +72,7 @@ struct Instance
     std::vector<int16_t> channels; std::vector<uint32_t> ids; // its contexts: a part's channel and sound ID each (SELECTED alone)
     bool reports=true,ownVoices=true;
     float weight=1; // a lead voice's cost against a piano voice's, which a shared instance reports
+    float pianoWeight=1;bool single=false;uint32_t pool=128;
     std::vector<Voice> voices=std::vector<Voice>(128);
     bool pedal[16]{};uint64_t started=0;
     oscairn::voices::Limits limits;oscairn::voices::Importance<> importance;
@@ -68,7 +80,7 @@ struct Instance
     uint32_t context(int16_t channel) const{for(size_t c=0;c<channels.size();++c)if(channels[c]==channel)return ids[c];return OSCAIRN_VOICE_BUDGET_SELECTED;}
     float level(const Voice& v,uint32_t block) const{return v.db-(v.channel==0?6.f*float(block-v.born)*float(blockMs)/1000.f:0.f);} // a piano decays 6 dB a second
     oscairn::voices::Candidate candidate(const Voice& v,uint32_t block) const
-    {return {context(v.channel),true,v.held,false,false,std::pow(10.0,level(v,block)/20.0),v.order,v.pedaled,double(block-v.born)*blockMs,v.channel?weight:1.f};}
+    {return {context(v.channel),true,v.held,false,false,std::pow(10.0,level(v,block)/20.0),v.order,v.pedaled,double(block-v.born)*blockMs,v.channel?weight:pianoWeight};}
     uint32_t sounding(int32_t channel=-1) const{uint32_t n=0;for(const auto& v:voices)n+=v.on && (channel<0 || v.channel==channel);return n;}
     void end(Voice& v){clap_event_note_t x{};x.header={sizeof x,0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_END,0};x.note_id=v.id;x.channel=v.channel;x.key=v.key;ends.push_back(from(x));v.on=false;}
     // victim() over every voice, within one context (`only`) or the instance.
@@ -92,9 +104,11 @@ struct Instance
         if(h.type==CLAP_EVENT_NOTE_ON)
         {
             const uint32_t id=context(n.channel);
+            if(single)for(auto& v:voices)if(v.on && v.channel==n.channel && v.key==n.key)end(v); // key assign Single: its own ending
             const auto own=limits.of(id,true).limit;
             if(own && sounding(n.channel)>=own){const int i=victim(block,id,id);if(i>=0){lost.push_back(voices[size_t(i)]);end(voices[size_t(i)]);}}
             if(limits.limit && sounding()>=limits.limit){const int i=victim(block,id);if(i>=0){lost.push_back(voices[size_t(i)]);end(voices[size_t(i)]);}}
+            if(sounding()>=pool){Voice* o=nullptr;for(auto& v:voices)if(v.on && (!o || v.order<o->order))o=&v;if(o)end(*o);} // its pool full: its own cut
             for(auto& v:voices)if(!v.on){v={true,true,false,n.note_id,n.channel,n.key,float(20*std::log10(std::max(n.velocity,1e-3))),block,++started};break;}
             return;
         }
@@ -133,6 +147,9 @@ Seen run(const Setup& setup)
         inst[p].channels={int16_t(p)};inst[p].ids={OSCAIRN_VOICE_BUDGET_SELECTED};
     }
     if(!setup.pianoReports && !shared){inst[0].reports=false;inst[0].ownVoices=false;}
+    inst[0].pianoWeight=setup.pianoWeight;inst[0].single=setup.single;inst[0].pool=setup.pool;
+    const float laneLimit=0.8f*(inProcess?2266.67f:setup.allowance);
+    std::vector<float> laneTimes(setup.blocks,0.f);
     bool flags[8]{};
     oscairn_notes* notes=rust_core_notes_new(steps.data(),stepCount,apart(setup.mode)?2:1,flags);
     const oscairn_block timing{setup.budget,2666.67f,2266.67f,setup.allowance,setup.cores,96000,0};
@@ -148,7 +165,8 @@ Seen run(const Setup& setup)
         std::vector<Event> in;std::vector<int16_t> src;
         auto note=[&](uint16_t type,int16_t channel,int16_t key,double velocity){clap_event_note_t n{};n.header={sizeof n,0,CLAP_CORE_EVENT_SPACE_ID,type,0};n.note_id=-1;n.channel=channel;n.key=key;n.velocity=velocity;in.push_back(from(n));src.push_back(channel);};
         if(b==0){clap_event_midi_t m{};m.header={sizeof m,0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_MIDI,0};m.data[0]=0xb0;m.data[1]=64;m.data[2]=127;in.push_back(from(m));src.push_back(0);}
-        if(b>=1 && b<=30){note(CLAP_EVENT_NOTE_ON,0,int16_t(30+b),.9);note(CLAP_EVENT_NOTE_OFF,0,int16_t(30+b),0);}
+        for(const auto& [at,k]:setup.notes)if(at==b){note(CLAP_EVENT_NOTE_ON,0,k,.6);if(!setup.pianoHeld)note(CLAP_EVENT_NOTE_OFF,0,k,0);}
+        if(setup.notes.empty() && b>=1 && b<=30){note(CLAP_EVENT_NOTE_ON,0,int16_t(30+b),.9);note(CLAP_EVENT_NOTE_OFF,0,int16_t(30+b),0);}
         // The lead's struck and let go notes come first: one struck after the held keys is protected at its note-on
         // (RFC 0046's 50 ms), so a held key would give way to it.
         if(b>=40 && b<40+setup.leadReleased){note(CLAP_EVENT_NOTE_ON,1,int16_t(90+b),.8);note(CLAP_EVENT_NOTE_OFF,1,int16_t(90+b),0);}
@@ -177,7 +195,8 @@ Seen run(const Setup& setup)
             if(x.ownVoices)x.keepWithin(b,lost);
             for(uint32_t i=0;i<n;++i)x.play(merged[i],b,lost);
             // Its block: each voice's cost; its report.
-            float took=10;for(const auto& v:x.voices)if(v.on)took+=v.channel==0?setup.pianoUs:setup.leadUs;
+            const float pianoUs=b>=setup.busyFrom && b<setup.busyTo?setup.busyUs:setup.pianoUs;
+            float took=s==0 || shared?setup.restUs:10;for(const auto& v:x.voices)if(v.on)took+=v.channel==0?pianoUs:setup.leadUs;
             lanes[apart(setup.mode)?s:0]+=took;
             std::vector<oscairn::voices::Candidate> c(x.voices.size());for(size_t i=0;i<x.voices.size();++i)if(x.voices[i].on)c[i]=x.candidate(x.voices[i],b);
             x.importance.list(x.voices.size(),[&](size_t i){return x.voices[i].on?&c[i]:nullptr;},x.limits);
@@ -190,6 +209,10 @@ Seen run(const Setup& setup)
         // Who went: the piano's notes struck earlier must have gone before any struck later (oldest, quietest first).
         for(const auto& v:lost){if(v.channel==0){++seen.pianoLost;for(const auto& w:inst[0].voices)if(w.on && w.channel==0 && w.born<v.born && b<100)seen.oldestFirst=false;}else ++seen.leadLost;}
         if(!lost.empty() && b>=100)seen.decisionsLate+=lost.size();
+        // Given up while every lane kept within its limit in the 16 blocks before (the measurements' lag included).
+        float recent=0;for(uint32_t k=b>16?b-16:0;k<b;++k)recent=std::max(recent,laneTimes[k]);
+        if(recent<=laneLimit)for(const auto& v:lost)seen.lostWithin+=v.channel==0;
+        laneTimes[b]=std::max(lanes[0],lanes[1]);seen.laneMax=std::max(seen.laneMax,laneTimes[b]);
         // The excess: the busiest lane past its soft limit in the block before the first voice went (a plugin gives voices
         // up at the start of its block, so this block already has fewer).
         // Past the lane's limit is what is missing; the rule takes down to its soft limit (85 %), so fades have time: at
@@ -201,6 +224,7 @@ Seen run(const Setup& setup)
         uint32_t piano=0,lead=0;for(const auto& x:inst){piano+=x.sounding(0);lead+=x.sounding(1);}
         if(b>=45){seen.fewestPiano=std::min(seen.fewestPiano,piano);seen.fewestLead=std::min(seen.fewestLead,lead);}
     }
+    seen.pianoEnd=inst[0].sounding(0);
     for(const auto& x:inst){seen.pianoLeft+=x.sounding(0);seen.leadLeft+=x.sounding(1);for(const auto& v:x.voices)seen.leadHeldLeft+=v.on && v.channel==1 && v.held;}
     for(auto& a:act)seen.mismatch+=a.get()->importanceMismatch.load();
     seen.excessVoices=excess;seen.missingVoices=missing;
@@ -256,6 +280,38 @@ int main()
         check(r.mismatch==0,"held: every plugin kept to its cap");
         // Each new note may take one older pedaled voice; more than two given up a new note is the limit flapping.
         check(r.decisionsLate<=2*((2000-100)/25),"held: no more given up than the new notes bring: "+std::to_string(r.decisionsLate));
+    }
+    // The unit's take (notes/w27/voices-2026-11-20.md, newpool1-nolead's Notes.mid): the pedal down, 30 keys struck over
+    // 4.5 s and never let go, then a re-struck key every 0.25 s (key assign Single ends its earlier note); the lane at
+    // about 80 % of its limit. Sampler 0.9.7 there gave up 61 notes and sat at one voice with the lane at a third of its
+    // limit: a held key whose voice ended keeps its slot for its release, and the budget counted it as sounding.
+    {
+        static const std::pair<double,int16_t> take[]{{0.5038,36},{0.6719,40},{0.8427,43},{0.9682,47},{1.1385,48},{1.3066,50},{1.4348,52},{1.6056,55},{1.7732,57},{1.8987,59},{2.0722,60},{2.2398,62},{2.3680,64},{2.5361,65},{2.7069,67},{2.8346,69},{3.0027,71},{3.1735,72},{3.3012,74},{3.4693,76},{3.6401,77},{3.7651,79},{3.9359,81},{4.1067,83},{4.2322,84},{4.4025,86},{4.5733,88},{4.7015,89},{4.8691,91},{5.0372,93},{5.5469,36},{5.8001,55},{6.0108,67},{6.2667,79},{6.5172,91},{6.7732,50},{7.0242,64},{7.2802,76},{7.5307,88},{7.7839,47},{8.0345,60},{8.2904,72},{8.5415,84},{8.7974,40},{9.0479,57},{9.2613,69},{9.5118,81},{9.7651,93},{10.0189,52},{10.2721,65},{10.5226,77},{10.7759,89},{11.0291,48},{11.2829,62},{11.5334,74},{11.7893,86},{12.0399,43},{12.2958,59},{12.5469,71},{12.8001,83},{13.0108,36},{13.2667,55}};
+        const auto at=[](double seconds){return uint32_t(seconds*48000/frames);};
+        Setup u;u.mode=Mode::PoolTogether;u.leadKeys=0;u.restUs=450;u.pianoUs=14;u.pianoWeight=2;u.pianoHeld=true;u.single=true;u.blocks=at(13.8);
+        for(const auto& [t,k]:take)u.notes.push_back({at(t),k});
+        const auto r=run(u);row("pool, one worker","the unit's pedaled piano",r);
+        check(r.laneMax<=1066.67f,"the unit's take: the model's lane within its limit: "+std::to_string(r.laneMax));
+        check(r.pianoLost==0,"the unit's take: no voice given up with the lane within its limit: "+std::to_string(r.pianoLost));
+        check(r.pianoEnd>=28,"the unit's take: the pedaled wash kept: "+std::to_string(r.pianoEnd)+" voices at the end");
+        // A real overload (a piano voice at 26 us for a second, the lane past its limit), then new keys every 0.25 s: the
+        // limit comes back to what the lane carries, and nothing more goes while the lane is within it.
+        Setup o=u;o.busyFrom=at(6.0);o.busyTo=at(7.0);o.busyUs=26;o.notes.clear();
+        for(const auto& [t,k]:take)if(t<7.5)o.notes.push_back({at(t),k});
+        for(int16_t k=0;k<16;++k)o.notes.push_back({at(7.5+0.25*k),int16_t(20+k)});
+        const auto q=run(o);row("pool, one worker","the unit's piano, overload over",q);
+        check(q.pianoLost>=1,"after an overload: the overload gave voices up: "+std::to_string(q.pianoLost));
+        check(q.lostWithin==0,"after an overload: none given up with the lane within its limit: "+std::to_string(q.lostWithin));
+        check(q.pianoEnd>=30,"after an overload: the limit comes back, the new keys sound: "+std::to_string(q.pianoEnd)+" voices at the end");
+        // Chain, heavy (each piano on its own lane, limit 2,000 us): a re-struck key every 0.1 s, the Sampler's 64 voices
+        // full (it cuts its oldest), the lane near 1,190 us as on the unit, where the new bundle gave up 318 notes.
+        Setup c;c.mode=Mode::Chain;c.leadKeys=0;c.allowance=2500;c.restUs=100;c.pianoUs=17;c.pianoWeight=2;c.pianoHeld=true;c.pool=64;c.blocks=at(13.8);
+        static const int16_t keys[]{36,40,43,47,48,50,52,55,57,59,60,62,64,65,67,69,71,72,74,76,77,79,81,83,84,86,88,89,91,93};
+        for(int i=0;i<30;++i)c.notes.push_back({at(0.5+i*4.5/29),keys[i]});
+        for(int j=0;5.51+0.1*j<13.5;++j)c.notes.push_back({at(5.51+0.1*j),keys[(j*7)%30]});
+        const auto h=run(c);row("chain","the unit's heavy piano",h);
+        check(h.laneMax<=2000.f,"chain, heavy: the model's lane within its limit: "+std::to_string(h.laneMax));
+        check(h.pianoLost==0,"chain, heavy: no voice given up with the lane within its limit: "+std::to_string(h.pianoLost));
     }
     std::printf(failures?"FAIL: %d\n":"ok: voice importance across parts in every placement\n",failures);
     return failures?1:0;

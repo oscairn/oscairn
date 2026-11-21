@@ -273,7 +273,7 @@ export component ScrollBar inherits Rectangle {
     Rectangle {
         x: Theme.scroll-lead;
         width: Theme.scroll-bar;
-        border-radius: min(self.width / 2, Theme.radius);
+        border-radius: Theme.scaled-radius(self.width);
         background: Theme.track;
         Rectangle {
             y: root.thumb-y;

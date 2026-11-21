@@ -248,6 +248,13 @@ export global Theme {
     pure public function field-radius(height: length) -> length {
         return min(height / 2, corner);
     }
+    // The corner of a short element (a chip, a scroll thumb, a tag), scaled with its height: the family's corner (`corner`, never
+    // more than half the height) full at the standard touch height and above, proportionally smaller below it, so a small element
+    // is not rounder than the rest. `style.buttons` keeps its meaning exactly as buttonRadius and fieldRadius keep it: pill and
+    // rounded draw the same corner, and a square theme (radius 0) stays square. At the touch height and above it is buttonRadius.
+    pure public function scaled-radius(height: length) -> length {
+        return min(height / 2, corner * min(1.0, height / touch));
+    }
     // The corner of a piece set inside a stand-alone element by `padding`: the corner less the padding, so the two stay concentric.
     pure public function inner(padding: length) -> length {
         return max(0px, corner - padding);

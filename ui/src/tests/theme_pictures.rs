@@ -28,6 +28,16 @@ pub(super) fn orange() -> theme::Loaded {
     theme::chosen(&theme::Places::default(), "oscairn-dark", "")
 }
 
+/// Rounded corners with rectangular buttons and the same radius as the default: the other button style, for the scaled radius.
+fn rounded_theme() -> theme::Loaded {
+    theme_of(json!({"version": 7, "id": "rounded-short", "name": "Rounded", "radius": 6,
+        "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
+        "colors": {"background": "#111317", "surface": "#1D2127", "raised": "#2D333B", "border": "#4A535E", "text": "#F6F8FA", "muted": "#B4BDC8",
+                   "accent": "#FF9A45", "positive": "#5AD9A4", "danger": "#FF6B63", "warning": "#e8c547"},
+        "style": {"buttons": "rounded", "edges": "hairline", "depth": "soft", "sliders": "line", "tabs": "segmented", "marks": "square", "sections": "separate", "rows": "left"},
+        "wires": {"audio": "#8CC2FF", "notes": "#C29CFF", "disabled": "#6B7480", "draining": "#FF9A45", "unconnected": "#FF6B63", "control": "#6FE0A8"}}))
+}
+
 // The list's style tokens follow the theme's sections until a theme says otherwise, so the default look is as it was: separate
 // cards (a gap, corners, no line) in the current theme; no gap, square corners and a line in the blue one, in which a row's
 // corner pixel is drawn (not the background showing through) where in the current one it is the background's.
@@ -146,6 +156,39 @@ fn radii_are_one_family() {
         }
         lib_png(&s, name);
     }
+}
+
+// The scaled radius (D1): a short element's corner is the family's, scaled with its height — full at the touch height and above,
+// proportionally smaller below it, never more than half its height, the same in both button styles as buttonRadius treats them,
+// and square where the radius is 0. A full-height element keeps exactly what buttonRadius draws.
+#[test]
+fn scaled_radius_scales_short_elements_and_keeps_full_height() {
+    let mut s = scene("scaled-radius", 10);
+    let ui = s.ui();
+    let t = ui.global::<crate::Theme>();
+    for (name, theme) in [("pill", orange()), ("rounded", rounded_theme())] {
+        theme::apply(&ui, &theme);
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let (touch, corner) = (t.get_touch(), t.get_corner());
+        assert_eq!(t.invoke_scaled_radius(touch), corner, "{name}: full corner at the touch height");
+        assert_eq!(t.invoke_scaled_radius(touch * 2.), corner, "{name}: full corner above it");
+        assert_eq!(t.invoke_scaled_radius(touch), t.invoke_button_radius(touch), "{name}: a full-height element is unchanged");
+        // Three heights under the touch target: the corner scaled with the height (twice the height, twice the corner), never above
+        // half the height, never the full corner, the same in both button styles.
+        let (h1, h2, h3) = (12., 24., 32.);
+        let (r1, r2, r3) = (t.invoke_scaled_radius(h1), t.invoke_scaled_radius(h2), t.invoke_scaled_radius(h3));
+        assert_eq!(r1, corner * (h1 / touch), "{name}: proportional at {h1}");
+        assert_eq!(r2, corner * (h2 / touch), "{name}: proportional at {h2}");
+        assert_eq!(r3, corner * (h3 / touch), "{name}: proportional at {h3}");
+        assert!(r3 >= r2 && r2 >= r1, "{name}: more height, more corner");
+        assert!(r3 < corner && r3 < touch / 2., "{name}: below the full corner and half the height");
+    }
+    // A square theme (radius 0): square everywhere, whatever the height.
+    theme::apply(&ui, &blue());
+    s.f.screen.frame();
+    assert_eq!((t.invoke_scaled_radius(12.), t.invoke_scaled_radius(44.), t.invoke_scaled_radius(88.)), (0., 0., 0.), "square stays square");
+    lib_png(&s, "polish-1-scaled-radius");
 }
 
 // Play in both themes, for the radii (the picture alone).

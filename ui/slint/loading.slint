@@ -25,7 +25,7 @@ export component Loading inherits Rectangle {
     property <length> inset: root.filled ? Theme.pad-wide : 0px;
     height: root.text == "" ? Theme.loading-bar : root.line + 2 * (Theme.pad-tight + Theme.loading-bar);
     background: root.filled ? Theme.loading-background : transparent;
-    border-radius: root.filled ? Theme.button-radius(root.height) : 0px;
+    border-radius: root.filled ? Theme.scaled-radius(root.height) : 0px;
     measure := Text {
         visible: false;
         font-size: Theme.button;

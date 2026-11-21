@@ -543,7 +543,12 @@ namespace oscairn::worker
                 const oscairn_voice_budget_importance_t* lists = nullptr;
                 const uint32_t contexts = host.importanceReport(lists);
                 s.importanceCount = lists ? std::min<uint32_t>(contexts, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS) : 0;
-                std::copy_n(lists, s.importanceCount, s.importance);
+                for(uint32_t i = 0; i < s.importanceCount; ++i) // each list and the entries it counts: the engine reads no further
+                {
+                    auto& to = s.importance[i]; const auto& from = lists[i];
+                    to.context = from.context; to.voices = from.voices; to.count = from.count; to.weight = from.weight;
+                    std::copy_n(from.least, std::min<uint32_t>(from.count, OSCAIRN_VOICE_BUDGET_LEAST), to.least);
+                }
             }
 #ifdef OSCAIRN_HOSTILE_WORKER
             hostileReport(s);

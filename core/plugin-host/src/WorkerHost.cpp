@@ -854,8 +854,11 @@ namespace oscairn
             {
                 voiceCost = voiceCost_; notes = voiceNotes_.data(); count = voiceNoteCount_; return activeVoices_;
             }
+            // Copied out of the shared block when the budget asks, after the block's finish and before the next start (the
+            // worker writes it only in between): a block whose report nobody reads copies nothing.
             uint32_t importanceReport(const oscairn_voice_budget_importance_t*& lists) const noexcept override
             {
+                if(importanceFresh_) { importanceFresh_ = false; takeImportance(*shared_); }
                 lists = importance_.data(); return importanceCount_;
             }
             bool preparesSnapshots() const noexcept override { return snapshots_; }
@@ -1296,6 +1299,7 @@ namespace oscairn
             bool start(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                        const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
+                importanceFresh_ = false; // the worker may write the shared block's report from here on
                 auto silence = [&] {
                     fadeOut(outputs, no, frames);
                     busy_.store(false);
@@ -1474,38 +1478,47 @@ namespace oscairn
                         auto& n = voiceNotes_[i] = s.voiceNotes[i];
                         if(!(std::isfinite(n.loudness) && n.loudness > 0)) n.loudness = 0;
                     }
-                    // Each list under the engine's ID for its context (unknown: OSCAIRN_VOICE_BUDGET_SELECTED); none while
-                    // the IDs are being republished.
-                    const auto version = idVersion_.load(std::memory_order_acquire);
-                    const auto known = std::min<uint32_t>(idCount_.load(std::memory_order_relaxed), maxIds);
-                    importanceCount_ = version & 1 ? 0 : std::min<uint32_t>(s.importanceCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS);
-                    for(uint32_t i = 0; i < importanceCount_; ++i)
-                    {
-                        auto& c = importance_[i] = s.importance[i];
-                        if(contexts_)
-                        {
-                            uint32_t j = 0;
-                            while(j < known && uint32_t(idTable_[j].load(std::memory_order_relaxed)) != c.context) ++j;
-                            c.context = j < known ? uint32_t(idTable_[j].load(std::memory_order_relaxed) >> 32) : OSCAIRN_VOICE_BUDGET_SELECTED;
-                        }
-                        c.voices = uint16_t(std::min<uint32_t>(c.voices, maxVoices));
-                        c.count = uint16_t(std::min<uint32_t>(c.count, OSCAIRN_VOICE_BUDGET_LEAST));
-                        // A weight is a voice's cost against its others: positive and finite, else 1 (a context's sum, else its voices).
-                        auto weight = [](float w, float none) { return std::isfinite(w) && w > 0 ? std::min(w, 1e6f) : none; };
-                        c.weight = weight(c.weight, float(c.voices));
-                        for(auto& v : c.least)
-                        {
-                            v.tier = std::min<uint8_t>(v.tier, 2);
-                            v.level_db = std::isfinite(v.level_db) ? std::clamp(v.level_db, -120.f, 24.f) : -120.f;
-                            v.weight = weight(v.weight, 1);
-                        }
-                    }
-                    std::atomic_thread_fence(std::memory_order_acquire);
-                    if(idVersion_.load(std::memory_order_relaxed) != version) importanceCount_ = 0;
+                    importanceFresh_ = true; // its importance report, copied when asked (importanceReport)
                 }
                 reset_ = reset_ || s.reset != 0;
                 if(!s.ok) kept_ = false; // not rendered in the worker (its control gate busy): events lost there
                 return s.ok;
+            }
+            // The worker's importance report out of the shared block, bounded (the worker may write anything): each list under
+            // the engine's ID for its context (unknown: OSCAIRN_VOICE_BUDGET_SELECTED); none while the IDs are being republished.
+            void takeImportance(const Shared& s) const noexcept
+            {
+                const auto version = idVersion_.load(std::memory_order_acquire);
+                const auto known = std::min<uint32_t>(idCount_.load(std::memory_order_relaxed), maxIds);
+                importanceCount_ = version & 1 ? 0 : std::min<uint32_t>(s.importanceCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS);
+                for(uint32_t i = 0; i < importanceCount_; ++i)
+                {
+                    // The list and the entries it counts: past `count` nothing is read.
+                    auto& c = importance_[i];
+                    const auto& from = s.importance[i];
+                    c.context = from.context; c.voices = from.voices; c.count = from.count; c.weight = from.weight;
+                    if(contexts_)
+                    {
+                        uint32_t j = 0;
+                        while(j < known && uint32_t(idTable_[j].load(std::memory_order_relaxed)) != c.context) ++j;
+                        c.context = j < known ? uint32_t(idTable_[j].load(std::memory_order_relaxed) >> 32) : OSCAIRN_VOICE_BUDGET_SELECTED;
+                    }
+                    c.voices = uint16_t(std::min<uint32_t>(c.voices, maxVoices));
+                    c.count = uint16_t(std::min<uint32_t>(c.count, OSCAIRN_VOICE_BUDGET_LEAST));
+                    // A weight is a voice's cost against its others: positive and finite, else 1 (a context's sum, else its voices).
+                    auto weight = [](float w, float none) { return std::isfinite(w) && w > 0 ? std::min(w, 1e6f) : none; };
+                    c.weight = weight(c.weight, float(c.voices));
+                    std::copy_n(from.least, c.count, c.least);
+                    for(uint32_t k = 0; k < c.count; ++k)
+                    {
+                        auto& v = c.least[k];
+                        v.tier = std::min<uint8_t>(v.tier, 2);
+                        v.level_db = std::isfinite(v.level_db) ? std::clamp(v.level_db, -120.f, 24.f) : -120.f;
+                        v.weight = weight(v.weight, 1);
+                    }
+                }
+                std::atomic_thread_fence(std::memory_order_acquire);
+                if(idVersion_.load(std::memory_order_relaxed) != version) importanceCount_ = 0;
             }
             // The worker's output events into this call's. SysEx bytes are copied out of the shared block: the next
             // chunk reuses it, and the worker must not change them under the plugins that read them. Late: a block
@@ -1978,8 +1991,9 @@ namespace oscairn
             std::array<oscairn_voice_budget_context_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceContexts_{};
             double voiceCost_ = 0;
             std::array<oscairn_voice_budget_note_t, maxVoiceNotes> voiceNotes_{};
-            uint32_t importanceCount_ = 0;
-            std::array<oscairn_voice_budget_importance_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> importance_{};
+            mutable bool importanceFresh_ = false; // the shared block holds a finished block's report not copied yet
+            mutable uint32_t importanceCount_ = 0;
+            mutable std::array<oscairn_voice_budget_importance_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> importance_{};
             // Engine sound ID << 32 | the worker's, as ids_ last had them (publishIds).
             // shortcut: sounds past maxIds are left out of voice limits; raise it if an instance holds more.
             static constexpr uint32_t maxIds = 64;

@@ -19,10 +19,12 @@
 //     the lane's measured time stays within its limit. Then with a real overload (a spike past the limit) in the middle: the
 //     limit comes back after it, so the keys struck after it sound.
 // In every case no part goes silent and every plugin keeps to its caps. A claim a slow machine could fail by itself is
-// checked only when the guard counted no lost block on the part it is about; that the piano loses nothing for the lead's lane,
-// also only when it kept its 30 notes until the lead played (under ThreadSanitizer a piano voice costs some 30 us, not 15, and
-// its own lane gives up some 10 before the lead plays: the machine, not the lead). Usage: voice-fixture (OSCAIRN_PLUGIN_WORKER
-// set, OSCAIRN_WORKER_BUDGET_US the allowance).
+// checked only when the guard counted no lost block on the part it is about; that the piano loses nothing for the lead's lane
+// counts only the voices the rules that take across lanes gave up (the device's, the losses', the deadline's), not those its
+// own lane gave up for its own time (a slow machine's piano voice costs more than the fixture's 15 us: under ThreadSanitizer
+// some 30, and its lane gives up some 10), and is checked only when no lane was held off its core and neither part lost a
+// block (then the device's time was short: the machine's, which those rules answer from any lane).
+// Usage: voice-fixture (OSCAIRN_PLUGIN_WORKER set, OSCAIRN_WORKER_BUDGET_US the allowance).
 //   oscairn-voice-scenario-test
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
@@ -51,7 +53,7 @@ enum class Case { SameThread, Device, OwnLane, NoReport, Held, Unit, UnitOverloa
 struct Seen
 {
     uint32_t pianoBefore=0,pianoLeft=0,leadLeft=0,fewestPiano=UINT32_MAX,fewestLead=UINT32_MAX;
-    uint64_t pianoGave=0,leadGave=0,heldOff=0,mismatch=0,pianoLost=0,leadLost=0,pianoDeadline=0,leadDeadline=0; bool apart=false;
+    uint64_t pianoGave=0,leadGave=0,heldOff=0,mismatch=0,pianoLost=0,leadLost=0,pianoDeadline=0,leadDeadline=0,pianoAcross=0,pianoOwn=0,pianoHeld=0,leadHeld=0; bool apart=false;
     double laneMost=0,laneLimit=0; uint32_t pianoAfter=0; // the unit's take: the lane's largest measured time; the piano's voices after the overload
     bool calm() const { return pianoLost+leadLost+pianoDeadline+leadDeadline==0; } // the machine lost no block on either part
 };
@@ -138,6 +140,7 @@ Seen run(const char* fixture,const char* worker,Mode mode,Case c){
     seen.pianoGave=gave(cp);seen.leadGave=gave(cl);
     seen.heldOff=cp.heldOff+cl.heldOff;seen.mismatch=cp.importanceMismatch+cl.importanceMismatch;
     seen.pianoLost=cp.lostBlocks;seen.leadLost=cl.lostBlocks;seen.pianoDeadline=cp.stolenForDeadline;seen.leadDeadline=cl.stolenForDeadline;
+    seen.pianoAcross=cp.stolenForDevice+cp.stolenForLoss+cp.stolenForDeadline;seen.pianoOwn=cp.stolen+cp.hardChokes;seen.pianoHeld=cp.heldOff;seen.leadHeld=cl.heldOff;
     return seen;
 }
 }
@@ -170,7 +173,8 @@ int main(int argc,char** argv){try{
         leadKept(m,d,"device out of core time");
         const auto o=measure(m,Case::OwnLane,"lead's own lane over");
         check(o.leadGave>=1,std::string(name(m))+": the lead gives up its own voices for its own lane");
-        premised(o.pianoLost==0 && o.pianoDeadline==0 && o.pianoBefore==30,o.pianoGave==0,std::string(name(m))+": the piano, on another lane, loses nothing for the lead's");
+        std::printf("  piano gave up %llu for its own lane, %llu across lanes; held off a core: piano %llu, lead %llu blocks\n",(unsigned long long)o.pianoOwn,(unsigned long long)o.pianoAcross,(unsigned long long)o.pianoHeld,(unsigned long long)o.leadHeld);
+        premised(o.pianoLost+o.leadLost+o.pianoHeld+o.leadHeld==0,o.pianoAcross==0,std::string(name(m))+": the piano, on another lane, loses nothing for the lead's");
         premised(o.leadLost==0,o.leadLeft>=2,std::string(name(m))+": the lead keeps its held keys");
     }
     leadKept(Mode::Plugin,measure(Mode::Plugin,Case::NoReport,"piano without the report"),"piano without the report");

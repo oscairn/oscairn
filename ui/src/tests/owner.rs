@@ -279,3 +279,92 @@ fn the_scroll_bar_sits_close_to_the_list() {
         lib_png(&s, name);
     }
 }
+
+/// A finger on the Library's list as the device delivers it: the shell turns a touch into a press, moves and a release
+/// followed by the pointer leaving (Slint's touch state, `process_ended`); the same events here, `steps` moves from `from` to `to`.
+fn finger(s: &Shelf, from: (f32, f32), to: (f32, f32), steps: usize) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let ui = s.ui();
+    let w = ui.window();
+    let at = |f: f32| slint::LogicalPosition::new(from.0 + (to.0 - from.0) * f, from.1 + (to.1 - from.1) * f);
+    w.dispatch_event(WindowEvent::PointerPressed { position: at(0.), button: PointerEventButton::Left });
+    for i in 1..=steps {
+        w.dispatch_event(WindowEvent::PointerMoved { position: at(i as f32 / steps as f32) });
+    }
+    w.dispatch_event(WindowEvent::PointerReleased { position: at(1.), button: PointerEventButton::Left });
+    w.dispatch_event(WindowEvent::PointerExited);
+}
+
+/// The Library with 300 Performances, the first six with a star or the warning.
+fn icons_scene(name: &str) -> Shelf {
+    let mut s = scene(name, 300);
+    for (i, it) in s.e.items.iter_mut().enumerate().take(6) {
+        *it = if i % 2 == 0 { it.clone().starred() } else { it.clone().unfit("needs 3 GB of memory") };
+    }
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame();
+    s.f.screen.frame();
+    s
+}
+
+/// Where row `row` of the list is, `from_right` logical pixels in from the rows' right end (the icons are there).
+fn row_point(s: &Shelf, row: usize, from_right: f32) -> (f32, f32) {
+    let ui = s.ui();
+    let t = ui.global::<crate::Theme>();
+    let x = ui.get_list_x() + ui.get_lane_x() - from_right;
+    (x, ui.get_list_y() + t.get_margin() + row as f32 * (t.get_touch() + t.get_list_gap()) + t.get_touch() / 2.)
+}
+
+// A finger drag on rows that carry a star or the warning scrolls the list row for row (starting on the icon too), opens no row,
+// asks the engine for nothing while it moves (the whole list is held), and a flick of two big moves does not open one at its end;
+// a press and release in place still opens the row.
+#[test]
+fn a_finger_drag_scrolls_from_a_row_with_an_icon() {
+    let mut s = icons_scene("drag-icons");
+    let ui = s.ui();
+    let t = ui.global::<crate::Theme>();
+    let pitch = t.get_touch() + t.get_list_gap();
+    let first = || ui.global::<crate::PartState>().get_first();
+    for (row, from_right) in [(2, 20.), (1, 20.), (0, 20.), (3, 300.)] {
+        let before = (first(), s.e.calls.len());
+        let p = row_point(&s, row, from_right);
+        finger(&s, p, (p.0, p.1 - 3. * pitch), 30);
+        s.serve();
+        assert_eq!(first(), before.0 + 3, "row {row} at {from_right}: the list followed three rows");
+        assert!(rows(&ui).iter().all(|r| !r.cursor), "row {row}: a drag opens nothing");
+        assert_eq!(s.e.calls.len(), before.1, "row {row}: the drag asked the engine for {:?}", &s.e.calls[before.1.min(s.e.calls.len())..]);
+        let back = (first(), s.e.calls.len());
+        finger(&s, p, (p.0, p.1 + 3. * pitch), 30);
+        s.serve();
+        assert_eq!(first(), back.0.saturating_sub(3), "dragging down goes back");
+        assert_eq!(s.e.calls.len(), back.1);
+    }
+    // A flick: two big moves, then the release.
+    let before = (first(), s.e.calls.len());
+    let p = row_point(&s, 4, 20.);
+    finger(&s, p, (p.0, p.1 - 4. * pitch), 2);
+    s.serve();
+    assert!(first() > before.0, "a flick scrolls");
+    assert!(rows(&ui).iter().all(|r| !r.cursor) && s.e.calls.len() == before.1, "a flick's end opens nothing: {:?}", s.e.calls);
+    // A tap in place on a starred row.
+    let p = row_point(&s, 0, 20.);
+    let n = s.e.called("performance.info").len();
+    finger(&s, p, p, 0);
+    s.serve();
+    assert!(s.e.called("performance.info").len() > n || rows(&ui).iter().any(|r| r.cursor), "a tap opens the row");
+}
+
+// A drag that starts on the scroll bar's lane drags the bar (and nothing else: no row opens, no request).
+#[test]
+fn a_drag_from_the_scroll_bar_lane_still_drags_the_bar() {
+    let mut s = icons_scene("drag-bar");
+    let ui = s.ui();
+    let calls = s.e.calls.len();
+    drag_bar(&mut s, 0.0, 0.5, 20);
+    let first = ui.global::<crate::PartState>().get_first();
+    assert!(first > 100, "the bar moved the list to {first}");
+    assert!(rows(&ui).iter().all(|r| !r.cursor) && s.e.calls.len() == calls, "{:?}", &s.e.calls[calls.min(s.e.calls.len())..]);
+}
+

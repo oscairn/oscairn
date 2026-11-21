@@ -98,7 +98,7 @@ export component Row inherits Section {
                 root.armed = true;
                 root.dragging = false;
             } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                if (root.armed && !root.dragging) {
+                if (root.armed && !root.dragging && e.kind == PointerEventKind.up) {
                     root.tapped(); // a press and a release without a drag: a tap
                 }
                 root.armed = false;

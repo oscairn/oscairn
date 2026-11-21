@@ -82,10 +82,11 @@ typedef struct oscairn_worker_shared
      * The worker's: what the plugin reported after it, which the engine bounds. */
     uint32_t setLimits, voiceLimit, voiceContextCount;
     oscairn_voice_budget_context_t voiceContexts[OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS];
-    uint32_t activeVoices, voiceNoteCount;
+    /* importanceCount: draft 2's importance report (RFC 0046), a list per context in importance; beside the counts the
+     * engine reads every block, so a block with none (at rest) reads no line of the lists. */
+    uint32_t activeVoices, voiceNoteCount, importanceCount;
     double voiceCost;
     oscairn_voice_budget_note_t voiceNotes[OSCAIRN_WORKER_MAX_VOICE_NOTES];
-    uint32_t importanceCount; /* draft 2's importance report (RFC 0046): a list per context */
     oscairn_voice_budget_importance_t importance[OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS];
     oscairn_atomic_u64 outputDrops, blocks, droppedEvents, processErrors, deadlineMisses, controlSilences, idleBlocks;
     oscairn_atomic_f64 lastMicroseconds, maximumMicroseconds, cpuMicroseconds; /* cpuMicroseconds: the audio thread's CPU time for its blocks so far */

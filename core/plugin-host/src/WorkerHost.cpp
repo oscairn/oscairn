@@ -1051,7 +1051,8 @@ namespace oscairn
             bool blockTimes(float& cpu, float& wait) const noexcept override
             {
                 const bool known = timed_ == sequence_ && sequence_ != 0;
-                cpu = known ? float(lastCpuNs_) / 1000.f : -1.f; wait = known ? float(lastWaitNs_) / 1000.f : -1.f;
+                const auto bounded = [](int64_t ns) { return float(std::clamp<int64_t>(ns, 0, 1'000'000'000)) / 1000.f; }; // the worker's stamps
+                cpu = known ? bounded(lastCpuNs_) : -1.f; wait = known ? bounded(lastWaitNs_) : -1.f;
                 return known;
             }
             uint64_t missedBlocks() const noexcept override { return late_.load(std::memory_order_relaxed) + silent_.load(std::memory_order_relaxed); }
@@ -1184,7 +1185,7 @@ namespace oscairn
                 timing_.wake.record(s.wokeAt - sent, at);
                 timing_.run.record(s.doneAt - s.wokeAt, at, s.cpuNs);
                 timing_.cpu.record(s.cpuNs, at);
-                lastWaitNs_ = std::clamp<int64_t>(s.wokeAt - sent, 0, 1'000'000'000); lastCpuNs_ = std::clamp<int64_t>(s.cpuNs, 0, 1'000'000'000);
+                lastWaitNs_ = s.wokeAt - sent; lastCpuNs_ = s.cpuNs; // bounded when read (blockTimes): most blocks' are not
                 // What a block usually takes in the worker (an eighth of each new one), for the extra block's catching up; the worker's stamps bounded.
                 const auto run = std::clamp<int64_t>(s.doneAt - s.wokeAt, 0, 1'000'000'000);
                 runNs_ += (run - runNs_) / 8;
@@ -1478,7 +1479,9 @@ namespace oscairn
                         auto& n = voiceNotes_[i] = s.voiceNotes[i];
                         if(!(std::isfinite(n.loudness) && n.loudness > 0)) n.loudness = 0;
                     }
-                    importanceFresh_ = true; // its importance report, copied when asked (importanceReport)
+                    // Its importance report, copied when asked (importanceReport); none (at rest) is none, read from the line above.
+                    importanceFresh_ = s.importanceCount != 0;
+                    if(!importanceFresh_) importanceCount_ = 0;
                 }
                 reset_ = reset_ || s.reset != 0;
                 if(!s.ok) kept_ = false; // not rendered in the worker (its control gate busy): events lost there
@@ -1850,7 +1853,7 @@ namespace oscairn
             bool kept_ = true, playedKept_ = true, abandoned_ = false;
             std::vector<float> last_;
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
-            int64_t lastWaitNs_ = 0, lastCpuNs_ = 0; // the last block's wait to be woken and CPU time, as workerTimes recorded them
+            int64_t lastWaitNs_ = 0, lastCpuNs_ = 0; // the last block's wait to be woken and CPU time, as workerTimes recorded them (unbounded)
             uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
             uint32_t startsSeen_ = UINT32_MAX, graceLeft_ = 0; bool noGrace_ = false; // timing_'s starts last seen, and the blocks left of the start's grace (start)
             // The block start handed over, for finish.

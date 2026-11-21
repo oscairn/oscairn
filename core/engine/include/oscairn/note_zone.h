@@ -70,16 +70,17 @@ namespace oscairn
 
     /// The other standard controllers a part takes by its receive setting, as a pedal is (PartInput::functions,
     /// NoteZone::functions): pitch bend (0xE0), the mod wheel (CC 1), breath (CC 2), foot (CC 4), expression (CC 11),
-    /// portamento (CC 65) and channel pressure (0xD0). A part not taking one gets none of that message, from any device.
+    /// portamento (CC 65) and aftertouch (channel and key pressure: 0xD0, 0xA0, or the pressure note expression midiToClap makes of
+    /// them). A part not taking one gets none of that message, from any device.
     enum class Function : uint8_t { PitchBend, Modulation, Breath, Foot, Expression, Portamento, Aftertouch };
     inline constexpr size_t functionClasses = 7;
     inline PedalReceive functionReceive(uint16_t functions, Function f) noexcept { return PedalReceive(functions >> (2 * int(f)) & 3); }
     inline uint16_t withFunctionReceive(uint16_t functions, Function f, PedalReceive r) noexcept { const int s = 2 * int(f); return uint16_t((functions & ~(3 << s)) | int(r) << s); }
-    /// The Function a MIDI message (status kind 0xB0 with controller `d1`, 0xD0 or 0xE0) is, or -1.
+    /// The Function a MIDI message (status kind 0xB0 with controller `d1`, 0xA0, 0xD0 or 0xE0) is, or -1.
     inline int functionOf(uint8_t kind, uint8_t d1) noexcept
     {
         if(kind == 0xE0) return 0;
-        if(kind == 0xD0) return 6;
+        if(kind == 0xD0 || kind == 0xA0) return 6;
         if(kind != 0xB0) return -1;
         return d1 == 1 ? 1 : d1 == 2 ? 2 : d1 == 4 ? 3 : d1 == 11 ? 4 : d1 == 65 ? 5 : -1;
     }

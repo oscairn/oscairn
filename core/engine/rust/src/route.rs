@@ -500,7 +500,7 @@ pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mu
         // A controller this part's receive setting does not take (note_zone.h Function).
         let function = match (kind, d[1]) {
             (0xe0, _) => 0,
-            (0xd0, _) => 6,
+            (0xd0 | 0xa0, _) => 6,
             (0xb0, 1) => 1,
             (0xb0, 2) => 2,
             (0xb0, 4) => 3,
@@ -580,6 +580,11 @@ pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mu
         NOTE_ON if e.size() == NOTE_SIZE => note_on(rs, me, &e, midi, next_id, emit, cx),
         NOTE_OFF | NOTE_CHOKE if e.size() == NOTE_SIZE => note_off(&mut rs[me], &e, midi, kind == NOTE_CHOKE, emit, cx.source),
         NOTE_EXPRESSION if e.size() == NOTE_SIZE => {
+            // Pressure this part's receive setting does not take (note_zone.h Function::Aftertouch): a keyboard's
+            // channel and key pressure arrive as this expression (midiToClap), not as MIDI.
+            if e.i32_at(EXPR_ID) == PRESSURE && cx.zones.filter(|z| z.count != 0).is_some_and(|z| !z.takes_function(6, cx.source)) {
+                return true;
+            }
             let r = &mut rs[me];
             let address = e.address(EXPR_NOTE);
             let volume = e.i32_at(EXPR_ID) == VOLUME;

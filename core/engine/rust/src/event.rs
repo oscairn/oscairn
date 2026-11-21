@@ -15,7 +15,7 @@ const GESTURE_END: u16 = 8;
 pub const MIDI: u16 = 10;
 const MIDI2: u16 = 12;
 pub const VOLUME: i32 = 0; // CLAP_NOTE_EXPRESSION_VOLUME
-const PRESSURE: i32 = 6; // CLAP_NOTE_EXPRESSION_PRESSURE
+pub const PRESSURE: i32 = 6; // CLAP_NOTE_EXPRESSION_PRESSURE
 
 pub const NOTE_SIZE: u32 = 40; // clap_event_note_t, and clap_event_note_expression_t
 pub const MIDI_SIZE: u32 = 24;

@@ -29,7 +29,8 @@ fn settle(f: &mut Fixture) {
             "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
             "parts.meters" | "wires.meters" => json!({"meters": []}),
             "window.info" => json!({"available": false}),
-            "controls.get" | "assignments.get" => json!({"assignments": []}),
+            "controls.get" => json!({"assignments": []}),
+            "assignments.get" => json!({"assignments": [], "unlinked": [], "physicalControls": {}}),
             "presets.list" => json!({"presets": []}),
             _ => json!({}),
         };

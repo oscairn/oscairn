@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <random>
 #include <string>
 #include <thread>
@@ -206,15 +207,24 @@ int main(int argc, char** argv)
                     pclose(list);
                 }
                 t.controller(64, 0);
-                std::string why;
-                for(int i = 0; i < 400; ++i) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); const auto f = t.sessionStatus().failures; why = f.empty() ? "" : f[0].reason; if(i > 100 && why.empty()) break; }
-                check(why.empty(), "ring out race: the workers killed restart: " + why);
-                for(const auto& [id, name] : t.graphState().names)
-                    if(name.rfind("organ ", 0) == 0)
+                // Restarted: no failure listed, and each organ node's sounds readable (a worker still restarting refuses them); then theirs there, selected.
+                std::string why; std::map<std::string, bool> there;
+                for(int i = 0; i < 800; ++i)
+                {
+                    t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    const auto f = t.sessionStatus().failures; why = f.empty() ? "" : f[0].reason;
+                    if(!why.empty()) continue;
+                    try
                     {
-                        bool there = false; for(const auto& c : t.sounds(id).contexts) there = there || (c.name == "Organ " + name.substr(6) && c.selectedChannels);
-                        check(there, "ring out race: after the restart " + name + "'s sound is there, selected");
+                        there.clear();
+                        for(const auto& [id, name] : t.graphState().names)
+                            if(name.rfind("organ ", 0) == 0) { auto& ok = there[name]; for(const auto& c : t.sounds(id).contexts) ok = ok || (c.name == "Organ " + name.substr(6) && c.selectedChannels); }
+                        break;
                     }
+                    catch(const std::exception& e) { why = e.what(); }
+                }
+                check(why.empty() && there.size() == 2, "ring out race: the workers killed restart: " + why);
+                for(const auto& [name, ok] : there) check(ok, "ring out race: after the restart " + name + "'s sound is there, selected");
                 const size_t from = block.load();
                 t.note(true, 60, .8); serve(block.load() + 200); t.note(false, 60, 0);
                 check(peak(from + 100, from + 200) > 0, "ring out race: after the restart the new Performance plays");

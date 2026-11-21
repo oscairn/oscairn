@@ -950,6 +950,12 @@ namespace oscairn
             void recordAsleep()
             {
                 if(pendingBeside_.empty() || process()->failed.load() || !shared_->asleep.load(std::memory_order_acquire)) return;
+                // No block handed from here (start), none in flight: the save never meets a block.
+                struct Saving { std::atomic<bool>& flag; ~Saving() { flag.store(false); } } saving{saving_};
+                saving_.store(true);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                while(busy_.load()) { if(std::chrono::steady_clock::now() > until) return; std::this_thread::sleep_for(std::chrono::microseconds(100)); }
+                if(!shared_->asleep.load(std::memory_order_acquire)) return; // woken by a block that came meanwhile
                 const auto was = record_;
                 record(Op::SaveSnapshot);
                 if(record_ == was) return;
@@ -1344,6 +1350,14 @@ namespace oscairn
                 // only the first has it, so a plugin too slow in itself is given up in about 5 s.
                 if(const auto n = timing_.starts.load(std::memory_order_relaxed); n != startsSeen_) { startsSeen_ = n; graceLeft_ = noGrace_ ? 0 : uint32_t(2 * process()->rate / std::max(1u, frames)); noGrace_ = false; consecutiveMisses_ = 0; }
                 else if(graceLeft_) --graceLeft_;
+                // While the deferred recovery record is saved (recordAsleep), nothing is handed: the plugin asleep, its whole state
+                // saved excluding rendering, a block handed would be a control silence and reset it, a note struck then lost.
+                // Its silence is the plugin's own; the events are carried, so the note comes after the save.
+                if(saving_.load())
+                {
+                    for(uint32_t i = 0; i < count; ++i) if(!carry(events[i], true)) kept_ = false;
+                    return silence();
+                }
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
                 if(s.done.load(std::memory_order_acquire) != sequence_ || groupLost_)
@@ -1829,6 +1843,7 @@ namespace oscairn
             struct Beside { std::string directory; std::vector<uint32_t> ids, gone; }; // a snapshot prepared beside: its sounds, slot order; those discarded since
             std::vector<Beside> pendingBeside_; // since the record (recordAsleep)
             std::atomic<bool> recordDue_{false}; // pendingBeside_ holds some: service() reads it without control
+            std::atomic<bool> saving_{false};    // recordAsleep saving: start() hands no block, carrying its events
             std::vector<Prepared> prepared_;
             std::array<uint32_t, 16> selected_ = [] { std::array<uint32_t, 16> a; a.fill(UINT32_MAX); return a; }();
             uint32_t nextId_ = 1;

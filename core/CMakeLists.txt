@@ -473,6 +473,9 @@ if(UNIX)
     add_executable(oscairn-core-bench ../tools/engine-bench/core_bench.cpp)
     target_link_libraries(oscairn-core-bench PRIVATE oscairn_engine)
     add_test(NAME engine-core-bench COMMAND oscairn-core-bench --check)
+    # The engine thread's CPU per block for a session shaped like the unit's heavy take (tools/engine-bench).
+    add_executable(oscairn-session-bench ../tools/engine-bench/session_bench.cpp)
+    target_link_libraries(oscairn-session-bench PRIVATE oscairn_engine)
 endif()
 
 # RFC 0034: parts rendered at the same time render exactly what they render one after another.

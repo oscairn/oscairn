@@ -160,7 +160,7 @@ namespace oscairn
             {
                 static const std::map<std::string, int> numbers{{"modulation", 1}, {"breath", 2}, {"foot", 4}, {"expression", 11}, {"sustain", 64}, {"portamento", 65}, {"sostenuto", 66}, {"soft", 67}};
                 for(const auto& r : resolveControls(source_, groups_, part_, positions_))
-                    if(r.control == control && r.target.kind == Assignment::Kind::None)
+                    if(r.control == control && (r.target.kind == Assignment::Kind::None || r.passes))
                         {
                             if(const auto n = numbers.find(r.function); n != numbers.end()) controller = n->second;
                             else if(r.function == "pitchBend" || r.function == "aftertouch") function = r.function;

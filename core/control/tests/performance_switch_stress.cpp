@@ -8,7 +8,7 @@
 // refuses, cuts ("opened at once") and a budget changed between switches. With plugins in workers,
 // a thread of its own also kills a worker now and then, so failures and restarts race the loads.
 //   oscairn-performance-switch-stress-test SYNTH.clap DELAY.clap INSTRUMENT.clap
-// OSCAIRN_STRESS=N switches N times as often.
+// OSCAIRN_STRESS=N switches N times as often. First, the ring-out race (OSCAIRN_RINGOUT_RUNS, OSCAIRN_RINGOUT_PACE_US; see there).
 #include "oscairn/session.h"
 #include "oscairn/midi_input.h"
 #include "oscairn/plugin_host.h"
@@ -64,6 +64,77 @@ namespace
         render(s, 2);
         s.savePerformance(file.string());
     }
+
+    // The unit's ST Final -> Into Yesterday 2 and # Organ -> Nameless Piano, in this repository's plugins (2026-11-21).
+    // big: four Basic Synth parts alone on their engines (read, they share one instance, as ST Final's five Sampler parts
+    // do), the first through a Delay, the last sending to a Reverb bus (a Delay); a plain instrument through the fixture's
+    // effect; and the converter's empty bus, muted. organ: two Basic Synth parts (they join a playing engine), each through
+    // the fixture's effect and a Delay, a Variation bus (a Delay), and the empty bus the parts send to at 0.0003 and 0.00025.
+    // piano: one Basic Synth part and two empty buses.
+    // OSCAIRN_RINGOUT_SAMPLER (a build of the Sampler, org.oscairn.sampler) and OSCAIRN_RINGOUT_SAMPLES (a folder holding
+    // sine.osp, a one-record pack of a sine): the shared parts play the Sampler, as on the unit, instead of the Basic Synth.
+    const char* sharedPlugin(const char* synth) { const char* p = std::getenv("OSCAIRN_RINGOUT_SAMPLER"); return p && *p ? p : synth; }
+    void sharedSound(Session& s, NodeId n, const std::string& name, double brightness, int variant)
+    {
+        const char* samples = std::getenv("OSCAIRN_RINGOUT_SAMPLES");
+        if(!std::getenv("OSCAIRN_RINGOUT_SAMPLER") || !samples) { check(s.selectSound(n, s.prepareSound(n, name, {{1, brightness}, {4, double(variant % 3)}})), "select a sound"); return; }
+        const auto folder = s.registerAssetFolder(samples);
+        const std::string sound = "oscairn-sampler-sound/0\nsample sine.osp\nelement ampeg_decay1=127 ampeg_decay2=127 ampeg_release=" + std::to_string(60 + 5 * variant) +
+            "\nregion key=0-127 root=" + std::to_string(50 + variant) + " element=0 sample=0 loop=0-44100\n";
+        check(s.selectSound(n, s.prepareSound(n, name, {}, {}, {}, sound, folder.library, folder.directory)), "select a Sampler sound");
+    }
+    void bigShape(const fs::path& file, const char* synth, const char* delay, const char* instrument)
+    {
+        Session s(48000, frames); synth = sharedPlugin(synth);
+        const auto reverb = s.addPart("Reverb", {PartInput::Kind::Bus}); const auto rfx = s.add("reverb", delay); s.insertIntoPart(reverb, 0, rfx);
+        const auto empty = s.addPart("Variation (type 03 00, not built yet)", {PartInput::Kind::Bus}); s.setPartLevel(empty, .57, true);
+        std::vector<NodeId> synths;
+        for(uint32_t i = 0; i < 4; ++i)
+        {
+            const auto n = s.add("pad " + std::to_string(i), synth); const auto part = s.addPart("Pad " + std::to_string(i)); s.insertIntoPart(part, 0, n);
+            if(i == 0) { const auto fx = s.add("pad delay", delay); s.insertIntoPart(part, 1, fx); s.commit(); check(s.setParameter(fx, 1, .2) && s.setParameter(fx, 2, .4) && s.setParameter(fx, 3, .4), "delay settings"); }
+            if(i == 3) s.setSend(part, reverb, .056);
+            s.setPartLevel(part, .85, false); synths.push_back(n);
+        }
+        const auto n = s.add("keys", instrument), fx = s.add("keys effect", instrument, "org.kick.test.effect");
+        const auto part = s.addPart("Keys"); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx);
+        s.commit();
+        check(s.setParameter(n, 7, .3) && s.setParameter(fx, 7, .8) && s.setParameter(rfx, 1, .3) && s.setParameter(rfx, 2, .5) && s.setParameter(rfx, 3, .5), "settings");
+        for(size_t i = 0; i < synths.size(); ++i) sharedSound(s, synths[i], "Pad " + std::to_string(i), .3 + .1 * double(i), int(i));
+        s.commit(); render(s, 2);
+        s.savePerformance(file.string());
+    }
+    void organShape(const fs::path& file, const char* synth, const char* delay, const char* instrument)
+    {
+        Session s(48000, frames); synth = sharedPlugin(synth);
+        const auto empty = s.addPart("Reverb (type 01 21, not built yet)", {PartInput::Kind::Bus}); s.setPartLevel(empty, .57, true);
+        const auto variation = s.addPart("Variation", {PartInput::Kind::Bus}); const auto vfx = s.add("variation", delay); s.insertIntoPart(variation, 0, vfx);
+        std::vector<NodeId> synths;
+        for(uint32_t i = 0; i < 2; ++i)
+        {
+            const auto n = s.add("organ " + std::to_string(i), synth), a = s.add("rotary " + std::to_string(i), instrument, "org.kick.test.effect"), b = s.add("amp " + std::to_string(i), delay);
+            const auto part = s.addPart("Organ " + std::to_string(i)); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, a); s.insertIntoPart(part, 2, b);
+            s.commit(); s.setSend(part, empty, i ? .00025 : .0003); s.setPartLevel(part, i ? .62 : .86, false);
+            check(s.setParameter(a, 7, .9) && s.setParameter(b, 1, .1) && s.setParameter(b, 2, .2) && s.setParameter(b, 3, .2), "organ effects");
+            synths.push_back(n);
+        }
+        s.commit();
+        check(s.setParameter(vfx, 1, .3) && s.setParameter(vfx, 2, .3) && s.setParameter(vfx, 3, .3), "variation settings");
+        for(size_t i = 0; i < synths.size(); ++i) sharedSound(s, synths[i], "Organ " + std::to_string(i), .8, int(4 + i));
+        s.setMaster(.497, 0); s.commit();
+        render(s, 2);
+        s.savePerformance(file.string());
+    }
+    void pianoShape(const fs::path& file, const char* synth)
+    {
+        Session s(48000, frames); synth = sharedPlugin(synth);
+        const auto n = s.add("piano", synth); const auto part = s.addPart("Piano"); s.insertIntoPart(part, 0, n);
+        for(const char* name : {"Reverb (type 01 02, not built yet)", "Variation (type 03 00, not built yet)"}) { const auto bus = s.addPart(name, {PartInput::Kind::Bus}); s.setPartLevel(bus, .25, true); }
+        s.commit(); s.setPartLevel(part, .89, false); s.setMaster(.63, 0);
+        sharedSound(s, n, "Piano", .5, 7);
+        s.commit(); render(s, 2);
+        s.savePerformance(file.string());
+    }
 }
 
 int main(int argc, char** argv)
@@ -78,6 +149,115 @@ int main(int argc, char** argv)
         for(int v = 0; v < 3; ++v) { performances.push_back(temp.path / ("p" + std::to_string(v))); save(performances.back(), v, 4, argv[1], argv[2], argv[3]); }
         const auto heavy = temp.path / "heavy"; save(heavy, 3, 12, argv[1], argv[2], argv[3]);
         performances.push_back(heavy);
+
+        // The unit's intermittent cut to digital zero (2026-11-21: ST Final -> Into Yesterday 2 cut 4 of 9 runs, # Organ ->
+        // Nameless Piano 1 of 2), as the unit's script played it: one engine all along, each run opening its first
+        // Performance (no note held), then a chord held by the pedal, then the change; the audio thread rendering on its
+        // own, the control thread ticking every 2 to 25 ms, the change at any point of a tick. The chord must ring on: it
+        // still sounds 0.8 s (300 blocks) after the change. The cause: the incoming parts joining the playing shared
+        // engine had its whole state saved as the worker's recovery record, which excludes rendering; the block missed
+        // so was reset for, which ended every note in it. With the blocks paced faster than a device's (300 us, so a save
+        // overlaps one), it cut 5 of 60 changes in chain placement before the fix.
+        // OSCAIRN_RINGOUT_RUNS: the runs (default 20), the cases in turn; OSCAIRN_RINGOUT_PACE_US: a block's pace.
+        {
+            const auto big = temp.path / "big", organ = temp.path / "organ", organ2 = temp.path / "organ-2", piano = temp.path / "piano";
+            bigShape(big, argv[1], argv[2], argv[3]); organShape(organ, argv[1], argv[2], argv[3]); organShape(organ2, argv[1], argv[2], argv[3]); pianoShape(piano, argv[1]);
+            const char* runsText = std::getenv("OSCAIRN_RINGOUT_RUNS");
+            const char* paceText = std::getenv("OSCAIRN_RINGOUT_PACE_US");
+            const int runs = runsText ? std::max(1, std::atoi(runsText)) : 20, pace = paceText ? std::max(50, std::atoi(paceText)) : 300;
+            struct Case { const char* what; fs::path a, b; };
+            const std::vector<Case> cases{{"ST Final -> Into Yesterday 2", big, organ}, {"# Organ -> Nameless Piano", organ2, piano}, {"Nameless Piano -> # Organ", piano, organ2},
+                                          {"ST Final -> Nameless Piano", big, piano}, {"Nameless Piano -> ST Final", piano, big}};
+            std::mt19937 rng(17);
+            int cuts = 0;
+            Session t(48000, frames);
+            std::vector<float> peaks(1 << 16, 0.f); // each block's peak, by its number modulo the size
+            std::atomic<size_t> block{0}; std::atomic<bool> done{false};
+            std::thread audio([&] {
+                std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()};
+                auto next = std::chrono::steady_clock::now();
+                while(!done)
+                {
+                    t.process(out, frames);
+                    float p = 0; for(uint32_t f = 0; f < frames; ++f) p = std::max({p, std::abs(l[f]), std::abs(r[f])});
+                    const auto b = block.load(std::memory_order_relaxed);
+                    peaks[b % peaks.size()] = p;
+                    block.store(b + 1, std::memory_order_release);
+                    next += std::chrono::microseconds(pace); std::this_thread::sleep_until(next);
+                }
+            });
+            struct Join { std::atomic<bool>& done; std::thread& audio; ~Join() { done = true; if(audio.joinable()) audio.join(); } } joined{done, audio};
+            auto peak = [&](size_t from, size_t to) { float p = 0; for(size_t b = from; b < to; ++b) p = std::max(p, peaks[b % peaks.size()]); return p; };
+#ifndef _WIN32
+            // The record deferred: the workers killed while ST Final's chord still rings in the shared engine Into Yesterday 2's
+            // parts joined restart with the engine's last record and those parts' snapshot prepared again: their sounds are
+            // there, selected on their channels, and they play. Before the race, on a fresh engine; not in plugin hosts, whose restarts
+            // within a minute the later kills here count.
+            if(!placementPolicy().worker.empty() && !placementPolicy().hosts)
+            {
+                auto serve = [&](size_t untilBlock) { while(block.load(std::memory_order_acquire) < untilBlock) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } };
+                t.loadPerformance(big.string()); serve(block.load() + 100);
+                t.controller(64, 127); t.note(true, 60, .8); serve(block.load() + 40); t.note(false, 60, 0);
+                t.loadPerformance(organ.string()); serve(block.load() + 10);
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    char line[32];
+                    while(std::fgets(line, sizeof line, list)) ::kill(std::atoi(line), SIGKILL);
+                    pclose(list);
+                }
+                t.controller(64, 0);
+                std::string why;
+                for(int i = 0; i < 400; ++i) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); const auto f = t.sessionStatus().failures; why = f.empty() ? "" : f[0].reason; if(i > 100 && why.empty()) break; }
+                check(why.empty(), "ring out race: the workers killed restart: " + why);
+                for(const auto& [id, name] : t.graphState().names)
+                    if(name.rfind("organ ", 0) == 0)
+                    {
+                        bool there = false; for(const auto& c : t.sounds(id).contexts) there = there || (c.name == "Organ " + name.substr(6) && c.selectedChannels);
+                        check(there, "ring out race: after the restart " + name + "'s sound is there, selected");
+                    }
+                const size_t from = block.load();
+                t.note(true, 60, .8); serve(block.load() + 200); t.note(false, 60, 0);
+                check(peak(from + 100, from + 200) > 0, "ring out race: after the restart the new Performance plays");
+                serve(block.load() + 100);
+            }
+#endif
+            for(int run = 0; run < runs; ++run)
+            {
+                const auto& c = cases[size_t(run) % cases.size()];
+                const int tickMs = 2 + int(rng() % 24);
+                auto serve = [&](size_t untilBlock) { while(block.load(std::memory_order_acquire) < untilBlock) { t.service(); std::this_thread::sleep_for(std::chrono::milliseconds(tickMs)); } };
+                t.setBudget(run % 3 ? Session::Budget{4, 0} : Session::Budget{}); // mostly with a budget: the estimate, the fit rule and measuring on, as on a device
+                t.loadPerformance(c.a.string());
+                serve(block.load() + 100);
+                t.allNotesOff(); serve(block.load() + 40);
+                t.controller(64, 127);
+                for(const int k : {48, 60, 64, 67}) t.note(true, k, .8);
+                serve(block.load() + 60);
+                for(const int k : {48, 60, 64, 67}) t.note(false, k, 0);
+                serve(block.load() + 40 + rng() % 8);
+                std::this_thread::sleep_for(std::chrono::microseconds(rng() % (tickMs * 1000)));
+                const size_t at = block.load(std::memory_order_acquire);
+                std::string refused;
+                try { t.loadPerformance(c.b.string()); } catch(const std::exception& e) { refused = e.what(); }
+                const size_t loaded = block.load(std::memory_order_acquire);
+                serve(loaded + 375);
+                check(refused.empty(), std::string(c.what) + ": the change opens: " + refused);
+                const float before = peak(at - 20, at), after = peak(loaded + 300, loaded + 375);
+                size_t silent = 0; for(size_t b = at; b < loaded + 375; ++b) silent += peaks[b % peaks.size()] == 0;
+                const bool cut = before == 0 || after == 0;
+                cuts += cut;
+                if(cut || std::getenv("OSCAIRN_STRESS_VERBOSE"))
+                {
+                    std::string notices; for(const auto& n : t.sessionStatus().notices) notices += n + "; ";
+                    std::fprintf(stderr, "%s, run %d (tick %d ms, budget %d): level before %.5f, 300 blocks after the change %.5f; %zu silent blocks from the change (it took %zu); notices: %s\n",
+                                 c.what, run, tickMs, run % 3 != 0, before, after, silent, loaded - at, notices.c_str());
+                }
+                t.controller(64, 0);
+                serve(block.load() + 20);
+            }
+            std::printf("ring out race: %d of %d changes cut a pedaled chord\n", cuts, runs);
+            check(cuts == 0, "ring out race: a pedaled chord rings on through every change: " + std::to_string(cuts) + " of " + std::to_string(runs) + " cut");
+        }
 
 #ifndef _WIN32
         // A Performance whose workers were given up (on the unit: failed as too slow, again and

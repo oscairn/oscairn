@@ -597,6 +597,21 @@ namespace oscairn
                         if(worker == CLAP_INVALID_ID) throw std::runtime_error("a prepared sound was rejected");
                         map[p.id] = worker;
                     }
+                    // Snapshots prepared beside since the record (recordAsleep): prepared again, their new sounds in slot order as
+                    // before, each one's sounds discarded since going at once, so they fit as they did. One that no longer fits
+                    // (the record's sounds selected then, discarded since, cannot be discarded here: two changes with notes
+                    // ringing before the plugin slept) is left out: its parts keep what their channels select, the instance plays.
+                    for(const auto& b : pendingBeside_)
+                    {
+                        std::set<uint32_t> before; for(const auto& c : contexts()) before.insert(c.id);
+                        try { process()->exchange(header(Op::PrepareSnapshot).str(b.directory).data); }
+                        catch(const std::exception& e) { std::fprintf(stderr, "oscairn: %s: a restarted worker left out the sounds prepared beside from %s: %s\n", descriptor_.id.c_str(), b.directory.c_str(), e.what()); continue; }
+                        std::vector<uint32_t> fresh; for(const auto& c : contexts()) if(!before.count(c.id)) fresh.push_back(c.id);
+                        std::sort(fresh.begin(), fresh.end());
+                        if(fresh.size() != b.ids.size()) throw std::runtime_error("the sounds prepared beside differ");
+                        for(size_t i = 0; i < fresh.size(); ++i) map[b.ids[i]] = fresh[i];
+                        for(const auto id : b.gone) { process()->exchange(header(Op::DiscardSound).u32(map.at(id)).u8(1).data); map.erase(id); }
+                    }
                     for(const auto id : discarded_) map.erase(id);
                     ids_ = map; publishIds();
                     for(int16_t c = 0; c < 16; ++c) if(auto i = ids_.find(selected_[c]); i != ids_.end())
@@ -662,6 +677,7 @@ namespace oscairn
             // handle, and throwing would stop the graph servicing its other nodes.
             void service() override
             {
+                if(recordDue_.load(std::memory_order_relaxed)) try { auto lock = controlFor(); recordAsleep(); } catch(const std::exception&) {}
                 if(const auto interval = workerServiceInterval(); interval.count())
                 {
                     // A worker that has had nothing to say for a while (quietServices answers, 0.5 s at the usual 20 ms) is asked
@@ -739,7 +755,7 @@ namespace oscairn
                 if(contexts_)
                 {
                     // The snapshot's sounds have fresh IDs.
-                    ids_.clear(); base_.clear(); prepared_.clear(); discarded_.clear(); selected_.fill(UINT32_MAX);
+                    ids_.clear(); base_.clear(); prepared_.clear(); discarded_.clear(); pendingBeside_.clear(); recordDue_.store(false, std::memory_order_relaxed); selected_.fill(UINT32_MAX);
                     for(const auto& c : contexts()) remember(c, allocate(c.id));
                 }
                 record(Op::SaveSnapshot);
@@ -837,6 +853,7 @@ namespace oscairn
                 // One the recovery record holds is discarded again after a restart; one from before a
                 // snapshot prepared beside became the record is not in it.
                 if(std::erase_if(prepared_, [&](const auto& p) { return p.id == id; }) == 0 && std::find(base_.begin(), base_.end(), id) != base_.end()) discarded_.push_back(id);
+                for(auto& b : pendingBeside_) if(std::find(b.ids.begin(), b.ids.end(), id) != b.ids.end()) b.gone.push_back(id);
                 return true;
             }
             // oscairn.voice-budget (RFC 0018): the limits ride the next block's request, the report
@@ -919,15 +936,26 @@ namespace oscairn
                 // and the incoming ones: on a shared instance the others' sounds stay, so a copy of this
                 // snapshot alone would restore one node's sounds on every channel. The selections and each
                 // shared sound's values are replayed after it. If the save fails, the old record stays.
+                // Saved only while the plugin sleeps: a whole-instance save excludes its rendering, and a block it
+                // misses so is reset for, which ended the last Performance's notes ringing in it (2026-11-21). Until
+                // then a restart prepares this snapshot again on the old record (restore).
+                pendingBeside_.push_back({directory, {}});
+                for(const auto w : fresh) pendingBeside_.back().ids.push_back(engine.at(w));
+                recordDue_.store(true, std::memory_order_relaxed);
+                recordAsleep();
+                return selected;
+            }
+            // The deferred recovery record of the snapshots prepared beside, saved once the plugin sleeps (nothing
+            // sounds in it, nothing renders). Under control.
+            void recordAsleep()
+            {
+                if(pendingBeside_.empty() || process()->failed.load() || !shared_->asleep.load(std::memory_order_acquire)) return;
                 const auto was = record_;
                 record(Op::SaveSnapshot);
-                if(record_ != was)
-                {
-                    base_.clear(); prepared_.clear(); discarded_.clear();
-                    for(const auto& c : contexts()) for(const auto& [engine, worker] : ids_) if(worker == c.id) { base_.push_back(engine); break; }
-                    besideRecord_ = true;
-                }
-                return selected;
+                if(record_ == was) return;
+                base_.clear(); prepared_.clear(); discarded_.clear(); pendingBeside_.clear(); recordDue_.store(false, std::memory_order_relaxed);
+                for(const auto& c : contexts()) for(const auto& [engine, worker] : ids_) if(worker == c.id) { base_.push_back(engine); break; }
+                besideRecord_ = true;
             }
             void setAssets(kick::clap::AssetResolver* assets) noexcept override { process()->assets.store(assets); }
             std::vector<kick::clap::AssetReference> assetDependencies() const override
@@ -1798,6 +1826,9 @@ namespace oscairn
             bool snapshotRecord_ = false, fresh_ = false;
             std::map<uint32_t, uint32_t> ids_; // engine sound ID -> worker sound ID
             std::vector<uint32_t> base_, discarded_; // the record's sounds, in slot order; those discarded since
+            struct Beside { std::string directory; std::vector<uint32_t> ids, gone; }; // a snapshot prepared beside: its sounds, slot order; those discarded since
+            std::vector<Beside> pendingBeside_; // since the record (recordAsleep)
+            std::atomic<bool> recordDue_{false}; // pendingBeside_ holds some: service() reads it without control
             std::vector<Prepared> prepared_;
             std::array<uint32_t, 16> selected_ = [] { std::array<uint32_t, 16> a; a.fill(UINT32_MAX); return a; }();
             uint32_t nextId_ = 1;

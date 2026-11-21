@@ -547,15 +547,19 @@ namespace oscairn
     // stuck voice ends with the instance and cannot come back with a later change taking it over.
     void Session::ringOut()
     {
-        if(staged_) return;
-        bool done = false;
-        const auto quiet = uint64_t(sampleRate_ * 3), limit = uint64_t(sampleRate_ * 30), held = uint64_t(sampleRate_ * 120);
+        // A panic is taken now, staged edits or not: kept for a later tick, it ended the tail of a change made since. While
+        // staged, the panicked plugins go once idle, as any.
         const bool panic = endRinging_.exchange(false, std::memory_order_acquire);
+        if(staged_) return;
+        bool done = false, limited = false;
+        const auto quiet = uint64_t(sampleRate_ * 3), limit = uint64_t(sampleRate_ * 30), held = uint64_t(sampleRate_ * 120);
         for(const auto n : disabled_)
             if(!rungOut_.count(n) && graph_.idle(n, quiet, limit, held)) { rungOut_.insert(n); done = true; }
         for(auto it = leaving_.begin(); it != leaving_.end(); )
             if(panic || endNow_.count(*it) || graph_.idle(*it, quiet, limit, held))
             {
+                // Each way a node still sounding goes, counted (SessionStatus::ringOut): a panic, a fade's end, or ring-out's limits.
+                if(!graph_.silent(*it, uint64_t(sampleRate_ / 10))) { if(panic) ++ringOut_.panicEnded; else if(endNow_.count(*it)) ++ringOut_.fadeEnded; else { ++ringOut_.limitEnded; limited = true; } }
                 // A node of a shared engine: its sound goes, the instance plays on for the others (RFC 0021).
                 if(const auto* c = dynamic_cast<const SoundContext*>(&graph_.host(*it))) retireShared(*c);
                 if(graph_.silent(*it, quiet)) keepWarm(*it); else graph_.remove(*it);
@@ -563,6 +567,7 @@ namespace oscairn
             }
             else ++it;
         endNow_.clear();
+        if(limited) tailNotice("the last Performance's sound still going at ring-out's limit was let go: 30 seconds after the change with no note held, or 2 minutes with one");
         if(!done) return;
         evictOpportunistic();
         compileWires();

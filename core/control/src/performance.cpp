@@ -767,6 +767,8 @@ namespace {
     };
 }
 
+void Session::tailNotice(const std::string& notice) { notices_.push_back(notice); std::fprintf(stderr,"oscairn: %s\n",notice.c_str()); }
+
 void Session::loadPerformance(const std::string& directory) {
     try{openPerformance(directory);}
     catch(const std::exception& e){++refusedLoads_;refusal_=e.what();throw;}
@@ -813,7 +815,7 @@ void Session::openPerformance(const std::string& directory) {
     auto stats=prepared->stats;
     {Clock publish{stats.publish};open(*prepared,seamless,fades);}
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
-    if(!cut.empty()){notices_.push_back(cut);std::fprintf(stderr,"oscairn: %s\n",cut.c_str());}
+    if(!cut.empty()){++(fades?ringOut_.faded:ringOut_.cut);tailNotice(cut);}
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
     for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();
@@ -1527,10 +1529,13 @@ void Session::open(Prepared& p,bool seamless,bool fades) {
     // Only one change's tail carries over: one still ringing out of it is cut at the cue (chokes).
     if(seamless)for(const auto& b:p.beside){next->takeNotes(graph_,b->was,b->now);
         // A way out of the outgoing chain into a plugin this Performance took over is left out: the others ring, said.
-        if(const auto lost=next->ringOut(graph_,b->was,b->now)){const auto n=nodes_.find(b->was);
+        if(const auto lost=next->ringOut(graph_,b->was,b->now)){const auto n=nodes_.find(b->was);++ringOut_.partial;
             p.notices.push_back("the last Performance's notes ring out without part of their chain: "+(n==nodes_.end()?std::string("a plugin"):n->second)+" also played into a plugin this Performance took over");
             std::fprintf(stderr,"oscairn: %s\n",p.notices.back().c_str());}
-        b->chokes=graph_.ringOutRoutes(b->was)!=0;}
+        // Only one change's tail rings out: one a change before left ringing in this instance fades out in the plugin's choke time, said.
+        if((b->chokes=graph_.ringOutRoutes(b->was)!=0)){++ringOut_.chokedOlder;const auto n=nodes_.find(b->was);
+            p.notices.push_back("the notes still ringing from two Performances ago faded out at this change: "+(n==nodes_.end()?std::string("a plugin"):n->second)+" rings out one change's notes at a time");
+            std::fprintf(stderr,"oscairn: %s\n",p.notices.back().c_str());}}
     // The outgoing nodes of shared engines it claimed select the Default at the cue, so new notes never
     // reach their sounds, which go once idle: their held notes keep their voices, and a cut drops them (RFC 0021).
     // Over the CPU budget with the memory there (Estimate::fades): what rings out reaches the outputs through the fade's live

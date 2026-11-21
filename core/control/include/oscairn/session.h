@@ -703,6 +703,8 @@ namespace oscairn
         std::map<NodeId, std::string> roles_;   // RFC 0016's node roles
         std::vector<std::string> notices_;      // SessionStatus::notices
         uint64_t refusedLoads_ = 0; std::string refusal_; // SessionStatus::refusedLoads and refusal
+        SessionStatus::RingOut ringOut_;          // SessionStatus::ringOut
+        void tailNotice(const std::string& notice); // a notice in session.status and the log
         void openPerformance(const std::string& directory); // loadPerformance's work: a failure is counted there
         std::vector<AssignmentOverride> assignments_; // physical controls' overrides (physical_controls.cpp)
         uint32_t nextMacro_ = 1;

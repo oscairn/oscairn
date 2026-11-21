@@ -901,6 +901,9 @@ int main(int argc, char** argv)
             const auto wt = load(t, c), wr = load(r, ccopy);
             check(wt.beside == 1 && wr.loaded == 1, "older tail: B's synth given C's sound beside; the reference loads C's copy");
             check(t.ringOutRoutes() == 4, "older tail: B's sound rings out into B's Delay, A's to the outputs: " + std::to_string(t.ringOutRoutes()) + " routes");
+            // A cut is never silent (the owner's rule): A's tail faded out by the change to C is said, and counted.
+            bool said = false; for(const auto& n : t.sessionStatus().notices) said = said || n.find("from two Performances ago faded out") != std::string::npos;
+            check(said && t.sessionStatus().ringOut.chokedOlder == 1, "older tail: the notice says A's notes faded out, and session.status counts it: " + std::to_string(t.sessionStatus().ringOut.chokedOlder));
             const uint32_t choke = 144; // the SDK's choke fade, 3 ms at 48 kHz
             float step = 0, after = 0; bool same = true; double energy = 0;
             for(int block = 0; block < 600; ++block)
@@ -1178,6 +1181,7 @@ int main(int argc, char** argv)
                 load(t, light);
                 bool said = false; for(const auto& n : t.sessionStatus().notices) said = said || n.find("faded out in 150 ms") != std::string::npos;
                 check(said, how + "the notice says the last Performance's notes faded out");
+                check(t.sessionStatus().ringOut.faded == 1 && t.sessionStatus().ringOut.cut == 0, how + "session.status counts the fade");
                 const int fadeBlocks = int(.15 * 48000 / frames);
                 double early = 0;
                 // The control thread's tick as on a device, every 20 ms (8 blocks of 128): the fade's steps that far apart,
@@ -1196,12 +1200,31 @@ int main(int argc, char** argv)
                 check(after == 0, how + "silent after the fade: " + std::to_string(after));
                 blocks(t, 4);
                 check(!t.leaving(), how + "A's plugins gone once faded");
+                check(t.sessionStatus().ringOut.fadeEnded > 0 && t.sessionStatus().ringOut.limitEnded == 0, how + "session.status counts what the fade's end took: " + std::to_string(t.sessionStatus().ringOut.fadeEnded));
                 t.note(false, 1, 0); t.controller(64, 0); t.setBudget({});
                 compare(t, light, (how + "then B as a fresh load").c_str());
             }
             else std::printf("fade: %u audio cores, more parts than the fixture's keyboard holds: not checked\n", cores);
         }
         ::unsetenv("OSCAIRN_AUDIO_CORES");
+
+        // A panic while edits are staged is taken then: kept for the next tick without them, it ended the tail of a change
+        // made since (the change publishes, so unstages), silently. A: a synth through a Delay; panic with a key staged; a
+        // pedaled note; the change to B: the note rings on.
+        {
+            const auto g1 = temp.path / "staged-a", g2 = temp.path / "staged-b";
+            ringing(g1, 0, argv[1], argv[3], .5); ringing(g2, 1, argv[1], argv[3], .5);
+            Session t(48000, frames);
+            load(t, g1); quiet(t);
+            t.setKey(MusicalKey{2, 0xAB5}); // staged, not committed
+            t.allNotesOff(); blocks(t, 10);
+            t.controller(64, 127); t.note(true, 60, .8); blocks(t, 20); t.note(false, 60, 0);
+            load(t, g2);
+            Audio x; double late = 0;
+            for(int i = 0; i < 60; ++i) { x.run(t); if(i >= 50) for(const auto v : x.l) late += double(v) * v; }
+            check(late > 0 && t.leaving() && t.sessionStatus().ringOut.panicEnded == 0, "a panic with edits staged ends no later change's tail: " + std::to_string(late) + ", " + std::to_string(t.leaving()) + " ringing");
+            t.controller(64, 0);
+        }
 
         if(const char* real = std::getenv("OSCAIRN_SWITCH_PERFORMANCES"); real && *real)
         {

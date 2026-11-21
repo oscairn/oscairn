@@ -1415,7 +1415,7 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   control no longer plays its function) or a part's Sound has its own assignment of the control (the
   mod wheel to a filter, say, `part` the part's): then that part's instruments get no CC 1 (or
   bend...), the control drives its target, and other parts still get the function. An assignment
-  with `"passes": true` does both for its part. A part's `receive` object can also turn a function
+  with `"passes": true` does both, for its part or, the Performance's own, for every part. A part's `receive` object can also turn a function
   off for the part whatever sent it (`pitchBend`, `modulation` and so on: `"none"`); an external
   keyboard's wheel goes through the same filter.
 

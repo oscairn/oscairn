@@ -657,6 +657,16 @@ namespace
             move(5, 0);
             check(bend() == 8192 && s.controllerState().touched == "wheel:1" && s.parts()[3].level < .1, "a wheel assigned to something else plays that and does not also bend");
             s.assign("wheel:1", {}); s.commit();
+            // The owner's case: the mod wheel set to a part's volume plays that and the engines get no CC 1, unless set to do both (passes).
+            s.setPartLevel(pd, .5, false);
+            s.assign("wheel:2", level); s.commit(); s.service();
+            move(6, 512); move(6, 1023); solo(1);
+            check(s.parts()[3].level > .9 && cc() == 100, "the mod wheel set to a part's volume moves it and sends no CC 1: " + std::to_string(cc()));
+            s.assign("wheel:2", level, 0, true); s.commit(); s.service();
+            move(6, 0); solo(1);
+            check(s.parts()[3].level < .1 && cc() == 0, "set to do both, it moves the volume and every part gets CC 1 too: " + std::to_string(cc()));
+            check(s.assignments().back().passes && s.assignments().back().part == 0, "the Performance's own assignment reports passes");
+            s.assign("wheel:2", {}); s.commit();
 
             // Unlinked, the lever's push is a control of its own: it no longer drives the mod wheel's, and can be assigned.
             s.setParameter(a, 7, 0);

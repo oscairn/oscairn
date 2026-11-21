@@ -1456,7 +1456,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // Physical controls' overrides (RFC 0011), by the control's logical identity.
     std::vector<AssignmentOverride> assignments;
     for(auto a:array(field(d,"assignments"),4096)){
-        AssignmentOverride o;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));o.part=integer(field(a,"part"));if(const V f=member(a,"passes")){o.passes=boolean(f);if(o.passes && !o.part)bad("only a part's own assignment passes the control's function on");}
+        AssignmentOverride o;o.control=text(field(a,"control"));const auto kind=text(field(a,"kind"));o.part=integer(field(a,"part"));if(const V f=member(a,"passes"))o.passes=boolean(f);
         if(!validPhysicalControl(o.control) || std::any_of(assignments.begin(),assignments.end(),[&](const AssignmentOverride& x){return x.control==o.control && x.part==o.part;}))bad("invalid or duplicate physical control");
         if(o.part && (std::none_of(parts.begin(),parts.end(),[&](const Part& p){return p.id==o.part;}) || (kind!="parameter" && kind!="control")))bad("a part's assignment plays its own plugins and controls");
         if(kind=="parameter"){fields(a,{"control","kind","node","param","part","passes"});o.target.kind=Assignment::Kind::Parameter;o.target.node=node(field(a,"node"));o.target.param=integer(field(a,"param"));

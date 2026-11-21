@@ -213,7 +213,7 @@ namespace oscairn
                     if(name.empty()) continue;
                     if(layer == AssignmentLayer::Sound && !r.function.empty()) { r.parts.emplace_back(o.part, o.target); continue; }
                     if(layer == AssignmentLayer::Sound && o.part != part) continue;
-                    r.target = o.target; r.layer = layer; r.label = name; r.bank.clear(); return;
+                    r.target = o.target; r.layer = layer; r.label = name; r.bank.clear(); r.passes = o.passes && layer == AssignmentLayer::Override; return;
                 }
         };
         std::map<std::string, uint32_t> numbers; // per identity, across groups
@@ -390,8 +390,7 @@ namespace oscairn
 
     void Session::assign(const std::string& control, const Assignment& target, uint32_t part, bool passes)
     {
-        if(passes && !part) throw std::invalid_argument("only a part's own assignment passes the control's function on");
-        if(!validPhysicalControl(control)) throw std::invalid_argument("a physical control is knob:N, fader:N, button:N, wheel:N, strip:N, jog:N, pedal:N, footswitch:N, aftertouch:N or breath:N");
+        if(!validPhysicalControl(control)) throw std::invalid_argument("a physical control is knob:N, fader:N, button:N, wheel:N, strip:N, jog:N, pedal:N, footswitch:N, aftertouch:N or breath:N, lever:N, joystick:N or ribbon:N");
         if(part)
         {
             // A Sound's own assignment plays only its own plugins and controls.

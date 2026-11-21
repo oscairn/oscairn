@@ -284,7 +284,7 @@
               },
               "passes": {
                 "type": "boolean",
-                "description": "A part's own assignment only: the control's own function (pitch bend, CC 1...) also reaches that part's instruments; absent or false: this assignment replaces it for the part"
+                "description": "The control's own function (pitch bend, CC 1...) also reaches the instruments: a part's own assignment, that part's; the Performance's (part 0), every part's. Absent or false: this assignment replaces it for the part, or for every part"
               }
             },
             "required": [
@@ -324,7 +324,7 @@
               },
               "passes": {
                 "type": "boolean",
-                "description": "A part's own assignment only: the control's own function (pitch bend, CC 1...) also reaches that part's instruments; absent or false: this assignment replaces it for the part"
+                "description": "The control's own function (pitch bend, CC 1...) also reaches the instruments: a part's own assignment, that part's; the Performance's (part 0), every part's. Absent or false: this assignment replaces it for the part, or for every part"
               }
             },
             "required": [

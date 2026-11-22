@@ -1686,3 +1686,57 @@ fn a_meter_update_stays_in_the_meter_area_while_the_values_change() {
         assert!(seen.windows(2).all(|w| w[0] == w[1]), "screen {screen}: the section or tempo moved: {seen:?}");
     }
 }
+
+// The device's display (the vendored KMS backend's dumb buffers): two buffers swapped at each
+// present and drawn a quarter turn round, as the FANTOM-07's panel is. A buffer comes back two
+// frames old, which the software renderer repaints in part; upstream's three came back three
+// old and every frame was painted whole (13.5 ms each on the unit, twice a second for the meters).
+// The ages are the backend's own (age.rs); what each present shows is compared with whole frames.
+#[path = "../vendor/i-slint-backend-linuxkms-1.18.1/display/swdisplay/age.rs"]
+mod age;
+
+#[test]
+fn the_devices_buffers_repaint_only_the_meters_for_a_meter_change() {
+    use slint::platform::software_renderer::RenderingRotation;
+    // What each present shows and how many pixels it repainted: by the device's buffers, or whole frames.
+    fn run(device: bool) -> Vec<(Vec<Rgb8Pixel>, i32)> {
+        let s = Screen::new();
+        settings(&s.ui, Show::Both, Show::Both);
+        let mut buffers = [vec![Rgb8Pixel::default(); W * H], vec![Rgb8Pixel::default(); W * H]];
+        let mut ages = [0u8, 0u8];
+        let mut back = 0;
+        let mut shown = Vec::new();
+        for cpu in [1, 74, 75, 89, 90, 100, 42, 7, 8, 9] {
+            meters(&s.ui, cpu, (cpu * 3) % 100);
+            slint::platform::update_timers_and_animations();
+            let mut painted = 0;
+            s.window.draw_if_needed(|renderer| {
+                // The backend's choice (renderer/sw.rs).
+                renderer.set_repaint_buffer_type(match ages[back] {
+                    _ if !device => RepaintBufferType::NewBuffer,
+                    1 => RepaintBufferType::ReusedBuffer,
+                    2 => RepaintBufferType::SwappedBuffers,
+                    _ => RepaintBufferType::NewBuffer,
+                });
+                renderer.set_rendering_rotation(RenderingRotation::Rotate90);
+                let region = renderer.render(&mut buffers[back], H);
+                painted = region.iter().map(|(_, size)| (size.width * size.height) as i32).sum();
+            });
+            assert!(painted > 0, "cpu {cpu} draws");
+            shown.push((buffers[back].clone(), painted));
+            let (a, b) = ages.split_at_mut(1);
+            if back == 0 { age::presented(&mut a[0], &mut b[0]) } else { age::presented(&mut b[0], &mut a[0]) }
+            back = 1 - back;
+        }
+        shown
+    }
+    let (device, whole) = (run(true), run(false));
+    for (i, ((pixels, painted), (expected, all))) in device.iter().zip(&whole).enumerate() {
+        assert_eq!(*all, (W * H) as i32, "frame {i}: a new buffer is painted whole");
+        assert!(pixels == expected, "frame {i}: the buffer shown is not the whole frame's picture");
+        // The first two frames fill the two buffers and the next two find the renderer's memory empty.
+        if i >= 4 {
+            assert!(*painted < (W * H / 50) as i32, "frame {i}: repainted {painted} pixels of {}", W * H);
+        }
+    }
+}

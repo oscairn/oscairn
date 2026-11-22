@@ -67,8 +67,9 @@ How (a) works:
 - `ui/`: one Cargo package, `oscairn-ui`, with its `Cargo.lock` and a `rust-toolchain.toml` at
   the release `OSCAIRN_RUST_VERSION` in `CMakeLists.txt` pins (the samplepack crate's). One crate,
   not a workspace: one program. Screens are modules of it.
-- `ui/vendor/i-slint-backend-linuxkms-1.18.1`: Slint's KMS backend, vendored with a frame cap
-  and frame statistics, through `[patch.crates-io]`; its README says where it came from and what
+- `ui/vendor/i-slint-backend-linuxkms-1.18.1`: Slint's KMS backend, vendored with a frame cap,
+  frame statistics and two display buffers in place of three (with three every frame was painted
+  whole on a device), through `[patch.crates-io]`; its README says where it came from and what
   changed.
 - Backends: Slint's ordinary windowed backend (winit) on macOS and Linux desktops, so the same
   screens run on a computer; `linuxkms` (no seat daemon: `backend-linuxkms-noseat`) for a device,

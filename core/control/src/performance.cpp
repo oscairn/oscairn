@@ -2609,9 +2609,10 @@ void refuseDependents(Session& s,const std::string& id){
 }
 }
 
-void Session::uninstallAssetLibrary(const std::string& id) {
+void Session::uninstallAssetLibrary(const std::string& id) { uninstallAssetLibrary(id,false); }
+void Session::uninstallAssetLibrary(const std::string& id,bool evenIfUsed) {
     if(assets_.libraryVersion(id).empty())bad("no asset library "+id+" is installed from a package");
-    const auto users=assetLibraryUsers(id);
+    const auto users=evenIfUsed?std::vector<std::string>():assetLibraryUsers(id);
     if(!users.empty()){std::string list;for(const auto& u:users)list+=(list.empty()?"":", ")+u;bad("the asset library "+id+" is used by "+list);}
     assets_.removeLibrary(id);
     assets_.sweep(true);
@@ -2638,7 +2639,7 @@ namespace {
 // of the repository it came from (RFC 0031), with a plugin package's plugins, as nothing else says
 // which it installed, and what it was installed from (InstalledPackage): {"format":"oscairn.packages",
 // "version":1,"packages":[{"id","version","kind","repository","plugins":[{"format","id","version"}],
-// "sha256","signers":[key ID],"otherBuild","needs":[{"id","version"}]}]}; the last four absent in
+// "sha256","signers":[key ID],"otherBuild","needs":[{"id","version"}],"name"}]}; the last five absent in
 // records written before them. needs: the packages it depends on (dependencies.packages; a plugin
 // package's asset libraries are in its plugins' assets.tsv).
 struct Recorded { Control::InstalledPackage package; std::vector<std::tuple<std::string,std::string,std::string>> plugins; std::vector<std::pair<std::string,std::string>> needs = {}; }; // needs: its package dependencies, by ID and least version
@@ -2658,6 +2659,7 @@ std::vector<Recorded> readRecorded(){
             if(member(r,"signers"))for(auto k:array(member(r,"signers"),64))x.package.signers.push_back(text(k));
             x.package.otherBuild=member(r,"otherBuild") && boolean(member(r,"otherBuild"));
             if(member(r,"needs"))for(auto n:array(member(r,"needs"),512))x.needs.push_back({text(field(n,"id")),text(field(n,"version"))});
+            if(member(r,"name"))x.package.name=text(member(r,"name"));
             out.push_back(std::move(x));
         }
     }catch(const std::exception& x){std::fprintf(stderr,"oscairn: %s unreadable (%s); what it recorded is derived where it can be\n",recordedFile().string().c_str(),x.what());out.clear();}
@@ -2672,7 +2674,7 @@ void writeRecorded(const std::vector<Recorded>& all){
         std::string needs;
         for(const auto& [id,version]:r.needs)needs+=std::string(needs.empty()?"":",")+"{\"id\":"+quote(id)+",\"version\":"+quote(version)+'}';
         out+=std::string(out.empty()?"":",")+"{\"id\":"+quote(r.package.id)+",\"version\":"+quote(r.package.version)+",\"kind\":"+quote(r.package.kind)+
-             ",\"repository\":"+quote(r.package.repository)+",\"plugins\":["+plugins+"],\"sha256\":"+quote(r.package.sha256)+",\"signers\":["+signers+"],\"otherBuild\":"+(r.package.otherBuild?"true":"false")+",\"needs\":["+needs+"]}";
+             ",\"repository\":"+quote(r.package.repository)+",\"plugins\":["+plugins+"],\"sha256\":"+quote(r.package.sha256)+",\"signers\":["+signers+"],\"otherBuild\":"+(r.package.otherBuild?"true":"false")+",\"needs\":["+needs+"],\"name\":"+quote(r.package.name)+'}';
     }
     writeAtomically(recordedFile(),"{\"format\":\"oscairn.packages\",\"version\":1,\"packages\":["+out+"]}\n");
 }
@@ -2693,6 +2695,7 @@ void Session::recordPackage(const Package& p,bool asLibrary,const std::string& v
     if(!otherBuild && !p.signature.key.empty())r.package.signers.push_back(signing::keyId(p.signature.key));
     for(const auto& q:p.plugins)r.plugins.push_back({q.format,q.id,q.version});
     for(const auto& d:p.packageDependencies)r.needs.push_back({d.id,d.version});
+    r.package.name=p.name;
     std::lock_guard lock(recordedMutex);
     auto all=readRecorded();
     // A library and an asset library are installed at one version at a time; a plugin package's versions side by side.
@@ -2728,22 +2731,33 @@ std::vector<Control::InstalledPackage> Session::installedPackages() {
     std::vector<InstalledPackage> out;
     {
         std::lock_guard lock(recordedMutex);
-        for(const auto& r:readRecorded())if(present(r,libraries,assets_))out.push_back(r.package);
+        for(const auto& r:readRecorded())if(present(r,libraries,assets_)){
+            out.push_back(r.package);
+            // Recorded before records carried names: a plugin package's first plugin's.
+            if(r.package.name.empty() && r.package.kind=="plugin" && !r.plugins.empty())out.back().name=storedName(std::get<0>(r.plugins.front()),std::get<1>(r.plugins.front()),std::get<2>(r.plugins.front()));
+        }
     }
     // Installed before installs were recorded: each asset library at its version, each locked library at a version unknown.
     auto listed=[&](const std::string& id){return std::any_of(out.begin(),out.end(),[&](const auto& p){return p.id==id;});};
     for(const auto& id:assets_.installedLibraries())if(!listed(id))out.push_back({id,assets_.libraryVersion(id),"asset",{}});
     for(const auto& l:libraries)if(!listed(l.id))out.push_back({l.id,{},"library",{}});
-    for(auto& p:out)if(p.kind=="asset")p.dependency=assets_.libraryTerms(p.id).dependency;
+    const auto assetLibraries=assets_.libraries();
+    for(auto& p:out){
+        if(p.kind=="asset")p.dependency=assets_.libraryTerms(p.id).dependency;
+        if(!p.name.empty())continue;
+        if(p.kind=="library"){for(const auto& l:libraries)if(l.id==p.id)p.name=l.name;}
+        else if(p.kind=="asset"){for(const auto& l:assetLibraries)if(l.id==p.id)p.name=l.name;}
+    }
     markWithdrawn(out);
     return out;
 }
 
-void Session::uninstallLibrary(const std::string& id) {
+void Session::uninstallLibrary(const std::string& id) { uninstallLibrary(id,false); }
+void Session::uninstallLibrary(const std::string& id,bool evenIfUsed) {
     auto& l=library();
     const auto all=l.installed();
     if(std::none_of(all.begin(),all.end(),[&](const auto& x){return x.id==id;}))bad("no such library installed");
-    refuseDependents(*this,id);
+    if(!evenIfUsed)refuseDependents(*this,id);
     fs::remove_all(l.libraries()/id); // readPackage: the ID is a plain name
     l.rescan();l.forgetOrphans();
     forgetRemoved();
@@ -2784,13 +2798,14 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
     return out;
 }
 
-void Session::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform) {
+void Session::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform) { removePlugin(format,id,version,forPlatform,false); }
+void Session::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform,bool evenIfUsed) {
     if(!forPlatform.empty() && !knownPlatform(forPlatform))bad("unknown platform "+forPlatform);
     const auto folder=storeFolder(format,id,version);
     const auto p=storedIdentity(folder);
     if(p.id!=id || p.version!=version || p.format!=format)bad("that plugin is not installed");
     // This device's build of a plugin of a package another package needs.
-    if(forPlatform.empty() || forPlatform==platform()){
+    if(!evenIfUsed && (forPlatform.empty() || forPlatform==platform())){
         std::vector<std::string> holders;
         {std::lock_guard lock(recordedMutex);for(const auto& r:readRecorded())if(std::count(r.plugins.begin(),r.plugins.end(),std::make_tuple(format,id,version)))holders.push_back(r.package.id);}
         for(const auto& h:holders)refuseDependents(*this,h);
@@ -2810,6 +2825,156 @@ void Session::removePlugin(const std::string& format,const std::string& id,const
     const auto gone=folder.parent_path()/("."+folder.filename().string()+".removing");
     fs::remove_all(gone,e);fs::rename(folder,gone);fs::remove_all(gone,e);
     forgetRemoved();
+}
+
+// What removing a package means (packages.removal): everything is read once (the packages with
+// what each needs, what each library item uses), then who uses a package is reckoned in memory,
+// for the package and for each of its dependencies once it and the unused before it are gone.
+Control::PackageRemoval Session::packageRemoval(const std::string& id,const std::string& version) {
+    using Key=std::tuple<std::string,std::string,std::string>;
+    struct Unit { PackagePart part; bool listed=true; std::set<Key> plugins; std::vector<std::string> folders; std::set<std::string> hashes; std::vector<std::pair<std::string,std::string>> needs; };
+    struct Use { std::string library,name; std::set<Key> plugins; std::vector<assets::Ref> refs; bool unknown=false; };
+    using Going=std::vector<std::pair<std::string,std::string>>; // packages leaving: an ID, at a version or (empty) every one
+    auto bytes=[](const fs::path& root){uint64_t n=0;std::error_code e;for(const auto& f:fs::recursive_directory_iterator(root,e))if(f.is_regular_file(e))n+=f.file_size(e);return n;};
+
+    std::vector<Unit> units;
+    {
+        const auto installed=installedPackages();
+        std::vector<Recorded> records;
+        {std::lock_guard lock(recordedMutex);records=readRecorded();}
+        for(const auto& p:installed){
+            Unit u{{p.id,p.version,p.kind,p.name.empty()?p.id:p.name}};
+            for(const auto& r:records)if(r.package.id==p.id && r.package.version==p.version && r.package.kind==p.kind){
+                if(p.kind=="plugin")u.plugins.insert(r.plugins.begin(),r.plugins.end()); // builds a library archive carried stay in the store when it goes
+                u.needs=r.needs;
+            }
+            if(p.kind=="library")u.part.bytes=bytes(library().libraries()/p.id);
+            if(p.kind=="asset"){u.part.bytes=bytes(assets_.libraryRoot(p.id,{}));const auto held=assets_.hashes(p.id);u.hashes.insert(held.begin(),held.end());}
+            for(const auto& [f,i,v]:u.plugins){u.part.bytes+=bytes(storeFolder(f,i,v));u.folders.push_back((storeFolder(f,i,v)/platform()).string()+"/");}
+            units.push_back(std::move(u));
+        }
+    }
+    // The asset libraries each stored plugin needs (assets.tsv): its package's needs, or its own when no package is recorded for it.
+    std::error_code e;
+    for(const auto* format:{"clap","lv2"})
+        for(const auto& entry:fs::directory_iterator(dataHome()/"Plugins"/format,e)){
+            std::ifstream in(entry.path()/"assets.tsv");std::string line;std::vector<std::pair<std::string,std::string>> needs;
+            while(std::getline(in,line))if(const auto tab=line.find('\t');tab!=std::string::npos)needs.push_back({line.substr(0,tab),line.substr(tab+1)});
+            if(needs.empty())continue;
+            const auto p=storedIdentity(entry.path());const Key key{p.format,p.id,p.version};
+            auto holder=std::find_if(units.begin(),units.end(),[&](const Unit& u){return u.plugins.count(key)>0;});
+            if(holder==units.end()){units.push_back({{p.id,p.version,"plugin",p.name.empty()?p.id:p.name},false,{key},{(entry.path()/platform()).string()+"/"}});holder=units.end()-1;}
+            holder->needs.insert(holder->needs.end(),needs.begin(),needs.end());
+        }
+
+    // What each library item with a document uses, and each Performance saved outside the library (as assetLibraryUsers reckons them).
+    std::vector<Use> uses;
+    auto pluginsOf=[](const fs::path& document){
+        const auto bytes=state_files::read(document,4*1024*1024);
+        const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+        std::set<Key> out;
+        if(doc)for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");out.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
+        return out;
+    };
+    auto& l=library();l.rescan();
+    for(const auto& item:l.items()){
+        if(item.inPlace || documentOf(item.kind).empty())continue;
+        Use u{item.library,item.name.empty()?"Untitled":item.name};
+        try{const auto document=fs::path(item.path)/documentOf(item.kind);u.refs=assetsOf(document);u.plugins=pluginsOf(document);}
+        catch(const std::exception&){u.unknown=true;} // unknown use is not proven unused
+        uses.push_back(std::move(u));
+    }
+    for(const auto& [folder,saved]:assets_.roots()){
+        const auto document=folder/"performance.json";
+        Use u{{},folder.string(),{},saved};
+        if(fs::exists(document,e)){try{u.refs=assetsOf(document);u.plugins=pluginsOf(document);}catch(const std::exception&){}}
+        else if(fs::exists(folder.parent_path(),e))continue; // its folder is gone from a folder that is there
+        uses.push_back(std::move(u));
+    }
+
+    auto among=[](const Going& going,const Unit& u){return std::any_of(going.begin(),going.end(),[&](const auto& g){return g.first==u.part.id && (g.second.empty() || g.second==u.part.version);});};
+    // Who uses the package `target` names, once those in `going` are gone.
+    auto dependentsOf=[&](const std::pair<std::string,std::string>& target,const Going& going){
+        std::vector<const Unit*> it;
+        for(const auto& u:units)if(among({target},u))it.push_back(&u);
+        auto refs=[&](const std::vector<assets::Ref>& all){return std::any_of(all.begin(),all.end(),[&](const auto& r){return std::any_of(it.begin(),it.end(),[&](const Unit* u){return u->part.kind=="asset" && (r.library==u->part.id || u->hashes.count(r.sha256));});});};
+        auto used=[&](const Use& x){
+            if(x.unknown)return std::any_of(it.begin(),it.end(),[](const Unit* u){return u->part.kind!="library";});
+            return refs(x.refs) || std::any_of(it.begin(),it.end(),[&](const Unit* u){return std::any_of(u->plugins.begin(),u->plugins.end(),[&](const Key& k){return x.plugins.count(k)>0;});});
+        };
+        auto loaded=[&](const PluginHost& h){
+            return refs(h.assetDependencies()) || std::any_of(it.begin(),it.end(),[&](const Unit* u){return std::any_of(u->folders.begin(),u->folders.end(),[&](const std::string& f){return h.descriptor().path.rfind(f,0)==0;});});
+        };
+        // A need another version of it that stays still meets is no dependence on this one.
+        auto met=[&](const std::string& least){return std::any_of(units.begin(),units.end(),[&](const Unit& u){
+            return u.part.id==target.first && !among({target},u) && !among(going,u) && (least.empty() || u.part.version.empty() || !assets::older(u.part.version,least));});};
+        std::map<std::string,uint32_t> counts;PackageDependent own{"own"};
+        for(const auto& x:uses)if(used(x)){
+            if(!x.library.empty()){++counts[x.library];continue;}
+            ++own.items;if(own.examples.size()<5)own.examples.push_back(x.name);
+        }
+        std::vector<PackageDependent> out;
+        for(const auto& u:units){
+            if(u.part.id==target.first || among(going,u))continue;
+            const bool needs=std::any_of(u.needs.begin(),u.needs.end(),[&](const auto& n){return n.first==target.first && !met(n.second);});
+            const uint32_t items=u.part.kind=="library" && counts.count(u.part.id)?counts[u.part.id]:0;
+            if(needs || items)out.push_back({u.part.kind,u.part.id,u.part.name,u.part.version,items});
+        }
+        if(own.items)out.push_back(std::move(own));
+        for(const auto& n:nodes_)if(const auto& h=graph_.host(n.first);h.failure().empty() && loaded(h)){out.push_back({"open",{},"the open Performance"});break;} // a stand-in plays nothing
+        for(const auto& w:warm_)if(loaded(*w.host)){out.push_back({"warm",{},"an instance kept warm"});break;}
+        return out;
+    };
+
+    PackageRemoval out;
+    const std::pair<std::string,std::string> target{id,version};
+    std::vector<std::string> wanted,candidates;
+    for(const auto& u:units)if(u.listed && among({target},u)){if(wanted.empty()){out.package=u.part;wanted.push_back(id);}else{out.package.version.clear();out.package.bytes+=u.part.bytes;}}
+    if(wanted.empty())bad("no package "+id+(version.empty()?"":" "+version)+" is installed");
+    out.dependents=dependentsOf(target,{});
+    // Its dependencies, direct and through them; then, to a fixed point, each that nothing staying uses.
+    for(size_t i=0;i<wanted.size();++i)
+        for(const auto& u:units)if(u.listed && u.part.id==wanted[i] && (i>0 || among({target},u)))
+            for(const auto& n:u.needs)if(!std::count(wanted.begin(),wanted.end(),n.first)){wanted.push_back(n.first);candidates.push_back(n.first);}
+    Going going{target};
+    for(bool more=true;std::exchange(more,false);)
+        for(const auto& c:candidates){
+            if(std::any_of(going.begin(),going.end(),[&](const auto& g){return g.first==c;}) || !dependentsOf({c,{}},going).empty())continue;
+            bool here=false;
+            for(const auto& u:units)if(u.listed && u.part.id==c){out.unused.push_back(u.part);here=true;}
+            if(here){going.push_back({c,{}});more=true;}
+        }
+    return out;
+}
+
+std::vector<Control::PackagePart> Session::uninstallPackage(const std::string& id,const std::string& version,const std::vector<std::string>& withUnused,bool allUnused,bool evenIfUsed) {
+    const auto removal=packageRemoval(id,version);
+    const auto name=removal.package.name+(removal.package.version.empty()?"":" "+removal.package.version);
+    std::string list;
+    for(const auto& d:removal.dependents){
+        if(d.kind=="open")bad("the open Performance uses "+name+"; remove it from the Performance or open another first");
+        if(d.kind=="warm")bad("an instance of "+name+" is kept warm for the next Performance change; let it go first (memory.release)");
+        list+=(list.empty()?"":", ")+(d.kind=="own"?std::to_string(d.items)+" of your own":d.name+(d.kind=="library"?d.items?" ("+std::to_string(d.items)+(d.items==1?" item)":" items)"):"":d.version.empty()?"":" "+d.version));
+    }
+    if(!list.empty() && !evenIfUsed)bad(name+" is used by "+list+"; nothing was removed");
+    std::vector<Recorded> records;
+    {std::lock_guard lock(recordedMutex);records=readRecorded();}
+    std::vector<PackagePart> removed;
+    auto remove=[&](const std::string& which,const std::string& at,bool anyway){
+        for(const auto& p:installedPackages()){
+            if(p.id!=which || (!at.empty() && p.version!=at))continue;
+            if(p.kind=="library")uninstallLibrary(p.id,anyway);
+            else if(p.kind=="asset")uninstallAssetLibrary(p.id,anyway);
+            else for(const auto& r:records)if(r.package.id==p.id && r.package.version==p.version && r.package.kind==p.kind)
+                for(const auto& [f,i,v]:r.plugins)if(storedIdentity(storeFolder(f,i,v)).id==i)removePlugin(f,i,v,{},anyway);
+            removed.push_back({p.id,p.version,p.kind,p.name.empty()?p.id:p.name});
+        }
+    };
+    remove(id,version,evenIfUsed);
+    // In the order reckoned, each after what used it; never anyway, so one something still uses now stays.
+    std::string last;
+    for(const auto& u:removal.unused)if(u.id!=std::exchange(last,u.id) && (allUnused || std::count(withUnused.begin(),withUnused.end(),u.id)))remove(u.id,{},false);
+    return removed;
 }
 
 void Session::addPluginBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform,const std::string& path) {

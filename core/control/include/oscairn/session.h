@@ -107,6 +107,8 @@ namespace oscairn
         uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false, bool replace = false) override;
         PackageJob packageJob(uint64_t id) override;
         std::vector<InstalledPackage> installedPackages() override;
+        PackageRemoval packageRemoval(const std::string& id, const std::string& version = {}) override;
+        std::vector<PackagePart> uninstallPackage(const std::string& id, const std::string& version, const std::vector<std::string>& withUnused, bool allUnused, bool evenIfUsed) override;
         Preinstall preinstalled() override;
         /// From the host at start, on the control thread: installs the packages the repository
         /// snapshot in `folder` holds, unless this release did already (preinstalled.json in the
@@ -899,6 +901,10 @@ namespace oscairn
         // Records in packages.json in the data folder the package an install put in place (RFC 0031): a plugin or asset package, or one installed as a locked library; not an archive copied into the user's own storage.
         // sha256: the archive's; otherBuild: the install kept a different build of its plugins (Installed::otherBuild).
         void recordPackage(const Package& package, bool asLibrary, const std::string& version, const std::string& repository, const std::string& sha256, bool otherBuild);
+        // The removals, also of what something still uses (packages.uninstall's evenIfUsed): its users are not asked about.
+        void uninstallLibrary(const std::string& library, bool evenIfUsed);
+        void uninstallAssetLibrary(const std::string& library, bool evenIfUsed);
+        void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, bool evenIfUsed);
         void forgetRemoved(); // drops the records of packages no longer installed, after a removal
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes

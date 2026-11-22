@@ -4610,6 +4610,101 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "packages.removal",
+              "description": "What removing an installed package means, nothing changed: what needs it, and its dependencies nothing else would use"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "An installed package's ID"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "One installed version; absent for every installed version of the ID"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "packages.uninstall",
+              "description": "Removes an installed package of any kind; refused while something needs it unless evenIfUsed"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "An installed package's ID"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "One installed version; absent for every installed version of the ID"
+                },
+                "withUnused": {
+                  "description": "true, or the IDs of its unused dependencies to remove with it",
+                  "oneOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 256
+                    }
+                  ]
+                },
+                "evenIfUsed": {
+                  "type": "boolean",
+                  "description": "Remove it though something needs it"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "packages.preinstalled",
               "description": "The packages that come with this release, installed from the app's repository snapshot at the engine's first start, and how that goes"
             },

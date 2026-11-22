@@ -678,7 +678,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(state['state'] == 'done' and records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good),
-                                                          'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None, 'dependency': False}],
+                                                          'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None, 'dependency': False, 'name': 'Test Synth'}],
               'from the repository, the listed manifest hash and its signer are recorded: ' + json.dumps(records()))
         again = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(again['state'] == 'done' and again['installed']['notes'] == [] and records()[0]['sha256'] == listed['1.0.0'], 'the same build again changes nothing')
@@ -727,7 +727,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('graph.commit')
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth', 'replace': True})
         check(state['state'] == 'done' and state['installed']['notes'] == [] and stored.read_bytes() == fixture.read_bytes() and
-              records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good), 'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None, 'dependency': False}],
+              records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good), 'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None, 'dependency': False, 'name': 'Test Synth'}],
               'asked to, the repository\'s build replaces it and is recorded as the repository\'s: ' + json.dumps(records()))
 
         # A plugin package that needs an asset library: installing it from the repository pulls
@@ -770,7 +770,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         # A record written before the archive hash was (no sha256) still reads, with none.
         (home / 'packages.json').write_text(json.dumps({'format': 'oscairn.packages', 'version': 1, 'packages': [
             {'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'plugins': []}]}))
-        check(records() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'sha256': '', 'signers': [], 'otherBuild': False, 'withdrawn': None, 'dependency': False}],
+        check(records() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'sha256': '', 'signers': [], 'otherBuild': False, 'withdrawn': None, 'dependency': False, 'name': 'Test factory content'}],
               'an older record reads, with no archive hash: ' + json.dumps(records()))
         (home / 'packages.json').unlink()
         check(recorded() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': ''}] and any(x['id'] == 'org.kick.test.synth' for x in store()),

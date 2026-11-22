@@ -7,7 +7,9 @@
 // block's cost (past the hold), and every block lost (late or silenced). With OSCAIRN_WORKER_REST unset (disabled) the
 // workers can be played, so none rests; with OFF given, the instrument's note connection is off (draining, as a part a
 // scene switches off) through each rest and back on in the very block of the note, so they rest and that enable wakes them.
-// Fails on a lost block, or when a worker that may rest is called past the hold (or one that may not is rested).
+// Fails on a lost block, or when a worker that may rest is called past the hold (or one that may not is rested). A block
+// a worker loses (late or silenced) is never one rested and begins its hold again, so where lost blocks are not held
+// against the run (below) each allows that worker one more hold in that rest.
 // Absolute times do not transfer from this machine to the FANTOM; the comparison does.
 //   oscairn-worker-wake-test WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS [off]]]]]
 #include <oscairn/graph.h>
@@ -82,13 +84,22 @@ int main(int argc, char** argv)
         const auto lostBefore = lost();
         double idle = 0, wakeChain = 0, steadyChain = 0, wakeMax = 0, steadyMax = 0;
         std::vector<double> wake(hosts.size()), trip(hosts.size()), steadyWake(hosts.size()), steadyTrip(hosts.size());
-        uint64_t idleBlocks = 0, idleCalls = 0;
+        uint64_t idleBlocks = 0, idleCalls = 0, pastHold = 0; // pastHold: rests in which a worker was called for more than its hold, begun again by each block it lost
+        std::string rests; // each rest's calls/lost blocks per worker, printed when the calls fail
         for(int c = 0; c < cycles; ++c)
         {
             const auto calls = called();
+            std::vector<uint64_t> before; for(auto& h : hosts) { const auto st = h->statistics(); before.push_back(st.calledBlocks); before.push_back(st.lateBlocks + st.silentBlocks); }
             if(off) { g.setDraining(oscairn::graphInput, nodes[0], true); g.commit(); }
             for(int i = 0; i < rest; ++i) { const auto t = block(); if(i >= hold + 2) { idle += t; ++idleBlocks; } }
             idleCalls += called() - calls;
+            for(size_t k = 0; k < hosts.size(); ++k)
+            {
+                const auto st = hosts[k]->statistics();
+                const uint64_t n = st.calledBlocks - before[2 * k], gone = st.lateBlocks + st.silentBlocks - before[2 * k + 1];
+                rests += (k ? " " : "\n  rest " + std::to_string(c) + ":") + std::to_string(n) + "/" + std::to_string(gone);
+                if(n > uint64_t(hold) * (gone + 1) + 2) ++pastHold;
+            }
             if(off) { g.setDraining(oscairn::graphInput, nodes[0], false); g.commit(); } // on again, taken in the note's own block
             const auto w = measured({kick::clap::Event::note(true, 60, 1)});
             Took s;
@@ -114,9 +125,16 @@ int main(int argc, char** argv)
         if(lostBlocks && !crowded && attempt < (relaxed() ? 2 : 0)) { std::printf("  %llu blocks lost: measured again\n", (unsigned long long)lostBlocks); continue; }
         if(lostBlocks && crowded) std::printf("  %zu real-time threads on %u cores: lost blocks not held against it\n", hosts.size() + 1, std::thread::hardware_concurrency());
         else if(lostBlocks) { std::fprintf(stderr, "FAIL: %llu blocks lost\n", (unsigned long long)lostBlocks); ++failures; }
-        // An idle worker that may rest called only for the hold; one that may not, every block.
+        // An idle worker that may rest called only for the hold, in every rest (and for one more hold per block it lost in
+        // that rest: WorkerHost's rest never rests a block a call late, and the block after starts the hold again), and
+        // never every block of the run; one that may not, every block.
         const uint64_t all = uint64_t(rest) * cycles * hosts.size();
-        if(resting ? idleCalls > uint64_t(hold + 2) * cycles * hosts.size() || (rest > hold + 2 && idleCalls >= all) : idleCalls < all) { std::fprintf(stderr, "FAIL: %llu worker calls in idle blocks of %llu\n", (unsigned long long)idleCalls, (unsigned long long)all); ++failures; }
+        if(resting ? pastHold || (rest > hold + 2 && idleCalls >= all) : idleCalls < all)
+        {
+            std::fprintf(stderr, "FAIL: %llu worker calls in idle blocks of %llu, %llu rests called past the hold of %d (begun again by each lost block); calls/lost blocks per worker:%s\n",
+                         (unsigned long long)idleCalls, (unsigned long long)all, (unsigned long long)pastHold, hold, rests.c_str());
+            ++failures;
+        }
         break;
     }
     return failures ? 1 : 0;

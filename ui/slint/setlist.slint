@@ -195,14 +195,15 @@ export component Setlist inherits Rectangle {
             f0 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s0; font-weight: 700; }
             f1 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s1; font-weight: 700; }
             f2 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s2; font-weight: 700; }
-            // What the name needs at the size chosen; the lines it gets (a line and a tenth each: a line's height is the measure of one letter).
+            // What the name needs at the size chosen; two lines are allowed, so a size is a step smaller only when the
+            // name does not fit on two lines there; the text shows up to two of its wrapped lines, cut after that.
             property <length> need: self.step == 0 ? f0.preferred-height : self.step == 1 ? f1.preferred-height : f2.preferred-height;
-            property <int> step: f0.preferred-height <= min(self.height, 2 * root.lh0) + Theme.hair ? 0 : f1.preferred-height <= min(self.height, 2 * root.lh1) + Theme.hair ? 1 : 2;
+            property <int> step: f0.preferred-height <= 2 * root.lh0 + Theme.hair ? 0 : f1.preferred-height <= 2 * root.lh1 + Theme.hair ? 1 : 2;
             property <length> lh: self.step == 0 ? root.lh0 : self.step == 1 ? root.lh1 : root.lh2;
             tile-name := Text {
                 y: (parent.height - self.height) / 2;
                 width: parent.width;
-                height: min(parent.need, min(parent.height, max(1, min(2, floor(parent.height / parent.lh))) * parent.lh * 1.1));
+                height: min(parent.need, min(parent.height, 2 * parent.lh * 1.1));
                 text: slot.title;
                 color: parent.ink;
                 font-size: parent.step == 0 ? root.s0 : parent.step == 1 ? root.s1 : root.s2;

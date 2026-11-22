@@ -227,37 +227,61 @@ fn keys() -> Rig {
 
 // ---- P: Installed ----
 
+fn package(id: &str, name: &str, version: &str, kind: &str, repository: &str, signers: &[&str]) -> Value {
+    json!({"id": id, "version": version, "kind": kind, "repository": repository, "sha256": "", "signers": signers, "otherBuild": false, "withdrawn": null, "dependency": false, "name": name})
+}
+
+/// A plugin package, an asset package, a library with no name of its own, a library both requests list and one only
+/// `library.libraries` does. The reverb is used and has a dependency nothing else uses.
 fn installed() -> Rig {
     let mut e = Fake::new();
     e.installed_packages = vec![
-        json!({"id": "org.example.reverb", "version": "1.0.0", "kind": "plugin", "repository": "https://packages.oscairn.org", "sha256": "", "signers": ["6a2dd1acf4d4e23c"], "otherBuild": false, "withdrawn": null, "dependency": false}),
-        json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "repository": "", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}),
-        json!({"id": "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "version": "0.9.0", "kind": "library", "repository": "https://friend.example.org", "sha256": "", "signers": ["89074b634c0de731"], "otherBuild": false, "withdrawn": null, "dependency": true}),
+        package("org.example.reverb", "Example Reverb", "1.0.0", "plugin", "https://packages.oscairn.org", &["6a2dd1acf4d4e23c"]),
+        package("lib-1", "Wicked Synths", "", "library", "", &[]),
+        package("org.example.strings", "example strings", "2.1.0", "asset", "", &[]),
+        package("org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "", "0.9.0", "library", "https://friend.example.org", &["89074b634c0de731"]),
     ];
     e.libraries = vec![("lib-1".into(), "Wicked Synths".into(), 12), ("lib-2".into(), "Field Recordings".into(), 34)];
+    e.removal = vec![(
+        "org.example.reverb".into(),
+        vec![
+            json!({"kind": "library", "id": "lib-1", "name": "Wicked Synths", "version": "", "items": 87}),
+            json!({"kind": "own", "id": "", "name": "", "version": "", "items": 3, "examples": ["Keys Split", "Pad", "Lead"]}),
+        ],
+        vec![json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "name": "example strings", "bytes": 1258291})],
+    )];
     let mut r = Rig::new("installed", None, e);
     r.page(Id::Installed);
     r
 }
 
-// The packages and the libraries, each a row under its section's heading, by name and version (the packages) or name
-// and item count (the libraries); a long name is the row's to fit, whole on the panel, which also
-// says the publisher (the repository it came from) (P1).
+const LONG: &str = "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary";
+const ALL: [&str; 5] = ["Example Reverb", "example strings", "Field Recordings", LONG, "Wicked Synths"];
+
+// One list of everything installed, by name whatever the case, no heading rows: each row its name, the word for its
+// kind and its version; the count is of items; a long name is the row's to fit, whole on the panel, which also says
+// the publisher (the repository it came from) (P1).
 #[test]
-fn the_installed_lists_packages_and_libraries() {
+fn the_installed_is_one_list_by_name() {
     let mut r = installed();
     assert_eq!(r.e.methods(), ["packages.installed", "library.libraries"]);
-    let all = labels(r.ui());
-    assert_eq!(all, ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "Libraries", "Wicked Synths", "Field Recordings"]);
-    assert_eq!((value_of(r.ui(), "org.example.reverb"), value_of(r.ui(), "Wicked Synths"), value_of(r.ui(), "Field Recordings")), ("1.0.0".to_string(), "12 items".to_string(), "34 items".to_string()));
-    r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the packages' heading
+    assert_eq!(labels(r.ui()), ALL, "a library only library.libraries lists is a row too, and one with no name shows its id");
+    let values: Vec<String> = ALL.iter().map(|l| value_of(r.ui(), l)).collect();
+    assert_eq!(values, ["Plugin 1.0.0", "Samples 2.1.0", "Library", "Library 0.9.0", "Library"]);
+    assert_eq!(r.ui().global::<crate::PartState>().get_total(), 5, "the count is of items");
+    r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the first row
     r.act(Action::Move { pane: None, by: 3 });
     let panel = info(r.ui());
-    assert!(panel.contains(&"org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary".to_string()), "{panel:?}");
+    assert!(panel.join("").contains(LONG), "the whole name, wrapped: {panel:?}");
     assert!(panel.join(" ").contains("Publisher") && panel.join(" ").contains("https://friend.example.org"), "the publisher is the repository it came from");
-    r.act(Action::Move { pane: None, by: 3 });
+    r.act(Action::Move { pane: None, by: 1 });
     let panel = info(r.ui());
-    assert!(panel.contains(&"Field Recordings".to_string()) && panel.join(" ").contains("34"), "{panel:?}");
+    assert!(panel.contains(&"Wicked Synths".to_string()) && panel.contains(&"12".to_string()) && panel.contains(&"lib-1".to_string()), "a library package has its item count: {panel:?}");
+    // Two of one name are told apart by id.
+    r.e.installed_packages.push(package("a.first", "wicked synths", "", "library", "", &[]));
+    r.page(Id::Appearance);
+    r.page(Id::Installed);
+    assert_eq!(labels(r.ui())[4..], ["wicked synths", "Wicked Synths"], "a.first before lib-1");
 }
 
 // Every row is reached by the cursor and the panel; nothing asks, and nothing is asked again, at rest (P1).
@@ -265,10 +289,10 @@ fn the_installed_lists_packages_and_libraries() {
 fn every_installed_row_is_reached_and_nothing_at_rest() {
     let mut r = installed();
     assert!(r.delayed.is_empty(), "nothing is asked again: {:?}", r.delayed);
-    for _ in 0..7 {
+    for _ in 0..5 {
         r.act(Action::Move { pane: None, by: 1 });
     }
-    assert!(info(r.ui()).contains(&"Field Recordings".to_string()), "{:?}", info(r.ui()));
+    assert!(info(r.ui()).contains(&"Wicked Synths".to_string()), "{:?}", info(r.ui()));
     r.e.calls.clear();
     for _ in 0..4 {
         r.act(Action::Move { pane: None, by: -1 });
@@ -286,119 +310,162 @@ fn a_refused_installed_request_is_a_failed_row() {
     r.page(Id::Installed);
     assert!(info(r.ui()).contains(&"The packages could not be read".to_string()), "{:?}", info(r.ui()));
     assert!(r.danger_lines().contains(&"the package store is not readable".to_string()), "{:?}", r.danger_lines());
-    assert!(labels(r.ui()).contains(&"Wicked Synths".to_string()), "the libraries were read");
+    assert!(labels(r.ui()).contains(&"Field Recordings".to_string()), "the libraries were read");
     r.e.fail = vec![("library.libraries".into(), "lost the connection to the engine".into())];
     r.page(Id::Appearance);
     r.page(Id::Installed);
     assert!(info(r.ui()).contains(&"The libraries could not be read".to_string()), "{:?}", info(r.ui()));
     assert!(r.danger_lines().contains(&"lost the connection to the engine".to_string()), "{:?}", r.danger_lines());
-    assert!(labels(r.ui()).contains(&"org.example.reverb".to_string()), "what read before stays");
+    assert!(labels(r.ui()).contains(&"Example Reverb".to_string()), "what read before stays");
 }
 
-// Remove is for a library, asked first as for a repository (P2): the question, one `library.uninstall` with the
-// library's id, the list read again; a package row is never offered, and every row is faint while it runs.
+// Remove works on every row (P2): `packages.removal` is asked first; nothing uses this one and it has no
+// dependencies, so the plain question, then one `packages.uninstall` and the lists read again; every row is faint
+// while it runs.
 #[test]
-fn a_library_is_removed_after_the_question() {
+fn a_package_nothing_uses_is_removed_after_the_question() {
     let mut r = installed();
-    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
-    r.act(Action::Move { pane: None, by: 1 }); // org.example.reverb, a package
-    let remove = r.c.bar_tools().into_iter().find(|t| t.label.starts_with("Remove")).unwrap();
-    assert!(!remove.enabled, "a package row is not offered Remove");
-    r.act(Action::Move { pane: None, by: 4 }); // Wicked Synths
-    let remove = r.c.bar_tools().into_iter().find(|t| t.label.starts_with("Remove")).unwrap();
-    assert!(remove.enabled);
-    r.e.calls.clear();
+    for at in 0..5 {
+        r.act(Action::Move { pane: None, by: 1 });
+        assert!(r.c.bar_tools().into_iter().find(|t| t.label.starts_with("Remove")).unwrap().enabled, "row {at} is offered Remove");
+    }
+    r.e.calls.clear(); // the cursor is on Wicked Synths
     r.tool("Remove");
+    assert_eq!(r.e.called("packages.removal"), [json!({"id": "lib-1"})]);
     let (title, message, choices) = r.notice.clone().unwrap();
     assert_eq!((title.as_str(), choices.as_slice()), ("Remove Wicked Synths?", ["Remove".to_string(), "Cancel".to_string()].as_slice()));
-    assert_eq!(message, "Its items are removed from this device with it.");
+    assert_eq!(message, "It is removed from this device.");
     // Confirmed before the engine answers: the row says so, every row faint.
+    r.notice = None;
     r.c.noticed(Some(0));
     assert_eq!(r.said(), "Removing Wicked Synths...");
     assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint while it runs");
     r.settle();
-    assert_eq!(r.e.called("library.uninstall"), [json!({"library": "lib-1"})]);
-    assert_eq!(r.e.methods(), ["library.uninstall", "packages.installed", "library.libraries"], "one uninstall, then the lists read again");
-    assert!(!labels(r.ui()).contains(&"Wicked Synths".to_string()), "the list no longer has it");
+    assert!(r.notice.is_none(), "no dependencies, no second question");
+    assert_eq!(r.e.called("packages.uninstall"), [json!({"id": "lib-1"})]);
+    assert_eq!(r.e.methods(), ["packages.removal", "packages.uninstall", "packages.installed", "library.libraries"], "one uninstall, then the lists read again");
+    assert_eq!(labels(r.ui()), ALL[..4], "the list no longer has it");
     assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are back");
-    assert!(r.delayed.is_empty(), "a library that is gone is not read for again: {:?}", r.delayed);
+    assert!(r.delayed.is_empty(), "a package that is gone is not read for again: {:?}", r.delayed);
 }
 
-// The handler answers `accepted` and the list changes a moment later: the list is read again, soon, until the library
-// is gone, every row faint meanwhile, and not at all after (P2).
+// What uses a package is named in the question, with Cancel and Remove anyway; then its dependencies nothing else
+// uses are listed with their sizes, to keep or remove too; then one `packages.uninstall` says all of it (P2).
 #[test]
-fn an_accepted_removal_is_followed_until_the_library_is_gone() {
+fn a_used_package_names_what_uses_it_and_offers_its_unused_dependencies() {
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 }); // Example Reverb, a plugin package
+    r.e.calls.clear();
+    r.tool("Remove");
+    assert_eq!(r.e.called("packages.removal"), [json!({"id": "org.example.reverb", "version": "1.0.0"})], "a plugin package by its version");
+    let (title, message, choices) = r.notice.clone().unwrap();
+    assert_eq!((title.as_str(), choices.as_slice()), ("Remove Example Reverb?", ["Cancel".to_string(), "Remove anyway".to_string()].as_slice()));
+    assert_eq!(message, "Used by: Wicked Synths (87 items), 3 of your own. What uses it will not work until it is installed again.");
+    r.answer_notice("Remove anyway");
+    assert_eq!(r.e.methods(), ["packages.removal"], "nothing is removed before the second answer");
+    let (title, message, choices) = r.notice.clone().unwrap();
+    assert_eq!(title, "Also remove what nothing else uses?");
+    assert_eq!(message, "example strings (1.2 MB)");
+    assert_eq!(choices, ["Keep them", "Remove them too", "Cancel"]);
+    r.answer_notice("Remove them too");
+    assert_eq!(r.e.called("packages.uninstall"), [json!({"id": "org.example.reverb", "version": "1.0.0", "evenIfUsed": true, "withUnused": ["org.example.strings"]})]);
+    assert_eq!(labels(r.ui()), ["Field Recordings", LONG, "Wicked Synths"], "both are gone");
+    // Keep them: the package alone.
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 });
+    r.tool("Remove");
+    r.answer_notice("Remove anyway");
+    r.answer_notice("Keep them");
+    assert_eq!(r.e.called("packages.uninstall"), [json!({"id": "org.example.reverb", "version": "1.0.0", "evenIfUsed": true})]);
+    assert_eq!(labels(r.ui()), ALL[1..], "its dependency stays");
+}
+
+// What `packages.uninstall` removed may show a moment longer: the lists are read again, soon, until it is gone, every
+// row faint meanwhile, and not at all after (P2).
+#[test]
+fn a_removal_is_followed_until_the_package_is_gone() {
     let mut r = installed();
     r.e.uninstall_lag = 3;
     r.act(Action::Move { pane: None, by: 1 });
-    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
+    r.act(Action::Move { pane: None, by: 4 }); // Wicked Synths
     r.e.calls.clear();
     r.tool("Remove");
     r.answer_notice("Remove");
-    assert_eq!(r.e.methods(), ["library.uninstall", "packages.installed", "library.libraries"]);
-    assert_eq!(r.delayed, [("library.libraries".to_string(), std::time::Duration::from_millis(200))], "still listed: read again later, not at once");
-    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "accepted is not gone");
+    assert_eq!(r.e.methods(), ["packages.removal", "packages.uninstall", "packages.installed", "library.libraries"]);
+    let later = std::time::Duration::from_millis(200);
+    assert_eq!(r.delayed, [("packages.installed".to_string(), later), ("library.libraries".to_string(), later)], "still listed: read again later, not at once");
+    assert!(labels(r.ui()).contains(&"Wicked Synths".to_string()), "removed is not gone");
     assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint until it is gone");
     r.later_all();
-    assert_eq!(r.e.called("library.libraries").len(), 4, "three stale reads, then the one without it");
+    assert_eq!(r.e.called("packages.installed").len(), 4, "three stale reads, then the one without it");
     assert!(!labels(r.ui()).contains(&"Wicked Synths".to_string()));
     assert!(rows(r.ui()).iter().all(|x| !x.off));
-    assert_eq!(r.delayed.len(), 3, "one later read for each stale answer and none after: {:?}", r.delayed);
+    assert_eq!(r.delayed.len(), 6, "a later read of both lists for each stale answer and none after: {:?}", r.delayed);
 }
 
-// Cancel leaves the library: nothing is asked, nothing read again, the row stays.
+// Cancel at either question leaves everything: nothing is asked but what removing it means, the rows stay.
 #[test]
-fn cancelling_a_libraries_remove_asks_nothing() {
+fn cancelling_a_remove_removes_nothing() {
     let mut r = installed();
-    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
-    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
+    r.act(Action::Move { pane: None, by: 1 }); // Example Reverb
     r.e.calls.clear();
     r.tool("Remove");
     r.answer_notice("Cancel");
-    assert!(r.e.calls.is_empty(), "Cancel sends nothing: {:?}", r.e.methods());
+    assert!(r.notice.is_none(), "no second question after Cancel");
+    r.tool("Remove");
+    r.answer_notice("Remove anyway");
+    r.answer_notice("Cancel");
+    assert_eq!(r.e.methods(), ["packages.removal", "packages.removal"], "Cancel removes nothing: {:?}", r.e.methods());
     assert!(r.delayed.is_empty(), "{:?}", r.delayed);
-    assert_eq!(labels(r.ui()), ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "Libraries", "Wicked Synths", "Field Recordings"]);
-    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
+    assert_eq!(labels(r.ui()), ALL);
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are not left faint");
 }
 
-// A removal the engine refuses says the reason and the row stays; a refusal is not a change, so the list is not read
-// again (P2).
+// A removal the engine refuses says the reason in its words and the row stays; a refusal is not a change, so the list
+// is not read again (P2). So does a `packages.removal` it cannot answer, with no question asked.
 #[test]
-fn a_refused_library_uninstall_says_why_and_the_row_stays() {
+fn a_refused_removal_says_why_and_the_row_stays() {
     let mut r = installed();
-    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
-    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
-    r.e.fail = vec![("library.uninstall".into(), "it is in use".into())];
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 4 }); // Wicked Synths
+    r.e.fail = vec![("packages.uninstall".into(), "the open Performance uses Wicked Synths; remove it from the Performance or open another first".into())];
     r.e.calls.clear();
     r.tool("Remove");
     r.answer_notice("Remove");
-    assert_eq!(r.e.methods(), ["library.uninstall"], "a refusal is not followed by a re-read");
-    assert!(r.danger_lines().contains(&"it is in use".to_string()), "{:?}", r.danger_lines());
-    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
+    assert_eq!(r.e.methods(), ["packages.removal", "packages.uninstall"], "a refusal is not followed by a re-read");
+    assert!(r.danger_lines().join(" ").contains("the open Performance uses Wicked Synths"), "{:?}", r.danger_lines());
+    assert_eq!(labels(r.ui()), ALL, "the row stays");
+    assert!(rows(r.ui()).iter().all(|x| !x.off));
+    // The library only library.libraries lists is no package to the engine: its words, and no question.
+    r.act(Action::Move { pane: None, by: -2 }); // Field Recordings
+    r.e.fail.clear();
+    r.tool("Remove");
+    assert!(r.notice.is_none());
+    assert!(r.danger_lines().join(" ").contains("no package lib-2 is installed"), "{:?}", r.danger_lines());
 }
 
-// A package row confirmed opens its detail: id, version, the publisher (the repository it came from), the key
+// A row confirmed opens its detail: name, id, version, the publisher (the repository it came from), the key
 // fingerprint of what signed it, as the repositories page shows a root key's; the panel is
 // the detail until Back, reaching a package by the cursor and a press, and nothing is asked (P3).
 #[test]
 fn a_packages_detail_shows_what_the_engine_reports() {
     let mut r = installed();
     let base = r.e.calls.len();
-    r.press_index(1); // org.example.reverb
+    r.press_index(0); // Example Reverb
     assert_eq!(r.e.calls.len(), base, "a press asks nothing: {:?}", r.e.methods());
     assert!(r.delayed.is_empty(), "{:?}", r.delayed);
-    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.reverb"], "the bar names the package");
+    assert_eq!(r.c.path(), ["Settings", "Installed", "Example Reverb"], "the bar names the package");
     let panel = info(r.ui());
-    assert!(panel.contains(&"org.example.reverb".to_string()), "{panel:?}");
+    assert!(panel.contains(&"Plugin".to_string()) && panel.contains(&"org.example.reverb".to_string()), "{panel:?}");
     assert!(panel.contains(&"1.0.0".to_string()), "{panel:?}");
     assert!(panel.contains(&"https://packages.oscairn.org".to_string()), "the publisher is the repository it came from: {panel:?}");
     assert!(panel.contains(&"Key fingerprint".to_string()) && panel.contains(&"6a2d d1ac f4d4 e23c".to_string()), "the key that signed it, in the reference's grouping: {panel:?}");
     assert!(!panel.join(" ").contains("Trusted"), "the engine reports no trust flag: {panel:?}");
     // A file's package, whose source is unknown: no fingerprint.
-    r.press_index(2); // org.example.strings
-    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.strings"], "the detail is the package confirmed");
+    r.press_index(1); // example strings
+    assert_eq!(r.c.path(), ["Settings", "Installed", "example strings"], "the detail is the package confirmed");
     let panel = info(r.ui()).join(" ");
-    assert!(panel.contains("org.example.strings") && panel.contains("installed from a file"), "{panel}");
+    assert!(panel.contains("Samples") && panel.contains("org.example.strings") && panel.contains("installed from a file"), "{panel}");
     assert!(!panel.contains("Key fingerprint"), "{panel}");
     assert_eq!(r.e.calls.len(), base, "another press asks nothing: {:?}", r.e.methods());
     assert!(r.delayed.is_empty(), "{:?}", r.delayed);
@@ -408,14 +475,14 @@ fn a_packages_detail_shows_what_the_engine_reports() {
 #[test]
 fn back_closes_a_packages_detail_on_the_same_row() {
     let mut r = installed();
-    r.press_index(1); // org.example.reverb
-    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.reverb"]);
+    r.press_index(1); // example strings
+    assert_eq!(r.c.path(), ["Settings", "Installed", "example strings"]);
     let base = r.e.calls.len();
     let o = r.c.back(); // the hardware Back, as the shell's go_back reaches the screen
     assert_eq!(o, crate::settings_app::Outcome::Stay, "Back closes the detail, not the page: {o:?}");
     r.settle();
     assert_eq!(r.c.path(), ["Settings", "Installed"]);
-    assert_eq!(rows(r.ui())[1].label, "org.example.reverb", "the list shows again");
+    assert_eq!(rows(r.ui())[1].label, "example strings", "the list shows again");
     assert!(rows(r.ui())[1].cursor, "the cursor is back on the same row");
     assert!(!info(r.ui()).join(" ").contains("Key fingerprint"), "the detail is closed: {:?}", info(r.ui()));
     assert_eq!(r.e.calls.len(), base, "back asks nothing: {:?}", r.e.methods());

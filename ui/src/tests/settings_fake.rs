@@ -92,10 +92,12 @@ pub struct Settings {
     pub installed_packages: Vec<Value>,
     /// The installed libraries, `library.libraries`: id, name, items.
     pub libraries: Vec<(String, String, u64)>,
-    /// How many reads of `library.libraries` still list a library after `library.uninstall` accepted it, as the engine's
-    /// handler answers `accepted` and the list changes a moment later.
+    /// What `packages.removal` answers for a package, by its id: its `dependents` and its `unused`, as the handler
+    /// words them (`{kind,id,name,version,items}` with `examples` for `own`; `{id,version,kind,name,bytes}`).
+    pub removal: Vec<(String, Vec<Value>, Vec<Value>)>,
+    /// How many reads of `packages.installed` still list what `packages.uninstall` removed.
     pub uninstall_lag: u32,
-    removing: Option<(String, u32)>,
+    removing: Option<(Vec<String>, u32)>,
     /// The trusted root keys.
     pub trusted: Vec<String>,
     /// What each address reads as, until it is added.
@@ -138,6 +140,7 @@ impl Settings {
             keys: vec![],
             repos: vec![Repo { address: "https://packages.oscairn.org".into(), name: "Oscairn".into(), key: "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into(), origin: "official".into(), enabled: true }],
             installed_packages: vec![],
+            removal: vec![],
             libraries: vec![],
             uninstall_lag: 0,
             removing: None,
@@ -185,6 +188,12 @@ impl Settings {
     }
 
     /// The handler's own check of a request's fields (json_rpc.cpp `fields`): none outside `allowed`.
+    /// What a removal takes away: the packages' records and their libraries.
+    fn forget(&mut self, ids: &[String]) {
+        self.installed_packages.retain(|x| !ids.iter().any(|i| x["id"] == i.as_str()));
+        self.libraries.retain(|l| !ids.contains(&l.0));
+    }
+
     fn fields(&self, p: &Value, allowed: &[&str]) -> Result<(), Error> {
         let Some(o) = p.as_object() else { return Err(refused(-32602, "Invalid method parameters")) };
         match o.keys().any(|k| !allowed.contains(&k.as_str())) {
@@ -405,7 +414,46 @@ impl Settings {
             }
             "packages.installed" => {
                 self.fields(p, &[])?;
+                if let Some((ids, n)) = self.removing.take() {
+                    if n == 0 {
+                        self.forget(&ids);
+                    } else {
+                        self.removing = Some((ids, n - 1));
+                    }
+                }
                 Ok(json!({"packages": self.installed_packages}))
+            }
+            "packages.removal" | "packages.uninstall" => {
+                let uninstall = method == "packages.uninstall";
+                self.fields(p, if uninstall { &["id", "version", "withUnused", "evenIfUsed"] } else { &["id", "version"] })?;
+                let id = p["id"].as_str().unwrap_or_default().to_string();
+                let part = |x: &Value, bytes: bool| {
+                    let mut o = json!({"id": x["id"], "version": x["version"], "kind": x["kind"], "name": x["name"]});
+                    if bytes {
+                        o["bytes"] = x.get("bytes").cloned().unwrap_or(json!(0));
+                    }
+                    o
+                };
+                let Some(package) = self.installed_packages.iter().find(|x| x["id"] == id.as_str() && (p["version"].is_null() || x["version"] == p["version"])).cloned() else {
+                    return Err(refused(-32005, &format!("Performance: no package {id} is installed")));
+                };
+                let (dependents, unused) = self.removal.iter().find(|r| r.0 == id).map(|r| (r.1.clone(), r.2.clone())).unwrap_or_default();
+                if !uninstall {
+                    return Ok(json!({"package": part(&package, true), "dependents": dependents, "unused": unused}));
+                }
+                if !dependents.is_empty() && p["evenIfUsed"] != json!(true) {
+                    let names: Vec<&str> = dependents.iter().filter_map(|d| d["name"].as_str()).collect();
+                    return Err(refused(-32005, &format!("Performance: {} is used by {}; nothing was removed", package["name"].as_str().unwrap_or_default(), names.join(", "))));
+                }
+                let mut removed = vec![part(&package, false)];
+                removed.extend(unused.iter().filter(|u| p["withUnused"] == json!(true) || p["withUnused"].as_array().is_some_and(|w| w.contains(&u["id"]))).map(|u| part(u, false)));
+                let ids: Vec<String> = removed.iter().filter_map(|r| r["id"].as_str().map(String::from)).collect();
+                if self.uninstall_lag == 0 {
+                    self.forget(&ids);
+                } else {
+                    self.removing = Some((ids, self.uninstall_lag));
+                }
+                Ok(json!({"removed": removed}))
             }
             "packages.preinstalled" => {
                 self.fields(p, &[])?;
@@ -444,28 +492,8 @@ impl Settings {
             m if m.starts_with("packages.") => self.packages(m, p),
             "library.libraries" => {
                 self.fields(p, &[])?;
-                if let Some((id, n)) = self.removing.take() {
-                    if n == 0 {
-                        self.libraries.retain(|l| l.0 != id);
-                    } else {
-                        self.removing = Some((id, n - 1));
-                    }
-                }
                 let list: Vec<Value> = self.libraries.iter().map(|(id, name, items)| json!({"id": id, "name": name, "items": items})).collect();
                 Ok(json!({"libraries": list}))
-            }
-            "library.uninstall" => {
-                self.fields(p, &["library"])?;
-                let id = p["library"].as_str().unwrap_or_default().to_string();
-                if !self.libraries.iter().any(|l| l.0 == id) {
-                    return Err(refused(-32005, "no such library installed"));
-                }
-                if self.uninstall_lag == 0 {
-                    self.libraries.retain(|l| l.0 != id);
-                } else {
-                    self.removing = Some((id, self.uninstall_lag));
-                }
-                Ok(json!({"accepted": true}))
             }
             _ => Err(refused(-32601, "Method not found")),
         }

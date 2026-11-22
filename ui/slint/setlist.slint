@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Setlist screen (src/setlist.rs): the setlists on the left, the open setlist's slots on the
-// right, a view of them at a time (a grid as the setlist's display says, or a list), Previous and
-// Next under them. Each pane's cursor is a border; the slot playing is marked apart from it.
+// The Setlist screen (src/setlist.rs): under the top bar one row, the setlist bar (the setlists' dropdown, the open
+// setlist's banks' dropdown, Previous and Next, which show the bank before or after, and at the right what the screen
+// says and which slots show), in the place and height of the Library's row; under it the shown bank's slots over the
+// whole width, a view of them at a time (a grid as the setlist's display says, or a list). The cursor is a border,
+// on a stop of the bar or on a slot; the slot playing is marked apart from it.
 
-import { Theme, Section, Button, Cursor, RowMark, RowStyle } from "theme.slint";
+import { Theme, Section, Button, Field, Cursor, RowMark, RowStyle } from "theme.slint";
 import { Loading } from "loading.slint";
 
-export struct ListRow {
-    name: string,
+// A stop of the setlist bar: a dropdown (what it shows now; a press opens its list) or a button.
+export struct BarStop {
+    text: string,
+    drop: bool,
+    enabled: bool,
     cursor: bool,
-    shown: bool, // the setlist open on the right
 }
 
 export struct SlotData {
@@ -27,82 +31,121 @@ export struct SlotData {
 
 // What the Setlist shows, set by setlist.rs.
 export global SetlistState {
-    in property <[ListRow]> setlists;
+    in property <[BarStop]> bar;
     in property <[SlotData]> slots;
     in property <string> name;
-    in property <string> page;
-    in property <string> view; // which slots of the page show: "1–12 of 30"
+    in property <string> view; // which slots of the bank show: "1–12 of 30"
     in property <string> message;
     in property <bool> grid;
     in property <int> columns: 4;
     in property <int> rows: 3;
-    in property <bool> can-previous;
-    in property <bool> can-next;
-    // How many rows of setlists, and how many slots, the screen holds: set by the screen.
-    in-out property <int> list-rows: 1;
+    // How many slots the screen holds: set by the screen.
     in-out property <int> slots-per-view: 1;
     callback tapped-slot(int);
-    callback tapped-setlist(int);
-    callback step(int);
-    callback play(); // open Play
-    callback resized(); // the views' sizes changed (the window, or the theme's paddings): shown again
+    callback tapped-stop(int);
+    callback resized(); // the view's size changed (the window, or the theme's paddings): shown again
 }
 
 export component Setlist inherits Rectangle {
-    // The sections' gap (none in a theme whose sections join); the list's width and a slot's row height (Setlist.cpp's).
+    // The sections' gap (none in a theme whose sections join); a list view's slot is a touch target and a margin over
+    // and under it high, and its number has a touch target and the paddings.
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> row-height: Theme.touch;
-    property <length> list-width: 280px;
-    property <length> line: 24px; // the message line above the buttons
-    property <length> number-column: 64px; // a list view's room for the slot's number
-    property <length> slot-row: 56px; // a slot's height in the list view
-    property <length> footer: Theme.touch + line + Theme.gap;
-    property <length> slots-x: list-width + 2 * Theme.margin;
-    property <length> slots-width: self.width - slots-x - Theme.margin;
-    property <length> slots-height: self.height - footer - 2 * Theme.margin - Theme.gap;
+    property <length> number-column: Theme.touch + 2 * Theme.pad;
+    property <length> slot-row: Theme.touch + 2 * Theme.margin;
+    // The bar's stops: a dropdown a quarter of the row at most, a button the theme's small button.
+    property <length> row-width: self.width - 2 * Theme.margin;
+    property <length> drop-width: min(2.4 * Theme.button-width, root.row-width * 0.25);
+    property <length> step-width: min(Theme.button-width, root.row-width * 0.125);
+    property <length> stops-width: 2 * (root.drop-width + root.step-width) + 4 * Theme.margin;
+    property <length> slots-y: Theme.margin + Theme.touch + Theme.gap;
+    property <length> slots-height: self.height - slots-y - Theme.margin;
     property <int> across: SetlistState.grid ? SetlistState.columns : 1;
     property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + gap) / (slot-row + gap)));
-    property <length> cell-width: (slots-width - (across - 1) * gap) / across;
+    property <length> cell-width: (row-width - (across - 1) * gap) / across;
     property <length> cell-height: SetlistState.grid ? (slots-height - (down - 1) * gap) / down : slot-row;
-    // The sizes setlist.rs pages by: settled whenever the screen's size or the setlist's display changes.
+    // The size setlist.rs pages by: settled whenever the screen's size or the setlist's display changes.
     changed down => { SetlistState.slots-per-view = across * down; SetlistState.resized(); }
     changed across => { SetlistState.slots-per-view = across * down; SetlistState.resized(); }
-    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap))); SetlistState.resized(); }
     init => {
         SetlistState.slots-per-view = across * down;
-        SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap)));
     }
 
-    for row[i] in SetlistState.setlists: Section {
-        x: Theme.margin;
-        y: Theme.margin + i * (root.row-height + root.gap);
-        width: root.list-width;
-        height: root.row-height;
-        fill: row.shown ? Theme.raised : Theme.surface;
-        Text {
-            x: Theme.pad-wide;
-            width: parent.width - 2 * Theme.pad-wide;
-            vertical-alignment: center;
-            overflow: elide;
-            font-size: Theme.body;
-            font-weight: row.shown ? 700 : 400;
-            color: Theme.text;
-            text: row.name;
+    for stop[i] in SetlistState.bar: Rectangle {
+        x: Theme.margin + min(i, 2) * (root.drop-width + Theme.margin) + max(0, i - 2) * (root.step-width + Theme.margin);
+        y: Theme.margin;
+        width: stop.drop ? root.drop-width : root.step-width;
+        height: Theme.touch;
+        accessible-role: button;
+        accessible-label: stop.text;
+        accessible-enabled: stop.enabled;
+        if stop.drop: Field {
+            opacity: stop.enabled ? 1 : Theme.disabled;
+            Text {
+                x: Theme.pad;
+                width: parent.width - 2 * Theme.pad - Theme.icon;
+                height: parent.height;
+                vertical-alignment: center;
+                overflow: elide;
+                font-size: Theme.body;
+                color: Theme.text;
+                text: stop.text;
+            }
+            Image {
+                x: parent.width - Theme.pad - self.width;
+                y: (parent.height - self.height) / 2;
+                width: Theme.icon * 0.7;
+                height: Theme.icon * 0.7;
+                source: @image-url("icons/chevron-down.svg");
+                colorize: Theme.muted;
+            }
+            TouchArea {
+                enabled: stop.enabled;
+                clicked => { SetlistState.tapped-stop(i); }
+            }
         }
-        TouchArea {
-            clicked => { SetlistState.tapped-setlist(i); }
+        if !stop.drop: Button {
+            text: stop.text;
+            enabled: stop.enabled;
+            clicked => { SetlistState.tapped-stop(i); }
         }
         Cursor {
-            shown: row.cursor;
+            corner: stop.drop ? Theme.field-radius(parent.height) : Theme.button-radius(parent.height);
+            shown: stop.cursor;
         }
+    }
+    // The bar's right end, two lines: what the screen says (the slots' count, what opens, why one did not), and which
+    // of the bank's slots show.
+    Text {
+        x: Theme.margin + root.stops-width;
+        y: Theme.margin;
+        width: root.row-width - root.stops-width;
+        height: Theme.touch / 2;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: SetlistState.message;
+    }
+    Text {
+        x: Theme.margin + root.stops-width;
+        y: Theme.margin + Theme.touch / 2;
+        width: root.row-width - root.stops-width;
+        height: Theme.touch / 2;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: SetlistState.view;
     }
 
     for slot[i] in SetlistState.slots: Section {
         property <color> base: slot.playing ? Theme.raised : Theme.surface;
         property <bool> odd: !SetlistState.grid && mod(i, 2) == 1;
         property <color> lifted: Theme.row-base(self.base, self.odd);
-        x: root.slots-x + mod(i, root.across) * (root.cell-width + root.gap);
-        y: Theme.margin + floor(i / root.across) * (root.cell-height + root.gap);
+        x: Theme.margin + mod(i, root.across) * (root.cell-width + root.gap);
+        y: root.slots-y + floor(i / root.across) * (root.cell-height + root.gap);
         width: root.cell-width;
         height: root.cell-height;
         // The item's color where the theme puts it (drawListRow): the whole slot, or a mark in it.
@@ -149,50 +192,6 @@ export component Setlist inherits Rectangle {
         }
         Cursor {
             shown: slot.cursor;
-        }
-    }
-
-    Text {
-        x: root.slots-x;
-        y: root.height - root.footer - Theme.margin;
-        width: root.slots-width * 0.55;
-        height: root.line;
-        overflow: elide;
-        font-size: Theme.small;
-        color: Theme.muted;
-        text: SetlistState.message;
-    }
-    // Which page of the setlist the slots are, and which of its slots.
-    Text {
-        x: root.slots-x + root.slots-width * 0.55;
-        y: root.height - root.footer - Theme.margin;
-        width: root.slots-width * 0.45;
-        height: root.line;
-        horizontal-alignment: right;
-        overflow: elide;
-        font-size: Theme.small;
-        color: Theme.muted;
-        text: SetlistState.page + "   " + SetlistState.view;
-    }
-    HorizontalLayout {
-        x: root.slots-x;
-        y: root.height - Theme.margin - Theme.touch;
-        width: root.slots-width;
-        height: Theme.touch;
-        spacing: Theme.gap;
-        Button {
-            text: "Previous";
-            enabled: SetlistState.can-previous;
-            clicked => { SetlistState.step(-1); }
-        }
-        Button {
-            text: "Next";
-            enabled: SetlistState.can-next;
-            clicked => { SetlistState.step(1); }
-        }
-        Button {
-            text: "Play";
-            clicked => { SetlistState.play(); }
         }
     }
 }

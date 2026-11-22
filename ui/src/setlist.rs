@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The Setlist screen, from the prototype (branch experiment/rust-setlist) onto the shell: two
-//! panes, the setlists on the left and the open setlist's slots on the right, each with a cursor
-//! of its own (the panel's pane 0 and pane 1; the VALUE dial moves the pane last touched). A
-//! setlist as docs/setlist-format.md has it (version 2); Previous and Next as
-//! hosts/standalone/Setlist.cpp does them: slots numbered across pages, empty slots passed over,
+//! The Setlist screen, from the prototype (branch experiment/rust-setlist) onto the shell: under
+//! the top bar one row, the setlist bar (a dropdown of the setlists, a dropdown of the open
+//! setlist's banks, its `pages`, then Previous and Next, which show the bank before or after and
+//! open nothing), and under it the shown bank's slots over the whole width. One cursor: on the
+//! bar's stops (the panel's pane 0) or on the slots (pane 1); the VALUE dial and the arrows walk
+//! from one into the other. A setlist as docs/setlist-format.md has it (version 2); stepping to
+//! the previous or next song (`step_by`: Play's buttons, the page keys) as
+//! hosts/standalone/Setlist.cpp does it: slots numbered across pages, empty slots passed over,
 //! a placeholder or a Performance not in the library stopped at. A slot asked for while another
 //! opens opens next, the last one chosen winning (as the JUCE Engine queues library loads).
 //! Slots show a view at a time: the cursor leaving it turns a whole view, never scrolling.
 
+use crate::menu::Item;
 use crate::nav::{Action, Cursor};
-use crate::{ListRow, SetlistState, Shell, SlotData};
+use crate::{BarStop, SetlistState, Shell, SlotData};
 use serde_json::{json, Value};
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
@@ -108,6 +112,15 @@ impl Setlist {
     }
 }
 
+/// The setlist bar's stops, from the left: the setlists' dropdown, the banks' dropdown, Previous, Next.
+const STOPS: usize = 4;
+
+/// A bank's name as its dropdown says it: the page's own, or its number.
+fn bank_name(s: &Setlist, page: usize) -> String {
+    let name = &s.pages[page].name;
+    if name.is_empty() { format!("Bank {}", page + 1) } else { name.clone() }
+}
+
 /// What the screen asks the engine, so its answer comes back to it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
@@ -139,14 +152,17 @@ struct Performance {
 pub struct Screen {
     ui: slint::Weak<Shell>,
     setlists: Vec<(String, String)>, // id, name
-    lists: Cursor,                    // pane 0
+    bar: Cursor,                      // pane 0: the setlist bar's stops (`STOPS`)
     setlist: Option<Setlist>,
     performances: HashMap<String, Performance>,
     whole: bool, // every Performance listed: one not among them is missing
     page: usize,
     slots: Cursor, // pane 1, over the page's slots, a view at a time
-    /// The pane the dial moves: the one last touched (0 the setlists, 1 the slots).
+    /// The pane the dial moves: the one the cursor is in (0 the setlist bar, 1 the slots).
     touched: u8,
+    /// A dropdown's list for the shell to open as the menu, and whether the one asked for is the banks'.
+    menu: Option<(String, Vec<Item>)>,
+    banks_menu: bool,
     current: Option<usize>,
     opening: bool,
     /// The slot the engine is opening (`current` may already be a later one waiting).
@@ -154,7 +170,7 @@ pub struct Screen {
     queued: Option<usize>,
     /// A load the engine refused as busy is to be asked again after `BUSY_RETRY` (the shell sets the timer).
     retry_wanted: bool,
-    names: Rc<VecModel<ListRow>>,
+    stops: Rc<VecModel<BarStop>>,
     rows: Rc<VecModel<SlotData>>,
     state_file: Option<PathBuf>,
     restore: Option<(String, Option<usize>)>,
@@ -189,28 +205,30 @@ pub fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, want: Vec<T>)
 
 impl Screen {
     pub fn new(window: &Shell, state_file: Option<PathBuf>) -> Screen {
-        let names = Rc::new(VecModel::default());
+        let stops = Rc::new(VecModel::default());
         let rows = Rc::new(VecModel::default());
         let state = window.global::<SetlistState>();
-        state.set_setlists(ModelRc::from(names.clone()));
+        state.set_bar(ModelRc::from(stops.clone()));
         state.set_slots(ModelRc::from(rows.clone()));
         let restore = state_file.as_deref().and_then(read_state);
         Screen {
             ui: window.as_weak(),
             setlists: vec![],
-            lists: Cursor::new(0, 1),
+            bar: Cursor::new(STOPS, STOPS),
             setlist: None,
             performances: HashMap::new(),
             whole: false,
             page: 0,
             slots: Cursor::new(0, 1),
             touched: 1,
+            menu: None,
+            banks_menu: false,
             current: None,
             opening: false,
             opening_index: None,
             queued: None,
             retry_wanted: false,
-            names,
+            stops,
             rows,
             state_file,
             restore,
@@ -271,7 +289,6 @@ impl Screen {
                 self.setlists = r["items"].as_array().map(|items| items.iter().map(|i| (text(i, "id"), text(i, "name"))).collect()).unwrap_or_default();
                 let open = self.setlist.as_ref().map(|s| s.id.clone()).or(self.restore.as_ref().map(|r| r.0.clone()));
                 let at = self.setlists.iter().position(|s| Some(&s.0) == open.as_ref()).unwrap_or(0);
-                self.lists = Cursor { at: self.lists.at.map(|a| a.min(self.setlists.len().saturating_sub(1))), count: self.setlists.len(), ..self.lists };
                 match self.setlists.get(at) {
                     Some((id, _)) => {
                         let id = id.clone();
@@ -387,16 +404,21 @@ impl Screen {
     fn show(&mut self) {
         let Some(ui) = self.ui.upgrade() else { return };
         let state = ui.global::<SetlistState>();
-        // The views' sizes, which the window works out (rows of setlists; slots a view holds).
-        let names: Vec<ListRow> = self.setlists.iter().enumerate().map(|(i, s)| ListRow { name: s.1.as_str().into(), cursor: self.lists.at == Some(i), shown: self.setlist.as_ref().is_some_and(|o| o.id == s.0) }).collect();
-        self.lists = Cursor { per_page: state.get_list_rows().max(1) as usize, ..self.lists };
-        let first_name = self.lists.first;
-        update(&self.names, names.into_iter().skip(first_name).take(self.lists.per_page).collect());
+        // The setlist bar: the two dropdowns say what is open, Previous and Next are off at the first and last bank.
+        let pages = self.setlist.as_ref().map_or(0, |s| s.pages.len());
+        let open = self.setlist.as_ref().map(|s| if s.name.is_empty() { "Untitled" } else { s.name.as_str() });
+        let bank = self.setlist.as_ref().map_or(String::new(), |s| format!("{}  {}/{pages}", bank_name(s, self.page), self.page + 1));
+        let stop = |i: usize, text: &str, drop: bool, enabled: bool| BarStop { text: text.into(), drop, enabled, cursor: self.bar.at == Some(i) };
+        let stops = vec![
+            stop(0, open.unwrap_or("No setlist"), true, !self.setlists.is_empty()),
+            stop(1, &bank, true, pages > 1),
+            stop(2, "Previous", false, self.page > 0),
+            stop(3, "Next", false, self.page + 1 < pages),
+        ];
+        update(&self.stops, stops);
         let Some(s) = self.setlist.as_ref() else { return };
         state.set_name(if s.name.is_empty() { "Untitled".into() } else { s.name.as_str().into() });
         let page = &s.pages[self.page];
-        let name = if page.name.is_empty() { format!("Page {}", self.page + 1) } else { page.name.clone() };
-        state.set_page(format!("{name}  ({}/{})", self.page + 1, s.pages.len()).into());
         state.set_grid(s.grid);
         state.set_columns(s.columns as i32);
         state.set_rows(s.rows as i32);
@@ -410,8 +432,6 @@ impl Screen {
         let rows: Vec<SlotData> = (start..end).map(|i| self.row(i, self.slots.at.map(|a| s.first(self.page) + a) == Some(i))).collect();
         update(&self.rows, rows);
         state.set_view(format!("{}–{} of {}", self.slots.first + 1, self.slots.first + (end - start), page.slots.len()).into());
-        state.set_can_previous(self.current.is_some() && s.step(self.current, -1).is_some());
-        state.set_can_next(s.step(self.current, 1).is_some());
     }
 
     fn keep(&self) {
@@ -476,9 +496,12 @@ impl Screen {
         }
     }
 
-    /// The slots' cursor by `by`, onto the setlist's next or last page past either end of this one.
-    fn move_slots(&mut self, by: i64) {
+    /// The slots' cursor by `by`, onto the setlist's next or last page past either end of this one; `joined` (the
+    /// dial, the arrows): up out of the first bank's first slot onto the setlist bar's last stop. The bar's drops: one cursor.
+    fn move_slots(&mut self, by: i64, joined: bool) {
         let Some(s) = self.setlist.as_ref() else { return };
+        self.touched = 1;
+        self.bar = self.bar.clear();
         let count = s.pages[self.page].slots.len() as i64;
         let at = self.slots.at.map(|a| a as i64);
         match at {
@@ -491,39 +514,94 @@ impl Screen {
                 let count = s.pages[self.page].slots.len();
                 self.slots = Cursor { count, ..self.slots }.to(count.saturating_sub(1));
             }
+            Some(a) if a + by < 0 && joined => {
+                self.slots = self.slots.clear();
+                self.touched = 0;
+                self.bar = self.bar.to(STOPS - 1);
+            }
             _ => self.slots = Cursor { count: count as usize, ..self.slots }.moved(by),
         }
+    }
+
+    /// The setlist bar's cursor by `by` (the slots' drops: one cursor); `joined`: down past its last stop into the slots.
+    fn move_bar(&mut self, by: i64, joined: bool) {
+        if joined && by > 0 && self.bar.at == Some(STOPS - 1) && self.setlist.is_some() {
+            return self.move_slots(by, false);
+        }
+        self.touched = 0;
+        self.slots = self.slots.clear();
+        self.bar = self.bar.moved(by);
+    }
+
+    /// The bank shown: nothing opens and the slot playing stays (a slot opens when it is chosen).
+    fn show_bank(&mut self, page: usize) {
+        if page != self.page && self.setlist.as_ref().is_some_and(|s| page < s.pages.len()) {
+            self.page = page;
+            self.slots = Cursor::new(0, 1);
+        }
+    }
+
+    /// A press on a stop of the setlist bar: a dropdown's list is made for the shell to open, Previous and Next
+    /// show the bank before or after. A stop that is off does nothing.
+    fn press(&mut self, stop: usize) {
+        let pages = self.setlist.as_ref().map_or(0, |s| s.pages.len());
+        match (stop, self.setlist.as_ref()) {
+            (0, open) if !self.setlists.is_empty() => {
+                let name = |n: &str| if n.is_empty() { "Untitled".to_string() } else { n.to_string() };
+                self.banks_menu = false;
+                self.menu = Some(("Setlist".into(), self.setlists.iter().enumerate().map(|(i, s)| Item::ticked(name(&s.1), i, open.is_some_and(|o| o.id == s.0))).collect()));
+            }
+            (1, Some(s)) if pages > 1 => {
+                self.banks_menu = true;
+                self.menu = Some(("Bank".into(), (0..pages).map(|i| Item::ticked(bank_name(s, i), i, i == self.page)).collect()));
+            }
+            (2, _) if self.page > 0 => self.show_bank(self.page - 1),
+            (3, _) => self.show_bank(self.page + 1),
+            _ => {}
+        }
+    }
+
+    /// A dropdown's list to open over the screen (taken: the shell opens it as the menu).
+    pub fn take_menu(&mut self) -> Option<(String, Vec<Item>)> {
+        self.menu.take()
+    }
+
+    /// What was pressed in the dropdown: that setlist is read, or that bank is shown.
+    pub fn chosen(&mut self, id: usize) {
+        if self.banks_menu {
+            self.show_bank(id);
+        } else {
+            self.open_setlist(id);
+        }
+        self.show();
+    }
+
+    /// The cursor is on the setlist bar's first stop: the dial moving up leaves for the top bar.
+    pub fn at_top(&self) -> bool {
+        self.bar.at == Some(0)
     }
 
     /// A navigation action; Back for Cancel with no cursor.
     pub fn act(&mut self, action: Action) -> Outcome {
         let pane = |p: Option<u8>, touched: u8| p.map_or(touched, |p| p.min(1));
         match action {
-            Action::Move { pane: p, by } => {
-                self.touched = pane(p, self.touched);
-                if self.touched == 0 {
-                    self.lists = self.lists.moved(by as i64);
-                } else {
-                    self.move_slots(by as i64);
-                }
-            }
-            // As the JUCE Setlist: up and down move the slots' cursor; left, right and the page
-            // keys are Previous and Next (page turners and foot switches send them).
+            Action::Move { pane: p, by } => match pane(p, self.touched) {
+                0 => self.move_bar(by as i64, p.is_none()),
+                _ => self.move_slots(by as i64, p.is_none()),
+            },
+            // As the JUCE Setlist: up and down move the cursor (along the setlist bar's stops, then the slots); left,
+            // right and the page keys are the previous and next song (page turners and foot switches send them).
+            Action::Arrow { dy, dx: 0 } if self.bar.at.is_some() => self.move_bar(dy as i64, true),
             Action::Arrow { dy, dx: 0 } => {
-                self.touched = 1;
                 let across = if self.setlist.as_ref().is_some_and(|s| s.grid) { self.setlist.as_ref().map_or(1, |s| s.columns as i64) } else { 1 };
-                self.move_slots(dy as i64 * across);
+                self.move_slots(dy as i64 * across, true);
             }
             Action::Arrow { dx, .. } | Action::Page(dx) => self.step(dx as i64),
-            Action::End(by) => {
-                self.touched = 1;
-                self.move_slots(by as i64 * 10_000);
-            }
+            Action::End(by) => self.move_slots(by as i64 * 10_000, false),
             Action::Confirm(p) => match pane(p, self.touched) {
                 0 => {
-                    if let Some(at) = self.lists.at {
-                        self.lists = self.lists.clear();
-                        self.open_setlist(at);
+                    if let Some(at) = self.bar.at {
+                        self.press(at);
                     }
                 }
                 _ => {
@@ -534,10 +612,10 @@ impl Screen {
                 }
             },
             Action::Cancel(_) => {
-                if self.lists.at.is_none() && self.slots.at.is_none() {
+                if self.bar.at.is_none() && self.slots.at.is_none() {
                     return Outcome::Back;
                 }
-                self.lists = self.lists.clear();
+                self.bar = self.bar.clear();
                 self.slots = self.slots.clear();
             }
         }
@@ -545,26 +623,28 @@ impl Screen {
         Outcome::Stay
     }
 
-    /// A tap on a slot of the view, or a setlist of the list shown: what Confirm does, the cursors gone.
+    /// A tap on a slot of the view, or on a stop of the setlist bar: what Confirm does, the cursor gone.
     pub fn tap_slot(&mut self, row: usize) {
+        self.bar = self.bar.clear();
         self.slots = self.slots.clear();
         let Some(s) = self.setlist.as_ref() else { return };
         let index = s.first(self.page) + self.slots.first + row;
         self.go(index);
     }
 
-    pub fn tap_setlist(&mut self, row: usize) {
-        self.lists = self.lists.clear();
-        self.open_setlist(self.lists.first + row);
+    pub fn tap_stop(&mut self, stop: usize) {
+        self.bar = self.bar.clear();
+        self.slots = self.slots.clear();
+        self.press(stop);
         self.show();
     }
 
+    /// The previous (-1) or next (1) song of the setlist: Play's Previous and Next and its page keys.
     pub fn step_by(&mut self, by: i64) {
         self.step(by);
     }
 
-    /// The screen's own action the top bar carries: Play, which opens Play (the footer's button
-    /// plays it by touch; the bar's cursor reaches it without).
+    /// The screen's own action the top bar carries: Play, which opens Play.
     pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
         vec![crate::topbar::Tool::new("Play")]
     }
@@ -576,7 +656,7 @@ impl Screen {
 
     /// The cursors drop when the screen goes, as on focus loss in the JUCE lists.
     pub fn hidden(&mut self) {
-        self.lists = self.lists.clear();
+        self.bar = self.bar.clear();
         self.slots = self.slots.clear();
         self.show();
     }

@@ -351,9 +351,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     keys.on_control(|i| with_app(|a| a.piano_control(i.max(0) as usize)));
     let lists = ui.global::<SetlistState>();
     lists.on_tapped_slot(|i| with_app(|a| a.on_setlist(|s| s.tap_slot(i.max(0) as usize))));
-    lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
-    lists.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
-    lists.on_play(|| with_app(|a| a.go(Screen::Play)));
+    lists.on_tapped_stop(|i| with_app(|a| a.on_setlist(|s| s.tap_stop(i.max(0) as usize))));
     lists.on_resized(|| with_app(|a| a.on_setlist(setlist::Screen::shown)));
     let play = ui.global::<PlayState>();
     play.on_scene_tapped(|i| with_app(|a| a.on_play(|p| p.tap_scene(i))));
@@ -1568,6 +1566,7 @@ impl App {
             Screen::Params => self.params.at_top(),
             Screen::Library => self.library.at_top(),
             Screen::Settings => self.settings.at_top(),
+            Screen::Setlist => self.setlist.at_top(),
             _ => false,
         }
     }
@@ -1614,11 +1613,14 @@ impl App {
         self.send(Request::View, "controllers.view", json!({"lists": lists}));
     }
 
-    /// Something for the Setlist screen, then what it asks the engine sent.
+    /// Something for the Setlist screen, then what it asks the engine sent, and a dropdown's list it has ready opened.
     fn on_setlist(&mut self, f: impl FnOnce(&mut setlist::Screen)) {
         f(&mut self.setlist);
         for (request, method, params) in std::mem::take(&mut self.setlist.out) {
             self.send(Request::Setlist(request), method, params);
+        }
+        if let Some((title, items)) = self.setlist.take_menu() {
+            self.open_menu(Screen::Setlist, &title, items);
         }
         if self.setlist.take_retry() {
             slint::Timer::single_shot(crate::client::BUSY_RETRY, || with_app(|a| a.on_setlist(setlist::Screen::retry)));
@@ -1801,6 +1803,9 @@ impl App {
                     }
                     self.show_bar();
                     return;
+                }
+                if screen == Some(Screen::Setlist) {
+                    self.on_setlist(|s| s.chosen(id));
                 }
                 if screen == Some(Screen::Controls) {
                     self.on_controls(|c| c.chosen(id));

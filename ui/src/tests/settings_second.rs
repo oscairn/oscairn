@@ -241,18 +241,15 @@ fn installed() -> Rig {
 }
 
 // The packages and the libraries, each a row under its section's heading, by name and version (the packages) or name
-// and item count (the libraries); a long name is cut with an ellipsis in its row, whole on the panel, which also
+// and item count (the libraries); a long name is the row's to fit, whole on the panel, which also
 // says the publisher (the repository it came from) (P1).
 #[test]
 fn the_installed_lists_packages_and_libraries() {
     let mut r = installed();
     assert_eq!(r.e.methods(), ["packages.installed", "library.libraries"]);
     let all = labels(r.ui());
-    assert_eq!(all, ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPack…", "Libraries", "Wicked Synths", "Field Recordings"]);
+    assert_eq!(all, ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "Libraries", "Wicked Synths", "Field Recordings"]);
     assert_eq!((value_of(r.ui(), "org.example.reverb"), value_of(r.ui(), "Wicked Synths"), value_of(r.ui(), "Field Recordings")), ("1.0.0".to_string(), "12 items".to_string(), "34 items".to_string()));
-    let long = &all[3];
-    assert_eq!(long.chars().count(), 34, "a long name is cut"); // "org.example.a.WonderfullyLongPackage" and an ellipsis
-    assert!(long.ends_with('…'), "{long}");
     r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the packages' heading
     r.act(Action::Move { pane: None, by: 3 });
     let panel = info(r.ui());
@@ -360,7 +357,7 @@ fn cancelling_a_libraries_remove_asks_nothing() {
     r.answer_notice("Cancel");
     assert!(r.e.calls.is_empty(), "Cancel sends nothing: {:?}", r.e.methods());
     assert!(r.delayed.is_empty(), "{:?}", r.delayed);
-    assert_eq!(labels(r.ui()), ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPack…", "Libraries", "Wicked Synths", "Field Recordings"]);
+    assert_eq!(labels(r.ui()), ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "Libraries", "Wicked Synths", "Field Recordings"]);
     assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
 }
 

@@ -2,8 +2,8 @@
 //! The Settings app's Installed page (ui/SETTINGS-APP.md P, the reference's `notBuilt` "Installed content" page, RFC
 //! 0006): what is installed on this device, read once when the page is shown and never on a timer — the packages
 //! `packages.installed` reports (each signed and from a repository where the handler says so) and the libraries
-//! `library.libraries` (by name and their item count), in two sections under shared heading rows. A long name is cut
-//! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row.
+//! `library.libraries` (by name and their item count), in two sections under shared heading rows. A long name is the
+//! row's to fit, the panel wraps the whole one. A refusal or a lost connection is the app's usual failed row.
 //! Confirming a package row opens its detail in the panel (id, version, the publisher and the key fingerprint of what
 //! signed it; Back closes it on the same row; no trust flag, which the handler does not report), and a library row is removed with the bar's Remove..., asked first as
 //! the repositories page asks before Remove; the protocol reports no library that cannot be removed, so every one is
@@ -20,18 +20,6 @@ use std::time::Duration;
 /// How often, and how soon after, the list is read while an accepted removal still shows (5 s at most).
 const FOLLOW: u32 = 25;
 const FOLLOW_AFTER: Duration = Duration::from_millis(200);
-
-/// A name too wide for a row is cut with an ellipsis; the panel keeps the whole one.
-fn cut(name: &str) -> String {
-    const WIDTH: usize = 34;
-    if name.chars().count() <= WIDTH {
-        name.to_string()
-    } else {
-        let mut s: String = name.chars().take(WIDTH - 1).collect();
-        s.push('…');
-        s
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step {
@@ -214,8 +202,8 @@ impl Page for Installed {
                 Row::PackagesHead | Row::LibrariesHead => faint(row(heading(r), "")),
                 Row::NonePackages => faint(row("No packages installed", "")),
                 Row::NoneLibraries => faint(row("No libraries", "")),
-                Row::Package(i) => faint(row(cut(&self.packages[i].id), self.packages[i].version.as_str())),
-                Row::Library(i) => faint(row(cut(&self.libraries[i].name), format!("{} {}", self.libraries[i].items, if self.libraries[i].items == 1 { "item" } else { "items" }))),
+                Row::Package(i) => faint(row(&self.packages[i].id, self.packages[i].version.as_str())),
+                Row::Library(i) => faint(row(&self.libraries[i].name, format!("{} {}", self.libraries[i].items, if self.libraries[i].items == 1 { "item" } else { "items" }))),
             })
             .collect()
     }
@@ -256,7 +244,8 @@ impl Page for Installed {
             Some(Row::Package(i)) => lines.extend(package_lines(&self.packages[*i], false)),
             Some(Row::Library(i)) => {
                 let l = &self.libraries[*i];
-                lines.push(head(&l.name));
+                lines.push(head("Library"));
+                lines.extend(crate::library::files::wrap_path(&l.name, crate::library::INFO_WIDTH).iter().map(|l| line(l)));
                 lines.push(head("Items"));
                 lines.push(line(&l.items.to_string()));
             }

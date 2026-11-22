@@ -54,7 +54,7 @@ impl Shelf {
                 "subscribe" | "unsubscribe" | "controllers.view" | "memory.shell" => json!({"accepted": true}),
                 "performance.reopen" => json!({"notice": ""}),
                 "library.query" => json!({"items": [], "total": 0}),
-                "packages.installed" => json!({"packages": []}),
+                "packages.installed" => json!({"packages": self.e.installed_packages}),
                 "record.takes" | "memory.state" | "transport.get" => json!({}), // the shell's own polls after a status
                 _ => match self.e.handle(&method, &request["params"]) {
                     Ok(r) => r,

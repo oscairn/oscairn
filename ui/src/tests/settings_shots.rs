@@ -115,3 +115,33 @@ fn pictures_of_the_settings_app() {
     }
     let _ = folder("shots");
 }
+
+// The Installed page on the keyboard's window, dark: the list, a package's detail and the Remove question
+// (target/screens/settings-installed-{list,detail,remove}.png).
+#[test]
+fn pictures_of_the_installed_page() {
+    fit_to_window();
+    let mut s = Shelf::on("sp-installed", Some("fantom-07"), busy_engine());
+    let ui = s.ui();
+    shell::settings_in_rust(true);
+    shell::set_text_on_screen(false);
+    s.f.screen.resize(1280, 720);
+    s.f.screen.set_scale(1.55);
+    theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Settings);
+    s.serve();
+    let at = crate::tests::settings::tabs(&ui).iter().position(|p| p == "Installed").unwrap() as i32;
+    ui.global::<crate::SettingsState>().invoke_show_page(at);
+    s.serve();
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Move { pane: None, by: 1 });
+    shoot(&mut s, "settings-installed-list");
+    shell::act(Action::Confirm(None));
+    shoot(&mut s, "settings-installed-detail");
+    shell::act(Action::Cancel(None));
+    shell::act(Action::Move { pane: None, by: 4 });
+    bar_do(&mut s, "Remove");
+    shoot(&mut s, "settings-installed-remove");
+    assert!(ui.global::<NoticeState>().get_open());
+}

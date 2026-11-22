@@ -107,6 +107,9 @@ export global Theme {
     out property <length> body: 16px * font-scale;
     out property <length> button: 15px * font-scale;
     out property <length> title: 20px * font-scale;
+    // Read from playing distance (a Setlist slot's name): in a tile, where it steps down for a name that does not fit, and in a list row.
+    out property <length> display: 32px * font-scale;
+    out property <length> headline: 26px * font-scale;
     // Sizes with no theme property: touch targets (RFC 0019).
     out property <length> bar-height: 48px;
     out property <length> touch: 44px;

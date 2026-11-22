@@ -488,10 +488,16 @@ pub fn attach(window: &Shell) {
     window.global::<Theme>().on_row_fill(row_fill);
 }
 
+/// The ink for large text on a box of the color `c` (a Setlist slot's name): white wherever it reads as large text does
+/// (3 to 1, WCAG's threshold for it), black only on a color too light for that.
+pub(crate) fn white_first(c: Color) -> Color {
+    if contrast(Color::from_rgb_u8(255, 255, 255), c) >= 3. { Color::from_rgb_u8(255, 255, 255) } else { Color::from_rgb_u8(0, 0, 0) }
+}
+
 /// JUCE's `Colour::contrasting`: black on a bright color, white on a dark one.
 /// Black or white, whichever reads better on `c` by WCAG's contrast ratio (the chip's text: it must read on any warning color a
 /// theme chooses, which `contrasting`'s brightness rule does not hold for a saturated red).
-pub(crate) fn most_readable(c: Color) -> Color {
+fn most_readable(c: Color) -> Color {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.;
         if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }

@@ -323,13 +323,21 @@ sidebar and no footer.
   queues library loads; a load refused as busy (`-32009`, another client's long request) is tried
   again as the next; the next slot is prepared (`performance.prepare`).
 - **A slot's color** (its own, else its Performance's) is its whole box, in the grid and in the list,
-  whatever the theme's `rows` says; its number, name and note are black or white on it, whichever
-  reads better (`theme::most_readable`: never under 4.5 to 1). A slot without a color is the theme's
+  whatever the theme's `rows` says; its number, name and note are white on it, black only on a color
+  too light for white (`theme::white_first`: white while it is 3 to 1, the large-text threshold). A slot without a color is the theme's
   surface as before, an empty slot the background with nothing in it, a placeholder its name with
   "(placeholder)" under it. The slot playing has its name bold and, without a color, the accent edge
   and the raised fill; on a colored box, a bar of the box's ink set inside its left edge and its
   number on a chip of that ink. The cursor is the focus border, with a hairline of the box's ink
   inside it on a colored box, so neither mark depends on the color under it.
+- **The text is a stage screen's**, read from playing distance. A tile's name is the theme's
+  `display` size (32) on up to two lines, broken at a word and then cut, under the band the number
+  has at the tile's top; a name that does not fit the lines the tile has steps down to 0.8 and then
+  0.65 of it (a 4 x 4 grid at the keyboard's scale has one line). A list row's name is one line of
+  the `headline` size (26) in a row as high as before: a view holds 9 rows at 1280 x 720 and 5 at the
+  keyboard's 1.55 (a bank longer than a view, with its line under the rows). The number is the body
+  size, bold; the note (why a slot does not open) the small size, under the name. The bar's dropdowns
+  and buttons are the title size.
 - **Without touch**, one cursor: pane 0 (E1 on a FANTOM-07) moves it along the setlist bar's four
   stops, pane 1 (E6) over the slots, and each drops the other's. The VALUE dial and Up and Down walk
   through both: up out of the first bank's first slot is the bar's last stop, down past it the slots

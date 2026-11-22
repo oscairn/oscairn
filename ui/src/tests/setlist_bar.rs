@@ -11,15 +11,20 @@ use std::time::Duration;
 /// The slots' colors, by their place in a bank: a light one, a blue, a dark one, a red and a green among the plain.
 const COLORS: [&str; 12] = ["", "#ffe082", "#3366cc", "", "", "#1a237e", "#e5484d", "", "", "", "#2e7d32", ""];
 
-/// A setlist of `banks` banks of `per` slots each, as `setlists.get` answers it.
+/// A song's name: short ones, and a long one fourth.
+fn song(i: usize) -> String {
+    if i == 3 { "Somebody's Watching Me (Extended)".into() } else { format!("Song {i}") }
+}
+
+/// A setlist of `banks` banks of `per` slots each (the ninth of a bank a placeholder; `grid4`: four rows of four), as `setlists.get` answers it.
 fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json::Value {
     let pages: Vec<_> = (0..banks)
         .map(|b| {
-            let slots: Vec<_> = (0..per).map(|i| json!({"id": format!("p{}", b * per + i), "name": format!("Song {}", b * per + i), "color": COLORS[i % 12], "label": ""})).collect();
+            let slots: Vec<_> = (0..per).map(|i| json!({"id": if i == 8 { String::new() } else { format!("p{}", b * per + i) }, "name": song(b * per + i), "color": COLORS[i % 12], "label": ""})).collect();
             json!({"name": if b == 1 { String::new() } else { format!("Set {}", b + 1) }, "slots": slots})
         })
         .collect();
-    json!({"format": "oscairn.setlist", "version": 2, "info": {"id": id, "name": name}, "display": {"mode": mode, "columns": 4, "rows": 3}, "pages": pages})
+    json!({"format": "oscairn.setlist", "version": 2, "info": {"id": id, "name": name}, "display": {"mode": mode.trim_end_matches('4'), "columns": 4, "rows": if mode == "grid4" { 4 } else { 3 }}, "pages": pages})
 }
 
 /// The Setlist shown on a fake engine with `sets` setlists, the first one read (`banks` banks of `per` slots), the
@@ -30,7 +35,7 @@ fn on_setlist(name: &str, sets: usize, mode: &str, banks: usize, per: usize) -> 
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
     let setlists: Vec<_> = (0..sets).map(|i| json!({"id": format!("{name}-{}", i + 1), "name": format!("Night {}", i + 1)})).collect();
-    let performances: Vec<_> = (0..40).map(|i| json!({"id": format!("p{i}"), "name": format!("Song {i}"), "color": "", "path": format!("/lib/p{i}")})).collect();
+    let performances: Vec<_> = (0..40).map(|i| json!({"id": format!("p{i}"), "name": song(i), "color": "", "path": format!("/lib/p{i}")})).collect();
     f.serve(13, &json!({"setlists": setlists, "performances": performances, "setlist": doc(&format!("{name}-1"), "Night 1", mode, banks, per)}));
     quiet(&mut f);
     f
@@ -267,11 +272,11 @@ fn a_slots_color_is_its_whole_box() {
             // A slot's box: its left, top, width and height.
             let cell = |i: usize| (margin + (i % across as usize) as f32 * (cw + gap), top + (i / across as usize) as f32 * (ch + gap), cw, ch);
             let all = slots(&f);
-            for (i, light) in [(1, Some(true)), (2, None), (5, Some(false)), (6, None)] {
+            for (i, light) in [(1, Some(true)), (2, Some(false)), (5, Some(false)), (6, Some(false))] {
                 let (s, (x, y, w, h)) = (&all[i], cell(i));
                 let (tint, ink) = (rgb(s.tint), rgb(s.ink));
                 assert!(s.tinted && light.is_none_or(|l| ink == if l { (0, 0, 0) } else { (255, 255, 255) }), "{mode} {theme} slot {i}: its ink {ink:?}");
-                assert!(crate::palette::contrast(s.tint, s.ink) >= 4.5, "{mode} {theme} slot {i}: {}", crate::palette::contrast(s.tint, s.ink));
+                assert!(crate::palette::contrast(s.tint, s.ink) >= 3., "{mode} {theme} slot {i}: {}", crate::palette::contrast(s.tint, s.ink));
                 // The box is the color: near each corner's inside, and under the name.
                 for (px, py) in [(x + w * 0.75, y + h - 6.), (x + w - 8., y + 6.), (x + w * 0.5, y + h - 4.)] {
                     assert_eq!(pixel(&f, px, py), tint, "{mode} {theme} slot {i}: the box at {px}, {py}");
@@ -346,7 +351,7 @@ fn the_setlist_has_no_footer_and_no_sidebar() {
     for (n, line) in code.lines().enumerate() {
         for word in line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.')) {
             let digits = word.trim_end_matches(|c: char| c.is_ascii_alphabetic());
-            assert!(digits.is_empty() || digits.parse::<f32>().is_err() || !["px", "ms", "s"].contains(&&word[digits.len()..]), "setlist.slint:{}: a literal size or time {word}", n + 1);
+            assert!(digits.is_empty() || digits == "0" || digits.parse::<f32>().is_err() || !["px", "ms", "s"].contains(&&word[digits.len()..]), "setlist.slint:{}: a literal size or time {word}", n + 1);
         }
     }
     let mut f = on_setlist("setlist-room", 2, "list", 1, 30);
@@ -370,8 +375,8 @@ fn the_setlist_has_no_footer_and_no_sidebar() {
 #[test]
 fn pictures_of_the_setlist() {
     for (scale, tag) in [(1.0, ""), (1.55, "-155")] {
-        for mode in ["list", "grid"] {
-            let mut f = on_setlist(&format!("setlist-pic-{mode}{tag}"), 3, mode, 3, if mode == "grid" { 12 } else { 30 });
+        for mode in ["list", "grid", "grid4"] {
+            let mut f = on_setlist(&format!("setlist-pic-{mode}{tag}"), 3, mode, 3, if mode == "grid" { 12 } else if mode == "grid4" { 16 } else { 30 });
             f.screen.set_scale(scale);
             let draw = |f: &mut Fixture, name: &str| {
                 for _ in 0..3 {
@@ -392,10 +397,110 @@ fn pictures_of_the_setlist() {
                 shell::act(Action::Confirm(None));
                 draw(&mut f, "setlist-bank-open");
                 shell::act(Action::Cancel(None));
-            } else if tag.is_empty() {
+            } else if mode == "list" && tag.is_empty() {
                 f.screen.resize(800, 480);
                 draw(&mut f, "setlist-list-800");
             }
         }
+    }
+}
+
+/// Slot `i`'s box in the window's pixels at `scale`: a tile of a grid of four across and `rows` down, or a list row (`rows` 0).
+fn slot_box(f: &Fixture, scale: f32, rows: usize, i: usize) -> (f32, f32, f32, f32) {
+    let t = f.screen.ui.global::<Theme>();
+    let (margin, gap) = (t.get_margin(), t.get_gap());
+    let top = 48. + margin + t.get_tall_row() + gap;
+    let (across, cw, ch) = if rows == 0 {
+        (1, f.screen.w as f32 / scale - 2. * margin, t.get_touch() + 2. * margin)
+    } else {
+        (4, (f.screen.w as f32 / scale - 2. * margin - 3. * gap) / 4., (f.screen.h as f32 / scale - top - margin - (rows - 1) as f32 * gap) / rows as f32)
+    };
+    ((margin + (i % across) as f32 * (cw + gap)) * scale, (top + (i / across) as f32 * (ch + gap)) * scale, cw * scale, ch * scale)
+}
+
+/// The bands of rows (`down`) or columns of the rectangle that have something drawn on its fill (the color at its
+/// lower right inside corner): each one's start within it and its length.
+fn bands(f: &Fixture, (x, y, w, h): (f32, f32, f32, f32), down: bool) -> Vec<(usize, usize)> {
+    let fill = pixel(f, x + w - 1., y + h - 1.);
+    let (n, m) = if down { (h as usize, w as usize) } else { (w as usize, h as usize) };
+    let (mut out, mut start) = (vec![], None);
+    for a in 0..=n {
+        let on = a < n && (0..m).any(|b| if down { pixel(f, x + b as f32, y + a as f32) } else { pixel(f, x + a as f32, y + b as f32) } != fill);
+        match (on, start) {
+            (true, None) => start = Some(a),
+            (false, Some(s)) => {
+                out.push((s, a - s));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+// A stage screen read from playing distance: at the keyboard's scale (1.55) a tile's name is drawn in the theme's
+// display size (32) and a list row's in its headline size (26), where they were the title (20) and the body (16). The
+// measure is the drawn text: from the top of "S" to the foot of "g" in "Song 0" (about nine tenths of the size), which
+// is at least 0.85 of the new size and at least 1.4 times the whole of the old one. A long name is two lines in a
+// 4 x 3 tile and never three (cut), one in a 4 x 4 tile; the number's band, the name's lines and the box's edge do
+// not meet (they would be one band); a list row's number ends clear of where its name starts. And the rows a list
+// view holds: 9 at scale 1, 5 at 1.55 (a bank of 30, with the line under them that says which show).
+#[test]
+fn names_are_large_and_nothing_overlaps() {
+    let scale = 1.55;
+    let inset = |(x, y, w, h): (f32, f32, f32, f32)| (x + 8., y + 5., w - 16., h - 10.);
+    for (mode, rows, long_lines) in [("grid", 3, 2), ("grid4", 4, 1)] {
+        let mut f = on_setlist(&format!("setlist-large-{mode}"), 2, mode, 1, 4 * rows);
+        f.screen.set_scale(scale);
+        for _ in 0..3 {
+            f.screen.frame();
+        }
+        let display = f.screen.ui.global::<Theme>().get_display() * scale;
+        let short = bands(&f, inset(slot_box(&f, scale, rows, 0)), true);
+        assert_eq!(short.len(), 2, "{mode}: the number's band, then the name's one line, apart: {short:?}");
+        let drawn = short[1].1 as f32;
+        assert!(drawn >= 0.85 * display && drawn >= 1.4 * 20. * scale, "{mode}: \"Song 0\" is drawn {drawn} px high (the display size is {display} px, the old title {} px)", 20. * scale);
+        assert!(short[1].1 > 2 * short[0].1, "{mode}: the number is clearly smaller than the name: {short:?}");
+        let long = bands(&f, inset(slot_box(&f, scale, rows, 3)), true);
+        assert_eq!(long.len(), 1 + long_lines, "{mode}: the long name on {long_lines} line(s) under the number, cut after: {long:?}");
+        // Every tile of the view: what is drawn in it starts under the number's band and ends inside the box.
+        for i in 0..4 * rows {
+            let b = bands(&f, inset(slot_box(&f, scale, rows, i)), true);
+            assert!(b.len() >= 2 && b.len() <= 4 && b[1].0 > b[0].0 + b[0].1, "{mode} tile {i}: {b:?}");
+        }
+    }
+    let mut f = on_setlist("setlist-large-list", 2, "list", 1, 30);
+    for (scale, per_view) in [(1.0, 9), (1.55, 5)] {
+        f.screen.set_scale(scale);
+        for _ in 0..3 {
+            f.screen.frame();
+        }
+        assert_eq!(state(&f).get_slots_per_view(), per_view, "the rows a list view holds at {scale}");
+        let t = f.screen.ui.global::<Theme>();
+        let (headline, column) = (t.get_headline() * scale, (t.get_touch() + 2. * t.get_pad()) * scale);
+        for i in [0, 3] {
+            let (x, y, w, h) = slot_box(&f, scale, 0, i);
+            let name = bands(&f, (x + column, y + 4., w - column - 8., h - 8.), true);
+            assert_eq!(name.len(), 1, "{scale} row {i}: one line: {name:?}");
+            let drawn = name[0].1 as f32;
+            assert!(drawn >= 0.85 * headline && drawn >= 1.4 * 16. * scale, "{scale} row {i}: its name is drawn {drawn} px high (the headline size is {headline} px, the old body {} px)", 16. * scale);
+            let number = bands(&f, (x + 8., y + 4., column - 8., h - 8.), false);
+            let end = number.last().map(|n| n.0 + n.1).unwrap();
+            assert!((end as f32) < column - 8. - 8. * scale, "{scale} row {i}: the number ends clear of the name: {number:?}");
+            let high = bands(&f, (x + 8., y + 4., column - 8., h - 8.), true);
+            assert!(high.len() == 1 && 3 * high[0].1 < 2 * name[0].1, "{scale} row {i}: the number is smaller than the name: {high:?} {name:?}");
+        }
+    }
+}
+
+// The ink on a slot's color: white wherever white is 3 to 1 against it (large text), black only on a light color.
+#[test]
+fn white_on_a_color_unless_it_is_light() {
+    let (white, black) = (slint::Color::from_rgb_u8(255, 255, 255), slint::Color::from_rgb_u8(0, 0, 0));
+    for (hex, want) in [("#e5484d", white), ("#3366cc", white), ("#1a237e", white), ("#2e7d32", white), ("#ffe082", black), ("#b2ebf2", black)] {
+        let c = crate::setlist::color(hex).unwrap();
+        let ink = crate::theme::white_first(c);
+        assert_eq!(rgb(ink), rgb(want), "{hex}");
+        assert!(crate::palette::contrast(c, ink) >= 3., "{hex}: {}", crate::palette::contrast(c, ink));
     }
 }

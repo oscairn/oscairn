@@ -382,8 +382,8 @@ impl Screen {
             note: note.into(),
             tint: tint.unwrap_or_default(),
             tinted: tint.is_some(),
-            // The slot's color is its whole box: black or white on it, whichever reads better.
-            ink: tint.map(crate::theme::most_readable).unwrap_or_default(),
+            // The slot's color is its whole box: white on it, black only on a light one.
+            ink: tint.map(crate::theme::white_first).unwrap_or_default(),
             empty: slot.empty,
             opens: self.opens(index),
             playing: self.current == Some(index),

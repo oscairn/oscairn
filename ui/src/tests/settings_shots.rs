@@ -21,12 +21,21 @@ fn busy_engine() -> Fake {
     e.ports[4].profiles.clear();
     e.keys = vec![("Stage".into(), "30fa782829102c1859d24993dc0349bebd65c09993f440a937213c2c50e81ed2".into()), ("Home-Studio_2".into(), "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into())];
     e.repos.push(super::settings_fake::Repo { address: "https://repository.example.org/with/a/long/path/to/its/index".into(), name: "A Friend's Instruments".into(), key: "30fa782829102c1859d24993dc0349bebd65c09993f440a937213c2c50e81ed2".into(), origin: "user".into(), enabled: false });
+    let package = |id: &str, name: &str, version: &str, kind: &str, repository: &str, signers: &[&str]| json!({"id": id, "version": version, "kind": kind, "repository": repository, "sha256": "", "signers": signers, "otherBuild": false, "withdrawn": null, "dependency": false, "name": name});
     e.installed_packages = vec![
-        json!({"id": "org.example.reverb", "version": "1.0.0", "kind": "plugin", "repository": "https://packages.oscairn.org", "sha256": "", "signers": ["6a2dd1acf4d4e23c"], "otherBuild": false, "withdrawn": null, "dependency": false}),
-        json!({"id": "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "version": "0.9.0", "kind": "library", "repository": "https://friend.example.org", "sha256": "", "signers": ["89074b634c0de731"], "otherBuild": false, "withdrawn": null, "dependency": true}),
-        json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "repository": "", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}),
+        package("org.example.reverb", "Example Reverb", "1.0.0", "plugin", "https://packages.oscairn.org", &["6a2dd1acf4d4e23c"]),
+        package("org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "A Sound Library With A Name That Is Far Too Long To Fit In The Row", "0.9.0", "library", "https://friend.example.org", &["89074b634c0de731"]),
+        package("org.example.strings", "example strings", "2.1.0", "asset", "", &[]),
+        package("org.example.sample-types", "Sample types", "1.0.0", "library", "https://packages.oscairn.org", &["6a2dd1acf4d4e23c"]),
+        package("lib-1", "Jacob's Performances", "", "library", "", &[]),
+        package("lib-2", "Field Recordings", "", "library", "", &[]),
     ];
-    e.libraries = vec![("lib-1".into(), "Wicked Synths With A Name That Is Far Too Long To Fit In The Row".into(), 12), ("lib-2".into(), "Field Recordings".into(), 34)];
+    e.libraries = vec![("lib-1".into(), "Jacob's Performances".into(), 87), ("lib-2".into(), "Field Recordings".into(), 34)];
+    e.removal = vec![(
+        "org.example.reverb".into(),
+        vec![json!({"kind": "library", "id": "lib-1", "name": "Jacob's Performances", "version": "", "items": 87}), json!({"kind": "own", "id": "", "name": "", "version": "", "items": 3, "examples": ["Keys Split", "Pad", "Lead"]})],
+        vec![json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "name": "example strings", "bytes": 1258291}), json!({"id": "org.example.sample-types", "version": "1.0.0", "kind": "library", "name": "Sample types", "bytes": 612})],
+    )];
     e
 }
 
@@ -116,8 +125,9 @@ fn pictures_of_the_settings_app() {
     let _ = folder("shots");
 }
 
-// The Installed page on the keyboard's window, dark: the list, a package's detail and the Remove question
-// (target/screens/settings-installed-{list,detail,remove}.png).
+// The Installed page on the keyboard's window, dark: the one list, a package's detail, and Remove's two questions
+// for a package something uses that has dependencies nothing else does
+// (target/screens/settings-installed-{list,detail,used,unused}.png).
 #[test]
 fn pictures_of_the_installed_page() {
     fit_to_window();
@@ -135,13 +145,17 @@ fn pictures_of_the_installed_page() {
     ui.global::<crate::SettingsState>().invoke_show_page(at);
     s.serve();
     shell::act(Action::Move { pane: None, by: 1 });
-    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Move { pane: None, by: 1 }); // Example Reverb
     shoot(&mut s, "settings-installed-list");
     shell::act(Action::Confirm(None));
     shoot(&mut s, "settings-installed-detail");
     shell::act(Action::Cancel(None));
-    shell::act(Action::Move { pane: None, by: 4 });
     bar_do(&mut s, "Remove");
-    shoot(&mut s, "settings-installed-remove");
+    s.serve();
+    shoot(&mut s, "settings-installed-used");
     assert!(ui.global::<NoticeState>().get_open());
+    ui.global::<NoticeState>().invoke_tapped(1); // Remove anyway
+    s.serve();
+    shoot(&mut s, "settings-installed-unused");
+    assert!(ui.global::<NoticeState>().get_open(), "the second question");
 }

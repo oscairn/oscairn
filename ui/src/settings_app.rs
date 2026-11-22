@@ -238,7 +238,7 @@ impl Screen {
             at: 0,
             tab_at: None,
             appearance: Appearance::new(crate::theme::Places::found(), profile.theme.clone(), config.clone()),
-            top_bar: TopBarPage::new(profile.top_bar, config),
+            top_bar: TopBarPage::new(config),
             controllers: Controllers::default(),
             audio: Audio::default(),
             repos: Repositories::default(),

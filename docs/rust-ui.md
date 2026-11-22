@@ -242,8 +242,8 @@ The resource section shows two meters, CPU over RAM:
   Shown as "–" where the engine cannot tell (macOS reports 0).
 - Each is yellow from 75% and red from 90%, as the JUCE bar colors the load.
 - **What shows:** for each of `cpu` and `ram`, `both` (a bar and its percent), `bar`, `percent`
-  or `none`. The profile sets it on its screen (`screens[].topBar`, absent: both), and the user
-  over it in Settings' Top bar page, which keeps it in the configuration folder's `top-bar.json`
+  or `none`. The default is both on every device (the profile's `screens[].topBar` is no longer read for it), and the user
+  chooses in Settings' Top bar page (Bar and percent, Bar, Percent, Hidden), which keeps it in the configuration folder's `top-bar.json`
   (beside `appearance.txt`; `OSCAIRN_CONFIG_HOME`, else `~/.config/Oscairn` or
   `~/Library/Application Support/Oscairn`). While Settings is a JUCE screen, the Rust UI reads it
   when it starts, which it does after every JUCE screen.

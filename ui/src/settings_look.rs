@@ -304,12 +304,11 @@ impl Page for Appearance {
 
 // ---- Top bar ----
 
-/// Each choice as top-bar.json writes it (empty: left out, as the device has it) and as the list shows it.
-const KEYS: [&str; 5] = ["", "both", "bar", "percent", "none"];
-const NAMES: [&str; 5] = ["As the device has it", "Bar and percent", "Bar", "Percent", "Hidden"];
+/// Each choice as top-bar.json writes it (the first, the default, is left out; an old "device" reads as it) and as the list shows it.
+const KEYS: [&str; 4] = ["both", "bar", "percent", "none"];
+const NAMES: [&str; 4] = ["Bar and percent", "Bar", "Percent", "Hidden"];
 
 pub struct TopBarPage {
-    base: MeterSettings,
     folder: Option<PathBuf>,
     /// The choice of each meter, by `KEYS`.
     cpu: usize,
@@ -319,8 +318,8 @@ pub struct TopBarPage {
 }
 
 impl TopBarPage {
-    pub fn new(base: MeterSettings, folder: Option<PathBuf>) -> TopBarPage {
-        TopBarPage { base, folder, cpu: 0, ram: 0, failure: String::new(), asking: None }
+    pub fn new(folder: Option<PathBuf>) -> TopBarPage {
+        TopBarPage { folder, cpu: 0, ram: 0, failure: String::new(), asking: None }
     }
 
     #[cfg(test)]
@@ -342,9 +341,9 @@ impl TopBarPage {
         Value::Object(chosen)
     }
 
-    /// The meters as they are shown with this choice: the profile's, the choice over it (`settings::over`).
+    /// The meters as they are shown with this choice: Bar and percent, the choice over it (`settings::over`).
     pub fn meters(&self) -> MeterSettings {
-        crate::settings::over(self.base, &self.document())
+        crate::settings::over(MeterSettings::default(), &self.document())
     }
 }
 

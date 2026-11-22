@@ -75,14 +75,19 @@ impl Screen {
     /// The lines of the sidebar, each with what it is.
     pub(super) fn side_entries(&self) -> Vec<(Side, SettingData)> {
         let head = |n: usize, t: &str| (Side::Heading(n), SettingData { label: t.into(), kind: 4, fluid: true, value: if self.folded[n] { "closed" } else { "open" }.into(), ..Default::default() });
-        let line = |side: Side, label: &str, count: String, on: bool, tint: Option<slint::Color>| {
+        // A line: `count` is what the list shows, `bubble` the count shown after a bubble's name. `value` keeps the check
+        // the list draws on a chosen line; `bubble` is a library's items (with the check when it is chosen), empty for the
+        // Favorites, Recent and the tags, whose bubbles show no count.
+        let line = |side: Side, label: &str, count: String, on: bool, tint: Option<slint::Color>, bubble: String| {
             let value = if on { format!("✓ {count}").trim_end().to_string() } else { count };
-            (side, SettingData { label: label.into(), value: value.into(), kind: 2, on, fluid: true, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..Default::default() })
+            (side, SettingData { label: label.into(), value: value.into(), count: bubble.into(), kind: 2, on, fluid: true, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..Default::default() })
         };
-        let mut out = vec![line(Side::Favorites, "Favorites", String::new(), self.filters.favorites, None), line(Side::Recent, "Recent", String::new(), self.filters.recent, None), head(0, "Libraries")];
+        let mut out = vec![line(Side::Favorites, "Favorites", String::new(), self.filters.favorites, None, String::new()), line(Side::Recent, "Recent", String::new(), self.filters.recent, None, String::new()), head(0, "Libraries")];
         for (i, (id, name, items)) in self.filters.sources(&self.libraries).into_iter().enumerate().filter(|_| !self.folded[0]) {
             let name = if id.is_empty() { "All".to_string() } else { name };
-            out.push(line(Side::Source(i), &name, items.map(|n| n.to_string()).unwrap_or_default(), id == self.filters.source, None));
+            let n = items.map(|n| n.to_string()).unwrap_or_default();
+            let bubble = if id == self.filters.source { format!("✓ {n}").trim_end().to_string() } else { n.clone() };
+            out.push(line(Side::Source(i), &name, n, id == self.filters.source, None, bubble));
         }
         out.push(head(1, "Tags"));
         let tags = self.filters.tag_list(&self.tags);
@@ -93,7 +98,7 @@ impl Screen {
             out.push((Side::Empty, SettingData { label: "No tags".into(), kind: 4, ..Default::default() }));
         }
         for (i, (tag, count)) in tags.iter().enumerate() {
-            out.push(line(Side::Tag(i), tag, count.to_string(), self.filters.chosen.contains(tag), self.tag_color(tag)));
+            out.push(line(Side::Tag(i), tag, count.to_string(), self.filters.chosen.contains(tag), self.tag_color(tag), String::new()));
         }
         out
     }
@@ -134,7 +139,10 @@ impl Screen {
                 continue;
             }
             let dot = if data.tinted { small * 0.7 + gap } else { 0. };
-            let w = (text_width(&data.label, body) + 2. * pad + dot).clamp(touch, room.max(touch));
+            // A library's bubble also holds its count (the caption size), a gap after the name; the name is the part that
+            // gives when the whole bubble does not fit, so the count keeps its room.
+            let count = if data.count.is_empty() { 0. } else { gap + text_width(&data.count, small) };
+            let w = (text_width(&data.label, body) + 2. * pad + dot + count).clamp(touch, room.max(touch));
             if open && x + w > room + 0.01 {
                 top += line_h + step;
                 line += 1;

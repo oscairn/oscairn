@@ -355,3 +355,160 @@ fn the_bubbles_view_scrolled_shows_lines_that_fit_its_own_start() {
     let g = geo.row_data(at).unwrap();
     assert!(g.y + g.h <= side + 0.5, "the last bubble is whole after a track tap: y {} h {} of {side}", g.y, g.h);
 }
+
+/// A Library with one installed library (`display`, `count` Performances in it) and six tagged Performances, at the
+/// keyboard's 1280x720 (scale 1.55, the dark theme): `display`'s bubble then carries `count`, the tags none.
+pub(super) fn one_library(name: &str, display: &str, count: usize) -> Shelf {
+    fit_to_window();
+    let mut s = Shelf::new(name);
+    let ui = s.ui();
+    shell::library_in_rust(true);
+    s.f.screen.resize(1280, 720);
+    s.f.screen.set_scale(1.55);
+    theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
+    let mut items: Vec<_> = (0..6).map(|i| stored("performance", &format!("p{i}"), &format!("Tag Item {i:02}")).tags(&[TAGS[i % TAGS.len()]])).collect();
+    for j in 0..count {
+        items.push(stored("performance", &format!("l{j}"), &format!("Lib item {j}")).locked("lib"));
+    }
+    s.e.items = items;
+    s.e.libraries = vec![("lib".to_string(), display.to_string())];
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame();
+    s.f.screen.frame();
+    s
+}
+
+/// `one_library` shown as bubbles.
+fn count_bubbles(name: &str, display: &str, count: usize) -> Shelf {
+    let mut s = one_library(name, display, count);
+    press_view_button(&mut s);
+    s
+}
+
+/// The physical pixel band across the middle of `label`'s bubble (the whole bubble, left to right), at the window's scale.
+fn bubble_band(s: &Shelf, label: &str) -> Vec<Rgb8Pixel> {
+    let ui = s.ui();
+    let lib = ui.global::<LibraryState>();
+    let rows = lib.get_side_rows();
+    let geo = lib.get_side_geo();
+    let i = (0..rows.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == label && r.kind == 2).unwrap_or(false)).unwrap_or_else(|| panic!("no bubble {label}"));
+    let g = geo.row_data(i).unwrap();
+    let t = ui.global::<crate::Theme>();
+    let k = ui.window().scale_factor();
+    let (x0, x1) = (((t.get_margin() + g.x) * k) as usize, ((t.get_margin() + g.x + g.w) * k) as usize);
+    let y = ((ui.get_list_y() + t.get_margin() + g.y + g.h / 2.) * k) as usize;
+    (x0..x1).map(|x| s.f.screen.pixels[y * s.f.screen.w + x]).collect()
+}
+
+/// Where two paintings of {the same-sized} bubble differ (the offsets along the band).
+fn band_diffs(a: &[Rgb8Pixel], b: &[Rgb8Pixel]) -> Vec<usize> {
+    a.iter().zip(b).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i).collect()
+}
+
+/// The last `n` pixels of the band: the count text and the pad off the right edge, kept alone whatever the name before it.
+fn count_tail(band: &[Rgb8Pixel], n: usize) -> &[Rgb8Pixel] {
+    &band[band.len().saturating_sub(n)..]
+}
+
+/// Scan the bubble's row: the name's ink on the left, then a gap of at least `min` background pixels, then the count's own
+/// ink on the right (the number drawn, not hidden or overlapped by the name). `bg` is the bubble's fill. Returns a failure
+/// reason, or None when the count stands alone after a clear gap.
+fn count_keeps_its_own_room(band: &[Rgb8Pixel], bg: Rgb8Pixel, min: usize) -> Option<String> {
+    let ink = |p: &Rgb8Pixel| (p.r as i32 - bg.r as i32).abs() + (p.g as i32 - bg.g as i32).abs() + (p.b as i32 - bg.b as i32).abs() > 60;
+    let is: Vec<usize> = band.iter().enumerate().filter(|(_, p)| ink(p)).map(|(i, _)| i).collect();
+    if is.is_empty() { return Some("no text is drawn".into()); }
+    if is.len() < 2 { return Some("only one ink cluster (name or count missing)".into()); }
+    // The count is the contiguous ink cluster at the right end; the name's ink ends just before the gap to it.
+    let mut c = is.len();
+    while c > 1 && is[c - 1] == is[c - 2] + 1 { c -= 1; }
+    let count_first = is[c - 1];
+    let count_last = is[is.len() - 1];
+    let name_last = is[c - 2];
+    let gap = count_first.saturating_sub(name_last) - 1;
+    if gap < min { return Some(format!("gap {gap} < {min} (name ends {}, count starts {} in {})", name_last, count_first, band.len())); }
+    if count_last + 1 + (band.len() - count_last - 1) < 1 { unreachable!(); }
+    None
+}
+
+
+// The bubbles' drawn text (H1): a library's count is its own text after the name, a gap away, in the caption size and
+// secondary ink; a short name is drawn whole (whose last character shows), a long one is cut with an ellipsis while the
+// count still shows, and the count's own pixels follow the number. Tags show no count. At 1280x720 (scale 1.55) the same
+// number of tag bubbles fit as without a count.
+#[test]
+fn a_short_library_bubble_shows_its_count_and_its_name_whole() {
+    let s = count_bubbles("h1-short", "A Friend's", 2);
+    lib_png(&s, "h1-short-no-count");
+    let ui = s.ui();
+    let lib = ui.global::<LibraryState>();
+    let rows = lib.get_side_rows();
+    let at = (0..rows.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == "A Friend's").unwrap_or(false)).expect("A Friend's is shown");
+    assert_eq!(rows.row_data(at).unwrap().count, "2", "a library's bubble carries its count");
+    let t = ui.global::<crate::Theme>();
+    assert!(lib.get_side_geo().row_data(at).unwrap().w < lib.get_side_room() - 1., "a short name does not fill the sidebar");
+    drop(s);
+    // The count's own pixels follow the number: a library of 3 draws the count's text differently from one of 2 (the same name).
+    let tail_n = (3_usize).max(t.get_pad() as usize) * 2 + 40;
+    let n3 = count_bubbles("h1-short3", "A Friend's", 3);
+    let n2 = count_bubbles("h1-short2", "A Friend's", 2);
+    assert!(!band_diffs(count_tail(&bubble_band(&n3, "A Friend's"), tail_n), count_tail(&bubble_band(&n2, "A Friend's"), tail_n)).is_empty(), "the count's own pixels follow the number");
+    drop((n3, n2));
+    // A short name is not cut: the last character (`s` against an `x`, both narrow) shows.
+    let short = count_bubbles("h1-short-a", "A Friend's", 2);
+    let band = bubble_band(&short, "A Friend's");
+    let diffs = band_diffs(&band, &bubble_band(&count_bubbles("h1-short-b", "A Friend'x", 2), "A Friend'x"));
+    assert!(!diffs.is_empty(), "the short name's last character is drawn");
+    lib_png(&short, "h1-short-library-count");
+}
+
+#[test]
+fn a_long_library_bubble_cuts_its_name_but_keeps_the_count() {
+    const LONG: &str = "Some Very Very Long Library Performance Name That Will Not Fit On Its Bubble At All And Has To Be Cut Down With An Ellipsis So That The Count Still Shows Clearly One";
+    let s = count_bubbles("h1-long", LONG, 3);
+    lib_png(&s, "h1-long-no-count");
+    let ui = s.ui();
+    let lib = &ui.global::<LibraryState>();
+    let rows = lib.get_side_rows();
+    let at = (0..rows.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == LONG).unwrap_or(false)).expect("the long library is shown");
+    assert_eq!(rows.row_data(at).unwrap().count, "3");
+    let t = ui.global::<crate::Theme>();
+    let room = lib.get_side_room();
+    let g = lib.get_side_geo().row_data(at).unwrap();
+    eprintln!("H1 long name: {} characters, bubble {} of {room}", LONG.len(), g.w);
+    assert!((g.w - room).abs() < 0.5, "a name too wide for the bubble fills the sidebar, not overflowing it");
+    // The count is its own text after the name, still fully drawn: the name's ink stops, then a gap of the theme's gap,
+    // then the number's ink at the right — never elided with the name. (FitText cuts the name with an ellipsis once even
+    // its smallest step does not fit; the count never borrows the room it is cut from.)
+    let band = bubble_band(&s, LONG);
+    let k = ui.window().scale_factor();
+    let bg = band[(t.get_pad() * k * 0.5) as usize];
+    if let Some(why) = count_keeps_its_own_room(&band, bg, (t.get_gap() * k) as usize) {
+        panic!("the count does not keep its own room under a long name: {why}");
+    }
+    lib_png(&s, "h1-long-library-count");
+}
+
+#[test]
+fn tag_bubbles_still_show_no_count_and_the_first_view_is_unchanged() {
+    // Tags get no count, and the count on a library's bubble does not move them: with the owner's fixture (a short library
+    // of 0 items) exactly 6 tag bubbles fit in the first view at 1280x720 — the same number as without a count (the layout
+    // of a tag bubble is unchanged: it never borrows a count's room).
+    let s = count_bubbles("h1-tags", "A Friend's", 0);
+    let ui = s.ui();
+    let tags = tags_in_view(&ui);
+    eprintln!("H1: {tags} tag bubbles in the first view at 1280x720, unchanged by a library's count");
+    assert!(tags >= 5, "the tags are still above the fold: {tags}");
+    let rows = ui.global::<LibraryState>().get_side_rows();
+    let mut seen = 0;
+    for i in 0..rows.row_count() {
+        let r = rows.row_data(i).unwrap();
+        if r.kind == 2 && TAGS.contains(&r.label.as_str()) {
+            seen += 1;
+            assert_eq!(r.count, "", "a tag shows no count ({}): {r:?}", r.count);
+        }
+    }
+    assert_eq!(seen, tags, "the tag bubbles shown carry their labels");
+}
+

@@ -147,6 +147,17 @@ component Pill inherits Rectangle {
     accessible-checkable: true;
     accessible-checked: root.data.on;
     accessible-label: root.data.label;
+    // A library's count after its name: its own text in the caption size and secondary ink, a gap away, keeping its room
+    // (the selected check and number are never cut; a name too long for the whole bubble is the part that gives way).
+    property <bool> count-shown: root.data.count != "";
+    count-measure := Text {
+        visible: false;
+        font-size: Theme.small;
+        font-weight: 700;
+        text: root.data.count;
+    }
+    property <length> count-w: root.count-shown ? min(count-measure.preferred-width, max(0px, self.width - 2 * Theme.pad - root.dot-room - Theme.gap)) : 0px;
+    property <length> name-w: self.width - 2 * Theme.pad - root.dot-room - root.count-w - (root.count-shown ? Theme.gap : 0px);
     if root.data.tinted: Rectangle {
         x: Theme.pad;
         y: (parent.height - self.height) / 2;
@@ -157,11 +168,21 @@ component Pill inherits Rectangle {
     }
     FitText {
         x: Theme.pad + root.dot-room;
-        width: parent.width - 2 * Theme.pad - root.dot-room;
+        width: root.name-w;
         height: parent.height;
         text: root.data.label;
         ink: root.data.on ? Theme.accent : Theme.text;
         bold: root.data.on;
+    }
+    if root.count-shown: Text {
+        x: Theme.pad + root.dot-room + root.name-w + Theme.gap;
+        width: root.count-w;
+        height: parent.height;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: root.data.count;
     }
     TouchArea {
         clicked => { root.tapped(); }

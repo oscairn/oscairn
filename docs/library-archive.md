@@ -448,7 +448,9 @@ before, the refusal naming the packages the archive needs, which may declare tha
 **Removing one.** `packages.json` records what each installed package needs. A package another
 installed package needs is not removed: `library.uninstall`, `assets.uninstall` and removing this
 device's build of a plugin package's plugin (`plugins.remove`) refuse, naming the dependents, as an
-asset library in use is refused today. Remove the dependents first.
+asset library in use is refused today. Remove the dependents first. `packages.removal` says what
+needs a package of any kind and which of its dependencies nothing else would use, and
+`packages.uninstall` removes it, with those if asked ([control protocol](control-protocol.md)).
 
 **Packing it.** `oscairn-sign plugin-package`, `asset-package` and `library-package` take
 `--package-dependency <id> <least-version>`. `library-package` packs a tree into a library with no

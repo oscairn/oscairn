@@ -691,7 +691,22 @@ namespace oscairn
     namespace { Control::Withdrawal withdrawal(V x){V w=detail::member(x,"withdrawn");return w && w->type==json_type_object?Control::Withdrawal{string(field(w,"repository")),string(field(w,"reason")),string(field(w,"date"))}:Control::Withdrawal{};} }
     std::vector<Control::InstalledPackage> RemoteControl::installedPackages() {
         auto d=impl_->call("packages.installed","{}");std::vector<InstalledPackage> out;
-        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild")),withdrawal(x),boolean(field(x,"dependency"))});
+        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild")),withdrawal(x),boolean(field(x,"dependency")),string(field(x,"name"))});
+        return out;
+    }
+    namespace { Control::PackagePart part(V x){V b=detail::member(x,"bytes");return {string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"name")),b?uint64_t(integer(b)):0};} }
+    Control::PackageRemoval RemoteControl::packageRemoval(const std::string& id,const std::string& version) {
+        auto d=impl_->call("packages.removal","{\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+'}',60000);auto r=field(d.get(),"result");
+        PackageRemoval out{part(field(r,"package")),{},{}};
+        for(auto x:array(field(r,"dependents")))out.dependents.push_back({string(field(x,"kind")),string(field(x,"id")),string(field(x,"name")),string(field(x,"version")),uint32_t(integer(field(x,"items"))),detail::member(x,"examples")?strings(field(x,"examples")):std::vector<std::string>()});
+        for(auto x:array(field(r,"unused")))out.unused.push_back(part(x));
+        return out;
+    }
+    std::vector<Control::PackagePart> RemoteControl::uninstallPackage(const std::string& id,const std::string& version,const std::vector<std::string>& withUnused,bool allUnused,bool evenIfUsed) {
+        std::string with;for(const auto& u:withUnused)with+=(with.empty()?"":",")+quote(u);
+        auto d=impl_->call("packages.uninstall","{\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+",\"withUnused\":"+(allUnused?"true":"["+with+"]")+",\"evenIfUsed\":"+(evenIfUsed?"true":"false")+'}',120000);
+        std::vector<PackagePart> out;
+        for(auto x:array(field(field(d.get(),"result"),"removed")))out.push_back(part(x));
         return out;
     }
     Control::Preinstall RemoteControl::preinstalled() {

@@ -241,7 +241,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
               'a second start does nothing: ' + json.dumps(result))
 
         # The user removes the synth; the next release does not bring it back, and tries the failed one again.
-        s.rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.synth', 'version': '1.0.0'})
+        s.rpc('packages.uninstall', {'id': 'org.kick.synth'})  # a preinstalled package is removed like any, and stays removed
         s.close()
         r['releases'] = ['0.0.0-an-earlier-release']
         (home / 'preinstalled.json').write_text(json.dumps(r))

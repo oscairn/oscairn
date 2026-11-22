@@ -1559,7 +1559,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   control thread; asking about it once it has unpacked moves it into place.
 - `packages.installed` (`{}`) returns `{packages}`: the packages installed on this device
   ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
-  `{id,version,kind,repository,sha256,signers,otherBuild,withdrawn,dependency}`: `kind` is `plugin`, `asset` or
+  `{id,version,kind,repository,sha256,signers,otherBuild,withdrawn,dependency,name}`: `name` is what to show (a
+  library's name, a plugin package's product name; for a plugin package recorded before records carried names, its
+  first plugin's), `kind` is `plugin`, `asset` or
   `library` (installed as a locked library), and `repository` the address of the repository it
   came from, empty for one installed from a file. `sha256` is the SHA-256 of the manifest of the
   release it was installed from (its `library.json`, the package's identity), from a repository,
@@ -1577,12 +1579,54 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   0009](rfcs/0009-sound-assets-and-dependencies.md)). Each install records its package in `packages.json` in the data folder: from a
   repository, or by `library.install` a plugin or asset package or one installed as a library (a
   copy into the user's own storage installs no package). Removing what it installed
-  (`plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the
+  (`packages.uninstall`, `plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the
   record. Plugin packages install side by side, so one is listed once for each version still
   installed. From a file, a library has an empty `version` and a plugin package its first
   plugin's. What was installed before installs were recorded is listed where it can be told: an
   asset library at its version and a locked library with an empty `version`, neither with a
   repository; a plugin package is not, as nothing says which plugins it held.
+- **Libraries and packages.** Everything installed is a package: one archive, one ID, one row in
+  `packages.installed`. Its `kind` is decided by the archive's manifest and how it was installed, never by
+  the file types found in it: `plugin` and `asset` are the manifest's own `kind` (a plugin package holds
+  only plugin builds, an asset package only files plugins read), and `library` is any other archive
+  installed as a locked library, whatever it holds: Performances, Sounds, samples, waveforms, item types,
+  and the plugin builds its items use. Such an archive is one package and one row; its parts are not
+  listed apart. Only what is published as a package of its own is a row of its own, as an engine's init
+  library is beside the engine's plugin package. (An archive copied into the user's own storage installs
+  no package. The plugin builds a library archive carried go into the plugin store and stay there when
+  the library is removed: `plugins.list`, `plugins.remove`.)
+- `packages.removal` takes `{id}` and optional `version` (absent: every installed version of the ID, as
+  plugin packages install side by side) and says, changing nothing, what removing that package means:
+  `{package,dependents,unused}`. `package` is `{id,version,kind,name,bytes}` (`version` empty when
+  several are meant; `bytes` its size on disk). `dependents` is what needs it, each
+  `{kind,id,name,version,items}`: `library`, an installed library whose dependencies name it or whose
+  items use its plugins or files, with `items` the number that do (0 when only its dependencies name
+  it); `plugin` or `asset`, another package that needs it (an asset library's plugin package; `items`
+  0); `own`, the user's own Performances and Sounds that use it, counted in `items` with up to five
+  names in `examples` (`id`, `name` and `version` empty), a Performance saved outside the library
+  counted too, by its folder; `open`, the open Performance, and `warm`, an instance kept warm
+  (`memory.release`), each with only a `name`. `unused` is its dependencies, direct and through them,
+  that nothing would use once it is gone (no other installed package, no library item of any library
+  or the user's own, not the open Performance), each `{id,version,kind,name,bytes}`, in an order that
+  removes each after what used it. What uses a package is read from what the device records: each
+  package's `dependencies.packages`, a stored plugin's asset libraries, and each library item's
+  document (its plugins by format, ID and version; its asset references by library or content). An
+  item that cannot be read counts as using it. Not known, so not counted: which items use a library's
+  samples and waveforms (they are kept by content in the device's own packs, for every library alike),
+  and anything outside the library and the saved Performances the engine has recorded. Unknown ID or
+  version: `-32005`.
+- `packages.uninstall` takes `{id}` and optional `version`, `withUnused` (`true`, or the IDs to remove
+  from `unused`) and `evenIfUsed`, and returns `{removed}`, each `{id,version,kind,name}`. It removes the
+  package by its kind's removal (`plugins.remove` for every build of each plugin of a plugin package,
+  `assets.uninstall`, `library.uninstall`), so files, links and the record go as those make them go, at
+  once, on the control thread as they do. It is refused (`-32005`, nothing removed) naming the dependents
+  when there are any, unless `evenIfUsed` is true: then items that use a removed plugin open with a
+  stand-in until it is installed again, and a library that needed it stays. It is always refused while
+  the open Performance uses the package or an instance of its plugin is kept warm (open another
+  Performance; `memory.release`). `unused` is reckoned again at the removal, and one named in
+  `withUnused` that something still uses is left and not in `removed`. A preinstalled package is removed
+  like any other and does not come back at the next start or the next release, only after a reset that
+  clears the data folder ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
 - `packages.preinstalled` (`{}`) returns `{state,release,error,job,packages}`: the packages that
   come with this release ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
   The app ships a repository snapshot (`Contents/Resources/Preinstalled` in the macOS app,

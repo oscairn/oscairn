@@ -207,6 +207,10 @@ if(Python3_Interpreter_FOUND)
         $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal> "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/types/org.oscairn.sample-types/sample.json")
     set_tests_properties(control-package-dependencies PROPERTIES TIMEOUT 120)
+    # Removing an installed package of any kind: what uses it, and what nothing else would use (packages.removal, packages.uninstall).
+    add_test(NAME control-package-removal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_removal.py" $<TARGET_FILE:oscairn-json-rpc-test> $<TARGET_FILE:oscairn_basic_synth>
+        $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal>)
+    set_tests_properties(control-package-removal PROPERTIES TIMEOUT 120)
     # The packages that come with a release, from a repository snapshot (RFC 0031).
     add_test(NAME control-preinstall COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/preinstall.py" $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal>
         "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py" $<TARGET_FILE:oscairn-json-rpc-test> $<TARGET_FILE:oscairn_basic_synth>)

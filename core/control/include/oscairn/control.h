@@ -559,8 +559,24 @@ namespace oscairn
         // signed it, as each was last read (empty reason when not): said, never acted on, so the user
         // can remove or replace it; nothing removes or disables it. dependency: an asset library
         // installed only because a package needed it (RFC 0009), not by hand.
-        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; Withdrawal withdrawn; bool dependency = false; };
+        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; Withdrawal withdrawn; bool dependency = false; std::string name = {}; }; // name: to show (a library's, a plugin package's product name)
         virtual std::vector<InstalledPackage> installedPackages() = 0;
+        // What removing an installed package means, nothing changed (packages.removal). dependents:
+        // what needs it, by kind: "library" (an installed library whose dependencies name it or
+        // whose items use its plugins or files: `items` of them), "plugin" and "asset" (packages
+        // that need it), "own" (the user's own items that use it: `items`, up to 5 `examples`),
+        // "open" (the open Performance) and "warm" (an instance kept warm). unused: its
+        // dependencies, direct and through them, that nothing else would use once it is gone, each
+        // after what used it. version empty: every installed version of the ID.
+        struct PackagePart { std::string id, version, kind, name; uint64_t bytes = 0; };
+        struct PackageDependent { std::string kind, id = {}, name = {}, version = {}; uint32_t items = 0; std::vector<std::string> examples = {}; };
+        struct PackageRemoval { PackagePart package; std::vector<PackageDependent> dependents; std::vector<PackagePart> unused; };
+        virtual PackageRemoval packageRemoval(const std::string& id, const std::string& version = {}) = 0;
+        // Removes it by its kind's removal (packages.uninstall), with those of `unused` named in
+        // withUnused (or all), reckoned again now; refused, nothing removed, while it has
+        // dependents unless evenIfUsed, and always while the open Performance or an instance kept
+        // warm uses it. Returns what was removed.
+        virtual std::vector<PackagePart> uninstallPackage(const std::string& id, const std::string& version, const std::vector<std::string>& withUnused, bool allUnused, bool evenIfUsed) = 0;
         // The packages that come with this release (RFC 0031): the app ships a snapshot of a
         // repository (its signed root and index, and the archives of the packages it preinstalls),
         // and at the engine's first start with a data folder that has not run it for this release,

@@ -93,6 +93,8 @@ namespace oscairn
         PackageJob packageJob(uint64_t id) override;
         Preinstall preinstalled() override;
         std::vector<InstalledPackage> installedPackages() override;
+        PackageRemoval packageRemoval(const std::string& id, const std::string& version = {}) override;
+        std::vector<PackagePart> uninstallPackage(const std::string& id, const std::string& version, const std::vector<std::string>& withUnused, bool allUnused, bool evenIfUsed) override;
         std::vector<Repository> repositories() override;
         void addRepository(const Repository& repository) override;
         void removeRepository(const std::string& address) override;

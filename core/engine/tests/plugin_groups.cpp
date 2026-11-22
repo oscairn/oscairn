@@ -232,6 +232,7 @@ namespace
     struct Tines
     {
         std::vector<std::string> chain(int p) { std::vector<std::string> c; for(const char* e : {"chorus", "rotary", "eq3", "eq2"}) c.push_back("p" + std::to_string(p) + e); return c; }
+        long instrument = 0; // the shared instrument's worker
         void build(Wide& w)
         {
             std::vector<std::string> names{"fm"}; std::vector<std::pair<std::string, std::string>> audio;
@@ -247,7 +248,7 @@ namespace
             std::shared_ptr<oscairn::PluginHost> plugin;
             { const oscairn::PlacementScope s(w.groups["fm0"]); plugin = oscairn::loadPlugin(synth, "", rate, frames); }
             auto engine = std::make_shared<oscairn::SoundContext::Engine>(); engine->host = plugin; engine->busParameter = oscairn::SoundContext::busParameter(*plugin);
-            plugin->setActiveOutputs(0b11111);
+            plugin->setActiveOutputs(0b11111); instrument = plugin->workerPid();
             for(int p = 0; p < 5; ++p)
             {
                 // Each part its own sound (its Output bus is the sound's), as a Session prepares them.
@@ -391,9 +392,13 @@ namespace
     // a sanitizer build), a part's own plugins and the shared instrument miss blocks of their own, before the kill as after
     // it: there a silent block on another part counts against the kill only if no plugin on that part's path (the shared
     // instrument, its chain) missed its deadline from the block before to the one after, and part 3's loudness is compared
-    // only if no plugin on its path missed one around the blocks compared. Off CI every silent block counts, and the
-    // loudness is always compared.
-    void killOneChain(Policy policy = Policy::chain)
+    // only if no plugin on its path missed one around the blocks compared, and the instrument missed none from the strike
+    // before a compared one on: a block the instrument misses it never plays, so the note before starts a block nearer the
+    // compared one, its release under it in another phase, and their sum peaks elsewhere (one block: 0.0645 for 0.0731)
+    // with every gain as it was. Off CI every silent block counts, and the loudness is always compared.
+    // stall: the instrument's worker stopped for two blocks as part 3 comes back, as a busy runner stops it: relaxed, and the
+    // loudness must not be compared.
+    void killOneChain(Policy policy = Policy::chain, bool stall = false)
     {
         place(policy);
         Tines tines;
@@ -404,7 +409,7 @@ namespace
         const auto pid = w.graph.host(w.nodes["p2chorus"]).workerPid();
         const auto period = std::chrono::nanoseconds(int64_t(1e9 * frames / rate));
         auto next = std::chrono::steady_clock::now();
-        const bool relaxed = oscairn::test::relaxed();
+        const bool relaxed = stall || oscairn::test::relaxed();
         // The deadlines missed so far on part p's path: the shared instrument (its instance, and the part's sound context on
         // it) and the part's four inserts.
         auto misses = [&](int p) {
@@ -413,6 +418,8 @@ namespace
             return n;
         };
         std::vector<std::array<bool, 5>> missed; // per block, per part: a plugin on its path missed its deadline in it
+        auto instrumentMisses = [&] { return w.graph.host(w.nodes["fm0"]).statistics().deadlineMisses + w.graph.host(w.nodes["fm2"]).statistics().deadlineMisses; };
+        std::vector<bool> skipped; uint64_t skips = instrumentMisses(); // per block: the instrument missed its deadline on part 3 in it
         std::vector<std::pair<uint32_t, uint32_t>> silences; // another part's held blocks heard silent after the kill: block, port
         uint64_t was[5]{}; for(int p = 0; p < 5; ++p) was[p] = misses(p);
         bool silent = false, back = false; uint32_t silentAt = 0;
@@ -427,11 +434,16 @@ namespace
             if(b % 100 == 98) for(int p = 0; p < 5; ++p) e.push_back(Event::note(false, p * 24 + 12, 0));
             w.play(b, e);
             missed.emplace_back(); for(int p = 0; p < 5; ++p) { const auto n = misses(p); missed.back()[size_t(p)] = n != was[p]; was[p] = n; }
+            { const auto n = instrumentMisses(); skipped.push_back(n != skips); skips = n; }
             if(b == 350 && pid > 0) kill(pid_t(pid), SIGKILL);
             const bool held = b % 100 > 10 && b % 100 < 90;
             if(b > 350 && held) for(const uint32_t port : {1u, 2u, 4u, 5u}) if(w.peak(port) < 1e-6f) silences.emplace_back(b, port);
             if(b > 350 && held && w.peak(3) < 1e-6f && !silent) { silent = true; silentAt = b; }
-            if(b > 350 && silent && held && w.peak(3) > 1e-4f && !back) { back = true; again = (b / 100 + 1) * 100; }
+            if(b > 350 && silent && held && w.peak(3) > 1e-4f && !back)
+            {
+                back = true; again = (b / 100 + 1) * 100;
+                if(stall && tines.instrument > 0) std::thread([pid = pid_t(tines.instrument)] { kill(pid, SIGSTOP); std::this_thread::sleep_for(std::chrono::milliseconds(6)); kill(pid, SIGCONT); }).detach();
+            }
             if(b < 300 && held) { before = std::max(before, w.peak(3)); compared.push_back(b); }
             if(b >= again && held) { after = std::max(after, w.peak(3)); compared.push_back(b); }
         }
@@ -442,14 +454,17 @@ namespace
             if(relaxed && near(b, int(port) - 1)) ++excused; // its own plugins', not the kill's
             else if(quiet.empty()) quiet = "port " + std::to_string(port) + " at block " + std::to_string(b);
         if(excused) std::printf("%s kill: %u silent blocks on the other parts in which a plugin on their path missed its deadline: the machine's, not counted\n", name(policy), excused);
-        const bool comparable = !relaxed || std::none_of(compared.begin(), compared.end(), [&](uint32_t b) { return near(b, 2); });
+        bool shifted = false; // the instrument missed a block from the strike before a compared one on
+        for(uint32_t b = 0; b < skipped.size(); ++b) shifted = shifted || (skipped[b] && (b < 300 || (back && b + 100 >= again)));
+        const bool comparable = !relaxed || (!shifted && std::none_of(compared.begin(), compared.end(), [&](uint32_t b) { return near(b, 2); }));
         check(pid > 0 && silent, std::string(name(policy)) + " kill: part 3's chain process killed, and part 3 went silent");
         check(back, std::string(name(policy)) + " kill: part 3 came back (silent from block " + std::to_string(silentAt) + "; " + w.graph.host(w.nodes["p2chorus"]).failure() + ")");
         check(quiet.empty(), std::string(name(policy)) + " kill: the other four parts never went silent (" + quiet + ")");
         bool restored = true;
         for(size_t k = 0; k < chain.size(); ++k) restored = restored && std::abs(w.graph.host(w.nodes[chain[k]]).parameterValue(7) - (.9 - .1 * double(k))) < 1e-6;
         check(restored && w.graph.host(w.nodes["p2chorus"]).statistics().restarts > 0, std::string(name(policy)) + " kill: every plugin of part 3's chain restarted with its own gain");
-        if(!comparable) std::printf("%s kill: part 3's loudness not compared: a plugin on its path missed its deadline in the blocks compared\n", name(policy));
+        if(stall) check(shifted, std::string(name(policy)) + " kill, the instrument stalled as part 3 came back: its missed blocks seen, part 3's loudness not compared");
+        if(!comparable) std::printf("%s kill: part 3's loudness not compared: %s\n", name(policy), shifted ? "the instrument missed a block from the strike before a compared one on" : "a plugin on its path missed its deadline in the blocks compared");
         else check(back && std::abs(after - before) <= .02f * before, std::string(name(policy)) + " kill: part 3 as loud as before the kill, its chain's state restored (" + std::to_string(before) + " before, " + std::to_string(after) + " after)");
     }
 }
@@ -532,7 +547,7 @@ int main(int argc, char** argv)
     for(const auto& c : cases) compare(c);
     trusted();
     crash();
-    if(synth) { policies(); killOneChain(); if(std::getenv("KILL_PLUGIN")) killOneChain(Policy::plugin); }
+    if(synth) { policies(); killOneChain(); killOneChain(Policy::chain, true); if(std::getenv("KILL_PLUGIN")) killOneChain(Policy::plugin); }
     if(failures) std::fprintf(stderr, "%d failure(s)\n", failures);
     else std::printf("plugin groups: every case as with groups off\n");
     return failures ? 1 : 0;

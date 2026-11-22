@@ -3,11 +3,14 @@
 //! 0006): what is installed on this device, read once when the page is shown and never on a timer — the packages
 //! `packages.installed` reports (each signed and from a repository where the handler says so) and the libraries
 //! `library.libraries` (by name and their item count), in two sections under shared heading rows. A long name is cut
-//! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row. A
-//! library row is removed with the bar's Remove..., asked first as the repositories page asks before Remove; the
-//! protocol reports no library that cannot be removed, so every one is offered.
+//! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row.
+//! Confirming a package row opens its detail in the panel (id, version, the publisher and the key fingerprint of what
+//! signed it; Back closes it on the same row), and a library row is removed with the bar's Remove..., asked first as
+//! the repositories page asks before Remove; the protocol reports no library that cannot be removed, so every one is
+//! offered, and no license, platforms, size or dependency list for a package.
 
 use crate::client::Error;
+use crate::library::fingerprint;
 use crate::settings_app::{failed, head, line, row, said, Ctx, Page, Step as Any};
 use crate::topbar::Tool;
 use crate::{InfoLine, SettingData};
@@ -66,6 +69,8 @@ pub struct Installed {
     progress: String,
     /// A removal refused: the library and what the engine said.
     refused: (String, String),
+    /// The package whose detail the panel shows, opened by a press on its row; None: the panel follows the cursor.
+    detail: Option<usize>,
 }
 
 /// What the row at `index` of the list is: a section's heading, a package, a library, or the page's plain row.
@@ -163,6 +168,7 @@ impl Page for Installed {
         self.asking = None;
         self.progress.clear();
         self.refused = (String::new(), String::new());
+        self.detail = None;
         self.read(c);
     }
 
@@ -202,6 +208,28 @@ impl Page for Installed {
         if !why.is_empty() && (whose.is_empty() || at.and_then(|a| self.at(a)).is_some_and(|l| l.id == *whose)) {
             lines.push(head("Not done"));
             lines.extend(failed(why));
+        }
+        if let Some(i) = self.detail {
+            // A package's detail, opened by a press on its row and shown until Back: id, version, the publisher (the
+            // repository it came from), the key fingerprint of what signed it and whether it is trusted. `packages.installed`
+            // reports no license, platforms, size or dependency list, so the protocol shows no more.
+            if let Some(p) = self.packages.get(i) {
+                lines.push(head(&p.id));
+                lines.push(head("Version"));
+                lines.push(line(if p.version.is_empty() { "—" } else { &p.version }));
+                lines.push(head("Publisher"));
+                lines.extend(crate::library::files::wrap_path(if p.repository.is_empty() { "installed from a file" } else { &p.repository }, crate::library::INFO_WIDTH).iter().map(|l| line(l)));
+                lines.push(head("Trusted"));
+                // The handler reports the keys that signed it and the repository it came from, not a trust flag: a
+                // package is trusted when it was verified at install — signed, or from a repository whose root key is
+                // trusted (the two cases that let it install).
+                lines.push(line(if p.signers.is_empty() && p.repository.is_empty() { "Not verified" } else { "Yes" }));
+                if !p.signers.is_empty() {
+                    lines.push(head("Key fingerprint"));
+                    lines.extend(p.signers.iter().map(|id| line(&fingerprint(id))));
+                }
+                return lines;
+            }
         }
         let Some(at) = at else { return lines };
         match self.rows_rows().get(at) {
@@ -243,7 +271,23 @@ impl Page for Installed {
         lines
     }
 
-    fn press(&mut self, _at: usize, _c: &mut Ctx) {}
+    fn press(&mut self, at: usize, _c: &mut Ctx) {
+        // A package row confirmed opens its detail, which Back closes; a library row is changed by the bar's Remove.
+        if let Some(Row::Package(i)) = self.rows_rows().get(at) {
+            self.detail = Some(*i);
+        }
+    }
+
+    fn path(&self) -> Vec<String> {
+        match &self.detail {
+            Some(i) => vec![self.packages.get(*i).map_or_else(String::new, |p| p.id.clone())],
+            None => vec![],
+        }
+    }
+
+    fn back(&mut self, _c: &mut Ctx) -> bool {
+        self.detail.take().is_some()
+    }
 
     fn tools(&self, at: Option<usize>) -> Vec<Tool> {
         vec![Tool { label: "Remove...".into(), enabled: at.and_then(|a| self.at(a)).is_some() && !self.busy, on: false }]

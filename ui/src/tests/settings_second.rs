@@ -253,7 +253,8 @@ fn the_installed_lists_packages_and_libraries() {
     let long = &all[3];
     assert_eq!(long.chars().count(), 34, "a long name is cut"); // "org.example.a.WonderfullyLongPackage" and an ellipsis
     assert!(long.ends_with('…'), "{long}");
-    r.press_index(3);
+    r.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the packages' heading
+    r.act(Action::Move { pane: None, by: 3 });
     let panel = info(r.ui());
     assert!(panel.contains(&"org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary".to_string()), "{panel:?}");
     assert!(panel.join(" ").contains("Publisher") && panel.join(" ").contains("Trusted") && panel.join(" ").contains("https://friend.example.org"), "the publisher is the repository it came from");
@@ -353,6 +354,51 @@ fn a_refused_library_uninstall_says_why_and_the_row_stays() {
     assert_eq!(r.e.methods(), ["library.uninstall"], "a refusal is not followed by a re-read");
     assert!(r.danger_lines().contains(&"it is in use".to_string()), "{:?}", r.danger_lines());
     assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
+}
+
+// A package row confirmed opens its detail: id, version, the publisher (the repository it came from), the key
+// fingerprint of what signed it and whether it is trusted, as the repositories page shows a root key's; the panel is
+// the detail until Back, reaching a package by the cursor and a press, and nothing is asked (P3).
+#[test]
+fn a_packages_detail_shows_what_the_engine_reports() {
+    let mut r = installed();
+    let base = r.e.calls.len();
+    r.press_index(1); // org.example.reverb
+    assert_eq!(r.e.calls.len(), base, "a press asks nothing: {:?}", r.e.methods());
+    assert!(r.delayed.is_empty(), "{:?}", r.delayed);
+    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.reverb"], "the bar names the package");
+    let panel = info(r.ui());
+    assert!(panel.contains(&"org.example.reverb".to_string()), "{panel:?}");
+    assert!(panel.contains(&"1.0.0".to_string()), "{panel:?}");
+    assert!(panel.contains(&"https://packages.oscairn.org".to_string()), "the publisher is the repository it came from: {panel:?}");
+    assert!(panel.contains(&"Key fingerprint".to_string()) && panel.contains(&"6a2d d1ac f4d4 e23c".to_string()), "the key that signed it, in the reference's grouping: {panel:?}");
+    assert!(panel.contains(&"Yes".to_string()), "{panel:?}");
+    // A file's package, whose source is unknown: not verified, no fingerprint.
+    r.press_index(2); // org.example.strings
+    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.strings"], "the detail is the package confirmed");
+    let panel = info(r.ui()).join(" ");
+    assert!(panel.contains("org.example.strings") && panel.contains("Not verified") && panel.contains("installed from a file"), "{panel}");
+    assert!(!panel.contains("Key fingerprint"), "{panel}");
+    assert_eq!(r.e.calls.len(), base, "another press asks nothing: {:?}", r.e.methods());
+    assert!(r.delayed.is_empty(), "{:?}", r.delayed);
+}
+
+// Back closes a package's detail and the list shows again with the cursor on the same row; nothing is asked (P3).
+#[test]
+fn back_closes_a_packages_detail_on_the_same_row() {
+    let mut r = installed();
+    r.press_index(1); // org.example.reverb
+    assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.reverb"]);
+    let base = r.e.calls.len();
+    let o = r.c.back(); // the hardware Back, as the shell's go_back reaches the screen
+    assert_eq!(o, crate::settings_app::Outcome::Stay, "Back closes the detail, not the page: {o:?}");
+    r.settle();
+    assert_eq!(r.c.path(), ["Settings", "Installed"]);
+    assert_eq!(rows(r.ui())[1].label, "org.example.reverb", "the list shows again");
+    assert!(rows(r.ui())[1].cursor, "the cursor is back on the same row");
+    assert!(!info(r.ui()).join(" ").contains("Key fingerprint"), "the detail is closed: {:?}", info(r.ui()));
+    assert_eq!(r.e.calls.len(), base, "back asks nothing: {:?}", r.e.methods());
+    assert!(r.delayed.is_empty(), "{:?}", r.delayed);
 }
 
 // The keys are listed by name with their fingerprint; the row to make one ends the list; with none the page says so (K1).

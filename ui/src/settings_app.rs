@@ -475,7 +475,7 @@ impl Screen {
     fn back_one(&mut self) -> Outcome {
         self.tab_at = None;
         if self.with_page(|p, c| p.back(c)) {
-            self.b.reset_cursor();
+            // A page's own level closed (the file chooser, a package's detail): the list shows again where it was.
             return self.finish();
         }
         self.show();

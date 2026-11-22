@@ -74,6 +74,23 @@ export component Setlist inherits Rectangle {
     init => {
         SetlistState.slots-per-view = across * down;
     }
+    // A tile's name: the display size, then two steps down; each size's line, the list's headline's, the note's, and
+    // the band the number has at the tile's top.
+    property <length> s0: Theme.display;
+    property <length> s1: Theme.display * 0.8;
+    property <length> s2: Theme.display * 0.65;
+    property <length> lh0: l0.preferred-height;
+    property <length> lh1: l1.preferred-height;
+    property <length> lh2: l2.preferred-height;
+    property <length> lhl: ll.preferred-height;
+    property <length> small-line: ls.preferred-height;
+    property <length> band: ln.preferred-height + 2 * Theme.pad-tight;
+    l0 := Text { visible: false; text: "X"; font-size: root.s0; font-weight: 700; }
+    l1 := Text { visible: false; text: "X"; font-size: root.s1; font-weight: 700; }
+    l2 := Text { visible: false; text: "X"; font-size: root.s2; font-weight: 700; }
+    ll := Text { visible: false; text: "X"; font-size: Theme.headline; font-weight: 700; }
+    ls := Text { visible: false; text: "X"; font-size: Theme.small; }
+    ln := Text { visible: false; text: "0"; font-size: Theme.body; font-weight: 700; }
 
     for stop[i] in SetlistState.bar: Rectangle {
         x: Theme.margin + min(i, 2) * (root.drop-width + Theme.margin) + max(0, i - 2) * (root.step-width + Theme.margin);
@@ -91,7 +108,7 @@ export component Setlist inherits Rectangle {
                 height: parent.height;
                 vertical-alignment: center;
                 overflow: elide;
-                font-size: Theme.body;
+                font-size: Theme.title;
                 color: Theme.text;
                 text: stop.text;
             }
@@ -110,6 +127,7 @@ export component Setlist inherits Rectangle {
         }
         if !stop.drop: Button {
             text: stop.text;
+            size: Theme.title;
             enabled: stop.enabled;
             clicked => { SetlistState.tapped-stop(i); }
         }
@@ -148,7 +166,7 @@ export component Setlist inherits Rectangle {
         }
         if !slot.empty: Rectangle {
             x: Theme.pad-wide - Theme.pad-tight / 2;
-            y: Theme.pad-tight;
+            y: SetlistState.grid ? Theme.pad-tight : (parent.height - self.height) / 2;
             width: number.preferred-width + 2 * Theme.pad-tight;
             height: number.preferred-height + Theme.pad-tight;
             border-radius: Theme.scaled-radius(self.height);
@@ -158,22 +176,78 @@ export component Setlist inherits Rectangle {
                 y: Theme.pad-tight / 2;
                 text: slot.number;
                 color: slot.tinted ? (slot.playing ? slot.tint : slot.ink) : Theme.muted;
-                font-size: Theme.small;
+                font-size: Theme.body;
                 font-weight: 700;
             }
         }
-        if !slot.empty: Text {
-            x: SetlistState.grid ? Theme.pad-wide + Theme.pad-tight / 2 : root.number-column;
+        // A tile's name: under the number's band, the display size on up to two lines (broken at a word, then cut), a
+        // step smaller only when the name does not fit the lines the tile has; the note (why it does not open) small at its foot.
+        if !slot.empty && SetlistState.grid: Rectangle {
+            property <length> note-h: slot.note == "" ? 0px : root.small-line;
+            property <color> ink: parent.ink;
+            x: Theme.pad;
+            y: root.band;
+            width: parent.width - 2 * Theme.pad;
+            height: parent.height - root.band - Theme.pad-tight - self.note-h;
+            f0 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s0; font-weight: 700; }
+            f1 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s1; font-weight: 700; }
+            f2 := Text { visible: false; width: parent.width; wrap: word-wrap; text: slot.title; font-size: root.s2; font-weight: 700; }
+            // What the name needs at the size chosen; the lines it gets (a line and a tenth each: a line's height is the measure of one letter).
+            property <length> need: self.step == 0 ? f0.preferred-height : self.step == 1 ? f1.preferred-height : f2.preferred-height;
+            property <int> step: f0.preferred-height <= min(self.height, 2 * root.lh0) + Theme.hair ? 0 : f1.preferred-height <= min(self.height, 2 * root.lh1) + Theme.hair ? 1 : 2;
+            property <length> lh: self.step == 0 ? root.lh0 : self.step == 1 ? root.lh1 : root.lh2;
+            tile-name := Text {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                height: min(parent.need, min(parent.height, max(1, min(2, floor(parent.height / parent.lh))) * parent.lh * 1.1));
+                text: slot.title;
+                color: parent.ink;
+                font-size: parent.step == 0 ? root.s0 : parent.step == 1 ? root.s1 : root.s2;
+                font-weight: slot.playing ? 700 : 500;
+                wrap: word-wrap;
+                overflow: elide;
+                horizontal-alignment: center;
+                vertical-alignment: top;
+            }
+            if slot.note != "": Text {
+                y: tile-name.y + tile-name.height;
+                width: parent.width;
+                height: parent.note-h;
+                text: slot.note;
+                color: parent.ink;
+                font-size: Theme.small;
+                overflow: elide;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        // A list row's name: one line of the headline size, cut when it is longer; the note small under it.
+        if !slot.empty && !SetlistState.grid: Rectangle {
+            property <length> note-h: slot.note == "" ? 0px : root.small-line;
+            property <color> ink: parent.ink;
+            x: root.number-column;
             width: parent.width - self.x - Theme.pad;
-            height: parent.height;
-            text: slot.note == "" ? slot.title : slot.title + "\n" + slot.note;
-            color: parent.ink;
-            font-size: SetlistState.grid ? Theme.title : Theme.body;
-            font-weight: slot.playing ? 700 : 400;
-            wrap: word-wrap;
-            overflow: elide;
-            horizontal-alignment: SetlistState.grid ? center : left;
-            vertical-alignment: center;
+            Text {
+                y: (parent.height - self.height - parent.note-h) / 2;
+                width: parent.width;
+                height: root.lhl;
+                text: slot.title;
+                color: parent.ink;
+                font-size: Theme.headline;
+                font-weight: slot.playing ? 700 : 500;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            if slot.note != "": Text {
+                y: (parent.height + root.lhl - parent.note-h) / 2;
+                width: parent.width;
+                height: parent.note-h;
+                text: slot.note;
+                color: parent.ink;
+                font-size: Theme.small;
+                overflow: elide;
+                vertical-alignment: center;
+            }
         }
         if slot.opening: Loading {
             x: Theme.pad-wide;

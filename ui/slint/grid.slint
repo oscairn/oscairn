@@ -561,7 +561,7 @@ component ViewPanel inherits Section {
         y: b.y;
         width: b.w;
         height: b.h;
-        border-radius: b.mark ? Theme.mark-radius(min(b.w, b.h)) : Theme.radius / 2;
+        border-radius: b.mark ? Theme.mark-radius(min(b.w, b.h)) : (b.h < Theme.touch ? Theme.scaled-radius(b.h) : Theme.radius / 2);
         background: root.ink(b.fill);
         border-width: b.edge >= 0 ? Theme.hair : 0px;
         border-color: b.edge >= 0 ? root.ink(b.edge) : transparent;

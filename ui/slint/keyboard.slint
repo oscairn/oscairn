@@ -84,11 +84,11 @@ export component Keyboard inherits Rectangle {
         opacity: key.disabled ? Theme.disabled : 1;
         if Theme.depth == DepthStyle.soft: Rectangle {
             y: Theme.shadow-offset;
-            border-radius: Theme.button-radius(parent.height);
+            border-radius: Theme.scaled-radius(parent.height);
             background: Theme.shadow;
         }
         Rectangle {
-            border-radius: Theme.button-radius(parent.height);
+            border-radius: Theme.scaled-radius(parent.height);
             background: key.done ? Theme.accent : key.on ? Theme.accent.with-alpha(Theme.wash-strong) : key.special ? Theme.raised : Theme.key-fill;
             border-width: Theme.edge-width;
             border-color: Theme.edge-color;
@@ -114,7 +114,7 @@ export component Keyboard inherits Rectangle {
         Cursor {
             shown: key.cursor;
             always: true;
-            corner: Theme.button-radius(parent.height);
+            corner: Theme.scaled-radius(parent.height);
         }
     }
 }

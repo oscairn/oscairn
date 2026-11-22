@@ -6,8 +6,11 @@
 //! theme-orange-play, theme-blue-play.
 
 use super::bar::play_on_the_shell;
+use super::fm::{fm_n_text, fm_n_values};
+use super::fm_master::plugin;
 use super::library_shell::Shelf;
 use super::owner::{lib_png, scene};
+use super::shots::{open_with, panels};
 use super::*;
 
 /// Light, a blue accent, square: radius 0, square buttons, flat, sections (and so a list's items) joined edge to edge.
@@ -222,4 +225,84 @@ fn the_scroll_thumb_corner_is_drawn_scaled() {
     let at = |dx: f32, dy: f32| s.f.screen.pixels[(y + dy).ceil() as usize * s.f.screen.w + (x + dx).ceil() as usize];
     let (corner, inside) = (at(1., 1.), at(t.get_scroll_bar() * k / 2., 8.));
     assert_eq!(corner, inside, "the thumb's corner pixel is the thumb's: {corner:?} against {inside:?}");
+}
+
+/// The drawn corner radius of the FM table's operator-1 level fill bar, in pixels, measured on the window buffer: the
+/// leftmost operator-color pixel on the bar's top row is that radius in from the bar's true left (its mid row's left edge
+/// starts there), so their difference is the corner as drawn.
+fn drawn_bar_radius(s: &Screen, bar: &crate::GridBox, op: slint::Color) -> usize {
+    let (ur, ug, ub) = (i32::from(op.red()), i32::from(op.green()), i32::from(op.blue()));
+    let bar_h = f64::from(bar.h).round() as usize;
+    // The operator color's connected regions; the fill bar is the one whose height is the bar's (the others are the
+    // square chips, round nodes and value cells).
+    let mut pts: Vec<(usize, usize)> = Vec::new();
+    for y in 0..s.h {
+        for x in 0..s.w {
+            let p = s.pixels[y * s.w + x];
+            if (i32::from(p.r) - ur).abs() < 10 && (i32::from(p.g) - ug).abs() < 10 && (i32::from(p.b) - ub).abs() < 10 {
+                pts.push((x, y));
+            }
+        }
+    }
+    let mut used = vec![false; pts.len()];
+    for i in 0..pts.len() {
+        if used[i] {
+            continue;
+        }
+        let mut stack = vec![i];
+        used[i] = true;
+        let mut region: Vec<usize> = Vec::new();
+        while let Some(j) = stack.pop() {
+            region.push(j);
+            let (jx, jy) = pts[j];
+            for k in 0..pts.len() {
+                if !used[k] && pts[k].0 + 3 >= jx && pts[k].0 <= jx + 3 && pts[k].1 + 3 >= jy && pts[k].1 <= jy + 3 {
+                    used[k] = true;
+                    stack.push(k);
+                }
+            }
+        }
+        let (mut minx, mut maxx, mut miny, mut maxy) = (s.w, 0, s.h, 0);
+        for &j in &region {
+            minx = minx.min(pts[j].0);
+            maxx = maxx.max(pts[j].0);
+            miny = miny.min(pts[j].1);
+            maxy = maxy.max(pts[j].1);
+        }
+        let (h, _w) = (maxy - miny + 1, maxx - minx + 1);
+        if (h as isize - bar_h as isize).abs() <= 1 {
+            let mid_y = miny + h / 2;
+            let inside = |x: usize, y: usize| x >= minx && x <= maxx && y >= miny && y <= maxy;
+            let top_l = region.iter().map(|&j| pts[j]).filter(|&(x, y)| y == miny && inside(x, y)).map(|(x, _)| x).min();
+            let mid_l = region.iter().map(|&j| pts[j]).filter(|&(x, y)| y == mid_y && inside(x, y)).map(|(x, _)| x).min();
+            if let (Some(t), Some(m)) = (top_l, mid_l) {
+                return t.saturating_sub(m);
+            }
+        }
+    }
+    panic!("the fill bar's region not found (bar {bar_h} tall)");
+}
+
+// The grid's short boxes (the FM table's level fill bar) take the scaled radius, not the half radius: a bar shorter than
+// a touch row draws a corner smaller than radius / 2 and never more than half its own height. (The keyboard's keys are
+// button-radius, equal to the scaled radius at the touch height, so they are unchanged there; the piano's keys keep their
+// own key-radius.)
+#[test]
+fn the_grids_short_boxes_use_the_scaled_radius_not_the_half() {
+    fit_to_window();
+    let mut s = Screen::sized(1280, 720);
+    s.set_scale(1.);
+    theme::apply(&s.ui, &orange());
+    s.ui.global::<crate::Theme>().set_tab_placement(crate::TabPlacement::Top);
+    let mut vals = fm_n_values(1., false);
+    vals.push((101, 90.)); // operator 1's level high, so its fill bar draws wide
+    let mut p = open_with(&mut s, plugin(8, true), &vals, &fm_n_text);
+    p.shown();
+    s.frame();
+    let t = s.ui.global::<crate::Theme>();
+    let bar = panels(&s.ui)[0].boxes.iter().find(|b| b.fill == 16 && b.edge == -1 && b.text.is_empty()).expect("operator 1's level fill bar");
+    let drawn = drawn_bar_radius(&s, &bar, t.get_operators().iter().next().unwrap());
+    assert!(drawn < f64::from(t.get_radius() / 2.) as usize, "the short bar's corner is scaled, not radius / 2: drawn {drawn} against {}", f64::from(t.get_radius() / 2.) as usize);
+    assert!(drawn < f64::from(bar.h / 2.) as usize, "a corner never past half its own height: drawn {drawn} of half {}", f64::from(bar.h / 2.) as usize);
+    png(&s, "grid-scaled-radius");
 }

@@ -442,14 +442,51 @@ fn bands(f: &Fixture, (x, y, w, h): (f32, f32, f32, f32), down: bool) -> Vec<(us
 // display size (32) and a list row's in its headline size (26), where they were the title (20) and the body (16). The
 // measure is the drawn text: from the top of "S" to the foot of "g" in "Song 0" (about nine tenths of the size), which
 // is at least 0.85 of the new size and at least 1.4 times the whole of the old one. A long name is two lines in a
-// 4 x 3 tile and never three (cut), one in a 4 x 4 tile; the number's band, the name's lines and the box's edge do
+// 4 x 3 tile and never three (cut), and two in a 4 x 4 tile as well; the number's band, the name's lines and the box's edge do
 // not meet (they would be one band); a list row's number ends clear of where its name starts. And the rows a list
 // view holds: 9 at scale 1, 5 at 1.55 (a bank of 30, with the line under them that says which show).
+// A 4 x 4 tile is no taller than two lines of the smallest name size, so the old rule ("fit in what the tile's floor
+// says is the lines it has") drew a long name on one line, cut. The rule is "two lines are allowed": a size is a step
+// smaller only when the name does not fit on two lines there, and the drawn text shows two wrapped lines, cut after.
+// After the fix the long name is two lines in the 4 x 4 tile at the keyboard's scale too, and more of it shows than
+// the single cut line did (the ink below the number's chip grows: before 1908 px, after two lines); a short name keeps
+// the display size and one line, and no name's lines reach the number's chip (the per-tile loop of the test below).
+#[test]
+fn a_long_name_is_two_lines_in_a_4x4_tile() {
+    let scale = 1.55;
+    let inset = |(x, y, w, h): (f32, f32, f32, f32)| (x + 8., y + 5., w - 16., h - 10.);
+    for (mode, rows, long_lines) in [("grid", 3, 2), ("grid4", 4, 2)] {
+        let mut f = on_setlist(&format!("setlist-long-{mode}"), 2, mode, 1, 4 * rows);
+        f.screen.set_scale(scale);
+        for _ in 0..3 {
+            f.screen.frame();
+        }
+        f.screen.save(&format!("h3-long-{mode}"));
+        // The long slot (fourth) is drawn on `long_lines` lines, never more (cut after); the short one is still one.
+        let long = bands(&f, inset(slot_box(&f, scale, rows, 3)), true);
+        assert_eq!(long.len(), 1 + long_lines, "{mode}: the long name on {long_lines} lines under the number, cut after: {long:?}");
+        assert_eq!(bands(&f, inset(slot_box(&f, scale, rows, 0)), true).len(), 2, "{mode}: the short name one line, unchanged");
+        // More of the name shows than the single cut line did: the ink below the number's chip (the drawn characters).
+        // Before the fix the 4 x 4 tile's one cut line drew 1908 px; two lines draw roughly twice that.
+        if mode == "grid4" {
+            let (r0, r1, r2, r3) = inset(slot_box(&f, scale, rows, 3));
+            let fill = pixel(&f, r0 + r2 - 1., r1 + r3 - 1.);
+            let back = rgb(f.screen.ui.global::<Theme>().get_background());
+            let top = 5 + (long[0].0 + long[0].1);
+            let ink = (0..r2 as usize).map(|lx| (0..r3 as usize).filter(|&ly| {
+                let (px, py) = (r0 + lx as f32, r1 + ly as f32);
+                py >= r1 + top as f32 && { let p = pixel(&f, px, py); p != fill && p != back }
+            }).count()).sum::<usize>();
+            assert!(ink > 2400, "grid4: the characters shown ({ink} px below the chip) rose from the one cut line (1908 px before); now two lines");
+        }
+    }
+}
+
 #[test]
 fn names_are_large_and_nothing_overlaps() {
     let scale = 1.55;
     let inset = |(x, y, w, h): (f32, f32, f32, f32)| (x + 8., y + 5., w - 16., h - 10.);
-    for (mode, rows, long_lines) in [("grid", 3, 2), ("grid4", 4, 1)] {
+    for (mode, rows, long_lines) in [("grid", 3, 2), ("grid4", 4, 2)] {
         let mut f = on_setlist(&format!("setlist-large-{mode}"), 2, mode, 1, 4 * rows);
         f.screen.set_scale(scale);
         for _ in 0..3 {

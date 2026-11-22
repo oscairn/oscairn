@@ -733,7 +733,7 @@ impl Fixture {
     }
 }
 
-// The Setlist on the shell: two panes, E1 (pane 0) through the setlists and E6 (pane 1) or the
+// The Setlist on the shell: two panes, E1 (pane 0) along the setlist bar and E6 (pane 1) or the
 // dial through the slots; a view of slots at a time, the cursor past it turning a whole view; a
 // slot opens only on Confirm or a tap; a slot chosen while one opens waits, the last chosen winning;
 // a busy answer is tried again as the next; Cancel drops the cursor, then goes back.
@@ -801,10 +801,11 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.reply(&again, json!({"result": {}}));
     assert_eq!(f.engine.request()["method"], "performance.prepare", "the next one prepared");
     assert!(rows(&f)[4].playing);
-    // E1 (pane 0): the setlists' cursor.
+    // E1 (pane 0): the setlist bar's cursor, on the setlists' dropdown, which names the one open; the slots' is gone (one cursor).
     f.navigation(nav(2, 2, pv, 1, 0));
-    let names = f.screen.ui.global::<SetlistState>().get_setlists().iter().collect::<Vec<_>>();
-    assert_eq!((names[0].cursor, names[0].shown), (true, true), "shown on the first setlist by the first move");
+    let stops = f.screen.ui.global::<SetlistState>().get_bar().iter().collect::<Vec<_>>();
+    assert_eq!((stops[0].cursor, stops[0].drop, stops[0].text.as_str()), (true, true, "Friday"), "shown on the bar's first stop by the first move");
+    assert_eq!(cursor(&f), None, "one cursor");
     // Cancel is Back in one step, with the cursors where they are: Home.
     f.navigation(nav(2, 2, pv, 1, 1));
     assert_eq!(f.screen.ui.get_screen(), 0);
@@ -888,18 +889,22 @@ fn setlist_play_reached_by_the_bar_cursor() {
     assert_eq!(s.ui.get_screen(), 3, "Play");
 }
 
-// The whole Setlist walked with panel moves only: both setlist rows (the count the screen's own
-// setlists model declares) and every slot of the shown view (the count its slots model declares,
-// not hard-coded), plus Previous and Next and Play, each pressed and held to a real effect on the
-// fake engine or the shown screen — a setlist row opens (`setlists.get` for that id, the name in
-// the bar), a slot opens (`library.load` for that id, the row shows playing), Previous and Next
-// step to another slot, and Play opens Play. Nothing switches before the press.
+// The whole Setlist walked with panel moves only: every stop of the setlist bar (the count the
+// screen's own bar model declares), every setlist and every bank of the two dropdowns (the counts
+// the open list's own model declares) and every slot of the shown view (the count its slots model
+// declares, not hard-coded), plus the previous and next song and Play, each pressed and held to a
+// real effect on the fake engine or the shown screen — a setlist of the dropdown opens
+// (`setlists.get` for that id, the name on the dropdown), a bank of the dropdown and the bar's
+// Previous and Next show another bank and ask nothing, a slot opens (`library.load` for that id,
+// the row shows playing), the page keys step to another slot, and Play opens Play. Nothing
+// switches before the press.
 #[test]
 fn setlist_walked_with_panel_moves_only() {
     let setlists = json!([{"id": "s1", "name": "Friday"}, {"id": "s2", "name": "Saturday"}]);
     let doc = |id: &str, name: &str, slots: Vec<serde_json::Value>| json!({
         "format": "oscairn.setlist", "version": 2, "info": {"id": id, "name": name}, "display": {"mode": "list"},
-        "pages": [{"name": "Set 1", "slots": serde_json::Value::Array(slots)}]});
+        "pages": [{"name": "Set 1", "slots": serde_json::Value::Array(slots)},
+                  {"name": "Encore", "slots": [{"id": format!("{id}-e0"), "name": "Last 0", "color": "", "label": ""}, {"id": format!("{id}-e1"), "name": "Last 1", "color": "", "label": ""}]}]});
     let friday_slots: Vec<serde_json::Value> = (0..4).map(|i| json!({"id": format!("a{i}"), "name": format!("Song {i}"), "color": "", "label": ""})).collect();
     let saturday_slots: Vec<serde_json::Value> = (0..4).map(|i| json!({"id": format!("b{i}"), "name": format!("Late {i}"), "color": "", "label": ""})).collect();
     let mut f = Fixture::new("setlist-walk");
@@ -933,31 +938,85 @@ fn setlist_walked_with_panel_moves_only() {
     shell::act(Action::Confirm(None));
     assert_eq!(f.screen.ui.get_screen(), 1, "the Setlist");
     settle(&mut f, "s1", &friday_slots);
-    // Both setlist rows, counted from the screen's own setlists model: each pressed opens that
-    // setlist. The second row first (so the switch is real), then the first back.
-    let n_sets = f.screen.ui.global::<SetlistState>().get_setlists().row_count();
-    assert!(n_sets >= 2, "the screen declares two setlists: {n_sets}");
-    shell::act(Action::Move { pane: Some(0), by: 1 }); // the first move shows the cursor on the first setlist
-    shell::act(Action::Move { pane: Some(0), by: 1 }); // on to Saturday
-    shell::act(Action::Confirm(None));
-    let get = ask(&mut f, "open a setlist: confirm on a setlist row");
-    assert_eq!((get["method"].as_str(), get["params"]["id"].as_str()), (Some("setlists.get"), Some("s2")));
-    f.reply(&get, json!({"result": {"setlist": doc("s2", "Saturday", saturday_slots.clone())}}));
-    settle(&mut f, "s2", &saturday_slots);
-    assert_eq!(f.screen.ui.global::<SetlistState>().get_name().as_str(), "Saturday", "the second setlist row opened Saturday");
-    shell::act(Action::Move { pane: Some(0), by: -1 }); // back to Friday
-    shell::act(Action::Confirm(None));
-    let get = ask(&mut f, "open a setlist: confirm on a setlist row");
-    assert_eq!((get["method"].as_str(), get["params"]["id"].as_str()), (Some("setlists.get"), Some("s1")));
-    f.reply(&get, json!({"result": {"setlist": doc("s1", "Friday", friday_slots.clone())}}));
-    settle(&mut f, "s1", &friday_slots);
-    assert_eq!(f.screen.ui.global::<SetlistState>().get_name().as_str(), "Friday", "the first setlist row opened Friday");
+    // The setlist bar's stops, counted from the screen's own bar model: the cursor on each, each pressed.
+    let stops = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_bar().iter().collect::<Vec<_>>();
+    fn menu(f: &Fixture) -> crate::MenuState<'_> {
+        f.screen.ui.global::<crate::MenuState>()
+    }
+    let first_number = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().row_data(0).unwrap().number;
+    let silent = |f: &mut Fixture, what: &str| assert!(f.engine.try_request(std::time::Duration::from_millis(60)).is_none(), "{what} asked the engine for something");
+    let n_stops = stops(&f).len();
+    assert!(n_stops >= 4, "the screen declares its bar: {n_stops}");
+    let mut pressed = 0;
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // the first move shows the cursor on the bar's first stop
+    for i in 0..n_stops {
+        let stop = stops(&f)[i].clone();
+        assert!(stop.cursor && stops(&f).iter().filter(|s| s.cursor).count() == 1, "the cursor is on stop {i} alone");
+        if stop.drop && i == 0 {
+            // The setlists' dropdown: every setlist of its list (the list's own count) pressed opens that setlist, the
+            // last first (so the switch is real), the first last. Nothing is read until the press; Cancel closes it unchanged.
+            shell::act(Action::Confirm(None));
+            f.screen.frame(); // the list is drawn: it holds the rows that fit
+            let n_sets = menu(&f).get_rows().row_count();
+            assert!(menu(&f).get_open() && n_sets >= 2, "the dropdown lists the setlists: {n_sets}");
+            shell::act(Action::Move { pane: None, by: 1 });
+            shell::act(Action::Cancel(None));
+            assert!(!menu(&f).get_open() && f.screen.ui.get_screen() == 1, "Cancel closes the dropdown and stays");
+            silent(&mut f, "a dropdown opened, walked and closed");
+            for set in (0..n_sets).rev() {
+                shell::act(Action::Confirm(None));
+                shell::act(Action::Move { pane: None, by: set as i32 });
+                silent(&mut f, "moving in the dropdown");
+                shell::act(Action::Confirm(None));
+                let (id, name, slots) = if set == 0 { ("s1", "Friday", &friday_slots) } else { ("s2", "Saturday", &saturday_slots) };
+                let get = ask(&mut f, "open a setlist: confirm on a row of the dropdown");
+                assert_eq!((get["method"].as_str(), get["params"]["id"].as_str()), (Some("setlists.get"), Some(id)));
+                f.reply(&get, json!({"result": {"setlist": doc(id, name, slots.clone())}}));
+                settle(&mut f, id, slots);
+                assert_eq!((f.screen.ui.global::<SetlistState>().get_name().as_str(), stops(&f)[0].text.as_str(), menu(&f).get_open()), (name, name, false), "row {set} of the dropdown opened {name}");
+            }
+        } else if stop.drop {
+            // The banks' dropdown: every bank of its list pressed shows that bank, the last first; nothing is asked.
+            shell::act(Action::Confirm(None));
+            f.screen.frame();
+            let n_banks = menu(&f).get_rows().row_count();
+            assert!(menu(&f).get_open() && n_banks >= 2, "the dropdown lists the banks: {n_banks}");
+            shell::act(Action::Cancel(None));
+            for bank in (0..n_banks).rev() {
+                shell::act(Action::Confirm(None));
+                shell::act(Action::Move { pane: None, by: bank as i32 });
+                shell::act(Action::Confirm(None));
+                assert_eq!((first_number(&f), menu(&f).get_open()), (if bank == 0 { 1 } else { friday_slots.len() as i32 + 1 }, false), "row {bank} of the dropdown shows that bank");
+                assert!(stops(&f)[i].text.ends_with(&format!("{}/{n_banks}", bank + 1)), "the dropdown says the bank: {}", stops(&f)[i].text);
+            }
+            silent(&mut f, "choosing a bank");
+        } else {
+            // Previous and Next: the bank before or after, when there is one. From the first bank Previous is off and
+            // does nothing; Next shows the second, where Next is off and Previous comes back.
+            let next = stop.text == "Next";
+            assert_eq!((stop.enabled, first_number(&f)), (next, 1), "{}: on the first bank", stop.text);
+            shell::act(Action::Confirm(None));
+            assert_eq!(first_number(&f) > 1, next, "{} pressed on the first bank", stop.text);
+            if next {
+                assert!(!stops(&f)[i].enabled, "Next is off on the last bank");
+                shell::act(Action::Move { pane: Some(0), by: -1 });
+                shell::act(Action::Confirm(None)); // Previous, now on: back to the first bank
+                assert_eq!(first_number(&f), 1, "Previous comes back");
+                shell::act(Action::Move { pane: Some(0), by: 1 });
+            }
+            silent(&mut f, "a bank turned");
+        }
+        pressed += 1;
+        shell::act(Action::Move { pane: Some(0), by: 1 });
+    }
+    assert_eq!(pressed, n_stops, "every stop of the bar was pressed");
     // The slots: the count the screen's own slots model declares for the view, not hard-coded.
     shell::act(Action::Move { pane: Some(1), by: 1 }); // the cursor onto the first slot
     assert_eq!(f.screen.ui.get_screen(), 1, "moving to the slots switches nothing");
+    assert!(stops(&f).iter().all(|s| !s.cursor), "one cursor: the bar's is gone");
     let shown = f.screen.ui.global::<SetlistState>().get_slots().row_count();
     assert!(shown > 0, "the screen declares slots to walk");
-    // Previous and Next, from the first slot: each opens the slot it steps to.
+    // The previous and next song (the page keys), from the first slot: each opens the slot it steps to.
     shell::act(Action::Confirm(None));
     let first = ask(&mut f, "the first slot (Confirm on the cursor's slot)");
     assert_eq!(first["method"], "library.load");
@@ -1509,6 +1568,7 @@ mod library_list;
 mod library_open;
 mod library_items;
 mod library_setlist;
+mod setlist_bar;
 mod library_install;
 mod library_manage;
 mod library_catalog;

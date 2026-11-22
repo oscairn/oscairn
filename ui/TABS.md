@@ -27,7 +27,7 @@ unchanged.
 | Routing's header toggles (Meters, Parts collapsed...) | a setting | toggle buttons | no | toggles, not sets of views |
 | Controls: "By scene" | rows of mappings versus a table | one toggle button | no | the reference's `toggle(..."By scene")`: an on/off |
 | Part screen's rows (Sound, Insert effects, Keyboard...) | nothing: one list of rows | rows | no | one scrolling list, not sibling views |
-| Setlist: the setlists pane and the slots pane | two panes shown together, the cursor goes between them | two lists | no | both are on screen at once; neither replaces the other |
+| Setlist: the setlists and a setlist's banks | which setlist is open, which bank of it shows | two dropdowns in the row under the top bar (the shared menu), Previous and Next beside the banks' | no | there can be many of either, each named where it is chosen: a list to pick from and a pager, not a few siblings shown together |
 | Sounds chooser | one list with a search | a list and a search row | no | the reference's tags are a filter, several of them chosen at once (all must match), not siblings of which one shows: a Filters row opens a list of Favorites, Recent, Library and Tags, one scrolling list a level down each time, not tabs |
 | Chain: a split's lanes, a lane's plugins and settings | the chain screen's levels: the part's chain, a split's lanes, a lane | rows | no | one scrolling list a level down each time (a press opens, Cancel goes back), as the reference's chain row and panel: the lane's plugins and settings are not alternatives (the reference shows both at once), so they are one list, not tabs |
 | Mixer's paging buttons, the Parts and Setlist views of a long list | which slice of a list | ‹ › buttons | no | paging, not sibling views |

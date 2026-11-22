@@ -171,7 +171,8 @@ fn a_load_far_past_its_usual_says_so_in_plain_words() {
 fn a_request_nothing_explains_gets_the_slow_to_answer_banner() {
     let mut f = on_setlist("loading-silent");
     shell::wait_limits(Duration::from_secs(30), Duration::from_millis(300));
-    f.screen.ui.global::<SetlistState>().invoke_tapped_setlist(1);
+    f.screen.ui.global::<SetlistState>().invoke_tapped_stop(0); // the setlists' dropdown
+    f.screen.ui.global::<crate::MenuState>().invoke_tapped(1); // Saturday
     let get = f.engine.request();
     assert_eq!(get["method"], "setlists.get");
     assert_eq!((loading(&f), banner(&f)), (String::new(), String::new()), "a read is no wait the player expects");

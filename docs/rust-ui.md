@@ -293,23 +293,49 @@ normal wait (a fraction of a second to a few seconds; 4 to 20 s for a big one on
 
 ## The Setlist
 
-`setlist.rs` and `slint/setlist.slint`, from the prototype: the setlists on the left (pane 0, E1 on
-a FANTOM-07), the open setlist's slots on the right (pane 1, E6), the VALUE dial on the pane last
-touched. The slots show a view at a time (the setlist's grid, or as many list rows as fit); the
-cursor leaving the view turns a whole view. Confirm or a tap opens a slot (`library.load`); a slot
-chosen while one opens waits and opens next, the last chosen winning, as the JUCE engine client
-queues library loads; a load refused as busy (`-32009`, another client's long request) is tried
-again as the next; the next slot is prepared (`performance.prepare`). Left, Right, Page Up and
-Page Down are Previous and Next, as in the JUCE Setlist (page turners send them); Up and Down move
-the cursor. The setlist open and the slot playing are kept in the JUCE Setlist app's own state
-file (the data folder's `AppData/oscairn.setlist/state.json`), so either opens where the other
-left off. Play's Previous and Next step it (`step_by`, as the JUCE Play asks the Setlist app to).
-Its Play button opens Play. Not yet: editing.
+`setlist.rs` and `slint/setlist.slint`, from the prototype, in the owner's layout (2026-11-21): no
+sidebar and no footer.
+
+- **The top bar** is the system's, with the screen's one action, Play, which opens Play (reached by
+  the bar's cursor, `move:2` or Tab, like any screen's action).
+- **The setlist bar** is one row directly under it, in the place and height of the Library's row
+  (a touch target at the margin). From the left: the **setlists' dropdown** (it names the setlist
+  open; "No setlist" and off with none), the **banks' dropdown** (a setlist's `pages` are its banks:
+  the bank's name, or "Bank N" without one, and "n/m"), **Previous** and **Next**, and at the right
+  end two small lines: what the screen says (the slots' count, the slot chosen, why one did not open)
+  over which of the bank's slots show ("1–9 of 30"). The footer's "Set 1 (1/2)" is gone: the banks'
+  dropdown says it.
+- **Previous and Next turn the bank**, as on the reference keyboard: the bank before or after is
+  shown, nothing is asked of the engine and the slot playing stays the one it was; a song opens only
+  when it is chosen. At the first and last bank the button is off (no wrap). With one bank the banks'
+  dropdown and both buttons are shown off, so the row never moves.
+- **A dropdown** opens the shared menu (`menu.rs`) over the screen: its list with a border cursor, the
+  one open ticked; the dial moves, nothing is read or shown until the press (`setlists.get` for a
+  setlist; a bank asks nothing), Cancel closes it unchanged.
+- **The slots** of the bank shown have all the room under the bar, a view at a time (the setlist's
+  grid, or as many list rows as fit); the cursor leaving the view turns a whole view, and past the
+  bank's end goes on to the next bank. Confirm or a tap opens a slot (`library.load`); a slot
+  chosen while one opens waits and opens next, the last chosen winning, as the JUCE engine client
+  queues library loads; a load refused as busy (`-32009`, another client's long request) is tried
+  again as the next; the next slot is prepared (`performance.prepare`).
+- **Without touch**, one cursor: pane 0 (E1 on a FANTOM-07) moves it along the setlist bar's four
+  stops, pane 1 (E6) over the slots, and each drops the other's. The VALUE dial and Up and Down walk
+  through both: up out of the first bank's first slot is the bar's last stop, down past it the slots
+  again, and up out of the bar's first stop is the top bar. A stop that is off can hold the cursor;
+  a press on it does nothing.
+- **The previous and next song** are not on the screen any more but work as before: Left, Right, Page
+  Up and Page Down here, as in the JUCE Setlist (page turners send them), and Play's Previous and
+  Next and its page keys (`step_by`, as the JUCE Play asks the Setlist app to). The bank shown follows
+  the song stepped to.
+
+The setlist open and the slot playing are kept in the JUCE Setlist app's own state file (the data
+folder's `AppData/oscairn.setlist/state.json`), so either opens where the other left off. Not yet:
+editing.
 
 ## Play
 
 `play.rs` and `slint/play.slint`: the JUCE Performance app's first view (PlayView.cpp) for the stage.
-Home's Performance tile and the Setlist's Play button open it (Cancel goes back to where it was
+Home's Performance tile and the Setlist's Play (its top bar action) open it (Cancel goes back to where it was
 opened from); Edit, the last action of the top bar, opens the Parts list (below).
 
 - **Shows:** the open Performance's name and scene in the top bar as everywhere; eight scene tiles

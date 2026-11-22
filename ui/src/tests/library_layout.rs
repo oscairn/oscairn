@@ -4,10 +4,11 @@
 //! (the keyboard's, at 1.55) and checked: the sidebar's choices by the panel's moves alone, search, each kind, nothing at rest.
 
 use super::library::{footer, rows};
+use super::library_fake::stored;
 use super::library_shell::Shelf;
 use super::owner::{lib_png, scene};
 use super::*;
-use crate::{KeyboardState, LibraryState};
+use crate::{KeyboardState, LibraryState, PartState};
 
 /// The line the sidebar's cursor is on.
 pub(super) fn side_cursor(ui: &Shell) -> Option<String> {
@@ -19,6 +20,55 @@ fn side_labels(ui: &Shell) -> Vec<String> {
 }
 
 /// The dial down the sidebar to the line `label`.
+/// The window at `w` x `h` (logical) and `scale`, showing the Library's Performances, normal or compact.
+fn band_rig(name: &str, w: usize, h: usize, scale: f32, compact: bool) -> Shelf {
+    fit_to_window();
+    let mut s = Shelf::new(name);
+    shell::library_in_rust(true);
+    s.f.screen.resize(w, h);
+    s.f.screen.set_scale(scale);
+    theme::apply(&s.ui(), &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
+    s.e.items = (0..10).map(|i| stored("performance", &format!("p{i}"), &format!("Bright Strings {:03}", i + 2))).collect();
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    s.serve();
+    s.f.screen.frame();
+    s.f.screen.frame();
+    if compact {
+        s.ui().global::<LibraryState>().set_compact(true);
+        s.ui().global::<PartState>().set_compact(true);
+        s.f.screen.frame();
+    }
+    s
+}
+
+// The empty band under the Library's main list: the line that counts the rows is pinned to the window's bottom, so the
+// spare room the rows' fit leaves sits empty between the last row and it (at 1280x720 and at 800x480). The count line now
+// sits directly under the last row (one theme gap below it), so the band is no taller than a row gap, in Normal and Compact
+// alike. The last row's bottom and the count line's top are read where the layout draws them (rows-per-view at the theme's
+// touch and gap from the list's top, and the count line's own box), at the two windows the device and a small screen show.
+#[test]
+fn no_dead_band_between_the_last_row_and_the_count_line() {
+    use crate::Theme;
+    for (w, h, scale, mode) in [(1280, 720, 1.55, "the keyboard"), (800, 480, 1.0, "a small window")] {
+        for compact in [false, true] {
+            let name = format!("f1-band-{w}x{h}-{}", if compact { "compact" } else { "normal" });
+            let s = band_rig(&name, w, h, scale, compact);
+            let ui = s.ui();
+            let t = ui.global::<Theme>();
+            let per = ui.global::<crate::PartState>().get_rows_per_view() as f32;
+            let (m, gap, touch) = (t.get_margin(), t.get_gap(), t.get_touch());
+            // The last visible row's bottom and the count line's top, in the window's logical pixels.
+            let last_bottom = ui.get_list_y() + m + (per - 1.0) * (touch + gap) + touch;
+            let count_top = ui.get_list_y() + ui.get_count_y();
+            let band = count_top - last_bottom;
+            eprintln!("F1 {mode} {} {per} rows: the count line is {band} px below the last row (the gap is {gap})", if compact { "Compact" } else { "Normal" });
+            assert!(band <= gap + 1.0, "{mode}, {}: {per} rows then a band of {band} px to the count line, taller than the {gap} px row gap", if compact { "Compact" } else { "Normal" });
+            lib_png(&s, &name);
+        }
+    }
+}
+
 fn dial_to(s: &mut Shelf, label: &str) {
     for _ in 0..40 {
         if side_cursor(&s.ui()).as_deref() == Some(label) {

@@ -19,7 +19,6 @@ fn side_labels(ui: &Shell) -> Vec<String> {
     ui.global::<LibraryState>().get_side_rows().iter().map(|r| r.label.to_string()).collect()
 }
 
-/// The dial down the sidebar to the line `label`.
 /// The window at `w` x `h` (logical) and `scale`, showing the Library's Performances, normal or compact.
 fn band_rig(name: &str, w: usize, h: usize, scale: f32, compact: bool) -> Shelf {
     fit_to_window();
@@ -34,11 +33,11 @@ fn band_rig(name: &str, w: usize, h: usize, scale: f32, compact: bool) -> Shelf 
     s.serve();
     s.f.screen.frame();
     s.f.screen.frame();
-    if compact {
-        s.ui().global::<LibraryState>().set_compact(true);
-        s.ui().global::<PartState>().set_compact(true);
-        s.f.screen.frame();
+    // Compact is kept between Libraries, so it may already be on: press the Compact button (as the owner does) only to change it.
+    if s.ui().global::<PartState>().get_compact() != compact {
+        super::library_bubbles::press_tool(&mut s, 1);
     }
+    assert_eq!(s.ui().global::<PartState>().get_compact(), compact, "the list is {}", if compact { "Compact" } else { "Normal" });
     s
 }
 
@@ -57,7 +56,8 @@ fn no_dead_band_between_the_last_row_and_the_count_line() {
             let ui = s.ui();
             let t = ui.global::<Theme>();
             let per = ui.global::<crate::PartState>().get_rows_per_view() as f32;
-            let (m, gap, touch) = (t.get_margin(), t.get_gap(), t.get_touch());
+            let (m, touch) = (t.get_margin(), t.get_touch());
+            let gap = t.invoke_dense(t.get_list_gap(), compact); // the rows' gap, closed up in Compact
             // The last visible row's bottom and the count line's top, in the window's logical pixels.
             let last_bottom = ui.get_list_y() + m + (per - 1.0) * (touch + gap) + touch;
             let count_top = ui.get_list_y() + ui.get_count_y();
@@ -69,6 +69,7 @@ fn no_dead_band_between_the_last_row_and_the_count_line() {
     }
 }
 
+/// The dial down the sidebar to the line `label`.
 fn dial_to(s: &mut Shelf, label: &str) {
     for _ in 0..40 {
         if side_cursor(&s.ui()).as_deref() == Some(label) {

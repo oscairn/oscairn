@@ -125,8 +125,8 @@ fn a_choice_is_a_menu_over_the_screen() {
     ui.global::<PartState>().invoke_tapped(0);
     assert!(ui.global::<MenuState>().get_open());
     let items: Vec<String> = ui.global::<MenuState>().get_rows().iter().map(|r| r.label.to_string()).collect();
-    assert_eq!(items, ["As the device has it", "Bar and percent", "Bar", "Percent", "Hidden"]);
-    ui.global::<MenuState>().invoke_tapped(2);
+    assert_eq!(items, ["Bar and percent", "Bar", "Percent", "Hidden"]);
+    ui.global::<MenuState>().invoke_tapped(1);
     s.serve();
     assert!(!ui.global::<MenuState>().get_open());
     assert_eq!(std::fs::read_to_string(s.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"bar\"}\n");

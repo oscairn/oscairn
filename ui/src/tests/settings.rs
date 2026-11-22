@@ -436,35 +436,46 @@ fn a_theme_that_cannot_be_used_is_said() {
 
 // ---- T: the Top bar ----
 
-// CPU and RAM each offer As the device has it, Bar and percent, Bar, Percent and Hidden, the one kept ticked; a choice
+// CPU and RAM each offer Bar and percent (the default), Bar, Percent and Hidden, the one kept ticked; a choice
 // is stored in top-bar.json as the JUCE page stores it, at once, and the bar shows it at once (T1, T2, T4).
 #[test]
 fn the_top_bar_choices_are_stored_and_shown() {
     let mut r = Rig::desktop("topbar");
     r.page(Id::TopBar);
     assert_eq!(labels(r.ui()), ["CPU", "RAM"]);
-    assert_eq!(value_of(r.ui(), "CPU"), "As the device has it ›");
+    assert_eq!(value_of(r.ui(), "CPU"), "Bar and percent ›");
     r.press_row("CPU");
-    assert_eq!(r.menu_labels(), ("CPU".to_string(), ["As the device has it", "Bar and percent", "Bar", "Percent", "Hidden"].map(String::from).to_vec()));
-    assert_eq!(r.ticked(), ["As the device has it"]);
+    assert_eq!(r.menu_labels(), ("CPU".to_string(), ["Bar and percent", "Bar", "Percent", "Hidden"].map(String::from).to_vec()));
+    assert_eq!(r.ticked(), ["Bar and percent"]);
     r.choose("Percent");
     assert_eq!(std::fs::read_to_string(r.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"percent\"}\n");
     let bar = r.ui().global::<Bar>();
     assert!(!bar.get_cpu_bar() && bar.get_cpu_percent(), "the bar shows percent now");
-    assert!(bar.get_ram_bar() && bar.get_ram_percent(), "RAM as the device has it: both");
+    assert!(bar.get_ram_bar() && bar.get_ram_percent(), "RAM unchosen: both");
     r.press_row("RAM");
     r.choose("Hidden");
     assert_eq!(std::fs::read_to_string(r.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"percent\",\"ram\":\"none\"}\n");
     assert!(!r.ui().global::<Bar>().get_ram_bar() && !r.ui().global::<Bar>().get_ram_percent());
-    // Back to As the device has it leaves the key out, as the JUCE page does.
+    // Back to Bar and percent leaves the key out, as the JUCE page does.
     r.press_row("RAM");
-    r.choose("As the device has it");
+    r.choose("Bar and percent");
     assert_eq!(std::fs::read_to_string(r.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"percent\"}\n");
     // The page shown again reads what is kept.
     r.page(Id::Appearance);
     r.page(Id::TopBar);
-    assert_eq!((value_of(r.ui(), "CPU"), value_of(r.ui(), "RAM")), ("Percent ›".to_string(), "As the device has it ›".to_string()));
+    assert_eq!((value_of(r.ui(), "CPU"), value_of(r.ui(), "RAM")), ("Percent ›".to_string(), "Bar and percent ›".to_string()));
     assert!(r.e.calls.is_empty());
+}
+
+// A file an earlier version wrote, with "device" or no value, reads as Bar and percent and still loads.
+#[test]
+fn an_old_device_value_reads_as_bar_and_percent() {
+    let mut r = Rig::desktop("topbar-old");
+    std::fs::write(r.config.join("top-bar.json"), "{\"cpu\":\"device\",\"ram\":\"bar\"}\n").unwrap();
+    r.page(Id::TopBar);
+    assert_eq!((value_of(r.ui(), "CPU"), value_of(r.ui(), "RAM")), ("Bar and percent ›".to_string(), "Bar ›".to_string()));
+    r.press_row("CPU");
+    assert_eq!(r.ticked(), ["Bar and percent"]);
 }
 
 // The explanations are the reference's; a file that cannot be written is said in the danger color (T3).

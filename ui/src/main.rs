@@ -81,7 +81,7 @@ fn main() -> Result<(), slint::PlatformError> {
     theme::apply(&ui, &theme::chosen(&places, &settings::chosen_theme(), &profile.theme));
     let watch = slint::Timer::default();
     theme::follow(&ui, places, profile.theme.clone(), &watch);
-    shell::show_settings(&ui, settings::top_bar(profile.top_bar));
+    shell::show_settings(&ui, settings::top_bar(topbar::MeterSettings::default()));
     let weak = ui.as_weak();
     let post = move |event| {
         let _ = weak.upgrade_in_event_loop(move |_| shell::dispatch(event));

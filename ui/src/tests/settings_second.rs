@@ -242,7 +242,7 @@ fn installed() -> Rig {
 
 // The packages and the libraries, each a row under its section's heading, by name and version (the packages) or name
 // and item count (the libraries); a long name is cut with an ellipsis in its row, whole on the panel, which also
-// says the publisher (the repository it came from) and whether it is trusted (P1).
+// says the publisher (the repository it came from) (P1).
 #[test]
 fn the_installed_lists_packages_and_libraries() {
     let mut r = installed();
@@ -257,7 +257,7 @@ fn the_installed_lists_packages_and_libraries() {
     r.act(Action::Move { pane: None, by: 3 });
     let panel = info(r.ui());
     assert!(panel.contains(&"org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary".to_string()), "{panel:?}");
-    assert!(panel.join(" ").contains("Publisher") && panel.join(" ").contains("Trusted") && panel.join(" ").contains("https://friend.example.org"), "the publisher is the repository it came from");
+    assert!(panel.join(" ").contains("Publisher") && panel.join(" ").contains("https://friend.example.org"), "the publisher is the repository it came from");
     r.act(Action::Move { pane: None, by: 3 });
     let panel = info(r.ui());
     assert!(panel.contains(&"Field Recordings".to_string()) && panel.join(" ").contains("34"), "{panel:?}");
@@ -321,8 +321,32 @@ fn a_library_is_removed_after_the_question() {
     assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint while it runs");
     r.settle();
     assert_eq!(r.e.called("library.uninstall"), [json!({"library": "lib-1"})]);
-    assert_eq!(r.e.methods(), ["library.uninstall", "library.libraries"], "one uninstall, then the list read again");
-    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the list still has it");
+    assert_eq!(r.e.methods(), ["library.uninstall", "packages.installed", "library.libraries"], "one uninstall, then the lists read again");
+    assert!(!labels(r.ui()).contains(&"Wicked Synths".to_string()), "the list no longer has it");
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are back");
+    assert!(r.delayed.is_empty(), "a library that is gone is not read for again: {:?}", r.delayed);
+}
+
+// The handler answers `accepted` and the list changes a moment later: the list is read again, soon, until the library
+// is gone, every row faint meanwhile, and not at all after (P2).
+#[test]
+fn an_accepted_removal_is_followed_until_the_library_is_gone() {
+    let mut r = installed();
+    r.e.uninstall_lag = 3;
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
+    r.e.calls.clear();
+    r.tool("Remove");
+    r.answer_notice("Remove");
+    assert_eq!(r.e.methods(), ["library.uninstall", "packages.installed", "library.libraries"]);
+    assert_eq!(r.delayed, [("library.libraries".to_string(), std::time::Duration::from_millis(200))], "still listed: read again later, not at once");
+    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "accepted is not gone");
+    assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint until it is gone");
+    r.later_all();
+    assert_eq!(r.e.called("library.libraries").len(), 4, "three stale reads, then the one without it");
+    assert!(!labels(r.ui()).contains(&"Wicked Synths".to_string()));
+    assert!(rows(r.ui()).iter().all(|x| !x.off));
+    assert_eq!(r.delayed.len(), 3, "one later read for each stale answer and none after: {:?}", r.delayed);
 }
 
 // Cancel leaves the library: nothing is asked, nothing read again, the row stays.
@@ -357,7 +381,7 @@ fn a_refused_library_uninstall_says_why_and_the_row_stays() {
 }
 
 // A package row confirmed opens its detail: id, version, the publisher (the repository it came from), the key
-// fingerprint of what signed it and whether it is trusted, as the repositories page shows a root key's; the panel is
+// fingerprint of what signed it, as the repositories page shows a root key's; the panel is
 // the detail until Back, reaching a package by the cursor and a press, and nothing is asked (P3).
 #[test]
 fn a_packages_detail_shows_what_the_engine_reports() {
@@ -372,12 +396,12 @@ fn a_packages_detail_shows_what_the_engine_reports() {
     assert!(panel.contains(&"1.0.0".to_string()), "{panel:?}");
     assert!(panel.contains(&"https://packages.oscairn.org".to_string()), "the publisher is the repository it came from: {panel:?}");
     assert!(panel.contains(&"Key fingerprint".to_string()) && panel.contains(&"6a2d d1ac f4d4 e23c".to_string()), "the key that signed it, in the reference's grouping: {panel:?}");
-    assert!(panel.contains(&"Yes".to_string()), "{panel:?}");
-    // A file's package, whose source is unknown: not verified, no fingerprint.
+    assert!(!panel.join(" ").contains("Trusted"), "the engine reports no trust flag: {panel:?}");
+    // A file's package, whose source is unknown: no fingerprint.
     r.press_index(2); // org.example.strings
     assert_eq!(r.c.path(), ["Settings", "Installed", "org.example.strings"], "the detail is the package confirmed");
     let panel = info(r.ui()).join(" ");
-    assert!(panel.contains("org.example.strings") && panel.contains("Not verified") && panel.contains("installed from a file"), "{panel}");
+    assert!(panel.contains("org.example.strings") && panel.contains("installed from a file"), "{panel}");
     assert!(!panel.contains("Key fingerprint"), "{panel}");
     assert_eq!(r.e.calls.len(), base, "another press asks nothing: {:?}", r.e.methods());
     assert!(r.delayed.is_empty(), "{:?}", r.delayed);

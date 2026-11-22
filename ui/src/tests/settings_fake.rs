@@ -92,6 +92,10 @@ pub struct Settings {
     pub installed_packages: Vec<Value>,
     /// The installed libraries, `library.libraries`: id, name, items.
     pub libraries: Vec<(String, String, u64)>,
+    /// How many reads of `library.libraries` still list a library after `library.uninstall` accepted it, as the engine's
+    /// handler answers `accepted` and the list changes a moment later.
+    pub uninstall_lag: u32,
+    removing: Option<(String, u32)>,
     /// The trusted root keys.
     pub trusted: Vec<String>,
     /// What each address reads as, until it is added.
@@ -135,6 +139,8 @@ impl Settings {
             repos: vec![Repo { address: "https://packages.oscairn.org".into(), name: "Oscairn".into(), key: "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into(), origin: "official".into(), enabled: true }],
             installed_packages: vec![],
             libraries: vec![],
+            uninstall_lag: 0,
+            removing: None,
             trusted: vec!["6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into()],
             sources: vec![],
             job_polls: 1,
@@ -438,11 +444,27 @@ impl Settings {
             m if m.starts_with("packages.") => self.packages(m, p),
             "library.libraries" => {
                 self.fields(p, &[])?;
+                if let Some((id, n)) = self.removing.take() {
+                    if n == 0 {
+                        self.libraries.retain(|l| l.0 != id);
+                    } else {
+                        self.removing = Some((id, n - 1));
+                    }
+                }
                 let list: Vec<Value> = self.libraries.iter().map(|(id, name, items)| json!({"id": id, "name": name, "items": items})).collect();
                 Ok(json!({"libraries": list}))
             }
             "library.uninstall" => {
                 self.fields(p, &["library"])?;
+                let id = p["library"].as_str().unwrap_or_default().to_string();
+                if !self.libraries.iter().any(|l| l.0 == id) {
+                    return Err(refused(-32005, "no such library installed"));
+                }
+                if self.uninstall_lag == 0 {
+                    self.libraries.retain(|l| l.0 != id);
+                } else {
+                    self.removing = Some((id, self.uninstall_lag));
+                }
                 Ok(json!({"accepted": true}))
             }
             _ => Err(refused(-32601, "Method not found")),

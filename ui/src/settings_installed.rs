@@ -5,7 +5,7 @@
 //! `library.libraries` (by name and their item count), in two sections under shared heading rows. A long name is cut
 //! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row.
 //! Confirming a package row opens its detail in the panel (id, version, the publisher and the key fingerprint of what
-//! signed it; Back closes it on the same row), and a library row is removed with the bar's Remove..., asked first as
+//! signed it; Back closes it on the same row; no trust flag, which the handler does not report), and a library row is removed with the bar's Remove..., asked first as
 //! the repositories page asks before Remove; the protocol reports no library that cannot be removed, so every one is
 //! offered, and no license, platforms, size or dependency list for a package.
 
@@ -15,6 +15,11 @@ use crate::settings_app::{failed, head, line, row, said, Ctx, Page, Step as Any}
 use crate::topbar::Tool;
 use crate::{InfoLine, SettingData};
 use serde_json::{json, Value};
+use std::time::Duration;
+
+/// How often, and how soon after, the list is read while an accepted removal still shows (5 s at most).
+const FOLLOW: u32 = 25;
+const FOLLOW_AFTER: Duration = Duration::from_millis(200);
 
 /// A name too wide for a row is cut with an ellipsis; the panel keeps the whole one.
 fn cut(name: &str) -> String {
@@ -65,6 +70,9 @@ pub struct Installed {
     asking: Option<String>,
     /// While `library.uninstall` runs, or the list is read back afterwards: every row faint.
     busy: bool,
+    /// The library `library.uninstall` accepted, and the reads of the list made since: the handler answers `accepted`
+    /// and the list may change a moment later, so it is read again until the library is gone.
+    removing: Option<(String, u32)>,
     /// "Removing NAME..." while it runs.
     progress: String,
     /// A removal refused: the library and what the engine said.
@@ -135,7 +143,6 @@ impl Installed {
                 self.package_error = e.message;
             }
             (Step::Libraries, Ok(r)) => {
-                self.busy = false;
                 self.libraries_error.clear();
                 self.libraries = r["libraries"]
                     .as_array()
@@ -143,18 +150,39 @@ impl Installed {
                     .flatten()
                     .map(|x| Library { id: x["id"].as_str().unwrap_or_default().to_string(), name: x["name"].as_str().unwrap_or_default().to_string(), items: x["items"].as_u64().unwrap_or(0) })
                     .collect();
+                match self.removing.take() {
+                    Some((id, n)) if self.libraries.iter().any(|l| l.id == id) => {
+                        if n < FOLLOW {
+                            self.removing = Some((id, n + 1));
+                            c.ask_after(FOLLOW_AFTER, Any::Installed(Step::Libraries), "library.libraries", json!({}));
+                        } else {
+                            self.busy = false;
+                            self.progress.clear();
+                            self.refused = (id, "The engine accepted the removal but still lists the library".into());
+                        }
+                    }
+                    _ => {
+                        self.busy = false;
+                        self.progress.clear();
+                    }
+                }
             }
             (Step::Libraries, Err(e)) => {
                 self.busy = false;
+                self.removing = None;
+                self.progress.clear();
                 self.libraries_error = e.message;
             }
             (Step::Uninstall(id), result) => {
-                self.progress.clear();
                 match result {
-                    // Removed: the list is read again, as the engine kept it.
-                    Ok(_) => c.ask(Any::Installed(Step::Libraries), "library.libraries", json!({})),
+                    // Accepted is not gone: the lists are read until the library no longer shows (the packages' record goes with it).
+                    Ok(_) => {
+                        self.removing = Some((id, 0));
+                        self.read(c);
+                    }
                     Err(e) => {
                         self.busy = false;
+                        self.progress.clear();
                         self.refused = (id, e.message);
                     }
                 }
@@ -166,6 +194,8 @@ impl Installed {
 impl Page for Installed {
     fn open(&mut self, c: &mut Ctx) {
         self.asking = None;
+        self.removing = None;
+        self.busy = false;
         self.progress.clear();
         self.refused = (String::new(), String::new());
         self.detail = None;
@@ -209,27 +239,9 @@ impl Page for Installed {
             lines.push(head("Not done"));
             lines.extend(failed(why));
         }
-        if let Some(i) = self.detail {
-            // A package's detail, opened by a press on its row and shown until Back: id, version, the publisher (the
-            // repository it came from), the key fingerprint of what signed it and whether it is trusted. `packages.installed`
-            // reports no license, platforms, size or dependency list, so the protocol shows no more.
-            if let Some(p) = self.packages.get(i) {
-                lines.push(head(&p.id));
-                lines.push(head("Version"));
-                lines.push(line(if p.version.is_empty() { "—" } else { &p.version }));
-                lines.push(head("Publisher"));
-                lines.extend(crate::library::files::wrap_path(if p.repository.is_empty() { "installed from a file" } else { &p.repository }, crate::library::INFO_WIDTH).iter().map(|l| line(l)));
-                lines.push(head("Trusted"));
-                // The handler reports the keys that signed it and the repository it came from, not a trust flag: a
-                // package is trusted when it was verified at install — signed, or from a repository whose root key is
-                // trusted (the two cases that let it install).
-                lines.push(line(if p.signers.is_empty() && p.repository.is_empty() { "Not verified" } else { "Yes" }));
-                if !p.signers.is_empty() {
-                    lines.push(head("Key fingerprint"));
-                    lines.extend(p.signers.iter().map(|id| line(&fingerprint(id))));
-                }
-                return lines;
-            }
+        if let Some(p) = self.detail.and_then(|i| self.packages.get(i)) {
+            lines.extend(package_lines(p, true));
+            return lines;
         }
         let Some(at) = at else { return lines };
         match self.rows_rows().get(at) {
@@ -241,19 +253,7 @@ impl Page for Installed {
                 lines.push(head("Libraries"));
                 lines.extend(said("The libraries installed, as `library.libraries` reports them, and their item count."));
             }
-            Some(Row::Package(i)) => {
-                let p = &self.packages[*i];
-                lines.push(head(&p.id));
-                lines.push(head("Version"));
-                lines.push(line(if p.version.is_empty() { "—" } else { &p.version }));
-                lines.push(head("Publisher"));
-                lines.extend(crate::library::files::wrap_path(if p.repository.is_empty() { "installed from a file" } else { &p.repository }, crate::library::INFO_WIDTH).iter().map(|l| line(l)));
-                lines.push(head("Trusted"));
-                // The handler reports the keys that signed it and the repository it came from, not a trust flag: a
-                // package is trusted when it was verified at install — signed, or from a repository whose root key is
-                // trusted (the two cases that let it install).
-                lines.push(line(if p.signers.is_empty() && p.repository.is_empty() { "Not verified" } else { "Yes" }));
-            }
+            Some(Row::Package(i)) => lines.extend(package_lines(&self.packages[*i], false)),
             Some(Row::Library(i)) => {
                 let l = &self.libraries[*i];
                 lines.push(head(&l.name));
@@ -330,4 +330,16 @@ fn heading(r: Row) -> String {
         Row::LibrariesHead => "Libraries".to_string(),
         _ => String::new(),
     }
+}
+
+/// A package's panel, with the signing keys' fingerprints in its detail: what `packages.installed` reports of it (no license, platforms, size or trust flag).
+fn package_lines(p: &Package, detail: bool) -> Vec<InfoLine> {
+    let mut lines = vec![head(&p.id), head("Version"), line(if p.version.is_empty() { "—" } else { &p.version })];
+    lines.push(head("Publisher"));
+    lines.extend(crate::library::files::wrap_path(if p.repository.is_empty() { "installed from a file" } else { &p.repository }, crate::library::INFO_WIDTH).iter().map(|l| line(l)));
+    if detail && !p.signers.is_empty() {
+        lines.push(head("Key fingerprint"));
+        lines.extend(p.signers.iter().map(|id| line(&fingerprint(id))));
+    }
+    lines
 }

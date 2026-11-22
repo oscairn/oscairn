@@ -88,6 +88,10 @@ pub struct Settings {
     /// Keys: name, public key.
     pub keys: Vec<(String, String)>,
     pub repos: Vec<Repo>,
+    /// The packages installed here, `packages.installed`'s records (each id, version, kind, repository, signers, ...).
+    pub installed_packages: Vec<Value>,
+    /// The installed libraries, `library.libraries`: id, name, items.
+    pub libraries: Vec<(String, String, u64)>,
     /// The trusted root keys.
     pub trusted: Vec<String>,
     /// What each address reads as, until it is added.
@@ -129,6 +133,8 @@ impl Settings {
             ports: vec![],
             keys: vec![],
             repos: vec![Repo { address: "https://packages.oscairn.org".into(), name: "Oscairn".into(), key: "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into(), origin: "official".into(), enabled: true }],
+            installed_packages: vec![],
+            libraries: vec![],
             trusted: vec!["6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into()],
             sources: vec![],
             job_polls: 1,
@@ -391,6 +397,10 @@ impl Settings {
                     None => self.job_json(id, "failed", &format!("not a usable repository: cannot fetch repository.json: cannot reach {source}/repository.json: Could not connect to the server."), "", ""),
                 })
             }
+            "packages.installed" => {
+                self.fields(p, &[])?;
+                Ok(json!({"packages": self.installed_packages}))
+            }
             "packages.preinstalled" => {
                 self.fields(p, &[])?;
                 Ok(json!({"state": "none", "release": self.release, "error": "", "job": 0, "packages": []}))
@@ -426,6 +436,11 @@ impl Settings {
             }
             m if m.starts_with("keys.") => self.keys(m, p),
             m if m.starts_with("packages.") => self.packages(m, p),
+            "library.libraries" => {
+                self.fields(p, &[])?;
+                let list: Vec<Value> = self.libraries.iter().map(|(id, name, items)| json!({"id": id, "name": name, "items": items})).collect();
+                Ok(json!({"libraries": list}))
+            }
             _ => Err(refused(-32601, "Method not found")),
         }
     }

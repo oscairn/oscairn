@@ -19,8 +19,9 @@ ports), 0031 (repositories), 0006 (signing), 0022 (the Settings app), 0036, 0037
 
 Written 2026-11-16, branch `rust-settings` from `rust-library` (bca03b01). Nothing is switched: Home's Settings tile
 still hands the display to the JUCE app (`PORTED` in `ui/src/shell/settings_glue.rs`); the Rust app is reached with
-`OSCAIRN_UI_SETTINGS=1`, and the tests enter it directly. All 54 rows are built and ticked; the tile flips when the whole app is
-judged working on the device, which no one has done. See the last section.
+`OSCAIRN_UI_SETTINGS=1`, and the tests enter it directly. All 54 rows are built and ticked, and the first row of the new
+page P (Installed, P1) too; the tile flips when the whole app is judged working on the device, which no one has done.
+See the last section.
 
 ## What the reference is
 
@@ -150,6 +151,18 @@ screen and the other way round.
 | R8 | 2 | U | Errors: "Not read: why", "Not added: why"; the Add row and the address field are disabled while a job is out; Cancel on the field goes back to the Add button | `RepositoriesPage.cpp:79-146` | the requests | Cancel | [x] tests/settings_second.rs `a_repository_that_does_not_read_is_not_kept`, `a_repository_is_read_before_it_is_added`, `only_an_https_address_is_added` |
 | R9 | 2 | U | **Protection**: the key of a new repository is trusted only after the question with its fingerprint; a repository that does not verify is not kept (R7); a repository added over http is refused by the app though the engine takes it. Matched exactly | `RepositoriesPage.cpp` | - | - | [x] tests/settings_second.rs `a_root_key_is_trusted_only_when_the_player_says_so`, `a_repository_that_does_not_read_is_not_kept`, `only_an_https_address_is_added` |
 
+## P. Installed (kind U; the reference's `notBuilt` "Installed content" independent, RFC 0006)
+
+What is installed on this device, read once when the page is shown and nothing at rest (the engine's `status`
+reports no change to what is installed, so a re-listing comes only from a change the page itself made, as on the
+whole app). A refusal or a lost connection is the app's usual failed row.
+
+| # | Cut | Kind | Item | Ref | Request or file | No touch | Status |
+|---|---|---|---|---|---|---|---|
+| P1 | 2 | U | The packages installed (`packages.installed`) by name and version, and the libraries (`library.libraries`) by name and item count, in two sections under the shared heading rows; a long name is cut with an ellipsis in its row, whole on the panel, which says the publisher (the repository it came from, or a file) and whether it is trusted (a package is trusted when it was verified at install: signed, or from a repository whose root key is trusted; the handler reports the keys and the repository, not a trust flag); the list scrolls with the dial and the panel cursor, and at rest it asks nothing and draws nothing | `notBuilt` (`Pages.cpp:34`, "Installed content"); RFC 0006 | `packages.installed` `{packages}`; `library.libraries` `{libraries}` | rows; a press does nothing yet (P2, P3) | [x] src/settings_installed.rs; tests/settings_second.rs `the_installed_lists_packages_and_libraries`, `every_installed_row_is_reached_and_nothing_at_rest`, `a_refused_installed_request_is_a_failed_row` |
+| P2 | 2 | U | Remove a library, asked first as the repositories page asks before Remove, then `library.uninstall {library}`; a library the protocol marks as not removable shows no Remove | RFC 0006; `library.uninstall` | `library.uninstall {library}` | two choices | [ ] the commit that builds it (G2) |
+| P3 | 2 | U | A package's detail on confirming its row: id, version, publisher and key fingerprint, license, the platforms or size if `packages.installed` reports them, and which installed libraries or Performances name it as a dependency, if the protocol gives it | RFC 0006 | the answer to `packages.installed` | a press on a row | [ ] the commit that builds it (G3) |
+
 ## K. Signing keys (kind U)
 
 | # | Cut | Kind | Item | Ref | Request or file | No touch | Status |
@@ -180,7 +193,7 @@ changed here). None is shown.
 | N2 | Bluetooth (RFC 0036) | `notBuilt` (`#if OSCAIRN_BLUETOOTH`), no request; a product without it must not show it | n/a |
 | N3 | Date and time (RFC 0035) | `notBuilt`, no request | n/a |
 | N4 | Storage (RFC 0037) | `notBuilt`, no `drives.*` request | n/a |
-| N5 | Installed content (RFC 0006): the packages installed, withdrawn ones, removal | `notBuilt`; the Library's Libraries menu has the plugin store and uninstalling (LIBRARY-APP.md D) | n/a |
+| N5 | Installed content (RFC 0006): the packages installed, withdrawn ones, removal | `notBuilt`; the Library's Libraries menu has the plugin store and uninstalling (LIBRARY-APP.md D) | page P |
 | N6 | The panel, the audio routing, pedals and keys of a given instrument, boot behavior, window scaling | no page in the JUCE Settings app; routing and levels are the Performance app's Mixer and Routing; the profile fixes the panel; the boot choice is the start script's | n/a |
 | N7 | The capture buffer's length (`<config>/capture`) | read by the engine's start (`SessionSetup.cpp:11`); no Settings page writes it | n/a |
 | N8 | The trust store (`trust.list`, `trust.set`, `trust.remove`) | `Control` has it; no Settings page lists it (RFC 0037 puts it in Settings later) | n/a |

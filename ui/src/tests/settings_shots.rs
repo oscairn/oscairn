@@ -21,6 +21,12 @@ fn busy_engine() -> Fake {
     e.ports[4].profiles.clear();
     e.keys = vec![("Stage".into(), "30fa782829102c1859d24993dc0349bebd65c09993f440a937213c2c50e81ed2".into()), ("Home-Studio_2".into(), "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into())];
     e.repos.push(super::settings_fake::Repo { address: "https://repository.example.org/with/a/long/path/to/its/index".into(), name: "A Friend's Instruments".into(), key: "30fa782829102c1859d24993dc0349bebd65c09993f440a937213c2c50e81ed2".into(), origin: "user".into(), enabled: false });
+    e.installed_packages = vec![
+        json!({"id": "org.example.reverb", "version": "1.0.0", "kind": "plugin", "repository": "https://packages.oscairn.org", "sha256": "", "signers": ["6a2dd1acf4d4e23c"], "otherBuild": false, "withdrawn": null, "dependency": false}),
+        json!({"id": "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "version": "0.9.0", "kind": "library", "repository": "https://friend.example.org", "sha256": "", "signers": ["89074b634c0de731"], "otherBuild": false, "withdrawn": null, "dependency": true}),
+        json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "repository": "", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}),
+    ];
+    e.libraries = vec![("lib-1".into(), "Wicked Synths With A Name That Is Far Too Long To Fit In The Row".into(), 12), ("lib-2".into(), "Field Recordings".into(), 34)];
     e
 }
 

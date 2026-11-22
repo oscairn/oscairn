@@ -103,7 +103,7 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert_eq!(ui.get_screen(), 14);
     assert_eq!(title(&ui), "Settings › Appearance");
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
-    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Signing keys", "About"], "the keyboard's profile fixes its audio device");
+    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Signing keys", "About"], "the keyboard's profile fixes its audio device");
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
     assert_eq!(actions, ["Install...", "Record", "Capture"], "the page's own action and the two every screen has; Undo, Redo and Save are the Performance app's");
     // Back goes Home.
@@ -171,7 +171,7 @@ fn a_name_is_typed_and_a_refusal_is_a_question() {
     shell::set_text_on_screen(false);
     shell::goto(shell::Screen::Settings);
     s.serve();
-    ui.global::<crate::SettingsState>().invoke_show_page(4);
+    ui.global::<crate::SettingsState>().invoke_show_page(5);
     s.serve();
     assert_eq!(title(&ui), "Settings › Signing keys");
     ui.global::<PartState>().invoke_tapped(1);
@@ -270,7 +270,7 @@ fn every_page_is_reached_by_moves_alone() {
         assert!(!ui.global::<crate::Theme>().get_bar_cursor(), "the top bar did not take the move");
     };
     open_settings(&mut s, &mut nav);
-    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Signing keys", "About"];
+    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Signing keys", "About"];
     let last = pages.len() as i32 - 1;
     for (want, name) in pages.iter().enumerate() {
         let want = want as i32;

@@ -240,10 +240,10 @@ impl Rig {
 #[test]
 fn the_pages_are_the_profiles_tabs() {
     let r = Rig::desktop("tabs-desktop");
-    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Signing keys", "About"]);
+    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Installed", "Signing keys", "About"]);
     assert_eq!(r.c.path(), ["Settings", "Appearance"]);
     let r = Rig::new("tabs-fantom", Some("fantom-07"), Fake::null());
-    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Signing keys", "About"], "no Audio where the profile fixes the device");
+    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Signing keys", "About"], "no Audio where the profile fixes the device");
     for id in ["ignite", "imx8mm-evk", "kick", "modx-m", "qemu-aarch64"] {
         let r = Rig::new(&format!("tabs-{id}"), Some(id), Fake::new());
         assert!(tabs(r.ui()).contains(&"Audio".to_string()), "{id} leaves the device to the engine: it has the page");

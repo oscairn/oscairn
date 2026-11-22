@@ -225,6 +225,78 @@ fn keys() -> Rig {
     r
 }
 
+// ---- P: Installed ----
+
+fn installed() -> Rig {
+    let mut e = Fake::new();
+    e.installed_packages = vec![
+        json!({"id": "org.example.reverb", "version": "1.0.0", "kind": "plugin", "repository": "https://packages.oscairn.org", "sha256": "", "signers": ["6a2dd1acf4d4e23c"], "otherBuild": false, "withdrawn": null, "dependency": false}),
+        json!({"id": "org.example.strings", "version": "2.1.0", "kind": "asset", "repository": "", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false}),
+        json!({"id": "org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary", "version": "0.9.0", "kind": "library", "repository": "https://friend.example.org", "sha256": "", "signers": ["89074b634c0de731"], "otherBuild": false, "withdrawn": null, "dependency": true}),
+    ];
+    e.libraries = vec![("lib-1".into(), "Wicked Synths".into(), 12), ("lib-2".into(), "Field Recordings".into(), 34)];
+    let mut r = Rig::new("installed", None, e);
+    r.page(Id::Installed);
+    r
+}
+
+// The packages and the libraries, each a row under its section's heading, by name and version (the packages) or name
+// and item count (the libraries); a long name is cut with an ellipsis in its row, whole on the panel, which also
+// says the publisher (the repository it came from) and whether it is trusted (P1).
+#[test]
+fn the_installed_lists_packages_and_libraries() {
+    let mut r = installed();
+    assert_eq!(r.e.methods(), ["packages.installed", "library.libraries"]);
+    let all = labels(r.ui());
+    assert_eq!(all, ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPack…", "Libraries", "Wicked Synths", "Field Recordings"]);
+    assert_eq!((value_of(r.ui(), "org.example.reverb"), value_of(r.ui(), "Wicked Synths"), value_of(r.ui(), "Field Recordings")), ("1.0.0".to_string(), "12 items".to_string(), "34 items".to_string()));
+    let long = &all[3];
+    assert_eq!(long.chars().count(), 34, "a long name is cut"); // "org.example.a.WonderfullyLongPackage" and an ellipsis
+    assert!(long.ends_with('…'), "{long}");
+    r.press_index(3);
+    let panel = info(r.ui());
+    assert!(panel.contains(&"org.example.a.WonderfullyLongPackageIdentifierForSomeSoundLibrary".to_string()), "{panel:?}");
+    assert!(panel.join(" ").contains("Publisher") && panel.join(" ").contains("Trusted") && panel.join(" ").contains("https://friend.example.org"), "the publisher is the repository it came from");
+    r.act(Action::Move { pane: None, by: 3 });
+    let panel = info(r.ui());
+    assert!(panel.contains(&"Field Recordings".to_string()) && panel.join(" ").contains("34"), "{panel:?}");
+}
+
+// Every row is reached by the cursor and the panel; nothing asks, and nothing is asked again, at rest (P1).
+#[test]
+fn every_installed_row_is_reached_and_nothing_at_rest() {
+    let mut r = installed();
+    assert!(r.delayed.is_empty(), "nothing is asked again: {:?}", r.delayed);
+    for _ in 0..7 {
+        r.act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(info(r.ui()).contains(&"Field Recordings".to_string()), "{:?}", info(r.ui()));
+    r.e.calls.clear();
+    for _ in 0..4 {
+        r.act(Action::Move { pane: None, by: -1 });
+    }
+    assert!(r.e.calls.is_empty(), "moving the cursor asks nothing: {:?}", r.e.methods());
+    assert!(r.delayed.is_empty(), "{:?}", r.delayed);
+}
+
+// A request refused, or a lost connection, is the app's usual failed row; what was read of the other side stays (P1).
+#[test]
+fn a_refused_installed_request_is_a_failed_row() {
+    let mut r = installed();
+    r.e.fail = vec![("packages.installed".into(), "the package store is not readable".into())];
+    r.page(Id::Appearance);
+    r.page(Id::Installed);
+    assert!(info(r.ui()).contains(&"The packages could not be read".to_string()), "{:?}", info(r.ui()));
+    assert!(r.danger_lines().contains(&"the package store is not readable".to_string()), "{:?}", r.danger_lines());
+    assert!(labels(r.ui()).contains(&"Wicked Synths".to_string()), "the libraries were read");
+    r.e.fail = vec![("library.libraries".into(), "lost the connection to the engine".into())];
+    r.page(Id::Appearance);
+    r.page(Id::Installed);
+    assert!(info(r.ui()).contains(&"The libraries could not be read".to_string()), "{:?}", info(r.ui()));
+    assert!(r.danger_lines().contains(&"lost the connection to the engine".to_string()), "{:?}", r.danger_lines());
+    assert!(labels(r.ui()).contains(&"org.example.reverb".to_string()), "what read before stays");
+}
+
 // The keys are listed by name with their fingerprint; the row to make one ends the list; with none the page says so (K1).
 #[test]
 fn the_keys_are_listed_by_fingerprint() {

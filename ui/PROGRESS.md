@@ -6,7 +6,7 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   "Decisions" (display handover chosen: (a); `ui/` single crate; one process, one client,
   abstract navigation actions). `encoder-scroll` does not exist yet: nothing to reconcile with.
 - Step 1: `ui/vendor/i-slint-backend-linuxkms-1.18.1` vendored from crates.io (checked identical to
-  the published crate but for the patch), `frame-cap.patch` (frame cap, frame statistics; the
+  the published crate but for the patch), `frame-cap.patch` (frame cap, frame statistics, two display buffers for three; the
   shadow-buffer experiment left out), README with origin, hash, commit, license. `ui/` crate
   skeleton: profile reading (built-in profiles from hosts/standalone/profiles), the frame cap
   from `screens[].frameRate` (default 30 on a device, none on a computer) put in

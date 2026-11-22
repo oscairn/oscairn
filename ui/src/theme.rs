@@ -491,7 +491,7 @@ pub fn attach(window: &Shell) {
 /// JUCE's `Colour::contrasting`: black on a bright color, white on a dark one.
 /// Black or white, whichever reads better on `c` by WCAG's contrast ratio (the chip's text: it must read on any warning color a
 /// theme chooses, which `contrasting`'s brightness rule does not hold for a saturated red).
-fn most_readable(c: Color) -> Color {
+pub(crate) fn most_readable(c: Color) -> Color {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.;
         if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }

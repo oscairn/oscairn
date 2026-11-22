@@ -117,8 +117,8 @@ thumbs, knob discs and the lifted tab; `sliders` the grid's sliders and range th
 and pointer, Play's faders (a drawbar and the upright slider are the same widget); `tabs` and `tabPlacement` the shell's
 tab family (TabBar, TabPages: the parameter pages and Play's Performance / part switch; ui/TABS.md), its fill
 and text colors derived by src/palette.rs `tabs` (the selected fill 3 to 1 from an unselected one); `marks` Play's M and S; `sections` every card, tile, strip and panel, and the gap between
-them (the grid's layout reads it, Slint's screens use `Theme.gap-between`); `rows` the colors of
-Setlist slots (a mark left or right, a dot, or the slot's fill with the reference's contrast rule,
+them (the grid's layout reads it, Slint's screens use `Theme.gap-between`); `rows` the colors of list rows (the Library's; a Setlist slot's color is always its whole box, docs/rust-ui.md):
+a mark left or right, a dot, or the row's fill with the reference's contrast rule,
 `Theme.row-fill`); the piano keys' colors come from the text and surface inks as Panel.cpp's board
 has them. `wires` and `splash` are carried and tested but no screen draws them yet (no routing view,
 no splash in the Rust UI).

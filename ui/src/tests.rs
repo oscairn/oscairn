@@ -753,6 +753,7 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
     // Everything asked on connecting answered: the shell's eight, the Setlist's two, then the setlist (and the part the knob row follows).
     f.serve(13, &content); // and the knob row's view
+    f.screen.frame(); // the view settles: the line under a long bank takes its room
     let rows = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().iter().collect::<Vec<_>>();
     let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view() as usize;
     assert!(per_view >= 5, "a list view holds {per_view}");
@@ -965,6 +966,7 @@ fn setlist_walked_with_panel_moves_only() {
             silent(&mut f, "a dropdown opened, walked and closed");
             for set in (0..n_sets).rev() {
                 shell::act(Action::Confirm(None));
+                shell::act(Action::End(-1)); // the list opens on the one open: from its first row
                 shell::act(Action::Move { pane: None, by: set as i32 });
                 silent(&mut f, "moving in the dropdown");
                 shell::act(Action::Confirm(None));
@@ -984,6 +986,7 @@ fn setlist_walked_with_panel_moves_only() {
             shell::act(Action::Cancel(None));
             for bank in (0..n_banks).rev() {
                 shell::act(Action::Confirm(None));
+                shell::act(Action::End(-1));
                 shell::act(Action::Move { pane: None, by: bank as i32 });
                 shell::act(Action::Confirm(None));
                 assert_eq!((first_number(&f), menu(&f).get_open()), (if bank == 0 { 1 } else { friday_slots.len() as i32 + 1 }, false), "row {bank} of the dropdown shows that bank");

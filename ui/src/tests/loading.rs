@@ -95,7 +95,7 @@ fn a_switch_shows_the_chip_with_the_name_and_no_banner() {
     slint::platform::update_timers_and_animations();
     let again = f.engine.request();
     assert_eq!((again["method"].as_str(), again["params"]["id"].as_str()), (Some("library.load"), Some("p1")));
-    assert_eq!((loading(&f), banner(&f), f.screen.ui.global::<SetlistState>().get_message().to_string()), ("Loading Dusk Choir".to_string(), String::new(), "2. Dusk Choir".to_string()), "a busy answer raises nothing");
+    assert_eq!((loading(&f), banner(&f), f.screen.ui.global::<Bar>().get_notice().to_string()), ("Loading Dusk Choir".to_string(), String::new(), String::new()), "a busy answer raises nothing");
     f.reply(&again, ok());
     assert_eq!((loading(&f), banner(&f)), (String::new(), String::new()), "it opened: the chip is gone");
     assert!(opening(&f).iter().all(|o| !o));
@@ -135,7 +135,7 @@ fn a_load_refused_as_busy_is_asked_again_quietly_not_in_a_tight_loop() {
         assert_eq!(opening(&f).iter().position(|o| *o), Some(1));
     }
     assert!((5..=14).contains(&asked), "{asked} loads asked in a second");
-    assert!(!f.screen.ui.global::<SetlistState>().get_message().contains("Did not open"));
+    assert!(!f.screen.ui.global::<Bar>().get_notice().contains("Did not open"));
     std::thread::sleep(Duration::from_millis(150));
     slint::platform::update_timers_and_animations();
     let last = f.engine.request();

@@ -15,7 +15,7 @@ use crate::menu::Item;
 use crate::nav::{Action, Cursor};
 use crate::{BarStop, SetlistState, Shell, SlotData};
 use serde_json::{json, Value};
-use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{Color, ComponentHandle, Model, ModelRc, VecModel};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -161,7 +161,7 @@ pub struct Screen {
     /// The pane the dial moves: the one the cursor is in (0 the setlist bar, 1 the slots).
     touched: u8,
     /// A dropdown's list for the shell to open as the menu, and whether the one asked for is the banks'.
-    menu: Option<(String, Vec<Item>)>,
+    menu: Option<(String, Vec<Item>, usize)>, // its title, its rows, the row the cursor starts on (the one chosen now)
     banks_menu: bool,
     current: Option<usize>,
     opening: bool,
@@ -176,6 +176,8 @@ pub struct Screen {
     restore: Option<(String, Option<usize>)>,
     /// Requests for the shell to send.
     pub out: Vec<Out>,
+    /// What it has to say (why a slot did not open, a refusal), for the shell to show.
+    pub said: Option<String>,
 }
 
 /// The state the JUCE Setlist app keeps (its AppData/oscairn.setlist/state.json), shared with it:
@@ -233,18 +235,13 @@ impl Screen {
             state_file,
             restore,
             out: vec![],
+            said: None,
         }
     }
 
-    fn view(&self, f: impl FnOnce(&SetlistState)) {
-        if let Some(ui) = self.ui.upgrade() {
-            f(&ui.global::<SetlistState>())
-        }
-    }
-
-    fn say(&self, text: impl Into<SharedString>) {
-        let text = text.into();
-        self.view(|s| s.set_message(text));
+    /// Something to tell the musician: the shell says it where it says such things (the top bar, for a while).
+    fn say(&mut self, text: impl Into<String>) {
+        self.said = Some(text.into());
     }
 
     /// Connected: the setlists and the Performances read again.
@@ -289,13 +286,7 @@ impl Screen {
                 self.setlists = r["items"].as_array().map(|items| items.iter().map(|i| (text(i, "id"), text(i, "name"))).collect()).unwrap_or_default();
                 let open = self.setlist.as_ref().map(|s| s.id.clone()).or(self.restore.as_ref().map(|r| r.0.clone()));
                 let at = self.setlists.iter().position(|s| Some(&s.0) == open.as_ref()).unwrap_or(0);
-                match self.setlists.get(at) {
-                    Some((id, _)) => {
-                        let id = id.clone();
-                        self.out.push((Request::Get(id.clone()), "setlists.get", json!({"id": id})));
-                    }
-                    None => self.say("No setlists in the library."),
-                }
+                self.open_setlist(at); // with none, the dropdown says "No setlist"
                 self.show();
             }
             Request::Performances => {
@@ -313,7 +304,6 @@ impl Screen {
                         self.current = restored;
                         self.page = restored.and_then(|c| s.find(c)).map_or(0, |f| f.0);
                         self.slots = Cursor::new(0, 1);
-                        self.say(format!("{} slots", s.count()));
                     }
                     self.page = self.page.min(s.pages.len() - 1);
                     self.setlist = Some(s);
@@ -392,6 +382,8 @@ impl Screen {
             note: note.into(),
             tint: tint.unwrap_or_default(),
             tinted: tint.is_some(),
+            // The slot's color is its whole box: black or white on it, whichever reads better.
+            ink: tint.map(crate::theme::most_readable).unwrap_or_default(),
             empty: slot.empty,
             opens: self.opens(index),
             playing: self.current == Some(index),
@@ -431,6 +423,7 @@ impl Screen {
         let end = s.first(self.page) + page.slots.len().min(self.slots.first + per_view);
         let rows: Vec<SlotData> = (start..end).map(|i| self.row(i, self.slots.at.map(|a| s.first(self.page) + a) == Some(i))).collect();
         update(&self.rows, rows);
+        state.set_count(page.slots.len() as i32);
         state.set_view(format!("{}–{} of {}", self.slots.first + 1, self.slots.first + (end - start), page.slots.len()).into());
     }
 
@@ -470,7 +463,6 @@ impl Screen {
             self.opening = true;
             self.opening_index = Some(index);
             self.out.push((Request::Load(index), "library.load", json!({"id": slot.id})));
-            self.say(format!("{}. {}", index + 1, self.title(index)));
         }
         self.show();
     }
@@ -549,11 +541,12 @@ impl Screen {
             (0, open) if !self.setlists.is_empty() => {
                 let name = |n: &str| if n.is_empty() { "Untitled".to_string() } else { n.to_string() };
                 self.banks_menu = false;
-                self.menu = Some(("Setlist".into(), self.setlists.iter().enumerate().map(|(i, s)| Item::ticked(name(&s.1), i, open.is_some_and(|o| o.id == s.0))).collect()));
+                let at = self.setlists.iter().position(|s| open.is_some_and(|o| o.id == s.0)).unwrap_or(0);
+                self.menu = Some(("Setlist".into(), self.setlists.iter().enumerate().map(|(i, s)| Item::ticked(name(&s.1), i, i == at && open.is_some())).collect(), at));
             }
             (1, Some(s)) if pages > 1 => {
                 self.banks_menu = true;
-                self.menu = Some(("Bank".into(), (0..pages).map(|i| Item::ticked(bank_name(s, i), i, i == self.page)).collect()));
+                self.menu = Some(("Bank".into(), (0..pages).map(|i| Item::ticked(bank_name(s, i), i, i == self.page)).collect(), self.page));
             }
             (2, _) if self.page > 0 => self.show_bank(self.page - 1),
             (3, _) => self.show_bank(self.page + 1),
@@ -562,7 +555,7 @@ impl Screen {
     }
 
     /// A dropdown's list to open over the screen (taken: the shell opens it as the menu).
-    pub fn take_menu(&mut self) -> Option<(String, Vec<Item>)> {
+    pub fn take_menu(&mut self) -> Option<(String, Vec<Item>, usize)> {
         self.menu.take()
     }
 

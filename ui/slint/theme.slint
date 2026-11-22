@@ -110,6 +110,9 @@ export global Theme {
     // Sizes with no theme property: touch targets (RFC 0019).
     out property <length> bar-height: 48px;
     out property <length> touch: 44px;
+    // A row of dropdowns a quarter taller than a touch target (the Setlist's bar): this factor on it.
+    out property <float> tall-row-scale: 1.25;
+    out property <length> tall-row: touch * tall-row-scale;
     // A compact control of a master's detail (src/grid.rs `compact_height`, which a test holds equal): the touch target
     // high, or what its name line, a control 0.45 of a touch target high and the tight paddings need if that is more, and
     // 1.9 touch targets wide at least (eight across the keyboard's screen with both rails). Never lower than the touch target.

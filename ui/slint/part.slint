@@ -26,6 +26,7 @@ export struct SettingData {
     star: bool, // a trailing star: a favorite
     reason: string,
     fluid: bool, // the row's name, value and detail share its width by priority: the name, then the value, then the detail
+    count: string, // the count shown after a bubble's name (a Library's libraries; the JUCE pills), empty for a tag or a listing that shows none
     columns: [string], // a row in columns (the Catalog's: name, version, publisher, state and summary), each shrunk then cut on its own
 }
 

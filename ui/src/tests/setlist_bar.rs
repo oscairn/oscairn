@@ -504,3 +504,78 @@ fn white_on_a_color_unless_it_is_light() {
         assert!(crate::palette::contrast(c, ink) >= 3., "{hex}: {}", crate::palette::contrast(c, ink));
     }
 }
+
+/// A bank of four slots: an uncolored playable, a red playable, a red placeholder and a light placeholder, so a
+/// placeholder's box is told apart from the same color's playable slot and from an uncolored slot, in the grid and
+/// the list, with the cursor still shown on it and its name reading on the box (3 to 1).
+fn on_placeholders(name: &str, mode: &str) -> Fixture {
+    let mut f = Fixture::new(name);
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
+    let setlists = json!([{"id": format!("{name}-1"), "name": "Night 1"}]);
+    let performances = json!([{"id": "p0", "name": "Song", "color": "", "path": "/lib/p0"}, {"id": "p1", "name": "Red", "color": "", "path": "/lib/p1"}]);
+    let doc = json!({"format": "oscairn.setlist", "version": 2, "info": {"id": format!("{name}-1"), "name": "Night 1"},
+        "display": {"mode": mode, "columns": 4, "rows": 3},
+        "pages": [{"name": "Set 1", "slots": [
+            {"id": "p0", "name": "Song", "color": "", "label": ""},
+            {"id": "p1", "name": "Red", "color": "#e5484d", "label": ""},
+            {"id": "", "name": "Ghost", "color": "#e5484d", "label": ""},
+            {"id": "", "name": "Phantom", "color": "#ffe082", "label": ""}]}]});
+    f.serve(13, &json!({"setlists": setlists, "performances": performances, "setlist": doc}));
+    quiet(&mut f);
+    f
+}
+
+#[test]
+fn a_placeholder_is_a_tint_not_a_solid_and_reads_on_it() {
+    for mode in ["grid", "list"] {
+        let mut f = on_placeholders(&format!("setlist-ph-{mode}"), mode);
+        for scale in [1.0, 1.55] {
+            f.screen.set_scale(scale);
+            for _ in 0..3 {
+                f.screen.frame();
+            }
+            let t = f.screen.ui.global::<Theme>();
+            let rows = if mode == "grid" { 3 } else { 0 };
+            let fill = |i: usize| pixel(&f, slot_box(&f, scale, rows, i).0 + slot_box(&f, scale, rows, i).2 * 0.75, slot_box(&f, scale, rows, i).1 + slot_box(&f, scale, rows, i).3 - 6.);
+            let all = slots(&f);
+            assert_eq!(all[2].note, "(placeholder)", "{mode} {scale}: slot 2 a placeholder");
+            assert_eq!(all[3].note, "(placeholder)", "{mode} {scale}: slot 3 a placeholder");
+            assert!(!all[2].empty && !all[3].empty && all[2].tinted && all[3].tinted, "{mode} {scale}: the placeholders keep their colors");
+            // A placeholder's box: the tint of its color, not the solid, and not an uncolored slot's surface.
+            let (red_ph, red_play, plain) = (fill(2), fill(1), fill(0));
+            assert_ne!(red_ph, red_play, "{mode} {scale}: the placeholder is a tint, not the solid {red_ph:?}");
+            assert_ne!(red_ph, plain, "{mode} {scale}: the placeholder is not an uncolored slot's {plain:?}");
+            assert_ne!(red_ph, rgb(t.get_background()), "{mode} {scale}: and it is a slot, not the background");
+            // Its name reads on the box: the ink (the theme's secondary where that reads, else white or black) gives at
+            // least 3 to 1 on the box, and is drawn there.
+            for i in [2, 3] {
+                let (x, y, w, h) = slot_box(&f, scale, rows, i);
+                let bg = fill(i);
+                let ink = rgb(slots(&f)[i].ink);
+                let c = slint::Color::from_rgb_u8(ink.0, ink.1, ink.2);
+                let bgc = slint::Color::from_rgb_u8(bg.0, bg.1, bg.2);
+                assert!(crate::palette::contrast(bgc, c) >= 3., "{mode} {scale} placeholder {i}: {}", crate::palette::contrast(bgc, c));
+                let written = (y as usize..(y + h) as usize).any(|py| (x as usize..(x + w) as usize).any(|px| pixel(&f, px as f32, py as f32) == ink));
+                assert!(written, "{mode} {scale} placeholder {i}: its name drawn in {ink:?}");
+            }
+            // The cursor border still shows on a placeholder, with the ink's line inside it on a colored box.
+            let focus = rgb(t.get_focus());
+            shell::act(Action::Move { pane: Some(1), by: 1 }); // the first move shows it on the first slot
+            shell::act(Action::Move { pane: Some(1), by: 2 });
+            f.screen.frame(); // the move is drawn
+            let all = slots(&f);
+            let j = all.iter().position(|s| s.cursor).expect("the cursor shows");
+            assert_eq!(all[j].note, "(placeholder)", "{mode} {scale}: the cursor is on a placeholder (row {j})");
+            let ink = rgb(all[j].ink);
+            let (x, y, w, _) = slot_box(&f, scale, rows, j);
+            let top = (y as usize)..(y as usize + 6);
+            let xs = (x as usize)..(x as usize + w as usize);
+            let at = |colour: (u8, u8, u8)| top.clone().any(|py| xs.clone().any(|px| pixel(&f, px as f32, py as f32) == colour));
+            assert!(at(focus), "{mode} {scale}: the cursor's focus border on the placeholder");
+            assert!(at(ink), "{mode} {scale}: its ink's line inside it");
+        }
+    }
+}
+

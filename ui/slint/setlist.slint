@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Setlist screen (src/setlist.rs): under the top bar one row, the setlist bar (the setlists' dropdown, the open
-// setlist's banks' dropdown, Previous and Next, which show the bank before or after, and at the right what the screen
-// says and which slots show), in the place and height of the Library's row; under it the shown bank's slots over the
-// whole width, a view of them at a time (a grid as the setlist's display says, or a list). The cursor is a border,
-// on a stop of the bar or on a slot; the slot playing is marked apart from it.
+// The Setlist screen (src/setlist.rs): under the top bar one row, the setlist bar, a quarter taller than a touch
+// target (the setlists' dropdown and the open setlist's banks' dropdown, sharing the room equally, then Previous and
+// Next at the right end, which show the bank before or after); under it the shown bank's slots over the whole width,
+// a view of them at a time (a grid as the setlist's display says, or a list). A slot's color is its whole box, its
+// text black or white on it. The cursor is a border, on a stop of the bar or on a slot; the slot playing is marked
+// apart from it.
 
-import { Theme, Section, Button, Field, Cursor, RowMark, RowStyle } from "theme.slint";
+import { Theme, Section, Button, Field, Cursor } from "theme.slint";
 import { Loading } from "loading.slint";
 
 // A stop of the setlist bar: a dropdown (what it shows now; a press opens its list) or a button.
@@ -20,8 +21,9 @@ export struct SlotData {
     number: int,
     title: string,
     note: string, // why it does not open: a placeholder, not in the library
-    tint: color,
+    tint: color, // its own color: the whole box
     tinted: bool,
+    ink: color, // black or white, whichever reads better on the tint
     empty: bool,
     opens: bool,
     playing: bool,
@@ -34,8 +36,8 @@ export global SetlistState {
     in property <[BarStop]> bar;
     in property <[SlotData]> slots;
     in property <string> name;
-    in property <string> view; // which slots of the bank show: "1–12 of 30"
-    in property <string> message;
+    in property <int> count; // the slots of the bank shown
+    in property <string> view; // which of them show: "1–12 of 30", drawn when they are not all in view
     in property <bool> grid;
     in property <int> columns: 4;
     in property <int> rows: 3;
@@ -52,13 +54,16 @@ export component Setlist inherits Rectangle {
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> number-column: Theme.touch + 2 * Theme.pad;
     property <length> slot-row: Theme.touch + 2 * Theme.margin;
-    // The bar's stops: a dropdown a quarter of the row at most, a button the theme's small button.
+    // The bar: Previous and Next the theme's small button at the right end, the two dropdowns halves of the rest.
     property <length> row-width: self.width - 2 * Theme.margin;
-    property <length> drop-width: min(2.4 * Theme.button-width, root.row-width * 0.25);
-    property <length> step-width: min(Theme.button-width, root.row-width * 0.125);
-    property <length> stops-width: 2 * (root.drop-width + root.step-width) + 4 * Theme.margin;
-    property <length> slots-y: Theme.margin + Theme.touch + Theme.gap;
-    property <length> slots-height: self.height - slots-y - Theme.margin;
+    property <length> step-width: Theme.button-width;
+    property <length> drop-width: (root.row-width - 2 * root.step-width - 3 * Theme.margin) / 2;
+    property <length> slots-y: Theme.margin + Theme.tall-row + Theme.gap;
+    // The line under the slots that says which of the bank's show: only when they are not all in view.
+    property <length> room: self.height - slots-y - Theme.margin;
+    property <length> line: Theme.footer(true);
+    property <bool> long: SetlistState.count > (SetlistState.grid ? SetlistState.columns * SetlistState.rows : max(1, floor((room + gap) / (slot-row + gap))));
+    property <length> slots-height: root.long ? room - line - Theme.gap : room;
     property <int> across: SetlistState.grid ? SetlistState.columns : 1;
     property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + gap) / (slot-row + gap)));
     property <length> cell-width: (row-width - (across - 1) * gap) / across;
@@ -74,7 +79,7 @@ export component Setlist inherits Rectangle {
         x: Theme.margin + min(i, 2) * (root.drop-width + Theme.margin) + max(0, i - 2) * (root.step-width + Theme.margin);
         y: Theme.margin;
         width: stop.drop ? root.drop-width : root.step-width;
-        height: Theme.touch;
+        height: Theme.tall-row;
         accessible-role: button;
         accessible-label: stop.text;
         accessible-enabled: stop.enabled;
@@ -113,68 +118,56 @@ export component Setlist inherits Rectangle {
             shown: stop.cursor;
         }
     }
-    // The bar's right end, two lines: what the screen says (the slots' count, what opens, why one did not), and which
-    // of the bank's slots show.
-    Text {
-        x: Theme.margin + root.stops-width;
-        y: Theme.margin;
-        width: root.row-width - root.stops-width;
-        height: Theme.touch / 2;
-        horizontal-alignment: right;
-        vertical-alignment: center;
-        overflow: elide;
-        font-size: Theme.small;
-        color: Theme.muted;
-        text: SetlistState.message;
-    }
-    Text {
-        x: Theme.margin + root.stops-width;
-        y: Theme.margin + Theme.touch / 2;
-        width: root.row-width - root.stops-width;
-        height: Theme.touch / 2;
-        horizontal-alignment: right;
-        vertical-alignment: center;
-        overflow: elide;
-        font-size: Theme.small;
-        color: Theme.muted;
-        text: SetlistState.view;
-    }
 
     for slot[i] in SetlistState.slots: Section {
         property <color> base: slot.playing ? Theme.raised : Theme.surface;
         property <bool> odd: !SetlistState.grid && mod(i, 2) == 1;
-        property <color> lifted: Theme.row-base(self.base, self.odd);
+        // What is written on the box: on its own color the ink that reads on it, else the theme's.
+        property <color> ink: slot.tinted ? slot.ink : slot.opens ? Theme.text : Theme.muted;
         x: Theme.margin + mod(i, root.across) * (root.cell-width + root.gap);
         y: root.slots-y + floor(i / root.across) * (root.cell-height + root.gap);
         width: root.cell-width;
         height: root.cell-height;
-        // The item's color where the theme puts it (drawListRow): the whole slot, or a mark in it.
-        fill: slot.empty ? Theme.background : slot.tinted && Theme.rows == RowStyle.fill ? Theme.row-fill(slot.tint, self.lifted, Theme.text, self.odd) : self.lifted;
-        RowMark {
-            tint: slot.tint;
-            shown: slot.tinted && !slot.empty;
-        }
-        // The slot playing: an accent edge on its left; the cursor: a focus border round it.
-        if slot.playing: Rectangle {
+        fill: slot.empty ? Theme.background : slot.tinted ? slot.tint : Theme.row-base(self.base, self.odd);
+        // The slot playing: an edge on its left (the accent; on a colored box its ink, which no color hides), its number
+        // on a filled chip on a colored box, and its name bold. The cursor: a focus border round it.
+        if slot.playing && !slot.tinted: Rectangle {
             x: 0;
             width: Theme.mark;
             background: Theme.accent;
             border-radius: Theme.section-radius;
         }
-        if !slot.empty: Text {
-            x: Theme.pad-wide + Theme.pad-tight / 2;
-            y: Theme.pad-tight + Theme.pad-tight / 2;
-            text: slot.number;
-            color: Theme.muted;
-            font-size: Theme.small;
-            font-weight: 700;
+        // On a colored box the edge is a bar of its ink set inside it (inside the cursor's lines), the color round it.
+        if slot.playing && slot.tinted: Rectangle {
+            x: Theme.cursor-width + Theme.hair;
+            y: self.x;
+            width: Theme.mark;
+            height: parent.height - 2 * self.y;
+            background: slot.ink;
+            border-radius: Theme.inner(self.x);
+        }
+        if !slot.empty: Rectangle {
+            x: Theme.pad-wide - Theme.pad-tight / 2;
+            y: Theme.pad-tight;
+            width: number.preferred-width + 2 * Theme.pad-tight;
+            height: number.preferred-height + Theme.pad-tight;
+            border-radius: Theme.scaled-radius(self.height);
+            background: slot.playing && slot.tinted ? slot.ink : transparent;
+            number := Text {
+                x: Theme.pad-tight;
+                y: Theme.pad-tight / 2;
+                text: slot.number;
+                color: slot.tinted ? (slot.playing ? slot.tint : slot.ink) : Theme.muted;
+                font-size: Theme.small;
+                font-weight: 700;
+            }
         }
         if !slot.empty: Text {
             x: SetlistState.grid ? Theme.pad-wide + Theme.pad-tight / 2 : root.number-column;
             width: parent.width - self.x - Theme.pad;
             height: parent.height;
             text: slot.note == "" ? slot.title : slot.title + "\n" + slot.note;
-            color: slot.opens ? Theme.text : Theme.muted;
+            color: parent.ink;
             font-size: SetlistState.grid ? Theme.title : Theme.body;
             font-weight: slot.playing ? 700 : 400;
             wrap: word-wrap;
@@ -190,8 +183,29 @@ export component Setlist inherits Rectangle {
         TouchArea {
             clicked => { SetlistState.tapped-slot(i); }
         }
+        // On a colored box the cursor has a second line inside it in the box's ink: the focus color alone could be the box's.
+        if slot.cursor && slot.tinted && !Theme.bar-cursor: Rectangle {
+            x: Theme.cursor-width;
+            y: Theme.cursor-width;
+            width: parent.width - 2 * Theme.cursor-width;
+            height: parent.height - 2 * Theme.cursor-width;
+            border-radius: Theme.inner(Theme.cursor-width);
+            border-width: Theme.hair;
+            border-color: slot.ink;
+        }
         Cursor {
             shown: slot.cursor;
         }
+    }
+    if root.long: Text {
+        x: Theme.margin;
+        y: root.slots-y + root.down * (root.cell-height + root.gap) - root.gap + Theme.gap;
+        width: root.row-width;
+        height: root.line;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: SetlistState.view;
     }
 }

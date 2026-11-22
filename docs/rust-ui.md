@@ -298,19 +298,23 @@ sidebar and no footer.
 
 - **The top bar** is the system's, with the screen's one action, Play, which opens Play (reached by
   the bar's cursor, `move:2` or Tab, like any screen's action).
-- **The setlist bar** is one row directly under it, in the place and height of the Library's row
-  (a touch target at the margin). From the left: the **setlists' dropdown** (it names the setlist
-  open; "No setlist" and off with none), the **banks' dropdown** (a setlist's `pages` are its banks:
-  the bank's name, or "Bank N" without one, and "n/m"), **Previous** and **Next**, and at the right
-  end two small lines: what the screen says (the slots' count, the slot chosen, why one did not open)
-  over which of the bank's slots show ("1–9 of 30"). The footer's "Set 1 (1/2)" is gone: the banks'
-  dropdown says it.
+- **The setlist bar** is one row directly under it, where the Library has its row but a quarter
+  taller than a touch target (`Theme.tall-row`, the touch target times `tall-row-scale`). **Previous**
+  and **Next** are at its right end, the theme's small button each; the **setlists' dropdown** (it
+  names the setlist open; "No setlist" and off with none) and the **banks' dropdown** (a setlist's
+  `pages` are its banks: the bank's name, or "Bank N" without one, and "n/m") share the rest equally.
+  Nothing else is in the bar. The footer's texts: "Set 1 (1/2)" is the banks' dropdown's; "1–9 of 30"
+  shows only when a bank has more slots than a view, as a line directly under the last row (where the
+  Library has its count); "32 slots" and the name of the slot chosen are gone (the loading chip and
+  the slot's own marks say what opens); why a slot did not open, and a refusal, are said in the top
+  bar's title for four seconds, where the bar's actions say theirs (`Bar.notice`), on the Setlist and
+  on Play.
 - **Previous and Next turn the bank**, as on the reference keyboard: the bank before or after is
   shown, nothing is asked of the engine and the slot playing stays the one it was; a song opens only
   when it is chosen. At the first and last bank the button is off (no wrap). With one bank the banks'
   dropdown and both buttons are shown off, so the row never moves.
 - **A dropdown** opens the shared menu (`menu.rs`) over the screen: its list with a border cursor, the
-  one open ticked; the dial moves, nothing is read or shown until the press (`setlists.get` for a
+  one open ticked and the cursor on it; the dial moves, nothing is read or shown until the press (`setlists.get` for a
   setlist; a bank asks nothing), Cancel closes it unchanged.
 - **The slots** of the bank shown have all the room under the bar, a view at a time (the setlist's
   grid, or as many list rows as fit); the cursor leaving the view turns a whole view, and past the
@@ -318,6 +322,14 @@ sidebar and no footer.
   chosen while one opens waits and opens next, the last chosen winning, as the JUCE engine client
   queues library loads; a load refused as busy (`-32009`, another client's long request) is tried
   again as the next; the next slot is prepared (`performance.prepare`).
+- **A slot's color** (its own, else its Performance's) is its whole box, in the grid and in the list,
+  whatever the theme's `rows` says; its number, name and note are black or white on it, whichever
+  reads better (`theme::most_readable`: never under 4.5 to 1). A slot without a color is the theme's
+  surface as before, an empty slot the background with nothing in it, a placeholder its name with
+  "(placeholder)" under it. The slot playing has its name bold and, without a color, the accent edge
+  and the raised fill; on a colored box, a bar of the box's ink set inside its left edge and its
+  number on a chip of that ink. The cursor is the focus border, with a hairline of the box's ink
+  inside it on a colored box, so neither mark depends on the color under it.
 - **Without touch**, one cursor: pane 0 (E1 on a FANTOM-07) moves it along the setlist bar's four
   stops, pane 1 (E6) over the slots, and each drops the other's. The VALUE dial and Up and Down walk
   through both: up out of the first bank's first slot is the bar's last stop, down past it the slots

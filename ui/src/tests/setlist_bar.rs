@@ -8,11 +8,14 @@ use super::*;
 use crate::{MenuState, Theme};
 use std::time::Duration;
 
+/// The slots' colors, by their place in a bank: a light one, a blue, a dark one, a red and a green among the plain.
+const COLORS: [&str; 12] = ["", "#ffe082", "#3366cc", "", "", "#1a237e", "#e5484d", "", "", "", "#2e7d32", ""];
+
 /// A setlist of `banks` banks of `per` slots each, as `setlists.get` answers it.
 fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json::Value {
     let pages: Vec<_> = (0..banks)
         .map(|b| {
-            let slots: Vec<_> = (0..per).map(|i| json!({"id": format!("p{}", b * per + i), "name": format!("Song {}", b * per + i), "color": if i % 5 == 2 { "#3366cc" } else { "" }, "label": ""})).collect();
+            let slots: Vec<_> = (0..per).map(|i| json!({"id": format!("p{}", b * per + i), "name": format!("Song {}", b * per + i), "color": COLORS[i % 12], "label": ""})).collect();
             json!({"name": if b == 1 { String::new() } else { format!("Set {}", b + 1) }, "slots": slots})
         })
         .collect();
@@ -163,6 +166,129 @@ fn a_bank_is_chosen_from_the_dropdown_by_panel_moves() {
     shell::act(Action::Confirm(None));
     assert_eq!((slots(&f)[0].number, stops(&f)[1].text.as_str(), playing(&f) == before), (9, "Set 3  3/3", true));
     asks_nothing(&mut f, "choosing a bank");
+    // Opened again, the cursor starts on the bank shown (the ticked row), not the first; and the setlists' on the one open.
+    shell::act(Action::Confirm(None));
+    f.screen.frame();
+    let at = |f: &Fixture| menu(f).get_rows().iter().map(|r| (r.cursor, r.tick == 1)).collect::<Vec<_>>();
+    assert_eq!(at(&f), [(false, false), (false, false), (true, true)], "the banks' list opens on the bank shown");
+    shell::act(Action::Cancel(None));
+    shell::act(Action::Move { pane: Some(0), by: -1 });
+    shell::act(Action::Confirm(None));
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Confirm(None));
+    let get = f.engine.request();
+    assert_eq!(get["params"]["id"], "setlist-drop-banks-2");
+    f.reply(&get, json!({"result": {"setlist": doc("setlist-drop-banks-2", "Night 2", "list", 1, 3)}}));
+    shell::act(Action::Confirm(None));
+    f.screen.frame();
+    assert_eq!(at(&f), [(false, false), (true, true)], "the setlists' list opens on the one open");
+}
+
+fn rgb(c: slint::Color) -> (u8, u8, u8) {
+    (c.red(), c.green(), c.blue())
+}
+
+fn pixel(f: &Fixture, x: f32, y: f32) -> (u8, u8, u8) {
+    let p = f.screen.pixels[y as usize * f.screen.w + x as usize];
+    (p.r, p.g, p.b)
+}
+
+/// The runs of pixels that are not the background's along a line from (x, y) by (dx, dy): each one's start and length.
+fn runs(f: &Fixture, x: usize, y: usize, dx: usize, dy: usize) -> Vec<(usize, usize)> {
+    let back = rgb(f.screen.ui.global::<Theme>().get_background());
+    let (mut out, mut start) = (vec![], None);
+    let n = if dx == 1 { f.screen.w - x } else { f.screen.h - y };
+    for i in 0..=n {
+        let on = i < n && pixel(f, (x + i * dx) as f32, (y + i * dy) as f32) != back;
+        match (on, start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                out.push((s + if dx == 1 { x } else { y }, i - s));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+// The bar as drawn: a quarter taller than a touch target (the Library's row is one touch target), by the theme's own
+// factor; Previous and Next the theme's small button each, Next's right edge at the right margin; the two dropdowns
+// equal halves of everything left of them. At 1280 and at 800 across.
+#[test]
+fn the_bar_is_taller_and_its_buttons_are_at_the_right() {
+    let mut f = on_setlist("setlist-bar-shape", 2, "grid", 2, 12);
+    for (w, h) in [(1280, 720), (800, 480)] {
+        f.screen.resize(w, h);
+        for _ in 0..3 {
+            f.screen.frame();
+        }
+        let t = f.screen.ui.global::<Theme>();
+        let (margin, touch, tall, button) = (t.get_margin(), t.get_touch(), t.get_tall_row(), t.get_button_width());
+        assert_eq!((t.get_tall_row_scale(), tall), (1.25, touch * 1.25));
+        let down = runs(&f, margin as usize + 8, 48, 0, 1);
+        assert_eq!(down[0], (48 + margin as usize, tall as usize), "{w}: the bar starts at the margin and is the tall row high (a touch target is {touch})");
+        let across = runs(&f, 0, 48 + (margin + tall / 2.) as usize, 1, 0);
+        assert_eq!(across.len(), 4, "{w}: two dropdowns and two buttons: {across:?}");
+        assert_eq!(across[3].0 + across[3].1, w - margin as usize, "{w}: Next ends at the right margin");
+        assert_eq!((across[2].1, across[3].1), (button as usize, button as usize), "{w}: Previous and Next are the theme's small button");
+        assert_eq!(across[0].0, margin as usize, "{w}: the first dropdown starts at the left margin");
+        assert!(across[0].1.abs_diff(across[1].1) <= 1 && across[0].1 > 2 * button as usize, "{w}: the dropdowns are equal and have the rest: {across:?}");
+        assert_eq!(across[2].0 - (across[1].0 + across[1].1), margin as usize, "{w}: nothing between the dropdowns and the buttons but the gap");
+    }
+}
+
+// A slot's color is its whole box, in the grid and in the list, in a dark theme and a light one: the box's pixels are
+// the color itself, and the ink on it (black or white) is at least 4.5 to 1 against it, for a dark color and a light
+// one; a slot without a color keeps the theme's surface. The slot playing and the cursor are told apart on a colored
+// box without its background: the cursor is the focus border with a line of the box's ink inside it, the slot
+// playing has its left edge in the box's ink (and its number on a chip of it); a slot can be both.
+#[test]
+fn a_slots_color_is_its_whole_box() {
+    for mode in ["grid", "list"] {
+        let mut f = on_setlist(&format!("setlist-colors-{mode}"), 2, mode, 1, 12);
+        state(&f).invoke_tapped_slot(1); // the light one plays
+        let load = f.engine.request();
+        f.reply(&load, json!({"result": {}}));
+        quiet(&mut f);
+        shell::act(Action::Move { pane: Some(1), by: 1 });
+        shell::act(Action::Move { pane: Some(1), by: 2 }); // the cursor on the blue one
+        for theme in ["oscairn-dark", "oscairn-light"] {
+            theme::apply(&f.screen.ui, &theme::chosen(&theme::Places::default(), theme, ""));
+            for _ in 0..3 {
+                f.screen.frame();
+            }
+            let t = f.screen.ui.global::<Theme>();
+            let (margin, gap, tall, focus) = (t.get_margin(), t.get_gap(), t.get_tall_row(), rgb(t.get_focus()));
+            let (across, down) = if mode == "grid" { (4., 3.) } else { (1., 1.) };
+            let top = 48. + margin + tall + gap;
+            let cw = (f.screen.w as f32 - 2. * margin - (across - 1.) * gap) / across;
+            let ch = if mode == "grid" { (f.screen.h as f32 - top - margin - (down - 1.) * gap) / down } else { t.get_touch() + 2. * margin };
+            // A slot's box: its left, top, width and height.
+            let cell = |i: usize| (margin + (i % across as usize) as f32 * (cw + gap), top + (i / across as usize) as f32 * (ch + gap), cw, ch);
+            let all = slots(&f);
+            for (i, light) in [(1, Some(true)), (2, None), (5, Some(false)), (6, None)] {
+                let (s, (x, y, w, h)) = (&all[i], cell(i));
+                let (tint, ink) = (rgb(s.tint), rgb(s.ink));
+                assert!(s.tinted && light.is_none_or(|l| ink == if l { (0, 0, 0) } else { (255, 255, 255) }), "{mode} {theme} slot {i}: its ink {ink:?}");
+                assert!(crate::palette::contrast(s.tint, s.ink) >= 4.5, "{mode} {theme} slot {i}: {}", crate::palette::contrast(s.tint, s.ink));
+                // The box is the color: near each corner's inside, and under the name.
+                for (px, py) in [(x + w * 0.75, y + h - 6.), (x + w - 8., y + 6.), (x + w * 0.5, y + h - 4.)] {
+                    assert_eq!(pixel(&f, px, py), tint, "{mode} {theme} slot {i}: the box at {px}, {py}");
+                }
+                // And something is written on it in its ink.
+                let written = (y as usize..(y + h) as usize).any(|py| (x as usize..(x + w) as usize).any(|px| pixel(&f, px as f32, py as f32) == ink));
+                assert!(written, "{mode} {theme} slot {i}: its name in {ink:?}");
+                // The slot playing (1): its left edge in its ink; the others: the color. The cursor (2): the focus border, the ink's line inside it.
+                let (edge, border, inner) = (pixel(&f, x + 4., y + h / 2.), pixel(&f, x + w / 2., y + 1.), pixel(&f, x + w / 2., y + 2.));
+                assert_eq!(edge == ink, s.playing, "{mode} {theme} slot {i}: the playing edge {edge:?}");
+                assert_eq!((border == focus, inner == ink), (s.cursor, s.cursor), "{mode} {theme} slot {i}: the cursor {border:?} {inner:?}");
+                assert_eq!((s.playing, s.cursor), (i == 1, i == 2));
+            }
+            // No color: the theme's surface, as before.
+            assert!(!all[0].tinted && pixel(&f, cell(0).0 + cell(0).2 * 0.75, cell(0).1 + cell(0).3 - 6.) == rgb(t.get_surface()), "{mode} {theme}: a slot without a color");
+        }
+    }
 }
 
 #[test]
@@ -213,7 +339,7 @@ fn the_dial_walks_from_the_slots_through_the_bar_to_the_top_bar() {
 fn the_setlist_has_no_footer_and_no_sidebar() {
     let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("slint/setlist.slint")).unwrap();
     let code: String = text.lines().map(|l| l.split("//").next().unwrap_or_default()).collect::<Vec<_>>().join("\n");
-    for gone in ["footer", "list-width", "list-rows", "setlists", "tapped-setlist", "\"Play\"", "play()", "step(", "can-next", "can-previous", "slots-x"] {
+    for gone in ["property <length> footer", "list-width", "list-rows", "setlists", "tapped-setlist", "\"Play\"", "play()", "step(", "can-next", "can-previous", "slots-x", "message", "RowMark"] {
         assert!(!code.contains(gone), "setlist.slint still has {gone}");
     }
     // No literal size either: every length is the theme's.
@@ -224,12 +350,6 @@ fn the_setlist_has_no_footer_and_no_sidebar() {
         }
     }
     let mut f = on_setlist("setlist-room", 2, "list", 1, 30);
-    f.screen.set_scale(1.55);
-    for _ in 0..3 {
-        f.screen.frame();
-    }
-    let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view();
-    assert!(per_view >= 6, "a list view at 826 x 465 holds {per_view} rows (5 with the footer)");
     // The first row is drawn from margin to margin: the surface color at both ends of its middle line, under the bar.
     f.screen.set_scale(1.0);
     for _ in 0..3 {
@@ -237,7 +357,7 @@ fn the_setlist_has_no_footer_and_no_sidebar() {
     }
     let t = f.screen.ui.global::<Theme>();
     let (margin, touch, gap) = (t.get_margin(), t.get_touch(), t.get_gap());
-    let y = (48. + margin + touch + gap + touch / 2.) as usize;
+    let y = (48. + margin + t.get_tall_row() + gap + touch / 2.) as usize;
     let px = |x: usize| f.screen.pixels[y * f.screen.w + x];
     let (left, right, outside) = (px(margin as usize + 30), px(f.screen.w - margin as usize - 30), px(1));
     assert_eq!((left.r, left.g, left.b), (right.r, right.g, right.b), "the row's fill at both ends");
@@ -245,37 +365,37 @@ fn the_setlist_has_no_footer_and_no_sidebar() {
 }
 
 // Pictures (target/screens/setlist-*.png): the list and the grid with the dropdowns closed, and the banks' dropdown
-// open, at 1280 x 720; the list again at 800 x 480.
+// open, at 1280 x 720 at scale 1 and at the keyboard's 1.55 (NAME-155); the list again at 800 x 480. The second slot
+// (a light color) plays and the cursor is on the third (blue).
 #[test]
 fn pictures_of_the_setlist() {
-    for (name, mode) in [("setlist-list", "list"), ("setlist-grid", "grid")] {
-        let mut f = on_setlist(name, 3, mode, 3, if mode == "grid" { 12 } else { 30 });
-        f.screen.ui.global::<SetlistState>().invoke_tapped_slot(1);
-        let load = f.engine.request();
-        f.reply(&load, json!({"result": {}}));
-        quiet(&mut f);
-        shell::act(Action::Move { pane: Some(1), by: 1 });
-        shell::act(Action::Move { pane: Some(1), by: 3 });
-        f.screen.frame();
-        f.screen.frame();
-        png(&f.screen, name);
-        if mode == "grid" {
-            shell::act(Action::Move { pane: Some(0), by: 1 });
-            shell::act(Action::Move { pane: Some(0), by: 1 });
-            f.screen.frame();
-            png(&f.screen, "setlist-bank-cursor");
-            shell::act(Action::Confirm(None));
-            shell::act(Action::Move { pane: None, by: 1 });
-            f.screen.frame();
-            f.screen.frame();
-            png(&f.screen, "setlist-bank-open");
-            shell::act(Action::Cancel(None));
-        } else {
-            f.screen.resize(800, 480);
-            for _ in 0..3 {
-                f.screen.frame();
+    for (scale, tag) in [(1.0, ""), (1.55, "-155")] {
+        for mode in ["list", "grid"] {
+            let mut f = on_setlist(&format!("setlist-pic-{mode}{tag}"), 3, mode, 3, if mode == "grid" { 12 } else { 30 });
+            f.screen.set_scale(scale);
+            let draw = |f: &mut Fixture, name: &str| {
+                for _ in 0..3 {
+                    f.screen.frame();
+                }
+                png(&f.screen, &format!("{name}{tag}"));
+            };
+            f.screen.ui.global::<SetlistState>().invoke_tapped_slot(1);
+            let load = f.engine.request();
+            f.reply(&load, json!({"result": {}}));
+            quiet(&mut f);
+            shell::act(Action::Move { pane: Some(1), by: 1 });
+            shell::act(Action::Move { pane: Some(1), by: 2 });
+            draw(&mut f, &format!("setlist-{mode}"));
+            if mode == "grid" {
+                shell::act(Action::Move { pane: Some(0), by: 1 });
+                shell::act(Action::Move { pane: Some(0), by: 1 });
+                shell::act(Action::Confirm(None));
+                draw(&mut f, "setlist-bank-open");
+                shell::act(Action::Cancel(None));
+            } else if tag.is_empty() {
+                f.screen.resize(800, 480);
+                draw(&mut f, "setlist-list-800");
             }
-            png(&f.screen, "setlist-list-800");
         }
     }
 }

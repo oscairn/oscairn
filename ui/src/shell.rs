@@ -1619,8 +1619,15 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.setlist.out) {
             self.send(Request::Setlist(request), method, params);
         }
-        if let Some((title, items)) = self.setlist.take_menu() {
+        if let Some((title, items, at)) = self.setlist.take_menu() {
             self.open_menu(Screen::Setlist, &title, items);
+            if let Some((_, m)) = self.menu.as_mut() {
+                m.start(at);
+            }
+        }
+        // What it says (why a slot did not open) goes where the bar's actions say theirs, on the screens that step it.
+        if let Some(text) = self.setlist.said.take().filter(|_| matches!(self.screen, Screen::Setlist | Screen::Play)) {
+            self.say(&text);
         }
         if self.setlist.take_retry() {
             slint::Timer::single_shot(crate::client::BUSY_RETRY, || with_app(|a| a.on_setlist(setlist::Screen::retry)));

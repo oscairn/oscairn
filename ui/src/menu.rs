@@ -90,6 +90,14 @@ impl Menu {
         m
     }
 
+    /// The cursor on row `at` of the list shown, if it can be chosen: a dropdown opens on the choice it has now.
+    pub fn start(&mut self, at: usize) {
+        if let Some(level) = self.levels.last_mut().filter(|l| l.items.get(at).is_some_and(Item::selectable)) {
+            level.at = at;
+        }
+        self.show();
+    }
+
     fn push(&mut self, title: String, items: Vec<Item>) {
         let at = items.iter().position(Item::selectable).unwrap_or(0);
         self.levels.push(Level { title, items, at, first: 0 });

@@ -307,9 +307,16 @@ export component Part inherits Rectangle {
     property <length> list-width: root.list-only ? self.width - 2 * Theme.margin : (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin;
     out property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
+    // The count line's own top (the box the text sits in), read by a test that holds it directly under the last row.
+    out property <length> count-y: count.y;
     // The height of the lines the list's view shows (per-view touch rows and the gaps between them): the scroll bar's track.
     property <length> list-view-h: max(0px, root.per-view * (Theme.touch + root.gap) - root.gap);
-    property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
+    // The rows that fit, one a touch target and a gap apart (as the library's sidebar fits its entries): `fitted` the
+    // whole ones the room holds, and a further one when a whole row fits in the spare (per-view). The count line under
+    // the list sits directly under the last row, so nothing but the theme's gap is between them (no dead band).
+    property <int> fitted: max(1, floor((list-height + gap) / (Theme.touch + gap)));
+    property <length> fill: list-height - root.fitted * Theme.touch - (root.fitted - 1) * Theme.gap;
+    property <int> per-view: max(1, root.fitted + (root.fill >= Theme.touch ? 1 : 0));
     // A finger drag on a row scrolls the list: the anchor (the state the drag began at) and the row pitch it follows.
     property <bool> dz-on: false;
     property <int> dz-first0: 0;
@@ -417,9 +424,11 @@ export component Part inherits Rectangle {
             clicked => { PartState.info-scroll(1); }
         }
     }
-    Text {
+    count := Text {
         x: Theme.margin;
-        y: root.height - Theme.margin - root.footer;
+        // Directly under the last row (the theme's gap below it), not pinned to the window's bottom: the rows and the
+        // count use the room together, with no dead band between them.
+        y: root.list-y + (root.per-view - 1) * (Theme.touch + root.gap) + Theme.touch + root.gap;
         width: root.width - 2 * Theme.margin;
         height: root.footer;
         vertical-alignment: center;

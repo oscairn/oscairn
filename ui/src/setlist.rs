@@ -192,6 +192,26 @@ pub(crate) fn color(hex: &str) -> Option<Color> {
     Some(Color::from_rgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8))
 }
 
+/// `a` and `b` mixed `f` toward `b` (as Slint's `Color.mix`): `(1-f)*a + f*b`.
+fn mix(a: Color, b: Color, f: f32) -> Color {
+    let l = |c: u8| f32::from(c);
+    Color::from_rgb_u8(
+        (l(a.red()) * (1. - f) + l(b.red()) * f).round() as u8,
+        (l(a.green()) * (1. - f) + l(b.green()) * f).round() as u8,
+        (l(a.blue()) * (1. - f) + l(b.blue()) * f).round() as u8,
+    )
+}
+
+/// A placeholder name's ink: the theme's secondary (muted) wherever it reads on the box (3 to 1, large text), else the
+/// ink that does (white or black on the box), so a placeholder never relies on its color to be read.
+fn placeholder_ink(fill: Color, muted: Color) -> Color {
+    if crate::palette::contrast(muted, fill) >= 3. {
+        muted
+    } else {
+        crate::theme::white_first(fill)
+    }
+}
+
 /// Sets a model's rows to `want`, each row only if it changed: a cursor move sets two.
 pub fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, want: Vec<T>) {
     if model.row_count() != want.len() {
@@ -376,14 +396,31 @@ impl Screen {
         let own = if slot.color.is_empty() { self.performances.get(&slot.id).map_or("", |p| p.color.as_str()) } else { &slot.color };
         let tint = color(own);
         let note = if slot.empty || self.opens(index) { "" } else if slot.id.is_empty() { "(placeholder)" } else { "(not in the library)" };
+        let placeholder = !slot.empty && slot.id.is_empty();
+        // A placeholder's box: its color (or the surface, if none) at the theme's disabled strength over the surface, so
+        // it is a tint, never a solid; its name the theme's secondary ink where that reads on the box, else the ink that does.
+        let (phfill, ink) = if placeholder {
+            let (surface, muted, disabled) = self.ui.upgrade().map_or(
+                (Color::default(), Color::default(), 1.),
+                |u| {
+                    let t = u.global::<crate::Theme>();
+                    (t.get_surface(), t.get_muted(), t.get_disabled())
+                }
+            );
+            let fill = mix(tint.unwrap_or(surface), surface, 1. - disabled);
+            (fill, placeholder_ink(fill, muted))
+        } else {
+            (Color::default(), tint.map(crate::theme::white_first).unwrap_or_default())
+        };
         SlotData {
             number: index as i32 + 1,
             title: self.title(index).into(),
             note: note.into(),
             tint: tint.unwrap_or_default(),
             tinted: tint.is_some(),
-            // The slot's color is its whole box: white on it, black only on a light one.
-            ink: tint.map(crate::theme::white_first).unwrap_or_default(),
+            ink,
+            phfill,
+            placeholder,
             empty: slot.empty,
             opens: self.opens(index),
             playing: self.current == Some(index),

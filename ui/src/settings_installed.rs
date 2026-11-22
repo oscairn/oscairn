@@ -3,10 +3,13 @@
 //! 0006): what is installed on this device, read once when the page is shown and never on a timer — the packages
 //! `packages.installed` reports (each signed and from a repository where the handler says so) and the libraries
 //! `library.libraries` (by name and their item count), in two sections under shared heading rows. A long name is cut
-//! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row.
+//! with an ellipsis in its row, whole on the panel. A refusal or a lost connection is the app's usual failed row. A
+//! library row is removed with the bar's Remove..., asked first as the repositories page asks before Remove; the
+//! protocol reports no library that cannot be removed, so every one is offered.
 
 use crate::client::Error;
-use crate::settings_app::{failed, faint, head, line, row, said, Ctx, Page, Step as Any};
+use crate::settings_app::{failed, head, line, row, said, Ctx, Page, Step as Any};
+use crate::topbar::Tool;
 use crate::{InfoLine, SettingData};
 use serde_json::{json, Value};
 
@@ -28,6 +31,8 @@ pub enum Step {
     Installed,
     /// library.libraries.
     Libraries,
+    /// library.uninstall, of the library's id.
+    Uninstall(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -53,6 +58,14 @@ pub struct Installed {
     libraries: Vec<Library>,
     package_error: String,
     libraries_error: String,
+    /// The library whose Remove is being asked about.
+    asking: Option<String>,
+    /// While `library.uninstall` runs, or the list is read back afterwards: every row faint.
+    busy: bool,
+    /// "Removing NAME..." while it runs.
+    progress: String,
+    /// A removal refused: the library and what the engine said.
+    refused: (String, String),
 }
 
 /// What the row at `index` of the list is: a section's heading, a package, a library, or the page's plain row.
@@ -67,6 +80,14 @@ enum Row {
 }
 
 impl Installed {
+    /// The library a row is, if it is one.
+    fn at(&self, at: usize) -> Option<&Library> {
+        match self.rows_rows().get(at) {
+            Some(Row::Library(i)) => self.libraries.get(*i),
+            _ => None,
+        }
+    }
+
     /// The rows, in the order they show: the packages under their heading, the libraries under theirs.
     fn rows_rows(&self) -> Vec<Row> {
         let mut rows = vec![Row::PackagesHead];
@@ -91,7 +112,7 @@ impl Installed {
         c.ask(Any::Installed(Step::Libraries), "library.libraries", json!({}));
     }
 
-    pub fn reply(&mut self, step: Step, result: Result<Value, Error>, _c: &mut Ctx) {
+    pub fn reply(&mut self, step: Step, result: Result<Value, Error>, c: &mut Ctx) {
         match (step, result) {
             (Step::Installed, Ok(r)) => {
                 self.package_error.clear();
@@ -109,6 +130,7 @@ impl Installed {
                 self.package_error = e.message;
             }
             (Step::Libraries, Ok(r)) => {
+                self.busy = false;
                 self.libraries_error.clear();
                 self.libraries = r["libraries"]
                     .as_array()
@@ -118,7 +140,19 @@ impl Installed {
                     .collect();
             }
             (Step::Libraries, Err(e)) => {
+                self.busy = false;
                 self.libraries_error = e.message;
+            }
+            (Step::Uninstall(id), result) => {
+                self.progress.clear();
+                match result {
+                    // Removed: the list is read again, as the engine kept it.
+                    Ok(_) => c.ask(Any::Installed(Step::Libraries), "library.libraries", json!({})),
+                    Err(e) => {
+                        self.busy = false;
+                        self.refused = (id, e.message);
+                    }
+                }
             }
         }
     }
@@ -126,6 +160,9 @@ impl Installed {
 
 impl Page for Installed {
     fn open(&mut self, c: &mut Ctx) {
+        self.asking = None;
+        self.progress.clear();
+        self.refused = (String::new(), String::new());
         self.read(c);
     }
 
@@ -134,14 +171,15 @@ impl Page for Installed {
     }
 
     fn rows(&self) -> Vec<SettingData> {
+        let faint = |r: SettingData| if self.busy { crate::settings_app::faint(r) } else { r };
         self.rows_rows()
             .into_iter()
             .map(|r| match r {
                 Row::PackagesHead | Row::LibrariesHead => faint(row(heading(r), "")),
-                Row::NonePackages => row("No packages installed", ""),
-                Row::NoneLibraries => row("No libraries", ""),
-                Row::Package(i) => row(cut(&self.packages[i].id), self.packages[i].version.as_str()),
-                Row::Library(i) => row(cut(&self.libraries[i].name), format!("{} {}", self.libraries[i].items, if self.libraries[i].items == 1 { "item" } else { "items" })),
+                Row::NonePackages => faint(row("No packages installed", "")),
+                Row::NoneLibraries => faint(row("No libraries", "")),
+                Row::Package(i) => faint(row(cut(&self.packages[i].id), self.packages[i].version.as_str())),
+                Row::Library(i) => faint(row(cut(&self.libraries[i].name), format!("{} {}", self.libraries[i].items, if self.libraries[i].items == 1 { "item" } else { "items" }))),
             })
             .collect()
     }
@@ -155,6 +193,15 @@ impl Page for Installed {
         if !self.libraries_error.is_empty() {
             lines.push(head("The libraries could not be read"));
             lines.extend(failed(&self.libraries_error));
+        }
+        if !self.progress.is_empty() {
+            lines.push(head("Now"));
+            lines.extend(said(&self.progress));
+        }
+        let (whose, why) = &self.refused;
+        if !why.is_empty() && (whose.is_empty() || at.and_then(|a| self.at(a)).is_some_and(|l| l.id == *whose)) {
+            lines.push(head("Not done"));
+            lines.extend(failed(why));
         }
         let Some(at) = at else { return lines };
         match self.rows_rows().get(at) {
@@ -197,6 +244,40 @@ impl Page for Installed {
     }
 
     fn press(&mut self, _at: usize, _c: &mut Ctx) {}
+
+    fn tools(&self, at: Option<usize>) -> Vec<Tool> {
+        vec![Tool { label: "Remove...".into(), enabled: at.and_then(|a| self.at(a)).is_some() && !self.busy, on: false }]
+    }
+
+    fn tool(&mut self, i: usize, at: Option<usize>, c: &mut Ctx) {
+        if i != 0 || self.busy {
+            return;
+        }
+        let Some(lib) = at.and_then(|a| self.at(a)).cloned() else { return };
+        c.notice = Some((format!("Remove {}?", lib.name), "Its items are removed from this device with it.".into(), vec!["Remove".into(), "Cancel".into()]));
+        self.asking = Some(lib.id);
+    }
+
+    fn noticed(&mut self, choice: Option<usize>, c: &mut Ctx) {
+        let Some(id) = self.asking.take() else { return };
+        let Some(lib) = self.libraries.iter().find(|l| l.id == id).cloned() else { return };
+        if choice != Some(0) {
+            // Cancel: nothing happens; the question just closes.
+            return;
+        }
+        self.busy = true;
+        self.progress = format!("Removing {}...", lib.name);
+        self.refused = (id.clone(), String::new());
+        c.ask(Any::Installed(Step::Uninstall(id.clone())), "library.uninstall", json!({"library": id}));
+    }
+
+    fn message(&self) -> String {
+        if self.busy && !self.progress.is_empty() {
+            self.progress.clone()
+        } else {
+            String::new()
+        }
+    }
 }
 
 fn heading(r: Row) -> String {

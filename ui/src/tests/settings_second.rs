@@ -297,6 +297,64 @@ fn a_refused_installed_request_is_a_failed_row() {
     assert!(labels(r.ui()).contains(&"org.example.reverb".to_string()), "what read before stays");
 }
 
+// Remove is for a library, asked first as for a repository (P2): the question, one `library.uninstall` with the
+// library's id, the list read again; a package row is never offered, and every row is faint while it runs.
+#[test]
+fn a_library_is_removed_after_the_question() {
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
+    r.act(Action::Move { pane: None, by: 1 }); // org.example.reverb, a package
+    let remove = r.c.bar_tools().into_iter().find(|t| t.label.starts_with("Remove")).unwrap();
+    assert!(!remove.enabled, "a package row is not offered Remove");
+    r.act(Action::Move { pane: None, by: 4 }); // Wicked Synths
+    let remove = r.c.bar_tools().into_iter().find(|t| t.label.starts_with("Remove")).unwrap();
+    assert!(remove.enabled);
+    r.e.calls.clear();
+    r.tool("Remove");
+    let (title, message, choices) = r.notice.clone().unwrap();
+    assert_eq!((title.as_str(), choices.as_slice()), ("Remove Wicked Synths?", ["Remove".to_string(), "Cancel".to_string()].as_slice()));
+    assert_eq!(message, "Its items are removed from this device with it.");
+    // Confirmed before the engine answers: the row says so, every row faint.
+    r.c.noticed(Some(0));
+    assert_eq!(r.said(), "Removing Wicked Synths...");
+    assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint while it runs");
+    r.settle();
+    assert_eq!(r.e.called("library.uninstall"), [json!({"library": "lib-1"})]);
+    assert_eq!(r.e.methods(), ["library.uninstall", "library.libraries"], "one uninstall, then the list read again");
+    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the list still has it");
+}
+
+// Cancel leaves the library: nothing is asked, nothing read again, the row stays.
+#[test]
+fn cancelling_a_libraries_remove_asks_nothing() {
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
+    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
+    r.e.calls.clear();
+    r.tool("Remove");
+    r.answer_notice("Cancel");
+    assert!(r.e.calls.is_empty(), "Cancel sends nothing: {:?}", r.e.methods());
+    assert!(r.delayed.is_empty(), "{:?}", r.delayed);
+    assert_eq!(labels(r.ui()), ["Packages", "org.example.reverb", "org.example.strings", "org.example.a.WonderfullyLongPack…", "Libraries", "Wicked Synths", "Field Recordings"]);
+    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
+}
+
+// A removal the engine refuses says the reason and the row stays; a refusal is not a change, so the list is not read
+// again (P2).
+#[test]
+fn a_refused_library_uninstall_says_why_and_the_row_stays() {
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 }); // the packages' heading
+    r.act(Action::Move { pane: None, by: 5 }); // Wicked Synths
+    r.e.fail = vec![("library.uninstall".into(), "it is in use".into())];
+    r.e.calls.clear();
+    r.tool("Remove");
+    r.answer_notice("Remove");
+    assert_eq!(r.e.methods(), ["library.uninstall"], "a refusal is not followed by a re-read");
+    assert!(r.danger_lines().contains(&"it is in use".to_string()), "{:?}", r.danger_lines());
+    assert_eq!(value_of(r.ui(), "Wicked Synths"), "12 items", "the row stays");
+}
+
 // The keys are listed by name with their fingerprint; the row to make one ends the list; with none the page says so (K1).
 #[test]
 fn the_keys_are_listed_by_fingerprint() {

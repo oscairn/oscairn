@@ -441,6 +441,10 @@ impl Settings {
                 let list: Vec<Value> = self.libraries.iter().map(|(id, name, items)| json!({"id": id, "name": name, "items": items})).collect();
                 Ok(json!({"libraries": list}))
             }
+            "library.uninstall" => {
+                self.fields(p, &["library"])?;
+                Ok(json!({"accepted": true}))
+            }
             _ => Err(refused(-32601, "Method not found")),
         }
     }

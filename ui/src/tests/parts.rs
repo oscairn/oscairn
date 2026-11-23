@@ -427,6 +427,59 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     f.screen.frame();
 }
 
+// With the list shown and nothing changing, it asks nothing and draws nothing over ticks of the
+// event loop (docs/rust-ui.md, idle): the parts.meters polling is answered with silence and stops
+// after the shell's quiet window, a later unchanged status asks nothing either.
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut f = play_on_the_shell("parts-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), parts_graph());
+    let ui = f.screen.ui.clone_strong();
+    let none = json!({"undo": "", "redo": ""});
+    let graph = parts_graph();
+    ui.global::<Bar>().invoke_action(5); // Edit: the Parts list
+    assert_eq!(ui.get_screen(), 9);
+    // The shell's first status reads the takes and the meters; the loop below answers those.
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "sampleRate": 48000});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    // Everything the shell and the list ask until they are quiet, as a real engine would: the
+    // meters came silent, so their polling stops after the shell's quiet window (they never carry
+    // a signal in a quiet Performance), and the opening's other requests are answered.
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        slint::platform::update_timers_and_animations();
+        while let Some(request) = f.engine.try_request(std::time::Duration::from_millis(20)) {
+            let result = match request["method"].as_str().unwrap() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "record.get" => json!({"takes": []}),
+                "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
+                "transport.get" => json!({"tempo": 120.0, "playing": false}),
+                "session.status" => json!({"midiInputs": []}),
+                "parts.meters" => json!({"meters": []}),
+                "edit.history" => none.clone(),
+                "performance.reopen" => json!({"notice": ""}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+            f.pump();
+        }
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    // The meters stay awake for a signal: none came, so over two intervals nothing is asked, either.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    // A status that says what the last said costs neither a request nor a frame.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    assert_eq!(f.screen.frame(), None, "an unchanged status drew a frame");
+}
+
 // The list in every built-in theme and the two odd ones, at the keyboard's 1280x720 and at a small device's
 // 800x480, at the FANTOM-07's scale too: pictures in target/screens and target/theme-shots for a look by eye.
 // The rows a view holds fill the height (each theme's spacing and type decide how many), and a cursor and

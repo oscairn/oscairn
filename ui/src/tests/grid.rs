@@ -429,6 +429,115 @@ fn the_grid_draws_in_every_theme() {
     }
 }
 
+// Small screens (the audit's smoke): a grid of long, realistic names (each 40+ characters) and a long
+// module path (its rest is a heading) lays out with every tile inside the view the screen gives it and
+// inside the window, a tile keeping half its width for a touch control, and no two tiles overlapping,
+// on the small device's screen (800x480) and at the keyboard's scale (1280x720 at 1.55). A name too
+// long for its box is cut with an ellipsis, never a bare clip: the tile's name, its value and the
+// headings draw with `overflow: elide`.
+#[test]
+fn long_names_leave_nothing_cut_or_overlapping_on_small_screens() {
+    let names = [
+        "Filter resonance in the warm vocal section",
+        "Oscillator coarse detune stretched to full",
+        "Envelope attack time with the smoothing ramp",
+        "LFO modulation rate keyboard tracking curve",
+        "The split crossover eighth octave band limit",
+        "Output bus routing to the left main channel",
+    ];
+    assert!(names.iter().all(|n| n.len() >= 40), "the audit's names must be 40+ characters");
+    let list = json!({"parameters": (0..6u32).map(|i| param(i, names[i as usize], "Voice/The Upper Performance Section Arrangement", 1.0, true, "slider", 0)).collect::<Vec<_>>()});
+    let values: Vec<(u32, f64)> = (0u32..6).map(|id| (id, 0.4 + f64::from(id) * 0.05)).collect();
+    // The tile's name, its value and a heading are each cut with an ellipsis, never a bare clip.
+    let slint = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("slint/grid.slint")).unwrap();
+    assert!(slint.matches("overflow: elide").count() >= 4, "grid.slint: the name, the value and the headings must elide their text");
+    for (w, h, scale, what) in [(800usize, 480usize, 1.0f32, "800x480"), (1280, 720, 1.55, "1280x720@1.55")] {
+        let mut s = Screen::sized(w, h);
+        s.set_scale(scale);
+        s.ui.global::<crate::Theme>().set_tab_placement(crate::TabPlacement::Top);
+        let mut p = open(&mut s, list.clone(), &values);
+        p.shown();
+        assert!(s.frame().is_some(), "{what}: drawn");
+        let t = tiles(&s.ui);
+        assert_eq!(t.len(), 6, "{what}: every parameter is a tile");
+        let g = s.ui.global::<crate::GridState>();
+        let (vw, vh) = (g.get_view_width(), g.get_view_height());
+        let (win_w, win_h) = (w as f32 / scale, h as f32 / scale);
+        for (i, tile) in t.iter().enumerate() {
+            assert!(tile.x >= -0.01 && tile.y >= -0.01, "{what} t{i} ({}): starts inside the view", tile.name);
+            assert!(tile.x + tile.w <= vw + 0.51 && tile.y + tile.h <= vh + 0.51, "{what} t{i} ({}): fits the view it was given", tile.name);
+            assert!(tile.x + tile.w <= win_w + 0.51 && tile.y + tile.h <= win_h + 0.51, "{what} t{i} ({}): nothing leaves the window", tile.name);
+            assert!(tile.w >= 2. * 44., "{what} t{i} ({}): a tile keeps half its width for a touch control", tile.name);
+            for (j, other) in t.iter().enumerate() {
+                if i != j {
+                    let overlaps = tile.x < other.x + other.w - 0.01 && other.x < tile.x + tile.w - 0.01
+                        && tile.y < other.y + other.h - 0.01 && other.y < tile.y + tile.h - 0.01;
+                    assert!(!overlaps, "{what}: t{i} ({}) overlaps t{j} ({})", tile.name, other.name);
+                }
+            }
+        }
+        shot(&s, &format!("grid-long-{}", what.replace('@', "at").replace('.', "p")));
+    }
+}
+
+// The light theme (the audit's smoke): the parameter pages render in the light theme with the theme's
+// own background where nothing is drawn, no dark-only ink (a literal or a token without a light value)
+// covering the screen — the same bounds the stage screens' test holds — body and muted text at 4.5:1 on
+// the surfaces they draw on, and the cursor's focus border drawn (the pixels in the focus color grow
+// when the cursor is shown).
+#[test]
+fn the_parameter_pages_draw_light_and_the_cursor_shows() {
+    fn contrast(x: slint::Color, y: slint::Color) -> f64 {
+        fn lum(c: slint::Color) -> f64 {
+            let lin = |v: u8| {
+                let v = f64::from(v) / 255.;
+                if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue())
+        }
+        let (a, b) = (lum(x), lum(y));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    let surface = light.data.ink("surface");
+    let text = light.data.ink("text");
+    let muted = light.data.ink("muted");
+    assert!(contrast(text, bg) >= 4.5 && contrast(muted, bg) >= 4.5, "body and muted text read on the background");
+    assert!(contrast(text, surface) >= 4.5 && contrast(muted, surface) >= 4.5, "a tile's name and value read on its surface");
+    let mut s = Screen::new();
+    theme::apply(&s.ui, &light);
+    let mut p = open(&mut s, every_kind(), &every_kind_values());
+    p.shown();
+    let focus = s.ui.global::<crate::Theme>().get_focus();
+    let (fr, fg, fb) = (focus.red(), focus.green(), focus.blue());
+    let focus_pixels = |s: &Screen| s.pixels.iter().filter(|p| p.r.abs_diff(fr) <= 6 && p.g.abs_diff(fg) <= 6 && p.b.abs_diff(fb) <= 6).count();
+    let base = focus_pixels(&s);
+    p.act(Action::Move { pane: None, by: 1 }); // the first move shows the cursor on the first tile
+    assert_eq!(cursor(&s.ui).as_deref(), Some("Cutoff"), "a tile is under the cursor");
+    s.frame();
+    assert_eq!(s.ui.global::<crate::Theme>().get_id(), "oscairn-light", "the theme applied");
+    assert!(!s.ui.global::<crate::Theme>().get_dark(), "a light background");
+    let near = |want: [u8; 3], tol: u8| {
+        let mut count = 0u64;
+        for p in &s.pixels {
+            if p.r.abs_diff(want[0]) <= tol && p.g.abs_diff(want[1]) <= tol && p.b.abs_diff(want[2]) <= tol { count += 1; }
+        }
+        count as f64 / s.pixels.len() as f64
+    };
+    let corner: [u8; 3] = [s.pixels[0].r, s.pixels[0].g, s.pixels[0].b];
+    assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "the background where nothing is drawn");
+    let dark_ink = near([0xF6, 0xF8, 0xFA], 2);
+    assert!(dark_ink < 0.000_28, "{:.2}% of the screen in a dark theme's text color", dark_ink * 100.0);
+    // The grid is dense, so a tile's text alone is a few percent of the window (measured 2.4%); the
+    // dark theme's surfaces (#111317, #1D2127) would cover most of a tile. A share under an eighth.
+    let dark = s.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
+    assert!(dark * 8 < s.pixels.len(), "{:.2}% of the screen is dark, not a light scene", 100.0 * dark as f64 / s.pixels.len() as f64);
+    let shown = focus_pixels(&s);
+    assert!(shown > base + 100, "the cursor's focus border is drawn on the light background ({} to {} focus pixels)", base, shown);
+    shot(&s, "grid-light");
+}
+
 // Spacing alone grows the gap between tiles, and the grid is laid out again for it: the same theme at
 // 0.6, 1 and 1.6 differs in nothing else.
 #[test]

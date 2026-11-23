@@ -102,6 +102,9 @@ pub struct Settings {
     pub trusted: Vec<String>,
     /// What each address reads as, until it is added.
     pub sources: Vec<(String, Reads)>,
+    /// The packages a repository's listing offers, by source address: what `packages.job` returns as its `packages`
+    /// when the listing is done.
+    pub offers: Vec<(String, Vec<Value>)>,
     /// How many times a listing job is asked about before it ends.
     pub job_polls: u32,
     jobs: Vec<(u64, String, u32)>,
@@ -146,6 +149,7 @@ impl Settings {
             removing: None,
             trusted: vec!["6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into()],
             sources: vec![],
+            offers: vec![],
             job_polls: 1,
             jobs: vec![],
             release: "0.1.0-alpha.1".into(),
@@ -398,7 +402,7 @@ impl Settings {
                 self.jobs[at].2 = u32::MAX;
                 let source = self.jobs[at].1.clone();
                 let trusted = self.trusted.clone();
-                Ok(match self.sources.iter().find(|s| s.0 == source).map(|s| s.1.clone()) {
+                let mut answer = match self.sources.iter().find(|s| s.0 == source).map(|s| s.1.clone()) {
                     // A root signed whole is read when its key is trusted, else offered by its key (repository.cpp:365).
                     Some(Reads::Done(name, key)) | Some(Reads::Untrusted(name, key)) => {
                         if trusted.contains(&key) {
@@ -410,7 +414,13 @@ impl Settings {
                     }
                     Some(Reads::Fails(why)) => self.job_json(id, "failed", &why, "", ""),
                     None => self.job_json(id, "failed", &format!("not a usable repository: cannot fetch repository.json: cannot reach {source}/repository.json: Could not connect to the server."), "", ""),
-                })
+                };
+                if answer["state"] == "done" {
+                    if let Some((_, pkgs)) = self.offers.iter().find(|s| s.0 == source) {
+                        answer["packages"] = json!(pkgs);
+                    }
+                }
+                Ok(answer)
             }
             "packages.installed" => {
                 self.fields(p, &[])?;

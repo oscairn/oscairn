@@ -4,7 +4,7 @@
 
 use super::library::{info, labels, rows, value_of};
 use super::settings::{folder, installed_theme, wrapped, Rig};
-use super::settings_fake::{Reads, Settings as Fake};
+use super::settings_fake::{Reads, Repo, Settings as Fake};
 use super::*;
 use crate::settings_app::Id;
 use serde_json::Value;
@@ -622,4 +622,109 @@ fn a_theme_that_cannot_be_installed_is_refused() {
     r.c.choose_file(&broken.join("fonts/Inter-Regular.ttf"));
     r.settle();
     assert_eq!(r.danger_lines(), wrapped("Choose a theme folder or its theme.json"));
+}
+
+// ---- P1: Available ----
+
+// What one repository offers, as `packages.job` returns it (the handler's shape; `types` decide the kind).
+fn offered(id: &str, name: &str, version: &str, types: Value) -> Value {
+    json!({"id": id, "name": name, "summary": "", "license": "", "publisher": "", "publisherKey": "", "tags": [],
+           "versions": [{"version": version, "channel": "stable", "yanked": "", "incompatible": "", "sha256": "", "size": 1234, "installed": 0, "types": types, "dependencies": [], "withdrawn": null, "exports": []}]})
+}
+
+/// Two enabled repositories, one a needed key trusted, offering five packages: one installed at the offered version,
+/// one installed older, three not installed (P1). The list is read when the page is shown.
+fn available() -> Rig {
+    let mut e = Fake::new();
+    e.trusted.push(FRIEND.into());
+    e.repos.push(Repo { address: "https://friend.example.org".into(), name: "A Friend's".into(), key: FRIEND.into(), origin: "user".into(), enabled: true });
+    e.sources = vec![
+        ("https://packages.oscairn.org".into(), Reads::Done("Oscairn".into(), "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into())),
+        ("https://friend.example.org".into(), Reads::Done("A Friend's".into(), FRIEND.into())),
+    ];
+    e.offers = vec![
+        ("https://packages.oscairn.org".into(), vec![
+            offered("org.alpha", "Alpha Plugin", "1.2.0", json!({"clap": 1})),
+            offered("org.delta", "Delta Pack", "3.0.0", json!({"oscairn.asset": 1})),
+        ]),
+        ("https://friend.example.org".into(), vec![
+            offered("org.beta", "Beta Pack", "2.5.0", json!({"oscairn.asset": 1})),
+            offered("org.epsilon", "Epsilon Pack", "1.0.0", json!({"oscairn.asset": 1})),
+            offered("org.gamma", "Gamma Library", "0.9.0", json!({})),
+        ]),
+    ];
+    e.installed_packages = vec![
+        package("org.alpha", "Alpha Plugin", "1.2.0", "plugin", "", &[]),
+        package("org.beta", "Beta Pack", "1.0.0", "asset", "", &[]),
+    ];
+    let mut r = Rig::new("available", None, e);
+    r.e.calls.clear();
+    r.page(Id::Available);
+    r.later_all();
+    r
+}
+
+// One alphabetical list by name, each row its name, the word for its kind as the Installed page writes it, the newest
+// version offered, and a state word: "Installed" when that version is installed, "Update from X" when an older version
+// X is installed, nothing when it is not installed (P1).
+#[test]
+fn the_available_is_one_list_by_name_with_words() {
+    let mut r = available();
+    assert!(r.e.methods().iter().any(|m| m == "packages.repositories"), "the enabled repositories are read");
+    assert!(r.e.methods().iter().any(|m| m == "packages.list"), "each repository is listed");
+    assert_eq!(labels(r.ui()), ["Alpha Plugin", "Beta Pack", "Delta Pack", "Epsilon Pack", "Gamma Library"], "one list, by name");
+    assert_eq!(value_of(r.ui(), "Alpha Plugin"), "Plugin 1.2.0  ·  Installed", "its version is installed");
+    assert_eq!(value_of(r.ui(), "Beta Pack"), "Samples 2.5.0  ·  Update from 1.0.0", "an older version is installed");
+    assert_eq!(value_of(r.ui(), "Delta Pack"), "Samples 3.0.0", "an asset's word, not installed");
+    assert_eq!(value_of(r.ui(), "Epsilon Pack"), "Samples 1.0.0");
+    assert_eq!(value_of(r.ui(), "Gamma Library"), "Library 0.9.0", "a library's word, not installed");
+    assert_eq!(r.ui().global::<crate::PartState>().get_total(), 5, "the count is of offers");
+    r.e.calls.clear();
+    for _ in 0..5 {
+        r.act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(info(r.ui()).contains(&"Gamma Library".to_string()), "{:?}", info(r.ui()));
+    assert!(r.e.calls.is_empty(), "moving the cursor asks nothing: {:?}", r.e.methods());
+}
+
+// A failed repository shows the app's usual failed row with the engine's words, and the rest still lists (P1).
+#[test]
+fn a_failed_repository_is_said_and_the_rest_lists() {
+    let mut e = Fake::new();
+    e.trusted.push(FRIEND.into());
+    e.repos.push(Repo { address: "https://friend.example.org".into(), name: "A Friend's".into(), key: FRIEND.into(), origin: "user".into(), enabled: true });
+    e.sources = vec![
+        ("https://packages.oscairn.org".into(), Reads::Fails("cannot fetch repository.json: Could not connect to the server.".into())),
+        ("https://friend.example.org".into(), Reads::Done("A Friend's".into(), FRIEND.into())),
+    ];
+    e.offers = vec![("https://friend.example.org".into(), vec![offered("org.gamma", "Gamma Library", "0.9.0", json!({}))])];
+    let mut r = Rig::new("available-fail", None, e);
+    r.e.calls.clear();
+    r.page(Id::Available);
+    r.later_all();
+    assert!(info(r.ui()).contains(&"Not read".to_string()), "{:?}", info(r.ui()));
+    assert!(r.danger_lines().join(" ").contains("Could not connect to the server"), "the engine's words: {:?}", r.danger_lines());
+    assert!(labels(r.ui()).contains(&"Gamma Library".to_string()), "the friend's repository still lists");
+    r.e.calls.clear();
+    assert!(r.e.calls.is_empty(), "at rest nothing more is asked: {:?}", r.e.methods());
+}
+
+// Every row is reached by the cursor, and Refresh reads the repositories and the listings again (P1).
+#[test]
+fn refresh_reads_the_lists_again() {
+    let mut r = available();
+    for at in 0..5 {
+        r.e.calls.clear();
+        r.act(Action::Move { pane: None, by: 1 });
+        assert_eq!(rows(r.ui()).iter().position(|x| x.cursor), Some(at), "row {at} is reached by the cursor");
+        assert!(r.e.calls.is_empty(), "moving the cursor asks nothing");
+    }
+    r.e.calls.clear();
+    r.delayed.clear();
+    r.tool("Refresh");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.repositories").count(), 1, "refresh asks the repositories again");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.installed").count(), 1, "refresh reads what is installed again");
+    r.later_all();
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.list").count(), 2, "both repositories are listed again");
+    assert_eq!(labels(r.ui()), ["Alpha Plugin", "Beta Pack", "Delta Pack", "Epsilon Pack", "Gamma Library"], "the list is the same after a refresh");
 }

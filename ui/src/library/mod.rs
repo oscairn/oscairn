@@ -31,6 +31,7 @@ mod setlist;
 mod side;
 
 pub use filters::Installed;
+pub use catalog::older;
 pub use install::fingerprint;
 pub use item::{count, empty_saying, library_line, wrap, Item, Kind, INFO_WIDTH};
 #[cfg(test)]

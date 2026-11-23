@@ -82,6 +82,16 @@ pub enum Reads {
     Untrusted(String, String),
 }
 
+/// A package job in the engine: a listing, or an install, and how far `packages.job` has polled it (`u32::MAX`: ended;
+/// one job runs at a time, another is refused with reason `busy`).
+#[derive(Clone)]
+enum JobKind {
+    /// A listing of `source`.
+    List { source: String, polls: u32 },
+    /// An install of `id@version`: what its done job answers, and the `packages.installed` record added on success.
+    Install { id: String, version: String, polls: u32, installed: Value, record: Value },
+}
+
 pub struct Settings {
     pub audio: Audio,
     pub ports: Vec<Port>,
@@ -107,7 +117,12 @@ pub struct Settings {
     pub offers: Vec<(String, Vec<Value>)>,
     /// How many times a listing job is asked about before it ends.
     pub job_polls: u32,
-    jobs: Vec<(u64, String, u32)>,
+    jobs: Vec<(u64, JobKind)>,
+    /// What `packages.install` brings, by `source|id|version`: the done job's `installed` object and the new
+    /// `packages.installed` record. Empty: with nothing to install, the job ends failed asking a dependency.
+    pub installs: Vec<(String, String, String, Value, Value)>,
+    /// A `packages.install` refused at once because another package job runs (reason `busy`).
+    pub install_busy: bool,
     pub release: String,
     /// The next this many requests that are not session ones are refused as busy.
     pub busy: u32,
@@ -152,6 +167,8 @@ impl Settings {
             offers: vec![],
             job_polls: 1,
             jobs: vec![],
+            installs: vec![],
+            install_busy: false,
             release: "0.1.0-alpha.1".into(),
             busy: 0,
             calls: vec![],
@@ -331,6 +348,13 @@ impl Settings {
         Ok(entry(self.keys.last().unwrap()))
     }
 
+    /// Whether a package job is running: a listing or an install is still being polled.
+    fn job_running(&self) -> bool {
+        self.jobs.iter().any(|(_, j)| match j {
+            JobKind::List { polls, .. } | JobKind::Install { polls, .. } => *polls != u32::MAX,
+        })
+    }
+
     fn job_json(&self, id: u64, state: &str, error: &str, root: &str, claimed: &str) -> Value {
         json!({"job": id, "state": state, "error": error, "repository": "", "name": "", "claimedName": claimed, "rootKey": root, "serial": 0, "packages": [], "package": "", "version": "", "installed": {"added": 0, "skipped": 0, "notes": [], "code": [], "dependencies": []}})
     }
@@ -383,48 +407,88 @@ impl Settings {
             "packages.list" => {
                 self.fields(p, &["source"])?;
                 let source = p.get("source").and_then(Value::as_str).ok_or_else(|| refused(-32602, "Expected a string"))?.to_string();
-                if self.jobs.iter().any(|j| j.2 != u32::MAX) {
+                if self.job_running() {
                     return Err(Error { code: -32007, message: "a package job is running; wait for it to finish".into() });
                 }
                 let id = self.jobs.len() as u64 + 1;
-                self.jobs.push((id, source, 0));
+                self.jobs.push((id, JobKind::List { source, polls: 0 }));
                 Ok(json!({"job": id}))
+            }
+            "packages.install" => {
+                self.fields(p, &["source", "id", "version", "acceptUnsignedCode", "replace"])?;
+                let source = p.get("source").and_then(Value::as_str).ok_or_else(|| refused(-32602, "Expected a string"))?.to_string();
+                let id = p.get("id").and_then(Value::as_str).ok_or_else(|| refused(-32602, "Expected a string"))?.to_string();
+                let version = p.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
+                // One job runs at a time; another is refused with reason `busy`.
+                if self.install_busy || self.job_running() {
+                    return Err(refused(-32007, "a package job is running; wait for it to finish"));
+                }
+                let (installed, record) = self.installs.iter().find(|(a, i, v, _, _)| a == &source && i == &id && (version.is_empty() || v == &version)).map(|x| (x.3.clone(), x.4.clone())).unwrap_or_default();
+                let job = self.jobs.len() as u64 + 1;
+                self.jobs.push((job, JobKind::Install { id, version, polls: 0, installed, record }));
+                Ok(json!({"job": job}))
             }
             "packages.job" => {
                 self.fields(p, &["job"])?;
                 let id = p.get("job").and_then(Value::as_u64).unwrap_or(0);
-                let polls = self.job_polls;
+                let limit = self.job_polls;
                 let Some(at) = self.jobs.iter().position(|j| j.0 == id) else { return Err(refused(-32602, &format!("no package job {id}"))) };
-                if self.jobs[at].2 != u32::MAX && self.jobs[at].2 < polls {
-                    self.jobs[at].2 += 1;
-                    return Ok(self.job_json(id, "running", "", "", ""));
-                }
-                self.jobs[at].2 = u32::MAX;
-                let source = self.jobs[at].1.clone();
-                let trusted = self.trusted.clone();
-                let mut answer = match self.sources.iter().find(|s| s.0 == source).map(|s| s.1.clone()) {
-                    // A root signed whole is read when its key is trusted, else offered by its key (repository.cpp:365).
-                    Some(Reads::Done(name, key)) | Some(Reads::Untrusted(name, key)) => {
-                        if trusted.contains(&key) {
-                            self.job_json(id, "done", "", &key, &name)
-                        } else {
-                            let why = format!("not a repository this device trusts: its root key is {}; trust that key for repositories to use it", key_id(&key));
-                            self.job_json(id, "failed", &why, &key, &name)
+                match &mut self.jobs[at].1 {
+                    JobKind::List { source, polls } => {
+                        if *polls != u32::MAX && *polls < limit {
+                            *polls += 1;
+                            return Ok(self.job_json(id, "running", "", "", ""));
                         }
+                        *polls = u32::MAX;
+                        let source = source.clone();
+                        let trusted = self.trusted.clone();
+                        let mut answer = match self.sources.iter().find(|s| s.0 == source).map(|s| s.1.clone()) {
+                            // A root signed whole is read when its key is trusted, else offered by its key (repository.cpp:365).
+                            Some(Reads::Done(name, key)) | Some(Reads::Untrusted(name, key)) => {
+                                if trusted.contains(&key) {
+                                    self.job_json(id, "done", "", &key, &name)
+                                } else {
+                                    let why = format!("not a repository this device trusts: its root key is {}; trust that key for repositories to use it", key_id(&key));
+                                    self.job_json(id, "failed", &why, &key, &name)
+                                }
+                            }
+                            Some(Reads::Fails(why)) => self.job_json(id, "failed", &why, "", ""),
+                            None => self.job_json(id, "failed", &format!("not a usable repository: cannot fetch repository.json: cannot reach {source}/repository.json: Could not connect to the server."), "", ""),
+                        };
+                        // This device's name for the repository at `source`, empty when it knows none.
+                        if let Some(r) = self.repos.iter().find(|r| r.address == source) {
+                            answer["name"] = json!(r.name);
+                        }
+                        if answer["state"] == "done" {
+                            if let Some((_, pkgs)) = self.offers.iter().find(|s| s.0 == source) {
+                                answer["packages"] = json!(pkgs);
+                            }
+                        }
+                        Ok(answer)
                     }
-                    Some(Reads::Fails(why)) => self.job_json(id, "failed", &why, "", ""),
-                    None => self.job_json(id, "failed", &format!("not a usable repository: cannot fetch repository.json: cannot reach {source}/repository.json: Could not connect to the server."), "", ""),
-                };
-                // This device's name for the repository at `source`, empty when it knows none.
-                if let Some(r) = self.repos.iter().find(|r| r.address == source) {
-                    answer["name"] = json!(r.name);
-                }
-                if answer["state"] == "done" {
-                    if let Some((_, pkgs)) = self.offers.iter().find(|s| s.0 == source) {
-                        answer["packages"] = json!(pkgs);
+                    JobKind::Install { id: pid, version, polls, installed, record, .. } => {
+                        if *polls != u32::MAX && *polls < limit {
+                            *polls += 1;
+                            return Ok(self.job_json(id, "running", "", "", ""));
+                        }
+                        *polls = u32::MAX;
+                        // Asking about it once it has unpacked moves it into place (docs).
+                        let (pid, version, installed, record) = (pid.clone(), version.clone(), installed.clone(), record.clone());
+                        let mut answer = self.job_json(id, "done", "", "", "");
+                        if installed.is_null() {
+                            answer["state"] = "failed".into();
+                            answer["error"] = "the package needs an asset library this repository does not offer".into();
+                        } else {
+                            answer["package"] = json!(pid);
+                            answer["version"] = json!(version);
+                            answer["installed"] = installed.clone();
+                            if record.is_object() && !self.installed_packages.iter().any(|x| x["id"] == pid.as_str() && x["version"] == version.as_str()) {
+                                self.installed_packages.push(record.clone());
+                            }
+                        }
+                        Ok(answer)
                     }
                 }
-                Ok(answer)
             }
             "packages.installed" => {
                 self.fields(p, &[])?;

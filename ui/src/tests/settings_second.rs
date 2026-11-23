@@ -774,3 +774,115 @@ fn the_available_version_is_the_one_the_engine_would_install() {
 fn package_installed(id: &str, name: &str, version: &str, kind: &str) -> Value {
     package(id, name, version, kind, "https://packages.oscairn.org", &[])
 }
+
+// ---- P1: Available, install and update (I2) ----
+
+// A row that is not installed gets Install, one with an older version installed gets Update, and one installed at the
+// newest version gets neither; the action is the bar's, on the row under the cursor, asked first with its size and the
+// repository's name (P).
+#[test]
+fn an_available_row_is_offered_install_or_update_by_its_state() {
+    let mut r = available();
+    r.e.calls.clear();
+    r.delayed.clear();
+    r.act(Action::Move { pane: None, by: 1 }); // Alpha Plugin: installed at the offered version
+    assert!(r.c.bar_tools().into_iter().all(|t| t.label != "Install" && t.label != "Update"), "installed at the newest version has no action: {:?}", r.c.bar_tools());
+    r.act(Action::Move { pane: None, by: 1 }); // Beta Pack: an older version is installed
+    assert!(r.c.bar_tools().into_iter().any(|t| t.label == "Update"), "an older version installed is offered Update: {:?}", r.c.bar_tools());
+    r.act(Action::Move { pane: None, by: 1 }); // Delta Pack: not installed
+    assert!(r.c.bar_tools().into_iter().any(|t| t.label == "Install"), "not installed is offered Install: {:?}", r.c.bar_tools());
+    r.act(Action::Move { pane: None, by: 2 }); // Gamma Library: not installed
+    assert!(r.c.bar_tools().into_iter().any(|t| t.label == "Install"));
+    assert!(r.e.calls.is_empty() && r.delayed.is_empty(), "offering the action asks nothing and schedules nothing: {:?}", (r.e.methods(), r.delayed));
+}
+
+// Confirmed, one `packages.install` is sent with the row's id, version and repository, and its job is asked about every
+// 100 ms until it ends; on success both lists are read again, what the job lists as installed is shown, and at rest
+// nothing is asked. The question names the version, its size and the repository (P).
+#[test]
+fn an_update_is_installed_after_the_question_and_the_lists_read_again() {
+    let mut r = available();
+    r.e.installs = vec![(
+        "https://friend.example.org".into(), "org.beta".into(), "2.5.0".into(),
+        json!({"added": 1, "skipped": 0, "notes": ["It installed the samples it needs first"], "code": [], "dependencies": [{"id": "org.deps", "version": "1.0.0"}]}),
+        json!({"id": "org.beta", "version": "2.5.0", "kind": "asset", "repository": "https://friend.example.org", "name": "Beta Pack"}),
+    )];
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 1 }); // Beta Pack, offered by A Friend's
+    r.e.calls.clear();
+    r.delayed.clear();
+    r.tool("Update");
+    let (title, message, choices) = r.notice.clone().unwrap();
+    assert_eq!(title, "Update Beta Pack 2.5.0?");
+    assert_eq!(choices, ["Update".to_string(), "Cancel".to_string()]);
+    assert!(message.contains("It is offered by A Friend's.") && message.contains("It is 1.2 KB."), "the repository's name and the size are the question's: {message:?}");
+    assert!(r.e.calls.is_empty(), "nothing is asked before the answer: {:?}", r.e.methods());
+    r.e.calls.clear();
+    r.answer_notice("Update");
+    assert_eq!(r.e.called("packages.install"), [json!({"source": "https://friend.example.org", "id": "org.beta", "version": "2.5.0", "acceptUnsignedCode": false, "replace": false})], "one install, with the row's id, version and repository");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.install").count(), 1, "exactly one install");
+    assert_eq!(r.said(), "Installing Beta Pack 2.5.0...", "the row says so while the job runs");
+    assert!(rows(r.ui()).iter().all(|x| x.off), "every row is faint while the job runs");
+    assert_eq!(r.delayed, [("packages.job".to_string(), std::time::Duration::from_millis(100))], "the job is asked about again, after 100 ms: {:?}", r.delayed);
+    r.later_all();
+    assert_eq!(r.e.called("packages.install").len(), 1, "still exactly one install");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.repositories").count(), 1, "the repositories are read again after it ends");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.installed").count(), 1, "what is installed is read again");
+    assert!(r.said().contains("org.beta 2.5.0 installed.") && r.said().contains("It installed the samples it needs first"), "what the job lists as installed, notes shown: {:?}", r.said());
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are back");
+    assert_eq!(value_of(r.ui(), "Beta Pack"), "Samples 2.5.0  ·  Installed", "the new version is the installed one");
+    // At rest, and after a refresh, nothing more is asked.
+    r.e.calls.clear();
+    r.delayed.clear();
+    r.act(Action::Move { pane: None, by: 1 });
+    assert!(r.e.calls.is_empty() && r.delayed.is_empty(), "idle at rest: {:?}", (r.e.methods(), r.delayed));
+}
+
+// Cancel, or the question closed, sends nothing: the one install is not asked, the rows stay (P).
+#[test]
+fn cancelling_an_install_asks_nothing() {
+    let mut r = available();
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 1 }); // Beta Pack
+    r.e.calls.clear();
+    r.tool("Update");
+    r.answer_notice("Cancel");
+    assert!(r.e.calls.is_empty(), "cancel sends nothing: {:?}", r.e.methods());
+    assert!(r.e.called("packages.install").is_empty(), "cancel sends nothing");
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are not left faint");
+}
+
+// A failed install says the engine's words, the rows come back, nothing is read again (P).
+#[test]
+fn a_failed_install_says_the_engines_words() {
+    let mut r = available();
+    r.e.fail = vec![("packages.job".into(), "the package needs an asset library this repository does not offer".into())];
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 1 }); // Beta Pack
+    r.e.calls.clear();
+    r.tool("Update");
+    r.answer_notice("Update");
+    assert_eq!(r.said(), "Installing Beta Pack 2.5.0...");
+    r.later_all();
+    assert!(r.danger_lines().join(" ").contains("the package needs an asset library this repository does not offer"), "{:?}", r.danger_lines());
+    assert_eq!(r.e.called("packages.install").len(), 1, "one install only");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.repositories").count(), 0, "a failure is not a re-read");
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows come back after the failure");
+    assert!(info(r.ui()).contains(&"Not done".to_string()), "{:?}", info(r.ui()));
+}
+
+// A job already running is refused with reason `busy`, and the engine's words say so (P).
+#[test]
+fn an_install_a_job_already_runs_for_says_busy() {
+    let mut r = available();
+    r.e.install_busy = true;
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: 1 }); // Beta Pack
+    r.e.calls.clear();
+    r.tool("Update");
+    r.answer_notice("Update");
+    assert_eq!(r.e.called("packages.install"), [json!({"source": "https://friend.example.org", "id": "org.beta", "version": "2.5.0", "acceptUnsignedCode": false, "replace": false})]);
+    assert!(r.danger_lines().join(" ").contains("a package job is running; wait for it to finish"), "{:?}", r.danger_lines());
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows come back");
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.repositories").count(), 0, "a busy refusal is not a re-read");
+}

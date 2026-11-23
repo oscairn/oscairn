@@ -125,3 +125,131 @@ fn the_presets_are_drawn() {
         c.act(Action::Move { pane: None, by: 1 });
     });
 }
+
+// A performance instrument: with the chain open (the part's Insert effects) and the plugin's presets listed,
+// and nothing happening, it asks nothing and draws nothing (docs/rust-ui.md, idle); a status that says what
+// the last said costs neither.
+#[test]
+fn chain_at_rest_costs_no_request_and_no_frame() {
+    let mut f = Fixture::new("chain-idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    for _ in 0..12 {
+        let request = f.engine.request();
+        let result = match request["method"].as_str().unwrap() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => super::part::part_graph(),
+            "library.query" => json!({"items": [], "total": 0}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    let ui = f.screen.ui.clone_strong();
+    let graph = std::cell::RefCell::new(with_plugin(super::chain::marks_graph()));
+    // Everything the shell and the screens ask until they are quiet, as a real engine would.
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.borrow().clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "session.status" => json!({"midiInputs": [], "failures": []}),
+                "edit.history" => json!({"undo": "", "redo": ""}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => presets(),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Home → the Performance tile → Play, then a part, then Insert effects, then a plugin's Presets.
+    let mut total = std::collections::BTreeMap::<&str, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &'static str, by: i64| {
+        *total.entry(key).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    // The Performance tile already tapped to Play above: press the first part (pane 1).
+    nav(&mut f, "move:1", 0); // the first read is only a baseline
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 4, "a press on a part opens the Part screen");
+    // The dial onto Insert effects: the first row the walk meets that opens the chain.
+    let open_chain = {
+        let mut opened = false;
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+        for _ in 0..30 {
+            let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+            let label = rows(&ui)[at].label.clone();
+            if label == "Insert effects" {
+                nav(&mut f, "confirm", 1);
+                settle(&mut f);
+                opened = ui.get_screen() == 5;
+                break;
+            }
+            nav(&mut f, "move", 1);
+            settle(&mut f);
+        }
+        opened
+    };
+    assert!(open_chain, "the chain opens from Insert effects by confirm");
+    // The Rhodes's presets, in the chain (its actions list Presets...).
+    // The chain opens with no cursor (it drops when the screen changes): moving shows it.
+    let mut open_presets = false;
+    nav(&mut f, "move", 1);
+    settle(&mut f);
+    for _ in 0..12 {
+        let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+        let label = rows(&ui)[at].label.clone();
+        if label == "2. Rhodes" {
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            break;
+        }
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+    }
+    nav(&mut f, "move", 1);
+    settle(&mut f);
+    for _ in 0..12 {
+        let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+        let label = rows(&ui)[at].label.clone();
+        if label == "Presets..." {
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            open_presets = ui.global::<crate::PartState>().get_title().as_str() == "Rhodes: presets";
+            break;
+        }
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+    }
+    assert!(open_presets, "the presets list is shown");
+    assert_eq!(labels(&ui), ["Warm", "Bright"]);
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Rhodes: presets");
+    // At rest: nothing drawn, nothing asked; an unchanged status costs neither.
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "failures": []});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status})));
+    f.pump();
+    settle(&mut f); // the first status reads the takes and the meters; drained.
+    f.screen.frame();
+    f.screen.frame(); // and the meter's own bar repaint, so the bar is quiet too.
+    let status2 = status.clone();
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status2})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+}

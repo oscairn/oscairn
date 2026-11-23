@@ -711,6 +711,18 @@ fn light_theme_renders_the_stage_screens() {
     f.screen.frame();
     assert_eq!(f.screen.ui.get_screen(), 12, "Routing");
     check(&f.screen, "light-routing");
+    // Scene: the bar's Scene action on Play opens the scene's setup.
+    let mut f = Fixture::new("light-scene");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    quiet(&mut f, &play_graph());
+    f.screen.ui.global::<crate::Bar>().invoke_action(3); // Scene
+    quiet(&mut f, &play_graph());
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    assert_eq!(f.screen.ui.get_screen(), 8, "Scene");
+    check(&f.screen, "light-scene");
 }
 
 impl Fixture {

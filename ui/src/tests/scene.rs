@@ -192,3 +192,32 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     shell::act(Action::Cancel(None));
     assert_eq!(ui.get_screen(), 3);
 }
+
+// The scene's setup, shown with nothing changing, asks the engine nothing and draws nothing over many
+// ticks (docs/rust-ui.md, idle); a status that says what the last said costs neither. It read the graph
+// when it opened; once that is answered and nothing else moves, a frame and a time pass are free.
+#[test]
+fn scene_setup_at_rest_costs_no_request_and_no_frame() {
+    let mut f = play_on_the_shell("scene-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), graph());
+    let ui = f.screen.ui.clone_strong();
+    ui.global::<crate::Bar>().invoke_action(3); // Scene
+    assert_eq!(ui.get_screen(), 8, "the scene's setup");
+    // Everything the shell and the screen ask until they are quiet, as a real engine would.
+    let result_for = |method: &str| match method {
+        "graph.get" => graph(),
+        "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+        "library.query" => json!({"items": [], "total": 0}),
+        "edit.history" => json!({"undo": "", "redo": ""}),
+        _ => json!({}),
+    };
+    for _ in 0..60 {
+        let Some(request) = f.engine.try_request(WAIT) else { break };
+        f.reply(&request, json!({"result": result_for(request["method"].as_str().unwrap())}));
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+}

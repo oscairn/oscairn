@@ -283,6 +283,46 @@ fn drawn_bar_radius(s: &Screen, bar: &crate::GridBox, op: slint::Color) -> usize
     panic!("the fill bar's region not found (bar {bar_h} tall)");
 }
 
+// The FM master and detail page in the light theme (docs/rust-ui.md "Themes", the audit's check d): the page's
+// outer margin (where nothing is drawn) is the theme's background, none of the default theme's dark-only inks
+// (surface, background or text) covers it, the operator cells are drawn in the theme's own derived operator
+// colors, and the cursor's ring around a table row is the theme's focus, visible on the light background.
+#[test]
+fn the_fm_master_in_the_light_theme_draws_the_themes_ink() {
+    use crate::nav::Action;
+    use slint::Model as _;
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let (mut s, mut p) = super::fm_table::open_at(super::fm_table::ENGINE, (1280, 720), 1., &light, crate::TabPlacement::Side, 1);
+    // A cursor on the table: the Focus ring around the selected operator's box (as `the_dial_walks` moves to it).
+    p.act(Action::Move { pane: None, by: 1 });
+    p.act(Action::Move { pane: None, by: -1 });
+    s.frame();
+    let g = s.ui.global::<crate::Theme>();
+    assert_eq!(g.get_id(), "oscairn-light", "the theme applied");
+    assert!(!g.get_dark(), "a light background");
+    let total = (s.w * s.h) as f64;
+    let near = |color: slint::Color, tol: u8| -> u64 {
+        s.pixels.iter().filter(|p| p.r.abs_diff(color.red()) <= tol && p.g.abs_diff(color.green()) <= tol && p.b.abs_diff(color.blue()) <= tol).count() as u64
+    };
+    // The outer margin (the window's top-left, where nothing is drawn) is the theme's background, not a surface.
+    let corner = s.pixels[0];
+    let bg = g.get_background();
+    assert_eq!((corner.r, corner.g, corner.b), (bg.red(), bg.green(), bg.blue()), "the background where nothing is drawn");
+    // No dark-theme-only ink covers the page: far less than a percent in either the default theme's surface or background.
+    let dark_surface = slint::Color::from_rgb_u8(0x1D, 0x21, 0x27);
+    let dark_background = slint::Color::from_rgb_u8(0x11, 0x13, 0x17);
+    assert!(near(dark_surface, 6) as f64 / total < 0.003, "a dark surface literal covers the FM page");
+    assert!(near(dark_background, 6) as f64 / total < 0.001, "a dark background literal covers the FM page");
+    // The operators are drawn in the theme's own derived colors (src/palette.rs), not a literal.
+    let ops = g.get_operators().iter().collect::<Vec<_>>();
+    assert!(ops.iter().any(|c| near(*c, 8) > 0), "an operator's color from the theme is drawn");
+    // The cursor's ring is drawn in the theme's Focus ink, and its pixels are the theme's focus, visible on white.
+    let focus = g.get_focus();
+    assert!(panels(&s.ui)[0].shapes.iter().any(|x| x.ink == 12), "the cursor's Focus ring rings the selected operator");
+    assert!(near(focus, 6) as f64 / total > 0.0001, "the theme's focus ink (the cursor's ring) is visible in the light theme");
+    shot(&s, "fm-master-light");
+}
+
 // The grid's short boxes (the FM table's level fill bar) take the scaled radius, not the half radius: a bar shorter than
 // a touch row draws a corner smaller than radius / 2 and never more than half its own height. (The keyboard's keys are
 // button-radius, equal to the scaled radius at the touch height, so they are unchanged there; the piano's keys keep their

@@ -125,6 +125,70 @@ fn pictures_of_the_settings_app() {
     let _ = folder("shots");
 }
 
+/// The WCAG relative luminance of a color, 0 to 1.
+fn luminance(c: slint::Color) -> f64 {
+    let f = |v: u8| {
+        let v = f64::from(v) / 255.;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powi(12) }
+    };
+    0.2126 * f(c.red()) + 0.7152 * f(c.green()) + 0.0722 * f(c.blue())
+}
+
+/// The WCAG contrast ratio of `a` over `b`, 1 to 21.
+fn contrast(a: slint::Color, b: slint::Color) -> f64 {
+    let (l1, l2) = (luminance(a), luminance(b));
+    let (hi, lo) = (l1.max(l2), l1.min(l2));
+    (hi + 0.05) / (lo + 0.05)
+}
+
+// The Audio and MIDI controllers pages in the light theme: the shots use the dark and the two odd themes only. Body
+// text on the rows' surface and the faint rows' ink read 4.5:1 against the surface (the theme loader holds every
+// theme to it, theme/tests.rs "Text must read on the three backgrounds"), no dark theme's surface color is left
+// (a literal in the shared row would draw it), and the cursor's focus border draws and shows.
+#[test]
+// target/screens/settings-light-{audio,controllers}.png
+fn the_audio_and_controllers_pages_draw_light() {
+    fit_to_window();
+    let mut s = Shelf::on("light-settings", None, Fake::new()); // a computer: it has the Audio page
+    let ui = s.ui();
+    shell::settings_in_rust(true);
+    shell::set_text_on_screen(false);
+    s.f.screen.resize(1280, 720);
+    s.f.screen.set_scale(1.);
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    theme::apply(&ui, &light);
+    let d = &light.data;
+    assert_eq!(ui.global::<crate::Theme>().get_id().as_str(), "oscairn-light");
+    assert!(!ui.global::<crate::Theme>().get_dark(), "a light background");
+    let row = d.ink("surface");
+    let (text, muted) = (d.ink("text"), d.ink("muted"));
+    assert!(contrast(text, row) >= 4.5, "text {text:#?} on {row:#?}: {:.2}:1", contrast(text, row));
+    assert!(contrast(muted, row) >= 4.5, "muted {muted:#?} on {row:#?}: {:.2}:1", contrast(muted, row));
+    // The built-in dark theme's "surface", the color a leftover dark literal would draw.
+    let dark_surface = slint::Color::from_rgb_u8(0x20, 0x25, 0x2d);
+    shell::goto(shell::Screen::Settings);
+    s.serve();
+    let pages = crate::tests::settings::tabs(&ui);
+    for (i, name) in pages.iter().enumerate() {
+        if name != "MIDI controllers" && name != "Audio" {
+            continue;
+        }
+        ui.global::<crate::SettingsState>().invoke_show_page(i as i32);
+        s.serve();
+        s.f.screen.frame(); // the page, drawn
+        let n = s.f.screen.pixels.len();
+        let dark = s.f.screen.pixels.iter().filter(|p| p.r == dark_surface.red() && p.g == dark_surface.green() && p.b == dark_surface.blue()).count();
+        assert!(dark * 2000 < n, "{name}: {dark} px of the dark theme's surface left (a literal), {n} px total");
+        // The cursor: a move draws the focus border on a row, and its color is in the frame.
+        shell::act(Action::Move { pane: None, by: 1 });
+        assert!(s.f.screen.frame().is_some(), "{name}: the move drew the cursor");
+        let focus = ui.global::<crate::Theme>().get_focus();
+        let lit = s.f.screen.pixels.iter().filter(|p| p.r.abs_diff(focus.red()) <= 3 && p.g.abs_diff(focus.green()) <= 3 && p.b.abs_diff(focus.blue()) <= 3).count();
+        assert!(lit > 0, "{name}: no {focus:#?} cursor pixels drawn");
+        png(&s.f.screen, &format!("settings-light-{}", name.to_lowercase().replace(' ', "-")));
+    }
+}
+
 // The Installed page on the keyboard's window, dark: the one list, a package's detail, and Remove's two questions
 // for a package something uses that has dependencies nothing else does
 // (target/screens/settings-installed-{list,detail,used,unused}.png).

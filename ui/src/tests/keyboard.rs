@@ -172,3 +172,40 @@ fn the_keyboard_is_an_overlay_on_the_lower_part_of_the_screen() {
         shot(&s, &format!("keyboard-overlay-{w}x{h}@{scale}"));
     }
 }
+
+// A long name (40+ characters) in the caption and the field, at the keyboard's sizes: the overlay
+// still fits under the bar and nothing leaves the window (the caption and the field cut a long text
+// with an ellipsis, never wrapping it off).
+#[test]
+fn a_long_name_fits_the_keyboard_at_the_devices_sizes() {
+    for (w, h, scale) in [(1280, 720, 1.55), (800, 480, 1.0)] {
+        let mut s = Screen::sized(w, h);
+        s.set_scale(scale);
+        let name = "An unusually long part or scene name that keeps going past forty characters";
+        assert!(name.chars().count() > 40, "a long name to test with");
+        let _k = Keyboard::open(&s.ui, name, name, true);
+        s.ui.set_screen(4);
+        s.frame();
+        let want = s.ui.global::<crate::KeyboardState>().get_overlay_height();
+        let screen = h as f32 / scale;
+        let bar = s.ui.global::<crate::Theme>().get_bar_height();
+        assert!(want <= screen - bar, "a long name keeps the overlay under the bar: {want} of {screen}");
+        shot(&s, &format!("keyboard-long-{w}x{h}@{scale}"));
+    }
+}
+
+// The keyboard is an overlay whose own work is done when it is shown: with nothing changing it asks
+// the engine nothing (it has no request of its own) and draws nothing over many ticks
+// (docs/rust-ui.md, idle).
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut s = Screen::new();
+    let ui = &s.ui;
+    let _k = Keyboard::open(ui, "Name of the part", "Keys", true);
+    s.ui.set_screen(4);
+    assert!(s.frame().is_some(), "the keyboard draws once when shown");
+    for _ in 0..20 {
+        assert!(!s.animating(), "nothing on the keyboard animates");
+        assert_eq!(s.frame(), None, "nothing is drawn at rest");
+    }
+}

@@ -428,6 +428,38 @@ fn the_mixer_opens_from_the_parts_list_and_goes_back_to_it() {
     f.screen.frame();
 }
 
+// On the shell at rest: the Mixer's meter poll (50 ms) answers silence until the shell's two seconds of
+// quiet stop it, and then nothing is asked and nothing is drawn (docs/rust-ui.md, idle).
+#[test]
+fn at_rest_it_costs_no_request_and_no_frame() {
+    let mut f = play_on_the_shell("mixer-idle", json!({"id": "p1", "name": "Grand", "unsaved": false}), graph());
+    let ui = f.screen.ui.clone_strong();
+    ui.global::<Bar>().invoke_action(5); // Edit: the Parts list
+    assert_eq!(ui.get_screen(), 9);
+    ui.global::<PartsState>().invoke_tool(0); // Mixer
+    assert_eq!(ui.get_screen(), 10);
+    let g = graph();
+    // The meters answer silence until two seconds of it stop the asking.
+    for _ in 0..80 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        slint::platform::update_timers_and_animations();
+        while let Some(request) = f.engine.try_request(std::time::Duration::from_millis(10)) {
+            let result = match request["method"].as_str().unwrap() {
+                "parts.meters" => json!({"meters": []}),
+                "graph.get" => g.clone(),
+                _ => json!({}),
+            };
+            f.reply(&request, json!({"result": result}));
+        }
+    }
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+}
+
 // The Mixer in every built-in theme and the two odd ones, at the keyboard's 1280x720, a small device's 800x480,
 // the FANTOM-07's scale and an 800-wide window: pictures in target/screens and target/theme-shots for a look
 // by eye. A cursor and a fader being changed are drawn in each.

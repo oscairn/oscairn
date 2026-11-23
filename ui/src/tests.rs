@@ -1608,6 +1608,7 @@ mod wires;
 mod routing;
 mod controls;
 mod layout;
+mod light_theme;
 mod chrome;
 mod handover;
 mod owner;

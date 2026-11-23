@@ -828,3 +828,83 @@ fn the_page_and_the_menu_draw_in_every_theme_at_several_sizes() {
     mv(&mut c, Some(1), 1);
     at_fantom_scale(&mut s, "controls", || c.shown());
 }
+
+// A control's name and a scene's name each 45+ characters: at a small device's 800x480 and the
+// FANTOM-07's 1280x720 at 1.55 the rows that fit show whole and by scene, every name elided, nothing
+// overlaps the tools' row or the footer or leaves the window; and the same page in the light theme
+// is drawn in the theme's colors (the background where nothing is drawn is the theme's, and no
+// dark-only ink covers the screen). The names and scenes come from the page's own models, and how
+// many rows fit is the screen's own count for the window.
+#[test]
+fn long_names_fit_the_small_screens_and_draw_in_the_light_theme() {
+    let long = "An Extremely Long Control Name That Goes Well Beyond Forty Characters";
+    let scene = "And A Very Long Scene Name That Also Passes The Forty Character Mark";
+    assert!(long.len() > 40 && scene.len() > 40);
+    let mut g = graph();
+    g["controls"][0]["name"] = json!(long);
+    g["scenes"] = json!([{"id": 1, "name": scene}, {"id": 2, "name": "Chorus"}]);
+    // Nothing leaves the window: every element of the page is inset by the theme's margin, so the
+    // window's outer border is the background wherever nothing is drawn (a long name that wrapped or
+    // ran past its section would cross it).
+    let fits = |s: &Screen| {
+        let (w, h) = (s.w, s.h);
+        let bg = s.pixels[0];
+        let mut bad = 0;
+        // Below the top bar, the page's left and right edge are the background at every height, and
+        // the bottom four rows under the footer: a long name that wrapped or ran past its section
+        // would cross them (the bar's own meters at the right edge are the bar's concern).
+        for y in 48..h {
+            for &(x, n) in &[(0usize, 4usize), (w - 4, 4)] {
+                for i in 0..n {
+                    if x + i < w && s.pixels[y * w + x + i] != bg {
+                        bad += 1;
+                    }
+                }
+            }
+        }
+        for x in 0..w {
+            for y in (h - 4)..h {
+                if s.pixels[y * w + x] != bg {
+                    bad += 1;
+                }
+            }
+        }
+        assert_eq!(bad, 0, "{bad} px of a control or its text reach the window's edge");
+    };
+    for (w, h) in [(800, 480), (800, 700), (1280, 720)] {
+        let mut s = Screen::sized(w, h);
+        let mut c = controls_screen(&mut s, &g);
+        answer(&mut c);
+        c.shown();
+        assert!(s.frame().is_some(), "{w}x{h}: drawn");
+        let shown = s.ui.global::<ControlsState>().get_rows().row_count();
+        assert!(shown > 0, "{w}x{h}: the long-named rows are shown");
+        fits(&s);
+        png(&s, &format!("controls-long-{w}x{h}"));
+        at_fantom_scale(&mut s, &format!("controls-long-{w}x{h}"), || c.shown());
+        fits(&s);
+        assert!(s.ui.global::<ControlsState>().get_rows().row_count() > 0, "{w}x{h}: rows at 1.55");
+    }
+    // The light theme at the keyboard's 1280x720.
+    let mut s = Screen::sized(1280, 720);
+    let mut c = controls_screen(&mut s, &g);
+    answer(&mut c);
+    c.shown();
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    theme::apply(&s.ui, &light);
+    s.frame();
+    let t = s.ui.global::<crate::Theme>();
+    assert_eq!(t.get_id(), "oscairn-light", "the theme applied");
+    assert!(!t.get_dark(), "a light background");
+    let corner: [u8; 3] = [s.pixels[0].r, s.pixels[0].g, s.pixels[0].b];
+    assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "the background where nothing is drawn");
+    // No dark theme's surface left: the page is drawn in the light theme's colors, so no more than a
+    // small share (thin dark text) is darker than a mid grey. (The stage screens' near-white "#F6F8FA"
+    // ink heuristic does not fit here: the light theme's own white surface renders through the software
+    // renderer near that value.)
+    let share = s.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
+    assert!(share * 50 < s.pixels.len(), "the page is not mostly dark ({share} px)");
+    shot(&s, "controls-long-light");
+    at_fantom_scale(&mut s, "controls-long-light", || c.shown());
+}

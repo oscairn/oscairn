@@ -341,6 +341,7 @@ fn a_plugin_is_turned_off_removed_or_opened_in_its_part() {
     assert_eq!(sent[1].1, "graph.commit");
     assert_eq!(panel(&ui)[0].0, "Select a plugin to wire it, or to set the level of each source into it.", "what was removed is not chosen");
     // Expanded, a part's plugin: Open part, no Remove.
+    let _file = super::ROUTING_FILE.lock().unwrap_or_else(|e| e.into_inner()); // whoever rewrites routing-view.txt holds this
     r.tap_tool(1);
     r.graph(&g);
     r.tap(1, at(&ui, "Chorus"));
@@ -1410,4 +1411,68 @@ fn icon_only_buttons_have_accessible_labels() {
     let labels: Vec<String> = found.iter().map(|(_, l)| l.as_deref().unwrap().to_string()).collect();
     assert!(labels.contains(&"Collapse part".to_string()), "expanded: the labels are {labels:?}");
     assert!(labels.contains(&"Expand part".to_string()), "expanded: the labels are {labels:?}");
+}
+
+// SMALL SCREEN: a 40+ character name on every node, part and control, rendered at the small device's
+// 800x480 and the FANTOM-07's 1280x720 at scale 1.55, with the bar's title long too. A box's size does
+// not grow with its name (wires.rs lays fixed sizes out once), so a name that does not fit is cut with
+// an ellipsis inside its box (`overflow: elide`), never into a neighbor: the drawn rectangles (the
+// screen's own model, RoutingState) never overlap and every one lies within the graph's own bounds; the
+// graph that does not fit the canvas is scrolled to (its content is bigger), only the first column is
+// always in the visible canvas so the entry stays usable. Pictures in target/screens for a look by eye.
+#[test]
+fn long_names_keep_the_boxes_apart_on_a_small_and_a_scaled_window() {
+    let mut g = graph();
+    let long = "A Name That Is Comfortably Longer Than Forty Characters As The Audit Asks";
+    for n in g["nodes"].as_array_mut().unwrap().iter_mut() {
+        n["name"] = json!(long);
+    }
+    for p in g["parts"].as_array_mut().unwrap().iter_mut() {
+        p["name"] = json!(long);
+    }
+    for c in g["controls"].as_array_mut().unwrap().iter_mut() {
+        c["name"] = json!(long);
+    }
+    for (w, h, scale) in [(800, 480, 1.0), (1280, 720, 1.55)] {
+        let mut s = Screen::sized(w, h);
+        s.set_scale(scale);
+        let mut r = routing_screen(&mut s, &g);
+        s.ui.global::<crate::Bar>().set_performance(long.into());
+        set_title(&s.ui, &["Parts", "Routing"]);
+        r.shown();
+        s.frame();
+        s.frame();
+        let st = s.ui.global::<RoutingState>();
+        let (cw, ch) = (f64::from(st.get_content_width()), f64::from(st.get_content_height()));
+        let mut boxes: Vec<(String, f64, f64, f64, f64)> = vec![];
+        for b in st.get_frames().iter() {
+            boxes.push((format!("frame {}", b.name), f64::from(b.x), f64::from(b.y), f64::from(b.w), f64::from(b.h)));
+        }
+        for b in st.get_boxes().iter() {
+            boxes.push((format!("box {}", b.name), f64::from(b.x), f64::from(b.y), f64::from(b.w), f64::from(b.h)));
+        }
+        for b in st.get_controls().iter() {
+            boxes.push((format!("control {}", b.name), f64::from(b.x), f64::from(b.y), f64::from(b.w), f64::from(b.h)));
+        }
+        assert!(!boxes.is_empty(), "{w}x{h}@{scale}: no boxes drawn");
+        for (i, a) in boxes.iter().enumerate() {
+            assert!(a.1 >= -0.5 && a.2 >= -0.5 && a.1 + a.3 <= cw + 0.5 && a.2 + a.4 <= ch + 0.5,
+                "{w}x{h}@{scale}: {} {a:?} leaves the graph's {:.0}x{:.0} bounds", a.0, cw, ch);
+            for (j, b) in boxes.iter().enumerate() {
+                if i < j && a.1 < b.1 + b.3 && b.1 < a.1 + a.3 && a.2 < b.2 + b.4 && b.2 < a.2 + a.4 {
+                    panic!("{w}x{h}@{scale}: {} {a:?} and {} {b:?} overlap", a.0, b.0);
+                }
+            }
+        }
+        // The first column (the keys and the graph's inputs, at the canvas's left) is in the visible
+        // canvas: a musician begins there, and it must not be cut under the panel or off the window.
+        let first_x = boxes.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
+        for (n, x, y, bw, bh) in &boxes {
+            if (*x - first_x).abs() < 0.5 {
+                assert!(*x + bw <= f64::from(st.get_canvas_width()) + 0.5 && *y + bh <= f64::from(st.get_canvas_height()) + 0.5,
+                    "{w}x{h}@{scale}: the first column ({n}) is cut by the panel or the window");
+            }
+        }
+        png(&s, &format!("routing-long-{w}x{h}{}", if scale > 1. { "@1.55" } else { "" }));
+    }
 }

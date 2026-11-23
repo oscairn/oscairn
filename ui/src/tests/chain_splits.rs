@@ -477,6 +477,37 @@ fn crossovers_are_read_and_set_in_hertz() {
     assert_eq!(sent(&mut c.out)[0].0, "params.get");
 }
 
+// At rest, the chain and its splits and lanes ask the engine nothing and draw nothing over many
+// ticks (docs/rust-ui.md, "Nothing is drawn at rest"), as the Part and Settings idle tests hold:
+// a band split asks its crossovers once when it opens, and nothing follows while nothing changes.
+#[test]
+fn splits_and_lanes_at_rest_cost_no_request_and_no_frame() {
+    let mut s = Screen::new();
+    let mut c = open(&s, &split_graph("bands", 3));
+    // The chain itself: nothing asked, nothing drawn.
+    assert!(sent(&mut c.out).is_empty(), "the chain at rest asked for something");
+    s.frame();
+    assert_eq!(s.frame(), None, "the chain at rest drew a frame");
+    // The split asks its crossovers once when it opens, then nothing at rest.
+    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Move { pane: None, by: 3 }); // 2. Split
+    c.act(Action::Confirm(None));
+    assert_eq!(sent(&mut c.out).first().map(|r| r.0), Some("params.get"), "the crossovers are asked when the split opens");
+    c.reply(Request::Crossovers, Ok(json!({"values": [{"node": 7, "param": 3, "value": 500.0}, {"node": 7, "param": 4, "value": 4000.0}]})));
+    s.frame();
+    for _ in 0..40 {
+        assert!(sent(&mut c.out).is_empty(), "the split at rest asked for something");
+        assert_eq!(s.frame(), None, "the split at rest drew a frame");
+    }
+    // A lane: no crossovers, nothing at rest either.
+    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Confirm(None)); // Band 1
+    for _ in 0..40 {
+        assert!(sent(&mut c.out).is_empty(), "the lane at rest asked for something");
+        assert_eq!(s.frame(), None, "the lane at rest drew a frame");
+    }
+}
+
 // A split, lane or plugin that is gone (an undo, another editor) sends the screen back to what is still there.
 #[test]
 fn a_split_that_goes_takes_the_screen_back_to_the_chain() {

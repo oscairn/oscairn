@@ -346,3 +346,46 @@ fn the_grids_short_boxes_use_the_scaled_radius_not_the_half() {
     assert!(drawn < f64::from(bar.h / 2.) as usize, "a corner never past half its own height: drawn {drawn} of half {}", f64::from(bar.h / 2.) as usize);
     png(&s, "grid-scaled-radius");
 }
+
+// The text keyboard in the light theme: the overlay's painted surface is the theme's (light, not a
+// literal of the dark theme's), the dark theme's surface color is not drawn over it, and the
+// cursor's focus ring is drawn in the theme's ink on the row of keys (where a `special` Done key's
+// accent fill does not reach, so it is the cursor, not the button). Picture keyboard-light.png.
+#[test]
+fn the_keyboard_in_the_light_theme_draws_the_themes_ink() {
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let mut s = Screen::sized(1280, 720);
+    let _k = crate::keyboard::Keyboard::open(&s.ui, "Name of the part", "Keys", true);
+    s.ui.set_screen(4);
+    theme::apply(&s.ui, &light);
+    s.frame();
+    let g = s.ui.global::<crate::Theme>();
+    assert_eq!(g.get_id(), "oscairn-light", "the theme applied");
+    assert!(!g.get_dark(), "a light surface");
+    // The keyboard's rectangle: the bottom `overlay_height` rows (scale 1; the bar is above it).
+    let overlay = s.ui.global::<crate::KeyboardState>().get_overlay_height().round() as usize;
+    let y0 = s.h.saturating_sub(overlay);
+    let surface = light.data.ink("surface");
+    let focus = [g.get_focus().red(), g.get_focus().green(), g.get_focus().blue()];
+    let (mut light_surface, mut dark_surface, mut focus_left) = (0u64, 0u64, 0u64);
+    for (i, p) in s.pixels[y0 * s.w..].iter().enumerate() {
+        if p.r == surface.red() && p.g == surface.green() && p.b == surface.blue() {
+            light_surface += 1;
+        }
+        // The dark theme's surface #1D2127: a light-keyboard fault would draw the whole keys with it.
+        if p.r.abs_diff(0x1D) <= 3 && p.g.abs_diff(0x21) <= 3 && p.b.abs_diff(0x27) <= 3 {
+            dark_surface += 1;
+        }
+        // The cursor's ring on the first row of letter keys (the window's left half), the theme's focus ink.
+        if i % s.w < s.w / 2 && p.r.abs_diff(focus[0]) <= 3 && p.g.abs_diff(focus[1]) <= 3 && p.b.abs_diff(focus[2]) <= 3 {
+            focus_left += 1;
+        }
+    }
+    let total = (s.h - y0) * s.w;
+    let corner = s.pixels[y0 * s.w];
+    assert_eq!((corner.r, corner.g, corner.b), (surface.red(), surface.green(), surface.blue()), "the overlay's corner is the light theme's surface");
+    assert!(light_surface as f64 / total as f64 > 0.5, "the overlay is mostly the light surface");
+    assert!(dark_surface * 100 < total as u64, "{:.2}% of the overlay in the dark theme's surface color", dark_surface as f64 * 100.0 / total as f64);
+    assert!(focus_left > 0, "the cursor's focus ring is drawn on the row of keys in the light theme");
+    shot(&s, "keyboard-light");
+}

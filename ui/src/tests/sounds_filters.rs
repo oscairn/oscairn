@@ -300,3 +300,125 @@ fn the_sound_chooser_is_drawn() {
         press_row(c, ui, "keys");
     });
 }
+
+// A performance instrument: with the sound chooser open and nothing happening, it asks nothing and draws
+// nothing (docs/rust-ui.md, idle); a status that says what the last said costs neither.
+#[test]
+fn the_sound_chooser_at_rest_costs_no_request_and_no_frame() {
+    let mut f = Fixture::new("sounds-idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    for _ in 0..12 {
+        let request = f.engine.request();
+        let result = match request["method"].as_str().unwrap() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => super::part::part_graph(),
+            "library.query" => json!({"items": [], "total": 0}),
+            _ => json!({}),
+        };
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    let ui = f.screen.ui.clone_strong();
+    let graph = std::cell::RefCell::new(super::part::part_graph());
+    // Everything the shell and the screens ask until they are quiet, as a real engine would.
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.borrow().clone(),
+                "library.query" => json!({"items": [{"id": "s1", "name": "Warm Rhodes", "tags": ["keys"], "description": "Soft", "favorite": true}], "total": 1, "tags": []}),
+                "library.libraries" => json!({"libraries": []}),
+                "session.status" => json!({"midiInputs": [], "failures": []}),
+                "edit.history" => json!({"undo": "", "redo": ""}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "window.info" => json!({"available": false}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Home → the Performance tile → Play, then a part, then its Sound row (which opens the chooser).
+    let mut total = std::collections::BTreeMap::<&str, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &'static str, by: i64| {
+        *total.entry(key).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move:1", 0); // the first read is only a baseline
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 4, "a press on a part opens the Part screen");
+    let mut opened = false;
+    nav(&mut f, "move", 1); // the dial shows the cursor on the first row
+    settle(&mut f);
+    for _ in 0..30 {
+        let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+        if rows(&ui)[at].label == "Sound" {
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            opened = ui.get_screen() == 6;
+            break;
+        }
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+    }
+    assert!(opened, "the sound chooser opens from the Sound row by confirm");
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Sound", "the chooser is up");
+    // At rest: nothing drawn, nothing asked; an unchanged status costs neither.
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+    let status = json!({"cpuLoad": 0.42, "audioDevice": "null", "failures": []});
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status}))); // the first: the takes and the meters follow
+    f.pump();
+    settle(&mut f); // drained; the meters' own bars repaint once.
+    f.screen.frame();
+    f.screen.frame();
+    let status2 = status;
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": status2})));
+    f.pump();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    slint::platform::update_timers_and_animations();
+    assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
+    assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
+}
+
+// The chooser in the light theme: the background where nothing is drawn is the theme's, and no dark-only
+// ink (a literal or a token without a light value) covers the screen; the rows and their colors are the
+// theme's. Picture in target/theme-shots, looked at by eye alongside the stage screens' light test.
+#[test]
+fn the_sound_chooser_renders_in_the_light_theme() {
+    fit_to_window();
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    let mut s = Screen::new();
+    s.ui.set_screen(6);
+    theme::apply(&s.ui, &light);
+    s.frame();
+    let mut c = open(&s);
+    c.reply(Request::Query, Ok(sounds()));
+    s.frame();
+    let near = |want: [u8; 3], tol: u8| {
+        let mut count = 0u64;
+        for p in &s.pixels {
+            if p.r.abs_diff(want[0]) <= tol && p.g.abs_diff(want[1]) <= tol && p.b.abs_diff(want[2]) <= tol {
+                count += 1;
+            }
+        }
+        count as f64 / s.pixels.len() as f64
+    };
+    let corner: [u8; 3] = [s.pixels[0].r, s.pixels[0].g, s.pixels[0].b];
+    assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "the background where nothing is drawn");
+    let dark_ink = near([0xF6, 0xF8, 0xFA], 2);
+    assert!(dark_ink < 0.000_28, "{:.2}% of the screen in a dark theme's text color", dark_ink * 100.0);
+    let dark = s.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
+    assert!(dark * 50 < s.pixels.len(), "the screen is mostly dark");
+    shot(&s, "sounds-light");
+}

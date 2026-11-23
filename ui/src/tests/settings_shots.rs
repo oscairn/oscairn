@@ -278,3 +278,62 @@ fn pictures_of_the_available_page() {
         assert!(rows(&ui).iter().any(|r| !r.off), "the rows are back once it is installed");
     }
 }
+
+// The Package repositories and Signing keys pages in the light theme at 1280x720: pictures in
+// target/theme-shots, and measurements that the page draws in the light theme (check d). The window's
+// corner is the theme's background where nothing is drawn; a dark theme's surface (#1d2127) or
+// background (#111317) is gone; and the cursor's focus border is drawn where it sits. The rows draw
+// in `Theme.surface` (part.slint:88), which the light theme makes a paper, so a dark surface literal
+// left there covers the rows and fails the surface bound below.
+#[test]
+fn the_repositories_and_keys_pages_in_the_light_theme() {
+    fit_to_window();
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    let mut s = Shelf::on("sp-light", Some("fantom-07"), busy_engine());
+    let ui = s.ui();
+    shell::settings_in_rust(true);
+    s.f.screen.resize(1280, 720);
+    s.f.screen.set_scale(1.);
+    theme::apply(&ui, &light);
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Settings);
+    s.serve();
+    let pages = crate::tests::settings::tabs(&ui);
+    let show = |s: &mut Shelf, name: &str| {
+        s.f.screen.frame();
+        s.f.screen.frame();
+        let g = ui.global::<crate::Theme>();
+        assert_eq!(g.get_id(), "oscairn-light", "{name}: the theme applied");
+        assert!(!g.get_dark(), "{name}: a light background");
+        let near = |want: [u8; 3], tol: u8| {
+            let mut count = 0u64;
+            for p in &s.f.screen.pixels {
+                if p.r.abs_diff(want[0]) <= tol && p.g.abs_diff(want[1]) <= tol && p.b.abs_diff(want[2]) <= tol {
+                    count += 1;
+                }
+            }
+            count as f64 / s.f.screen.pixels.len() as f64
+        };
+        let corner: [u8; 3] = [s.f.screen.pixels[0].r, s.f.screen.pixels[0].g, s.f.screen.pixels[0].b];
+        assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "{name}: the background where nothing is drawn");
+        let surface = near([0x1d, 0x21, 0x27], 2);
+        assert!(surface < 0.005, "{name}: a dark theme surface literal covers {:.2}%", surface * 100.0);
+        let background = near([0x11, 0x13, 0x17], 2);
+        assert!(background < 0.002, "{name}: a dark theme background literal covers {:.2}%", background * 100.0);
+        let focus = g.get_focus();
+        let ring = s.f.screen.pixels.iter().filter(|p| p.r.abs_diff(focus.red()) <= 12 && p.g.abs_diff(focus.green()) <= 12 && p.b.abs_diff(focus.blue()) <= 12).count();
+        assert!(ring > 0, "{name}: the cursor's focus border is drawn {ring}");
+        shot(&s.f.screen, name);
+    };
+    let repos = pages.iter().position(|p| p == "Package repositories").unwrap();
+    ui.global::<crate::SettingsState>().invoke_show_page(repos as i32);
+    s.serve();
+    shell::act(Action::Move { pane: Some(0), by: 1 }); // the cursor on the first row
+    show(&mut s, "settings-repos-light");
+    let keys = pages.iter().position(|p| p == "Signing keys").unwrap();
+    ui.global::<crate::SettingsState>().invoke_show_page(keys as i32);
+    s.serve();
+    shell::act(Action::Move { pane: Some(0), by: 1 });
+    show(&mut s, "settings-keys-light");
+}

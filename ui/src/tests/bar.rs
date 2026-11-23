@@ -410,3 +410,86 @@ fn a_short_title_leaves_its_room_to_the_actions() {
     assert!(short < 2, "the actions fit beside a short title: {short}");
     assert!(short <= long, "a short title never folds more than a long one: {short} {long}");
 }
+
+fn luminance(c: slint::Color) -> f64 {
+    let lin = |v: u8| {
+        let v = f64::from(v) / 255.;
+        if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue())
+}
+
+fn contrast(a: slint::Color, b: slint::Color) -> f64 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The theme's focus color in the bar's rows: the cursor's border, as drawn.
+fn focus_pixels(s: &Screen, height: usize) -> usize {
+    let focus = s.ui.global::<crate::Theme>().get_focus();
+    let mut n = 0;
+    for y in 0..height.min(s.h) {
+        for x in 0..s.w {
+            let px = s.pixels[y * s.w + x];
+            n += usize::from((px.r, px.g, px.b) == (focus.red(), focus.green(), focus.blue()));
+        }
+    }
+    n
+}
+
+// The bar in the light theme: the text it draws in a theme token reads on the bar's surface (4.5 to 1 at
+// least; the bar has no large text, so nothing falls to the 3 to 1 bound), the surface where
+// nothing is drawn is the light theme's background, and the cursor's focus border is drawn in the
+// bar's pixels when it is on a stop and absent when it is not (measured, not just the property).
+#[test]
+fn the_bar_reads_in_the_light_theme_and_its_cursor_is_drawn() {
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let mut s = Screen::sized(1280, 720);
+    theme::apply(&s.ui, &light);
+    s.frame();
+    let height = {
+        let g = s.ui.global::<crate::Theme>();
+        assert!(!g.get_dark(), "the light theme draws a light surface");
+        let bg = g.get_background();
+        let corner = [s.pixels[0].r, s.pixels[0].g, s.pixels[0].b];
+        assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "the bar's surface where nothing is drawn");
+        for (what, ink) in [("the name", g.get_text()), ("the tempo and the meter labels", g.get_muted()), ("the REC mark", g.get_danger())] {
+            let ratio = contrast(ink, bg);
+            assert!(ratio >= 4.5, "{what}: {ratio:.2} to 1 against the bar's surface in {}", g.get_id());
+        }
+        g.get_bar_height() as usize
+    };
+    let ui = s.ui.clone_strong();
+    let bar = ui.global::<Bar>();
+    ui.set_screen(3);
+    bar.set_back(true);
+    bar.set_home_button(true);
+    bar.set_path(slint::ModelRc::new(slint::VecModel::from(vec![slint::SharedString::from("Keys")])));
+    bar.set_back_cursor(true);
+    s.frame();
+    let on = focus_pixels(&s, height);
+    bar.set_back_cursor(false);
+    s.frame();
+    let off = focus_pixels(&s, height);
+    assert!(on > 100, "the focus border is drawn: {on} px of it");
+    assert_eq!(off, 0, "no focus border without the cursor");
+    shot(&s, "bar-light-cursor");
+}
+
+// The bar has no color or wait-time of its own: a grep of the .slint for a `#`-color and for a time
+// (ms, s) finds none, so every color and wait the bar draws is a theme token's. Its own hard pixel
+// dimensions (the meter's 6 px, the 36 px field and button) are sizes the theme has no token for, and
+// the codebase keeps such elements in hard pixels elsewhere too.
+#[test]
+fn the_bar_has_no_literal_colors_or_durations() {
+    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("slint/topbar.slint")).unwrap();
+    for (n, line) in text.lines().enumerate() {
+        let code = line.split("//").next().unwrap_or_default();
+        assert!(!code.contains('#'), "topbar.slint:{}: a literal color: {line}", n + 1);
+        for word in code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.')) {
+            let digits: String = word.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            let unit = &word[digits.len()..];
+            assert!(!["ms", "s"].contains(&unit), "topbar.slint:{}: a literal time {word}: {line}", n + 1);
+        }
+    }
+}

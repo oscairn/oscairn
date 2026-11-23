@@ -20,6 +20,7 @@ use crate::browser::{Browser, Nav};
 use crate::client::{Error, BUSY};
 use crate::settings_controllers::Controllers;
 use crate::settings_installed::Installed;
+use crate::settings_available::Available;
 use crate::settings_keys::{About, Keys};
 use crate::settings_look::{Appearance, TopBarPage};
 use crate::menu;
@@ -42,13 +43,14 @@ pub enum Id {
     Audio,
     Repositories,
     Installed,
+    Available,
     Keys,
     About,
 }
 
 impl Id {
     /// In the order the tabs show them: what a player changes most first.
-    pub const ALL: [Id; 8] = [Id::Appearance, Id::TopBar, Id::Controllers, Id::Audio, Id::Repositories, Id::Installed, Id::Keys, Id::About];
+    pub const ALL: [Id; 9] = [Id::Appearance, Id::TopBar, Id::Controllers, Id::Audio, Id::Repositories, Id::Installed, Id::Available, Id::Keys, Id::About];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -58,6 +60,7 @@ impl Id {
             Id::Audio => "Audio",
             Id::Repositories => "Package repositories",
             Id::Installed => "Installed",
+            Id::Available => "Available",
             Id::Keys => "Signing keys",
             Id::About => "About",
         }
@@ -80,6 +83,7 @@ pub enum Step {
     Controllers(crate::settings_controllers::Step),
     Repos(crate::settings_repos::Step),
     Installed(crate::settings_installed::Step),
+    Available(crate::settings_available::Step),
     Keys(crate::settings_keys::Step),
     About(crate::settings_keys::AboutStep),
 }
@@ -223,6 +227,7 @@ pub struct Screen {
     audio: Audio,
     repos: Repositories,
     installed: Installed,
+    available: Available,
     keys: Keys,
     about: About,
     ctx: Ctx,
@@ -248,6 +253,7 @@ impl Screen {
             audio: Audio::default(),
             repos: Repositories::default(),
             installed: Installed::default(),
+            available: Available::default(),
             keys: Keys::default(),
             about: About::new(),
             ctx: Ctx::default(),
@@ -301,6 +307,7 @@ impl Screen {
             Id::Audio => &self.audio,
             Id::Repositories => &self.repos,
             Id::Installed => &self.installed,
+            Id::Available => &self.available,
             Id::Keys => &self.keys,
             Id::About => &self.about,
         }
@@ -315,6 +322,7 @@ impl Screen {
             Id::Audio => f(&mut self.audio, &mut self.ctx),
             Id::Repositories => f(&mut self.repos, &mut self.ctx),
             Id::Installed => f(&mut self.installed, &mut self.ctx),
+            Id::Available => f(&mut self.available, &mut self.ctx),
             Id::Keys => f(&mut self.keys, &mut self.ctx),
             Id::About => f(&mut self.about, &mut self.ctx),
         };
@@ -606,6 +614,7 @@ impl Screen {
             Step::Controllers(s) => self.controllers.reply(s, result, &mut self.ctx),
             Step::Repos(s) => self.repos.reply(s, result, &mut self.ctx),
             Step::Installed(s) => self.installed.reply(s, result, &mut self.ctx),
+            Step::Available(s) => self.available.reply(s, result, &mut self.ctx),
             Step::Keys(s) => self.keys.reply(s, result, &mut self.ctx),
             Step::About(s) => self.about.reply(s, result, &mut self.ctx),
         }

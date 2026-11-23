@@ -41,6 +41,7 @@ mod settings_app;
 mod settings_audio;
 mod settings_controllers;
 mod settings_keys;
+mod settings_available;
 mod settings_installed;
 mod settings_look;
 mod settings_repos;

@@ -102,7 +102,7 @@ pub struct Installed {
 }
 
 /// "Plugin", "Samples" or "Library": the word a row and the panel say for a package's kind.
-fn kind_word(kind: &str) -> &'static str {
+pub(crate) fn kind_word(kind: &str) -> &'static str {
     match kind {
         "plugin" => "Plugin",
         "asset" => "Samples",

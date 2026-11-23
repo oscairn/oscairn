@@ -59,6 +59,8 @@ pub struct Screen {
     /// The window's size in physical pixels.
     pub w: usize,
     pub h: usize,
+    /// The scale set on the window (1.0 unless a test raised it).
+    pub scale: f32,
 }
 
 impl Screen {
@@ -86,7 +88,7 @@ impl Screen {
         let window = WINDOW.with(|w| w.borrow_mut().take()).unwrap();
         window.set_size(PhysicalSize::new(w as u32, h as u32));
         ui.show().unwrap();
-        Screen { ui, window, pixels: vec![Rgb8Pixel::default(); w * h], w, h }
+        Screen { ui, window, pixels: vec![Rgb8Pixel::default(); w * h], w, h, scale: 1.0 }
     }
 
     /// Renders what changed since the last frame: the bounding box of what was repainted, None for nothing.
@@ -162,6 +164,7 @@ impl Screen {
     }
 
     pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
         self.ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
         self.window.set_size(PhysicalSize::new(self.w as u32, self.h as u32));
     }
@@ -1600,6 +1603,7 @@ mod tabs_model;
 mod search;
 mod shots;
 mod loading;
+mod overlays;
 mod real_engine;
 mod views;
 mod parts;

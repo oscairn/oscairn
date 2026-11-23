@@ -337,3 +337,59 @@ fn the_repositories_and_keys_pages_in_the_light_theme() {
     shell::act(Action::Move { pane: Some(0), by: 1 });
     show(&mut s, "settings-keys-light");
 }
+
+// The Appearance, Top bar and About pages in the light theme, a long theme name and a tall panel, at 1280x720 at
+// 1.55: pictures in target/theme-shots, and, as light_theme_renders_the_stage_screens holds the stage screens, that
+// they are drawn in the light theme's colors — the background where nothing is drawn is the theme's, no dark-only ink
+// covers a light surface (a literal or a token without a light value), and the screen is mostly light.
+#[test]
+fn the_settings_look_pages_render_in_the_light_theme() {
+    const W: usize = 1280;
+    const H: usize = 720;
+    let light = theme::chosen(&theme::Places::default(), "oscairn-light", "");
+    let bg = light.data.ink("background");
+    let mut s = Shelf::new("settings-light");
+    shell::settings_in_rust(true);
+    shell::set_text_on_screen(false);
+    s.f.screen.resize(W, H);
+    s.f.screen.set_scale(1.55);
+    installed_theme(&s.config, "evening-glass", "A Very Long Theme Name That Fills The Whole Row Indeed Without Fitting", |d| d["spacing"] = json!(1.3));
+    let ui = s.ui();
+    shell::goto(shell::Screen::Settings);
+    s.serve();
+    theme::apply(&ui, &light);
+    let check = |s: &mut Shelf, name: &str| {
+        let near = |want: [u8; 3], tol: u8| {
+            let mut count = 0u64;
+            for p in &s.f.screen.pixels {
+                if p.r.abs_diff(want[0]) <= tol && p.g.abs_diff(want[1]) <= tol && p.b.abs_diff(want[2]) <= tol {
+                    count += 1;
+                }
+            }
+            count as f64 / s.f.screen.pixels.len() as f64
+        };
+        let corner: [u8; 3] = [s.f.screen.pixels[0].r, s.f.screen.pixels[0].g, s.f.screen.pixels[0].b];
+        assert_eq!(corner, [bg.red(), bg.green(), bg.blue()], "{name}: the background where nothing is drawn");
+        let dark_ink = near([0xF6, 0xF8, 0xFA], 2);
+        assert!(dark_ink < 0.000_28, "{name}: {:.2}% of the screen in a dark theme's ink", dark_ink * 100.0);
+        // The dominant dark pixels are exactly Theme.text in every theme (the stage screens hold its ink under 2%; the
+        // settings pages' panels carry the theme's ink over it), so the "mostly light" bound lets a page's text through
+        // and catches a real dark surface (a left-behind fill covers far more than a tenth of the window).
+        let dark = s.f.screen.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
+        assert!(dark * 10 < s.f.screen.pixels.len(), "{name}: the screen is mostly light");
+        shot(&s.f.screen, name);
+    };
+    let page = |s: &mut Shelf, name: &str| {
+        let tabs = crate::tests::settings::tabs(&s.ui());
+        let at = tabs.iter().position(|p| p == name).unwrap_or_else(|| panic!("{name} in {tabs:?}"));
+        s.ui().global::<crate::SettingsState>().invoke_show_page(at as i32);
+        s.serve();
+        s.f.screen.frame();
+    };
+    page(&mut s, "Appearance");
+    check(&mut s, "settings-appearance-light");
+    page(&mut s, "Top bar");
+    check(&mut s, "settings-topbar-light");
+    page(&mut s, "About");
+    check(&mut s, "settings-about-light");
+}

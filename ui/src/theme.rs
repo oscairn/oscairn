@@ -486,6 +486,7 @@ fn row_fill(color: Color, base: Color, text: Color, odd: bool) -> Color {
 /// Gives a window its theme's computed pieces; before the first `apply`.
 pub fn attach(window: &Shell) {
     window.global::<Theme>().on_row_fill(row_fill);
+    window.global::<Theme>().on_placeholder_ink(crate::setlist::placeholder_ink);
 }
 
 /// The ink for large text on a box of the color `c` (a Setlist slot's name): white wherever it reads as large text does

@@ -98,6 +98,8 @@ export global Theme {
     // A list row's color blended into its background, as much as text still reads on it (theme.rs).
     // Arguments: the row's own color, its background, the text's color, whether it is an odd row.
     pure callback row-fill(color, color, color, bool) -> color;
+    // A Setlist placeholder name's ink on its box: the muted ink where it reads 3 to 1, else white or black (setlist.rs).
+    pure callback placeholder-ink(color, color) -> color;
     // Not a theme setting but the window's state: the top bar has the cursor, so no screen draws its
     // own (only one cursor shows); set by the shell, never by a theme.
     in-out property <bool> bar-cursor: false;

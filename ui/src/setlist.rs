@@ -204,7 +204,7 @@ fn mix(a: Color, b: Color, f: f32) -> Color {
 
 /// A placeholder name's ink: the theme's secondary (muted) wherever it reads on the box (3 to 1, large text), else the
 /// ink that does (white or black on the box), so a placeholder never relies on its color to be read.
-fn placeholder_ink(fill: Color, muted: Color) -> Color {
+pub(crate) fn placeholder_ink(fill: Color, muted: Color) -> Color {
     if crate::palette::contrast(muted, fill) >= 3. {
         muted
     } else {
@@ -397,9 +397,9 @@ impl Screen {
         let tint = color(own);
         let note = if slot.empty || self.opens(index) { "" } else if slot.id.is_empty() { "(placeholder)" } else { "(not in the library)" };
         let placeholder = !slot.empty && slot.id.is_empty();
-        // A placeholder's box: its color (or the surface, if none) at the theme's disabled strength over the surface, so
-        // it is a tint, never a solid; its name the theme's secondary ink where that reads on the box, else the ink that does.
-        let (phfill, ink) = if placeholder {
+        // A placeholder's name: the theme's secondary ink where that reads on its box, else the ink that does. The box and
+        // the ink drawn are derived in setlist.slint so they follow a theme switch; this is the same reckoning.
+        let ink = if placeholder {
             let (surface, muted, disabled) = self.ui.upgrade().map_or(
                 (Color::default(), Color::default(), 1.),
                 |u| {
@@ -408,9 +408,9 @@ impl Screen {
                 }
             );
             let fill = mix(tint.unwrap_or(surface), surface, 1. - disabled);
-            (fill, placeholder_ink(fill, muted))
+            placeholder_ink(fill, muted)
         } else {
-            (Color::default(), tint.map(crate::theme::white_first).unwrap_or_default())
+            tint.map(crate::theme::white_first).unwrap_or_default()
         };
         SlotData {
             number: index as i32 + 1,
@@ -419,7 +419,6 @@ impl Screen {
             tint: tint.unwrap_or_default(),
             tinted: tint.is_some(),
             ink,
-            phfill,
             placeholder,
             empty: slot.empty,
             opens: self.opens(index),

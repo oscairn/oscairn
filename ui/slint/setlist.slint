@@ -24,7 +24,6 @@ export struct SlotData {
     tint: color, // its own color: the whole box
     tinted: bool,
     ink: color, // black or white, whichever reads better on the tint
-    phfill: color, // a placeholder's box: its color at the theme's disabled strength over the surface
     placeholder: bool,
     empty: bool,
     opens: bool,
@@ -139,17 +138,20 @@ export component Setlist inherits Rectangle {
         }
     }
 
-    for slot[i] in SetlistState.slots: Section {
+    for slot[i] in SetlistState.slots: slot-box := Section {
         property <color> base: slot.playing ? Theme.raised : Theme.surface;
         property <bool> odd: !SetlistState.grid && mod(i, 2) == 1;
+        // A placeholder's box: its color (or the surface, if none) at the theme's disabled strength over the surface, so
+        // it is a tint, never a solid; derived here so it follows a theme switch.
+        property <color> phfill: (slot.tinted ? slot.tint : Theme.surface).mix(Theme.surface, Theme.disabled);
         // What is written on the box: a placeholder the ink chosen for it (the theme's secondary where it reads on the
         // box), on its own color the ink that reads on it, else the theme's.
-        property <color> ink: slot.placeholder ? slot.ink : slot.tinted ? slot.ink : slot.opens ? Theme.text : Theme.muted;
+        property <color> ink: slot.placeholder ? Theme.placeholder-ink(self.phfill, Theme.muted) : slot.tinted ? slot.ink : slot.opens ? Theme.text : Theme.muted;
         x: Theme.margin + mod(i, root.across) * (root.cell-width + root.gap);
         y: root.slots-y + floor(i / root.across) * (root.cell-height + root.gap);
         width: root.cell-width;
         height: root.cell-height;
-        fill: slot.empty ? Theme.background : slot.placeholder ? slot.phfill : slot.tinted ? slot.tint : Theme.row-base(self.base, self.odd);
+        fill: slot.empty ? Theme.background : slot.placeholder ? self.phfill : slot.tinted ? slot.tint : Theme.row-base(self.base, self.odd);
         // The slot playing: an edge on its left (the accent; on a colored box its ink, which no color hides), its number
         // on a filled chip on a colored box, and its name bold. The cursor: a focus border round it.
         if slot.playing && !slot.tinted: Rectangle {
@@ -178,7 +180,7 @@ export component Setlist inherits Rectangle {
                 x: Theme.pad-tight;
                 y: Theme.pad-tight / 2;
                 text: slot.number;
-                color: slot.tinted ? (slot.playing ? slot.tint : slot.ink) : Theme.muted;
+                color: slot.tinted ? (slot.playing ? slot.tint : slot-box.ink) : Theme.muted;
                 font-size: Theme.body;
                 font-weight: 700;
             }
@@ -269,7 +271,7 @@ export component Setlist inherits Rectangle {
             height: parent.height - 2 * Theme.cursor-width;
             border-radius: Theme.inner(Theme.cursor-width);
             border-width: Theme.hair;
-            border-color: slot.ink;
+            border-color: slot-box.ink;
         }
         Cursor {
             shown: slot.cursor;

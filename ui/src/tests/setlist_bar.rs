@@ -572,7 +572,7 @@ fn a_placeholder_is_a_tint_not_a_solid_and_reads_on_it() {
             let (x, y, w, _) = slot_box(&f, scale, rows, j);
             let top = (y as usize)..(y as usize + 6);
             let xs = (x as usize)..(x as usize + w as usize);
-            let at = |colour: (u8, u8, u8)| top.clone().any(|py| xs.clone().any(|px| pixel(&f, px as f32, py as f32) == colour));
+            let at = |color: (u8, u8, u8)| top.clone().any(|py| xs.clone().any(|px| pixel(&f, px as f32, py as f32) == color));
             assert!(at(focus), "{mode} {scale}: the cursor's focus border on the placeholder");
             assert!(at(ink), "{mode} {scale}: its ink's line inside it");
         }

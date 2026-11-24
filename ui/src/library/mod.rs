@@ -31,7 +31,8 @@ mod setlist;
 mod side;
 
 pub use filters::Installed;
-pub use catalog::{offers, older, why_not, Installed as InstalledPackage, Listing, Offer, Package};
+pub use catalog::{offers, older, why_not, CodeQuestion, Installed as InstalledPackage, Listing, Offer, Package};
+pub use catalog_flow::{install_ended, install_params, trust_params, Ctx as InstallCtx, Ended};
 pub use install::fingerprint;
 pub use item::{count, empty_saying, library_line, wrap, Item, Kind, INFO_WIDTH};
 #[cfg(test)]

@@ -489,7 +489,7 @@ fn the_bar_has_no_literal_colors_or_durations() {
         for word in code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.')) {
             let digits: String = word.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
             let unit = &word[digits.len()..];
-            assert!(!["ms", "s"].contains(&unit), "topbar.slint:{}: a literal time {word}: {line}", n + 1);
+            assert!(digits.is_empty() || !["ms", "s"].contains(&unit), "topbar.slint:{}: a literal time {word}: {line}", n + 1);
         }
     }
 }

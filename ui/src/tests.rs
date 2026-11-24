@@ -607,7 +607,7 @@ fn themes_switch_live_and_repaint_once() {
     assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0x00, 0x40, 0xc0), "focus: the accent when the theme has none");
 }
 
-// Home, Play, Part and Routing at 1280x720 in the light theme: pictures in target/theme-shots, and
+// Home, Play, Part, the Parts list and Routing at 1280x720 in the light theme: pictures in target/theme-shots, and
 // checks that the screens are drawn in the light theme's colors — the background where nothing is
 // drawn is the theme's, and no dark-only ink (a literal or a token without a light value) covers the
 // screen: a dark theme's background would fail the dark-pixel bound, text in a dark theme's ink would
@@ -685,6 +685,18 @@ fn light_theme_renders_the_stage_screens() {
     f.screen.frame();
     assert_eq!(f.screen.ui.get_screen(), 4, "Part");
     check(&f.screen, "light-part");
+    // Parts: the bar's Edit opens the Parts list.
+    let mut f = Fixture::new("light-parts");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    quiet(&mut f, &parts::parts_graph());
+    f.screen.ui.global::<Bar>().invoke_action(5); // Edit
+    quiet(&mut f, &parts::parts_graph());
+    theme::apply(&f.screen.ui, &light);
+    f.screen.frame();
+    assert_eq!(f.screen.ui.get_screen(), 9, "Parts");
+    check(&f.screen, "light-parts");
     // Routing: the bar's Edit opens the Parts list, its Routing tool opens Routing.
     let mut f = Fixture::new("light-routing");
     f.engine.answer(); // session.hello

@@ -846,14 +846,14 @@ fn long_names_fit_the_small_screens_and_draw_in_the_light_theme() {
     // Nothing leaves the window: every element of the page is inset by the theme's margin, so the
     // window's outer border is the background wherever nothing is drawn (a long name that wrapped or
     // ran past its section would cross it).
-    let fits = |s: &Screen| {
+    let fits = |s: &Screen, scale: f32| {
         let (w, h) = (s.w, s.h);
         let bg = s.pixels[0];
         let mut bad = 0;
         // Below the top bar, the page's left and right edge are the background at every height, and
         // the bottom four rows under the footer: a long name that wrapped or ran past its section
         // would cross them (the bar's own meters at the right edge are the bar's concern).
-        for y in 48..h {
+        for y in (48.0 * scale).ceil() as usize..h { // below the top bar, 48 logical
             for &(x, n) in &[(0usize, 4usize), (w - 4, 4)] {
                 for i in 0..n {
                     if x + i < w && s.pixels[y * w + x + i] != bg {
@@ -879,11 +879,17 @@ fn long_names_fit_the_small_screens_and_draw_in_the_light_theme() {
         assert!(s.frame().is_some(), "{w}x{h}: drawn");
         let shown = s.ui.global::<ControlsState>().get_rows().row_count();
         assert!(shown > 0, "{w}x{h}: the long-named rows are shown");
-        fits(&s);
+        fits(&s, 1.0);
         png(&s, &format!("controls-long-{w}x{h}"));
-        at_fantom_scale(&mut s, &format!("controls-long-{w}x{h}"), || c.shown());
-        fits(&s);
+        // At 1.55, checked before the scale goes back (at_fantom_scale ends at 1.0).
+        s.set_scale(1.55);
+        s.frame();
+        c.shown();
+        s.frame();
+        fits(&s, 1.55);
         assert!(s.ui.global::<ControlsState>().get_rows().row_count() > 0, "{w}x{h}: rows at 1.55");
+        png(&s, &format!("controls-long-{w}x{h}@1.55"));
+        s.set_scale(1.0);
     }
     // The light theme at the keyboard's 1280x720.
     let mut s = Screen::sized(1280, 720);

@@ -11,6 +11,7 @@ use super::settings_fake::{dev, port, Settings as Fake};
 use super::settings_shell::Shelf;
 use super::*;
 use crate::{MenuState, NoticeState};
+use serde_json::Value;
 
 /// An engine with a good deal to show: long names, many ports and keys, a repository of the user's.
 fn busy_engine() -> Fake {
@@ -158,4 +159,58 @@ fn pictures_of_the_installed_page() {
     s.serve();
     shoot(&mut s, "settings-installed-unused");
     assert!(ui.global::<NoticeState>().get_open(), "the second question");
+}
+
+// The Available page on the keyboard's window, dark and light: the list, Update's question, and the install running
+// (target/screens/settings-available-{THEME}-{list,question,running}.png).
+#[test]
+fn pictures_of_the_available_page() {
+    fit_to_window();
+    let version = |v: &str, channel: &str, incompatible: &str, size: u64, types: Value| json!({"version": v, "channel": channel, "yanked": "", "incompatible": incompatible, "sha256": "", "size": size, "installed": size * 2, "types": types, "dependencies": [], "withdrawn": null, "exports": []});
+    let package = |id: &str, name: &str, versions: Vec<Value>| json!({"id": id, "name": name, "summary": "", "license": "MIT", "publisher": "Oscairn", "publisherKey": "6a2dd1acf4d4e23c", "tags": [], "versions": versions});
+    for theme_name in ["dark", "light"] {
+        let mut e = busy_engine();
+        e.sources = vec![("https://packages.oscairn.org".into(), super::settings_fake::Reads::Done("Oscairn".into(), "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into()))];
+        e.offers = vec![(
+            "https://packages.oscairn.org".into(),
+            vec![
+                package("org.example.reverb", "Example Reverb", vec![version("1.0.0", "stable", "", 2_400_000, json!({"clap": 1})), version("1.2.0", "stable", "", 2_600_000, json!({"clap": 1})), version("2.0.0-beta", "beta", "", 2_700_000, json!({"clap": 1}))]),
+                package("org.example.strings", "example strings", vec![version("2.1.0", "stable", "", 310_000_000, json!({"oscairn.asset": 1}))]),
+                package("org.example.pianos", "Concert Grand Pianos From A Collection With A Very Long Name", vec![version("1.0.0", "stable", "", 1_200_000_000, json!({"oscairn.asset": 3}))]),
+                package("org.example.songs", "Songs for the Stage", vec![version("0.3.0", "stable", "", 52_000_000, json!({"oscairn.performance": 24, "clap": 1}))]),
+                package("org.example.fuzz", "Fuzz", vec![version("1.0.0", "stable", "it has no build for this device (linux-arm64)", 900_000, json!({"clap": 1}))]),
+            ],
+        )];
+        e.installs = vec![("https://packages.oscairn.org".into(), "org.example.reverb".into(), "1.2.0".into(), json!({"added": 1, "skipped": 0, "notes": [], "code": [], "dependencies": []}), json!({"id": "org.example.reverb", "version": "1.2.0", "kind": "plugin", "repository": "https://packages.oscairn.org", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false, "name": "Example Reverb"}))];
+        let mut s = Shelf::on(&format!("sp-available-{theme_name}"), Some("fantom-07"), e);
+        let ui = s.ui();
+        shell::settings_in_rust(true);
+        shell::set_text_on_screen(false);
+        s.f.screen.resize(1280, 720);
+        s.f.screen.set_scale(1.55);
+        theme::apply(&ui, &theme::chosen(&theme::Places::default(), &format!("oscairn-{theme_name}"), ""));
+        shell::goto(shell::Screen::Home);
+        shell::goto(shell::Screen::Settings);
+        s.serve();
+        let at = crate::tests::settings::tabs(&ui).iter().position(|p| p == "Available").unwrap() as i32;
+        ui.global::<crate::SettingsState>().invoke_show_page(at);
+        s.serve();
+        shell::act(Action::Move { pane: None, by: 1 });
+        shell::act(Action::Move { pane: None, by: 1 }); // Example Reverb, an update
+        let one = |what: &str| format!("settings-available-{theme_name}-{what}");
+        shoot(&mut s, &one("list"));
+        assert_eq!(labels(&ui).len(), 5, "every offer is a row");
+        bar_do(&mut s, "Update");
+        s.f.screen.frame();
+        s.f.screen.frame();
+        png(&s.f.screen, &one("question"));
+        assert!(ui.global::<NoticeState>().get_open());
+        ui.global::<NoticeState>().invoke_tapped(0); // Update
+        s.f.screen.frame(); // the install is asked; its job not yet answered
+        s.f.screen.frame();
+        png(&s.f.screen, &one("running"));
+        assert!(rows(&ui).iter().all(|r| r.off), "every row is faint while the job runs");
+        s.serve();
+        assert!(rows(&ui).iter().any(|r| !r.off), "the rows are back once it is installed");
+    }
 }

@@ -194,7 +194,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
 }
 
 // The scene's setup, shown with nothing changing, asks the engine nothing and draws nothing over many
-// ticks (docs/rust-ui.md, idle); a status that says what the last said costs neither. It read the graph
+// ticks (docs/rust-ui.md, idle). It read the graph
 // when it opened; once that is answered and nothing else moves, a frame and a time pass are free.
 #[test]
 fn scene_setup_at_rest_costs_no_request_and_no_frame() {

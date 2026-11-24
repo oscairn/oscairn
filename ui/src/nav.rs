@@ -126,7 +126,7 @@ impl Cursor {
         }
         let at = match self.at {
             None => self.first.min(self.count - 1), // the first move shows it
-            Some(at) => (at as i64 + by).clamp(0, self.count as i64 - 1) as usize,
+            Some(at) => (at as i64).saturating_add(by).clamp(0, self.count as i64 - 1) as usize,
         };
         self.to(at)
     }
@@ -179,6 +179,50 @@ mod tests {
     }
 
     #[test]
+    fn keys_every_direction_and_rest_and_line_returns() {
+        use slint::platform::Key;
+        let k = |key: Key| slint::SharedString::from(key).to_string();
+        assert_eq!(from_key(&k(Key::UpArrow)), Some(Action::Arrow { dx: 0, dy: -1 }));
+        assert_eq!(from_key(&k(Key::LeftArrow)), Some(Action::Arrow { dx: -1, dy: 0 }));
+        assert_eq!(from_key(&k(Key::RightArrow)), Some(Action::Arrow { dx: 1, dy: 0 }));
+        assert_eq!(from_key(&k(Key::PageDown)), Some(Action::Page(1)));
+        assert_eq!(from_key(&k(Key::Home)), Some(Action::End(-1)));
+        assert_eq!(from_key(&k(Key::Escape)), Some(Action::Cancel(None)));
+        assert_eq!(from_key("\n"), Some(Action::Confirm(None)));
+        assert_eq!(from_key("\r"), Some(Action::Confirm(None)));
+        assert_eq!(from_key(""), None, "no key text is no action");
+        assert_eq!(from_key(" "), None);
+        assert_eq!(from_key("é"), None, "a unicode key that is no shortcut");
+    }
+
+    #[test]
+    fn panel_totals_clamp_a_move_and_cap_a_spam_of_presses() {
+        let mut t = Totals::default();
+        assert!(t.read(&json!({"move": 0, "confirm": 0, "cancel": 0})).is_empty(), "a start baseline");
+        let a = t.read(&json!({"move": 5000}));
+        assert_eq!(a, [Action::Move { pane: None, by: 1000 }], "a move past a thousand steps is a thousand");
+        let a = t.read(&json!({"confirm": 10}));
+        assert_eq!(a, [Action::Confirm(None); 4], "a spam of confirms is at most four");
+        let a = t.read(&json!({"cancel": 7}));
+        assert_eq!(a, [Action::Cancel(None); 4], "a spam of cancels is at most four");
+    }
+
+    #[test]
+    fn panel_totals_ignore_what_is_not_a_list_count() {
+        let mut t = Totals::default();
+        assert!(t.read(&json!({"move": 1})).is_empty(), "a baseline");
+        // A count that is not an integer, and an unknown key, ask nothing.
+        assert!(t.read(&json!({"move": "x", "odd": "x"})).is_empty());
+        // A pane that is not a number is the pane last touched; 300 is past a u8.
+        let a = t.read(&json!({"move:chant": 1, "move:300": 1}));
+        assert_eq!(a, [Action::Move { pane: None, by: 1 }, Action::Move { pane: None, by: 1 }]);
+        // A read that is not an object has no counts.
+        assert!(t.read(&json!([])).is_empty());
+        assert!(t.read(&json!("m")).is_empty());
+        assert!(t.read(&json!(1.5)).is_empty());
+    }
+
+    #[test]
     fn cursor_shows_on_the_first_move_pages_and_stops_at_the_ends() {
         let c = Cursor::new(25, 10);
         assert_eq!(c.moved(5).at, Some(0), "the first move shows it where the page starts");
@@ -190,5 +234,18 @@ mod tests {
         assert_eq!(c.clear().at, None);
         let empty = Cursor::new(0, 10);
         assert_eq!((empty.moved(3).at, empty.to(5).at), (None, None));
+    }
+
+    #[test]
+    fn cursor_stops_at_the_ends_for_any_step() {
+        let c = Cursor::new(25, 10).to(5);
+        assert_eq!(c.moved(-50).at, Some(0), "a backward step stops at the first");
+        assert_eq!(c.moved(50).at, Some(24), "a forward step stops at the last");
+        assert_eq!(c.moved(i64::MAX).at, Some(24), "the widest step still reaches the last");
+        assert_eq!(c.moved(i64::MIN).at, Some(0), "the smallest step still reaches the first");
+        assert_eq!(Cursor::new(10, 0).per_page, 1, "a page is never of width zero");
+        // The first move after a clear shows it where the page shown starts.
+        let cur = Cursor::new(25, 10).to(12).clear().moved(1);
+        assert_eq!((cur.at, cur.first), (Some(10), 10));
     }
 }

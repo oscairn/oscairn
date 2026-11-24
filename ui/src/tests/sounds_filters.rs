@@ -419,6 +419,6 @@ fn the_sound_chooser_renders_in_the_light_theme() {
     let dark_ink = near([0xF6, 0xF8, 0xFA], 2);
     assert!(dark_ink < 0.000_28, "{:.2}% of the screen in a dark theme's text color", dark_ink * 100.0);
     let dark = s.pixels.iter().filter(|p| 0.2126 * f64::from(p.r) + 0.7152 * f64::from(p.g) + 0.0722 * f64::from(p.b) < 80.0).count();
-    assert!(dark * 50 < s.pixels.len(), "the screen is mostly dark");
+    assert!(dark * 50 < s.pixels.len(), "the screen is mostly light");
     shot(&s, "sounds-light");
 }

@@ -41,7 +41,11 @@ pub struct Browser {
 
 /// The cursor fitted to `count` items, `per_page` a view, the view following it.
 fn fit(c: Cursor, count: usize, per_page: usize) -> Cursor {
-    let c = Cursor { count, per_page, at: c.at.map(|a| a.min(count.saturating_sub(1))), ..c };
+    if count == 0 {
+        // Nothing to sit on: no selection, the first empty page.
+        return Cursor::new(0, per_page);
+    }
+    let c = Cursor { count, per_page, at: c.at.map(|a| a.min(count - 1)), ..c };
     match c.at {
         Some(at) => c.to(at),
         None => Cursor { first: if c.first >= count { 0 } else { c.first }, ..c },
@@ -194,5 +198,212 @@ impl Browser {
         self.active = false;
         self.cursor = self.cursor.clear();
         self.editing = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `Browser` whose window is never shown: the methods under test never upgrade the weak.
+    fn browser() -> Browser {
+        Browser {
+            ui: slint::Weak::default(),
+            rows: Rc::new(VecModel::default()),
+            info: Rc::new(VecModel::default()),
+            cursor: Cursor::new(0, 10),
+            info_cursor: Cursor::new(0, 10),
+            editing: false,
+            count: 0,
+            active: false,
+        }
+    }
+
+    #[test]
+    fn fit_keeps_a_first_cursor_on_a_list() {
+        let c = fit(Cursor::new(0, 1), 5, 10);
+        assert_eq!(c.at, None, "no selection until the first move");
+        assert_eq!((c.first, c.count), (0, 5));
+    }
+
+    #[test]
+    fn fit_puts_the_selected_items_page_under_it() {
+        let c = fit(Cursor::new(30, 10).to(15), 30, 10);
+        assert_eq!((c.at, c.first), (Some(15), 10), "a view of ten turns at fifteen");
+    }
+
+    #[test]
+    fn fit_clamps_a_selection_past_the_end_of_a_shrunk_list() {
+        let c = fit(Cursor::new(30, 10).to(29), 10, 10);
+        assert_eq!((c.at, c.first), (Some(9), 0), "row 9 of ten, its page");
+    }
+
+    #[test]
+    fn fit_empty_list_shows_no_cursor() {
+        let c = fit(Cursor::new(0, 1), 0, 10);
+        assert_eq!((c.at, c.first, c.count), (None, 0, 0));
+    }
+
+    #[test]
+    fn fit_shrunk_to_nothing_drops_an_old_selection_and_page() {
+        let c = fit(Cursor::new(50, 10).to(39), 0, 10);
+        assert_eq!((c.at, c.first, c.count), (None, 0, 0), "an empty list has nothing to sit on");
+    }
+
+    #[test]
+    fn index_never_goes_before_the_page() {
+        let mut b = browser();
+        b.cursor = Cursor::new(30, 10).to(17); // first is 10
+        assert_eq!(b.index(0), 10);
+        assert_eq!(b.index(7), 17);
+        assert_eq!(b.index(-5), 10, "a drag above the view clamps to the first shown");
+    }
+
+    #[test]
+    fn at_top_needs_the_first_row_and_no_change() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10);
+        assert!(!b.at_top(), "no selection is not on the top row");
+        b.cursor = Cursor::new(5, 10).to(0);
+        assert!(b.at_top());
+        b.cursor = Cursor::new(5, 10).to(1);
+        assert!(!b.at_top(), "the second row leaves the list");
+        b.cursor = Cursor::new(5, 10).to(0);
+        b.editing = true;
+        assert!(!b.at_top(), "a value being changed still holds the list");
+    }
+
+    #[test]
+    fn nav_moves_the_cursor_and_answers_none_until_confirmed() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10);
+        assert_eq!(b.nav(Action::Move { pane: None, by: 1 }), Nav::None);
+        assert_eq!(b.cursor.at, Some(0), "the first move shows it on the first shown");
+        assert_eq!(b.nav(Action::Arrow { dx: 0, dy: 3 }), Nav::None);
+        assert_eq!(b.cursor.at, Some(3));
+        assert_eq!(b.nav(Action::Confirm(Some(0))), Nav::Press(3));
+    }
+
+    #[test]
+    fn nav_arrow_across_steps_like_the_dial() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10);
+        assert_eq!(b.nav(Action::Arrow { dx: 1, dy: 0 }), Nav::None);
+        assert_eq!(b.cursor.at, Some(0));
+    }
+
+    #[test]
+    fn nav_right_knob_steers_the_panel_apart_from_the_cursor() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10).to(3);
+        b.editing = true;
+        assert_eq!(b.nav(Action::Move { pane: Some(1), by: 2 }), Nav::Pane(2));
+        assert_eq!((b.cursor.at, b.editing), (Some(3), true), "the panel leaves the row's change untouched");
+    }
+
+    #[test]
+    fn nav_a_page_and_an_end_shift_without_opening() {
+        let mut b = browser();
+        b.cursor = Cursor::new(25, 10).to(5);
+        assert_eq!(b.nav(Action::Page(1)), Nav::None);
+        assert_eq!((b.cursor.at, b.cursor.first), (Some(15), 10), "a whole page on");
+        assert_eq!(b.nav(Action::End(1)), Nav::None);
+        assert_eq!((b.cursor.at, b.cursor.first), (Some(24), 20), "the last row, its page");
+    }
+
+    #[test]
+    fn nav_end_back_to_the_first() {
+        let mut b = browser();
+        b.cursor = Cursor::new(25, 10).to(17);
+        assert_eq!(b.nav(Action::End(-1)), Nav::None);
+        assert_eq!((b.cursor.at, b.cursor.first), (Some(0), 0));
+    }
+
+    #[test]
+    fn nav_cancel_first_drops_the_change_then_the_cursor_then_back() {
+        let mut b = browser();
+        assert_eq!(b.nav(Action::Cancel(None)), Nav::Back, "nothing to drop: back");
+        b.cursor = Cursor::new(5, 10).to(2);
+        assert_eq!(b.nav(Action::Cancel(None)), Nav::None, "a selection drops it");
+        assert_eq!(b.cursor.at, None);
+        b.cursor = Cursor::new(5, 10).to(2);
+        b.editing = true;
+        assert_eq!(b.nav(Action::Cancel(None)), Nav::None, "a change drops it first, keeping the row");
+        assert!(!b.editing);
+        assert_eq!(b.cursor.at, Some(2), "the row stays until a second cancel");
+    }
+
+    #[test]
+    fn nav_confirm_with_no_selection_answers_none() {
+        let mut b = browser();
+        assert_eq!(b.nav(Action::Confirm(None)), Nav::None);
+    }
+
+    #[test]
+    fn nav_dial_changes_the_value_under_the_cursor_after_a_press() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10).to(2);
+        b.editing = true;
+        assert_eq!(b.nav(Action::Move { pane: None, by: 4 }), Nav::Dial(2, 4));
+        assert_eq!(b.cursor.at, Some(2), "the value changes, not the row");
+    }
+
+    #[test]
+    fn tap_selects_and_presses_the_row() {
+        let mut b = browser();
+        b.cursor = Cursor::new(20, 10);
+        assert_eq!(b.tap(3), Nav::Press(3));
+        assert_eq!(b.cursor.at, Some(3));
+        assert_eq!(b.tap(-1), Nav::Press(0), "a finger above the list presses its first row");
+    }
+
+    #[test]
+    fn tap_on_an_empty_list_answers_none() {
+        let mut b = browser();
+        assert_eq!(b.tap(0), Nav::None);
+        assert_eq!(b.cursor.at, None);
+    }
+
+    #[test]
+    fn scroll_to_holds_the_first_and_drops_the_selection() {
+        let mut b = browser();
+        b.count = 10;
+        b.cursor = Cursor::new(10, 10).to(5);
+        b.editing = true;
+        b.scroll_to(3);
+        assert_eq!((b.cursor.at, b.cursor.first, b.editing), (None, 3, false));
+        b.scroll_to(99);
+        assert_eq!(b.cursor.first, 9, "past the end clamps to the last row");
+        b.scroll_to(0);
+        assert_eq!(b.cursor.first, 0);
+    }
+
+    #[test]
+    fn scroll_info_turns_the_panel_a_whole_view_at_a_time() {
+        let mut b = browser();
+        b.info_cursor = Cursor::new(20, 5);
+        b.scroll_info(1);
+        assert_eq!((b.info_cursor.at, b.info_cursor.first), (Some(0), 0));
+        b.scroll_info(1);
+        assert_eq!((b.info_cursor.at, b.info_cursor.first), (Some(5), 5));
+        b.scroll_info(-1);
+        assert_eq!((b.info_cursor.at, b.info_cursor.first), (Some(0), 0));
+        b.scroll_info(99);
+        assert_eq!((b.info_cursor.at, b.info_cursor.first), (Some(19), 15), "stops at the last row's page");
+    }
+
+    #[test]
+    fn reset_and_hidden_drop_the_cursor() {
+        let mut b = browser();
+        b.cursor = Cursor::new(5, 10).to(3);
+        b.editing = true;
+        b.info_cursor = Cursor::new(5, 10).to(2);
+        b.hidden();
+        assert_eq!((b.cursor.at, b.editing, b.active()), (None, false, false));
+        b.cursor = Cursor::new(5, 10).to(3);
+        b.editing = true;
+        b.reset_cursor();
+        assert_eq!((b.cursor.at, b.editing), (None, false), "the panel keeps its row");
+        assert_eq!(b.info_cursor.at, Some(2));
     }
 }

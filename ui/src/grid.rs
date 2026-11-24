@@ -1005,7 +1005,7 @@ pub fn longest_stage(params: &[&Param]) -> f64 {
 /// How far across its room (0 to 1) the stage of a time or rate parameter at `v` (0 to 1) reaches: by its
 /// seconds on the log axis up to `longest`, or by its range when that is 0 (a rate reversed).
 pub fn stage_across(p: &Param, v: f64, rate: bool, longest: f64) -> f64 {
-    if longest > 0. {
+    if longest > 0. && p.seconds.len() >= 2 {
         time_across(seconds_at(&p.seconds, v), longest)
     } else if rate {
         1. - v
@@ -1447,6 +1447,141 @@ mod tests {
         assert!(points[1].1 > 28. && points[1].1 < 170., "the sustain level halfway");
         assert_eq!(arc(0., 0.), "");
         assert!(arc(0., 1.).contains(" 1 1 "), "past 180 degrees: the large arc");
+    }
+
+    #[test]
+    fn parse_tolerates_missing_and_wrong_typed_fields() {
+        assert!(parse(&serde_json::json!({})).is_empty(), "no parameters list: nothing");
+        assert!(parse(&serde_json::json!({"parameters": 42})).is_empty(), "not a list: nothing");
+        assert_eq!(parse(&serde_json::json!({"parameters": ["x", null]})).len(), 2, "a string and a null each parse as a default parameter");
+        let defaults = parse(&serde_json::json!({"parameters": [{}]}));
+        assert_eq!(defaults.len(), 1);
+        assert_eq!(&defaults[0], &Param { max: 1., ..Default::default() }, "every field is its default when missing");
+        let wrong = parse(&serde_json::json!({"parameters": [{"id": "x", "name": 5, "minimum": "low", "stepped": "yes", "rangeHigh": "big"}]}));
+        assert_eq!(&wrong[0], &Param { max: 1., ..Default::default() }, "wrong-typed fields are their defaults");
+    }
+
+    #[test]
+    fn a_parameter_holds_its_values_between_the_ends() {
+        let mut a = p(0, "A", "", 10., false);
+        assert_eq!(a.norm(5.), 0.5);
+        assert_eq!(a.norm(-5.), 0., "below the minimum clamps");
+        assert_eq!(a.norm(25.), 1., "above the maximum clamps");
+        assert_eq!(a.denorm(0.5), 5.);
+        assert_eq!(a.denorm(-1.), 0., "a norm below 0 clamps");
+        assert_eq!(a.denorm(2.), 10., "a norm above 1 clamps");
+        a.stepped = true;
+        assert_eq!(a.denorm(0.5), 5., "a stepped parameter lands on a whole value");
+        assert_eq!(a.values(), 11, "eleven stepped values from 0 to 10");
+        assert_eq!(p(0, "A", "", 1., false).values(), 0, "no fixed count for a plain slider");
+        assert_eq!(Param::default().values(), 0, "a plain slider counts no fixed values");
+    }
+
+    #[test]
+    fn a_bipolar_range_is_centered_on_zero_by_default() {
+        assert!(Param { min: -1., max: 1., default: 0., ..Default::default() }.bipolar(), "a pan");
+        assert!(!Param { min: -1., max: 1., default: 0.5, ..Default::default() }.bipolar(), "default not zero");
+        assert!(!Param { min: -1., max: 2., default: 0., ..Default::default() }.bipolar(), "not centered");
+        assert!(!Param { min: 0., max: 1., default: 0., ..Default::default() }.bipolar(), "not across zero");
+    }
+
+    #[test]
+    fn an_operator_index_is_left_off_the_names() {
+        assert_eq!(without_index("Level 5", 5), "Level");
+        assert_eq!(without_index("Op 5 Coarse", 5), "Coarse");
+        assert_eq!(without_index("Operator 3 Mix", 3), "Mix");
+        assert_eq!(without_index("5 Mix", 5), "Mix");
+        assert_eq!(without_index("Op5 Coarse", 5), "Coarse");
+        assert_eq!(without_index("Level", 5), "Level", "a number in a one-word name stays");
+        assert_eq!(without_index("5", 5), "5", "a name that is only the number stays");
+        assert_eq!(without_index("Cutoff 5 X", 5), "Cutoff 5 X", "an index in the middle stays");
+    }
+
+    #[test]
+    fn a_length_reads_as_the_control_writes_it() {
+        assert_eq!(seconds_text(0.012), "12 ms");
+        assert_eq!(seconds_text(0.0095), "9.5 ms", "under 10 ms shows a decimal");
+        assert_eq!(seconds_text(0.), "0.0 ms");
+        assert_eq!(seconds_text(1.3), "1.3 s");
+        assert_eq!(seconds_text(12.), "12 s");
+    }
+
+    #[test]
+    fn fields_that_name_an_envelope_stage() {
+        for f in ["delay", "attack", "hold", "decay", "sustain", "release", "time1", "rate9", "level2"] {
+            assert!(is_envelope(f), "{f}");
+        }
+        for f in ["", "cutoff", "timed", "ratex", "time", "echo", "level"] {
+            assert!(!is_envelope(f), "{f}");
+        }
+    }
+
+    #[test]
+    fn declared_icons_map_and_others_keep_their_names() {
+        assert_eq!(declared_icon(0), 0);
+        assert_eq!(declared_icon(3), 1);
+        assert_eq!(declared_icon(9), 0, "an unknown declared icon is none");
+        let mut iconed = p(0, "Wave", "", 3., true);
+        iconed.icons = vec![3];
+        assert_eq!(icons_for(&iconed, &["A".into(), "B".into()]), vec![1, 0], "one declared: the rest guessed as none");
+        assert_eq!(icons_for(&p(0, "Wave", "", 3., true), &["Saw".into(), "Noise".into()]), vec![1, 5], "no declared: every value by its name");
+    }
+
+    #[test]
+    fn a_row_with_no_tiles_and_the_numbered_places() {
+        assert!(row_layout(0, 840., 44., 6.).is_empty());
+        let row = row_layout(3, 840., 44., 6.);
+        assert_eq!((row[0].x, row[0].w, row[0].h), (0., 276., 44.), "the tile at the left");
+        assert_eq!(row[2].x, 2. * 282., "three tiles across the row");
+        assert_eq!(row[2].w, 276., "every tile the same");
+    }
+
+    #[test]
+    fn priorities_sort_numbered_first_in_the_plugins_order() {
+        let params: Vec<Param> = [("a", 3), ("b", 0), ("c", 1), ("d", 0)].iter().map(|(n, pri)| Param { id: 0, name: n.to_string(), priority: *pri, ..Default::default() }).collect();
+        let mut order = vec![0, 1, 2, 3];
+        by_priority(&params, &mut order);
+        assert_eq!(order, vec![2, 0, 1, 3], "numbered 1 and 3 first, then the unnumbered in order");
+    }
+
+    #[test]
+    fn stage_across_falls_back_to_the_range_without_seconds() {
+        assert_eq!(stage_across(&p(0, "A", "", 1., false), 0.5, false, 1.), 0.5, "no seconds, an axis asked: by the range");
+        assert_eq!(stage_across(&p(0, "A", "", 1., false), 0.25, true, 1.), 0.75, "a rate reversed");
+        assert_eq!(stage_across(&p(0, "A", "", 1., false), 0.25, true, 0.), 0.75, "no axis at all: a rate reversed");
+        let timed = Param { seconds: vec![0.1, 1.], ..Default::default() };
+        assert_eq!(stage_across(&timed, 0., false, 1.), stage_axis(0.1, 1.), "a stage on the seconds axis");
+    }
+
+    #[test]
+    fn stage_seconds_needs_two_or_more_to_read() {
+        assert_eq!(stage_seconds(&p(0, "A", "", 1., false), 0.5), None, "no seconds: none");
+        assert_eq!(stage_seconds(&Param { seconds: vec![1.], ..Default::default() }, 0.5), None, "one value: none");
+        let timed = Param { seconds: vec![0.1, 1.], ..Default::default() };
+        assert_eq!(stage_seconds(&timed, 0.), Some(0.1), "the shortest");
+        assert_eq!(stage_seconds(&timed, 1.), Some(1.), "the longest");
+        assert!(stage_seconds(&timed, 0.5).is_some_and(|s| s < 1.));
+    }
+
+    #[test]
+    fn compact_sizes_stay_inside_the_touch_and_the_screen() {
+        assert!(compact_height(1., 1.) >= TOUCH, "never below the touch target");
+        assert!(compact_height(0.5, 0.5) > 0.);
+        assert_eq!(compact_columns(60., 6.), 2, "a narrow width holds two at least");
+        assert_eq!(compact_columns(5000., 6.), 8, "a wide one holds eight at most");
+        assert!(knob_is_cell(20., 20., 1., 1.), "a tile too small for a knob is a cell");
+        assert!(!knob_is_cell(100., 100., 0.5, 0.5));
+    }
+
+    #[test]
+    fn the_master_view_is_a_sibling_with_an_algorithm() {
+        let mut params: Vec<Param> = (0..3).map(|i| p(i, "P", "", 1., false)).collect();
+        assert_eq!(master_view(&params, &[0, 1]), None, "no algorithm: none");
+        params[1].view = 2;
+        assert_eq!(master_view(&params, &[1, 2]), None, "no algorithm field: none");
+        params[1].field = "algorithm".into();
+        assert_eq!(master_view(&params, &[0, 2]), None, "the algorithm not among the members");
+        assert_eq!(master_view(&params, &[0, 1, 2]), Some(2), "the first with an algorithm");
     }
 }
 

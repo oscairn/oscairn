@@ -704,4 +704,116 @@ mod tests {
         assert_eq!(Target::from_json(&Target::Parameter { node: 3, param: 4 }.json()), Target::Parameter { node: 3, param: 4 });
         assert_eq!(Override::parse(&json!({"assignments": [{"control": "knob:1", "kind": "partLevel", "id": 5, "part": 0}]})), [Override { control: "knob:1".into(), target: Target::PartLevel(5), part: 0 }]);
     }
+
+    #[test]
+    fn a_profile_entry_with_missing_or_wrong_typed_fields_takes_the_defaults() {
+        let g = Group::from_profile(&json!({}));
+        assert_eq!((g.role, g.kind.as_str(), g.count, g.rows.len(), g.modes.len(), g.paged), (Role::Assign, "", 0, 0, 0, false));
+        assert_eq!(Group::from_profile(&json!({"role": "sequencer", "kind": "wheel", "count": "four", "paging": ""})).role, Role::Assign);
+        let g = Group::from_profile(&json!({"role": 7, "count": 4.5, "paging": ["x"]}));
+        assert_eq!((g.role, g.count, g.paged), (Role::Assign, 0, false));
+        assert!(Group::from_profile(&json!({"kind": "knobs", "count": 4, "paging": "button"})).paged);
+        assert!(!Group::from_profile(&json!({"kind": "knobs", "count": 4, "paging": ""})).paged);
+    }
+
+    #[test]
+    fn a_target_parses_missing_and_wrong_typed_kinds_as_none() {
+        assert_eq!(Target::from_json(&json!({})), Target::None);
+        assert_eq!(Target::from_json(&json!({"kind": "something else"})), Target::None);
+        assert_eq!(Target::from_json(&json!({"kind": 3})), Target::None);
+        let p = Target::from_json(&json!({"kind": "parameter", "node": 12, "param": 8}));
+        assert_eq!((p, Target::from_json(&json!({"kind": "control", "id": 3}))), (Target::Parameter { node: 12, param: 8 }, Target::Control(3)));
+    }
+
+    #[test]
+    fn an_override_missing_its_fields_defaults_them() {
+        assert_eq!(Override::parse(&json!({})), Vec::<Override>::new());
+        assert_eq!(Override::parse(&json!({"assignments": []})), Vec::<Override>::new());
+        let parsed = Override::parse(&json!({"assignments": [{"kind": null}, {"control": 9, "part": "none"}]}));
+        assert_eq!(parsed, [Override { control: "".into(), target: Target::None, part: 0 }, Override { control: "".into(), target: Target::None, part: 0 }]);
+    }
+
+    #[test]
+    fn role_from_name_is_case_insensitive_and_unknown_names_have_no_role() {
+        assert_eq!(role_from_name("", ""), "");
+        assert_eq!(role_from_name("Ino", ""), "");
+        assert_eq!(role_from_name("Level", ""), "level");
+        assert_eq!(role_from_name("VOLUME", ""), "level");
+        assert_eq!(role_from_name("Pan", ""), "pan");
+        assert_eq!(role_from_name("Wet", ""), "mix");
+        assert_eq!(role_from_name("Dry/Wet", ""), "mix");
+        assert_eq!(role_from_name("Reso", ""), "resonance");
+        assert_eq!(role_from_name("Low gain", ""), "lowGain");
+        assert_eq!(role_from_name("CUTOFF", ""), "cutoff", "case does not matter");
+        assert_eq!(role_from_name("decay", "Osc/Filter 1"), "filterDecay", "a filter's envelope by its module");
+        assert_eq!(role_from_name("Decay", "Amp"), "decay");
+        assert_eq!(role_from_name("filter envelope", ""), "filterEnvelope");
+    }
+
+    #[test]
+    fn name_of_a_target_that_is_gone_is_empty() {
+        let s = source(&none);
+        assert_eq!(s.name_of(&parameter(99, 7)), "");
+        assert_eq!(s.name_of(&Target::Control(99)), "");
+        assert_eq!(s.name_of(&Target::PartLevel(99)), "");
+        assert_eq!(s.name_of(&Target::PartMute(8)), "");
+        assert_eq!(s.name_of(&Target::Scene(99)), "");
+        assert_eq!(s.name_of(&Target::Panic), "Panic");
+        assert_eq!(s.name_of(&parameter(1, 99)), "synth: Tune");
+    }
+
+    #[test]
+    fn a_group_of_any_width_pages_banks_of_that_width() {
+        let s = source(&none);
+        assert_eq!(s.knob_banks(0, 0)[0].slots.len(), 1, "width 0 resolves one wide, without panicking");
+        assert_eq!(s.knob_banks(0, 0)[0].slots[0], Target::Control(20));
+        assert_eq!(s.knob_banks(0, 3)[0].slots, [Target::Control(20), Target::Control(21), Target::None]);
+        assert_eq!(s.positions(&group(Role::Assign, "faders", 4), 10), 1, "faders with no modes are one position");
+        assert_eq!(s.positions(&group(Role::Notes, "knobs", 4), 10), 1, "a Notes group is one position");
+        assert_eq!(s.positions(&group(Role::Assign, "buttons", 4), 10), 1);
+    }
+
+    #[test]
+    fn resolve_out_of_range_or_for_the_wrong_kind_is_empty_and_a_part_without_nodes_is_blank() {
+        let s = source(&none);
+        assert_eq!(s.resolve(&[], 0, 10, 0), Vec::<Slot>::new());
+        assert_eq!(s.resolve(&[group(Role::Assign, "knobs", 4)], 1, 10, 0), Vec::<Slot>::new(), "which past the last group");
+        assert_eq!(s.resolve(&[group(Role::Notes, "knobs", 4)], 0, 10, 0), Vec::<Slot>::new(), "a Notes knob group");
+        assert_eq!(s.resolve(&[group(Role::Assign, "keys", 61)], 0, 10, 0), Vec::<Slot>::new());
+        let remote = [group(Role::Assign, "knobs", 4)];
+        // A part the source does not know plays the Performance's own controls, as no part does.
+        assert_eq!(s.resolve(&remote, 0, 3, 0)[0].target, Target::Control(20), "part 3 not among the parts");
+        // A known part with nodes but no parameters fills a blank row.
+        let sparse = Source { parts: vec![SPart { id: 10, name: "Keys".into(), nodes: vec![1] }], nodes: HashMap::from([(1, SNode { name: "Silent".into(), effect: false, instrument: true, params: vec![] })]), ..Source::default() };
+        let b = sparse.resolve(&remote, 0, 10, 0);
+        assert_eq!((b[0].target, b[0].label.as_str(), b.len()), (Target::None, "", 4));
+    }
+
+    #[test]
+    fn an_out_of_range_bank_is_blank_named_for_its_kind() {
+        let eq = Source::default().bank_of(0, 2, BankKind::Eq, 7);
+        assert_eq!((eq.name.as_str(), eq.layer, eq.slots.len(), eq.slots[0]), ("EQ", Layer::None, 2, Target::None));
+        let eff = Source::default().bank_of(0, 3, BankKind::Effects, 0);
+        assert_eq!((eff.name.as_str(), eff.slots.len(), eff.slots[0]), ("Effects", 3, Target::None));
+    }
+
+    #[test]
+    fn from_graph_defaults_what_a_graph_leaves_out() {
+        let s = Source::from_graph(&json!({}), vec![], &|_| None);
+        assert_eq!((s.parts.len(), s.nodes.len(), s.controls.len(), s.scenes.len()), (0, 0, 0, 0));
+        let graph = json!({
+            "nodes": [{"id": 5}, {"id": 6, "audioOutputs": [{"channels": 2}]}],
+            "parts": [{"id": 3, "chain": [5, 6, 9]}],
+            "controls": [{}],
+            "scenes": [{}],
+        });
+        let s = Source::from_graph(&graph, vec![], &|_| None);
+        assert_eq!(s.nodes[&5].name, "Plugin", "a node without arrays is no instrument and no effect");
+        assert_eq!((s.nodes[&5].effect, s.nodes[&5].instrument), (false, false));
+        assert_eq!((s.nodes[&6].effect, s.nodes[&6].instrument), (false, true));
+        assert_eq!(s.nodes[&9].name, "Plugin", "a chain node absent from the graph is still a node");
+        assert_eq!(s.parts[0].name, "");
+        assert_eq!((s.controls[0].id, s.controls[0].part), (0, 0));
+        assert_eq!((s.scenes[0].0, s.scenes[0].1.as_str()), (0, ""));
+    }
 }

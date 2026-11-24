@@ -125,22 +125,6 @@ fn pictures_of_the_settings_app() {
     let _ = folder("shots");
 }
 
-/// The WCAG relative luminance of a color, 0 to 1.
-fn luminance(c: slint::Color) -> f64 {
-    let f = |v: u8| {
-        let v = f64::from(v) / 255.;
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powi(12) }
-    };
-    0.2126 * f(c.red()) + 0.7152 * f(c.green()) + 0.0722 * f(c.blue())
-}
-
-/// The WCAG contrast ratio of `a` over `b`, 1 to 21.
-fn contrast(a: slint::Color, b: slint::Color) -> f64 {
-    let (l1, l2) = (luminance(a), luminance(b));
-    let (hi, lo) = (l1.max(l2), l1.min(l2));
-    (hi + 0.05) / (lo + 0.05)
-}
-
 // The Audio and MIDI controllers pages in the light theme: the shots use the dark and the two odd themes only. Body
 // text on the rows' surface and the faint rows' ink read 4.5:1 against the surface (the theme loader holds every
 // theme to it, theme/tests.rs "Text must read on the three backgrounds"), no dark theme's surface color is left
@@ -162,10 +146,11 @@ fn the_audio_and_controllers_pages_draw_light() {
     assert!(!ui.global::<crate::Theme>().get_dark(), "a light background");
     let row = d.ink("surface");
     let (text, muted) = (d.ink("text"), d.ink("muted"));
+    let contrast = crate::palette::contrast;
     assert!(contrast(text, row) >= 4.5, "text {text:#?} on {row:#?}: {:.2}:1", contrast(text, row));
     assert!(contrast(muted, row) >= 4.5, "muted {muted:#?} on {row:#?}: {:.2}:1", contrast(muted, row));
-    // The built-in dark theme's "surface", the color a leftover dark literal would draw.
-    let dark_surface = slint::Color::from_rgb_u8(0x20, 0x25, 0x2d);
+    // The dark theme's "surface" (theme.slint's default), the color a leftover dark literal would draw.
+    let dark_surface = slint::Color::from_rgb_u8(0x1d, 0x21, 0x27);
     shell::goto(shell::Screen::Settings);
     s.serve();
     let pages = crate::tests::settings::tabs(&ui);

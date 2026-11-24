@@ -7,7 +7,7 @@
 #
 #   ./start-chroot.sh [COMMAND [ARGUMENTS...]]
 set -eu
-root=$(cd "$(dirname "$0")" && pwd)
+root=$(cd -P "$(dirname "$0")" && pwd -P) # the real folder: /proc/mounts names it so, never the oscairn-current link
 
 mounted() { grep -q "^[^ ]* $root$1 " /proc/mounts; }
 for d in /proc /sys /dev /dev/pts /dev/shm; do

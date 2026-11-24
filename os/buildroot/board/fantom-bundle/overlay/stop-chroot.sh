@@ -5,7 +5,7 @@
 #
 #   ./stop-chroot.sh
 set -u
-root=$(cd "$(dirname "$0")" && pwd)
+root=$(cd -P "$(dirname "$0")" && pwd -P) # the real folder: /proc/mounts names it so, never the oscairn-current link
 
 status=0
 for d in /tmp /run/udev /run /dev/shm /dev/pts /dev /sys /proc; do

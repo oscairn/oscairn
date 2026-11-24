@@ -63,7 +63,7 @@
 set -u
 # Roland's tickgen module keeps sending signal 42 every millisecond to a stale pid (its application's, never cleared); a process that gets that pid number is killed unless it ignores it. An ignored signal stays ignored across fork and exec, so everything started below is protected.
 trap '' 42
-root=$(cd "$(dirname "$0")" && pwd)
+root=$(cd -P "$(dirname "$0")" && pwd -P) # the real folder: /proc/mounts names it so, never the oscairn-current link
 dry="" cold="" alone=""
 for a in "$@"; do
 	case "$a" in

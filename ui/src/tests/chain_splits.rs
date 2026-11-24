@@ -484,6 +484,7 @@ fn crossovers_are_read_and_set_in_hertz() {
 fn splits_and_lanes_at_rest_cost_no_request_and_no_frame() {
     let mut s = Screen::new();
     let mut c = open(&s, &split_graph("bands", 3));
+    s.ui.set_screen(5); // the chain shown, so the frames below are its own
     // The chain itself: nothing asked, nothing drawn.
     assert!(sent(&mut c.out).is_empty(), "the chain at rest asked for something");
     s.frame();
@@ -502,6 +503,7 @@ fn splits_and_lanes_at_rest_cost_no_request_and_no_frame() {
     // A lane: no crossovers, nothing at rest either.
     c.act(Action::Move { pane: None, by: 1 });
     c.act(Action::Confirm(None)); // Band 1
+    assert!(s.frame().is_some(), "the lane is drawn once when it opens");
     for _ in 0..40 {
         assert!(sent(&mut c.out).is_empty(), "the lane at rest asked for something");
         assert_eq!(s.frame(), None, "the lane at rest drew a frame");

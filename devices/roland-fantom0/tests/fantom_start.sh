@@ -205,29 +205,65 @@ out=$(OSCAIRN_PROC=$shm OSCAIRN_IPCRM=no-such-ipcrm "$bundle/oscairn-fantom-star
 check "without ipcrm: says so and goes on" "[ $status = 0 ] && echo \"\$out\" | grep -q 'no no-such-ipcrm here: not removing the shared memory ended processes left (1 segments)' && ! echo \"\$out\" | grep -q 'ipcrm -m'"
 rm -rf "$shm"
 
+export OSCAIRN_BOOT_DIR="$bundle/bootdir" OSCAIRN_BOOT_RUN="$bundle/bootrun"
+mkdir -p "$OSCAIRN_BOOT_RUN"
 boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
+roland='go.sh runs /home/root/mi078'
 boot 0
-check "boot, MENU held: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
+check "boot, MENU held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
+check "boot logs to its folder outside the bundle" "grep -q 'MENU is held' '$OSCAIRN_BOOT_DIR/boot.log'"
 boot 2
-check "boot, MENU unreadable: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU cannot be read' && echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+check "boot, MENU unreadable: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'MENU cannot be read' && echo \"\$out\" | grep -q '$roland'"
 boot 1
-check "boot, MENU up: Oscairn, cold" "[ $status = 0 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && ! echo \"\$out\" | grep -q mi078"
-mkdir -p "$bundle/var/oscairn" && : > "$bundle/var/oscairn/stock-next-boot"
+check "boot, MENU up: Oscairn, cold (dry: Roland's application after)" "[ $status = 3 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && echo \"\$out\" | grep -q 'a dry run'"
+: > "$OSCAIRN_BOOT_DIR/stock-next-boot"
 boot 1
-check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$bundle/var/oscairn/stock-next-boot' ]"
-rm -f "$bundle/var/oscairn/stock-next-boot"
+check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$OSCAIRN_BOOT_DIR/stock-next-boot' ]"
+rm -f "$OSCAIRN_BOOT_DIR/stock-next-boot"
 sh -c 'exec 3< "$1"; exec sleep 30' sh "$OSCAIRN_PANEL_DEVICE" &
 holder=$!
 sleep 0.3
 mkdir -p "$bundle/proc/$!/fd"
 ln -s "$OSCAIRN_PANEL_DEVICE" "$bundle/proc/$!/fd/3"
 boot 0
-check "boot never starts Roland's application while the panel is held (from the fake proc)" "[ $status = 1 ] && echo \"\$out\" | grep -q 'still holds' && ! echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+check "boot never leaves Roland's application to go.sh while the panel is held (exit 0)" "[ $status = 0 ] && echo \"\$out\" | grep -q 'still holds' && ! echo \"\$out\" | grep -q '$roland'"
 rm -rf "$bundle/proc"
 kill $holder
 sleep 0.3
 boot 0
-check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'still holds'"
+check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 3 ] && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'still holds'"
+
+# The decision for real (not --dry-run) in a stand-in bundle whose start and stop only log, and
+# go.sh's line around it.
+fb=$bundle/fakeboot
+mkdir -p "$fb/b" "$fb/run" "$fb/dir" "$fb/proc"
+cp "$scripts/oscairn-fantom-boot" "$fb/b/"
+printf '#!/bin/sh\necho start "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/hang" ] || exec sleep 30\n[ ! -e "$(dirname "$0")/fails" ] || exit 1\n' > "$fb/b/oscairn-fantom-start"
+printf '#!/bin/sh\necho stop "$@" >> "$(dirname "$0")/ran"\n' > "$fb/b/oscairn-fantom-stop"
+chmod +x "$fb/b"/*
+real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
+fresh() { rm -f "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/hang"; }
+fresh; : > "$fb/b/fails"; real
+check "real: a failed start falls back (stop --panel) to Roland's application, attempt cleared" "[ $status = 3 ] && grep -q 'stop --panel' '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ]"
+real
+check "real: a second run in the same boot is Roland's application, nothing started" "[ $status = 3 ] && echo \"\$out\" | grep -q 'already ran this boot' && [ ! -e '$fb/b/ran' ]"
+fresh; : > "$fb/b/hang"; real
+check "real: a start that hangs is ended after its time, then the fallback" "[ $status = 3 ] && echo \"\$out\" | grep -q 'ran out of its 1 seconds' && grep -q 'stop --panel' '$fb/b/ran'"
+fresh; : > "$fb/dir/attempt"; real
+check "real: an attempt left by the last power-on gives this one to Roland's application and is removed" "[ $status = 3 ] && echo \"\$out\" | grep -q 'did not finish' && [ ! -e '$fb/dir/attempt' ] && [ ! -e '$fb/b/ran' ]"
+fresh; : > "$fb/dir/dry-run"; real
+check "real: the dry-run file logs the decision and starts nothing" "[ $status = 3 ] && grep -q 'a dry run' '$fb/dir/boot.log' && ! grep -q 'start --cold\$' '$fb/b/ran' && [ ! -e '$fb/run/oscairn-boot-started' ]"
+rm -f "$fb/dir/dry-run"
+fresh; real 0
+check "real: MENU held, nothing started" "[ $status = 3 ] && [ ! -e '$fb/b/ran' ]"
+gosh() { sh -c '[ -x "$1" ] && "$1" && [ -e "$2/oscairn-boot-started" ] && exit 0; echo mi078' sh "$1" "$fb/run" 2>/dev/null; }
+fresh; : > "$fb/b/fails"
+check "go.sh: a failed start runs mi078" "[ \"\$(OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$fb/proc' OSCAIRN_BOOT_DIR='$fb/dir' OSCAIRN_BOOT_RUN='$fb/run' gosh '$fb/b/oscairn-fantom-boot' | tail -n 1)\" = mi078 ]"
+check "go.sh: no bundle runs mi078" "[ \"\$(gosh '$fb/none/oscairn-fantom-boot')\" = mi078 ]"
+printf '#!/bin/sh\nexit 0\n' > "$fb/zero"; chmod +x "$fb/zero"; fresh
+check "go.sh: exit 0 without having started Oscairn runs mi078" "[ \"\$(gosh '$fb/zero')\" = mi078 ]"
+: > "$fb/run/oscairn-boot-started"
+check "go.sh: exit 0 once Oscairn ran starts nothing" "[ -z \"\$(gosh '$fb/zero')\" ]"
 
 # Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
 fake=$bundle/fakeproc
@@ -241,7 +277,7 @@ supervise
 sleep 0.5
 check "the engine running: boot stays" "kill -0 $watcher && grep -q 'Oscairn runs; staying in the foreground' '$bundle/watch.out'"
 gone 4242
-check "the engine ended without oscairn-fantom-stop: the fallback, then Roland's application" "until_done $watcher && grep -q 'ended without oscairn-fantom-stop' '$bundle/watch.out' && grep -q 'would run: $bundle/oscairn-fantom-stop --panel' '$bundle/watch.out' && grep -q 'would run: /home/root/mi078' '$bundle/watch.out'"
+check "the engine ended without oscairn-fantom-stop: the fallback, then Roland's application" "until_done $watcher && grep -q 'ended without oscairn-fantom-stop' '$bundle/watch.out' && grep -q 'would run: $bundle/oscairn-fantom-stop --panel' '$bundle/watch.out' && grep -q '$roland' '$bundle/watch.out'"
 running Oscairn 4240
 supervise
 sleep 0.5

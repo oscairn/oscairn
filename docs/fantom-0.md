@@ -1056,14 +1056,20 @@ to take that last line's place, after everything before it has run:
 
 1. **Roland's app when asked for:** MENU held at power-on (read with `oscairn-key-held`, which
    asks `gpio-keys` for key 139's state once, read-only; WRITE held at power-on is the
-   bootloader's update mode, so MENU is the choice key), or the file
-   `var/oscairn/stock-next-boot` in the bundle (removed as it is honored: one boot of Roland's
-   app), or MENU that cannot be read. It then starts Roland's app as `go.sh` does.
-2. **Otherwise Oscairn:** `oscairn-fantom-start --cold`, which starts the app on the display
-   and, through it, the engine.
-3. **The fallback:** if that fails, the engine not answering `session.status` within 20 seconds
-   among the failures, it runs `oscairn-fantom-stop --panel` and starts Roland's app, logging
-   why. It never starts Roland's app while a process still holds `/dev/i2c-slave-2`.
+   bootloader's update mode, so MENU is the choice key), or MENU that cannot be read within 10
+   seconds, or one of these: the script already ran this boot (`/run/oscairn-boot-tried`); the
+   file `stock-next-boot` in the boot folder `/home/root/oscairn-boot` (removed as it is
+   honored: one boot of Roland's app); the file `attempt` there, left by a start that never
+   finished (a start that crashed or hung the unit: the next power-on is Roland's, the one after
+   Oscairn's again); the file `dry-run` there (the decision is logged to `boot.log` there and
+   nothing started); a file that cannot be written. It then exits 3, and `go.sh` runs Roland's
+   app.
+2. **Otherwise Oscairn:** `oscairn-fantom-start --cold`, given 120 seconds, which starts the app
+   on the display and, through it, the engine.
+3. **The fallback:** if that fails or runs out of time, the engine not answering
+   `session.status` within 20 seconds among the failures, it runs `oscairn-fantom-stop --panel`
+   and exits 3 for Roland's app, logging why. It never does while a process still holds
+   `/dev/i2c-slave-2`: it exits 0 then, and `go.sh` starts nothing.
 4. **It stays while Oscairn runs.** `go.sh` is the main process of `weston-term.service`
    (`ExecStart=/home/root/go.sh`, `After=weston.service`). If the boot script returned, `go.sh`
    would end, and systemd, with a unit's default settings (`KillMode=control-group`), would stop
@@ -1079,15 +1085,11 @@ to take that last line's place, after everything before it has run:
    was chosen over `systemd-run --scope`, which would move Oscairn into a scope of its own but
    needs systemd's bus and more of systemd than `go.sh` uses; the loop needs nothing.
 
-The unit's real settings were not read: before changing `go.sh`, read them with
-
-```sh
-systemctl show weston-term -p Type -p KillMode -p RemainAfterExit
-```
-
-`Type=simple` (or none, which is simple), `KillMode=control-group` and `RemainAfterExit=no` are
-the defaults the paragraph above assumes; `KillMode=process` or `none` would leave Oscairn
-running when `go.sh` ends, which the loop does not mind either way.
+The unit's settings, read on November 23: `weston-term.service` has `User=root`,
+`Type=simple`, `KillMode=control-group`, `RemainAfterExit=no` and `Restart=no`: `go.sh` runs
+once per boot and is never run again when it ends, so no restart loop. The SSH service is not
+tied to it (`oscairn-ssh@eth1.service`, started by a udev rule when the USB network interface
+appears).
 
 The fallback is best effort: started again after it had run earlier in the same boot, Roland's
 app showed "program version error", and whether it starts cleanly after Oscairn has used the
@@ -1095,19 +1097,24 @@ link first (Local Switch among it) is not tried. The sure way back is holding ME
 power-on. `oscairn-key-held` itself has not run on the unit (its bit lookup is tested); it
 answers 2, and so Roland's app, when it cannot read MENU.
 
-The change the owner would make by hand, when he decides to: in `/home/root/go.sh`, replace the
-last line, `/home/root/mi078` (with its environment), by
+The change the owner would make, when he decides to: `/home/root/oscairn-current`, a link to
+the bundle in use (replaced by a link, never a hash in `go.sh`), and in `/home/root/go.sh`, in
+its last branch, after its three `export` lines, one line before `/home/root/mi078`:
 
 ```sh
-XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 /home/root/oscairn/oscairn-fantom-boot
+[ -x /home/root/oscairn-current/oscairn-fantom-boot ] && /home/root/oscairn-current/oscairn-fantom-boot && [ -e /run/oscairn-boot-started ] && exit 0
 ```
 
-(the bundle's folder as unpacked). To undo it, put the line back; Roland's update procedure also
-reinstalls `go.sh`. `./oscairn-fantom-boot --dry-run` reads MENU (mounting the chroot to run
-`oscairn-key-held`) and the one-shot file, and prints what it would do. `--supervise` is step 4
-alone, for an Oscairn already running. `devices-fantom-start` checks each path off the unit,
-dry, the waiting on a stand-in `/proc`: staying while the engine runs, the fallback when it ends
-unasked, waiting on the holder after a stop on purpose, and returning once the holder is gone.
+Roland's app runs unless the boot script ends with 0 after having started Oscairn this boot: a
+missing link, a broken script and every exit but that one go on to `/home/root/mi078`. To undo
+it, put back `go.sh.stock`; Roland's update procedure also reinstalls `go.sh`.
+`./oscairn-fantom-boot --dry-run` reads MENU (mounting the chroot to run `oscairn-key-held`)
+and the files, and prints what it would do. `--supervise` is step 4 alone, for an Oscairn
+already running. `devices-fantom-start` checks each path off the unit, dry, the waiting on a
+stand-in `/proc`: staying while the engine runs, the fallback when it ends unasked, waiting on
+the holder after a stop on purpose, and returning once the holder is gone; and, not dry, in a
+stand-in bundle, a failed and a hung start, the second run in a boot, the attempt left, the
+dry-run file, and `go.sh`'s line around them.
 None of it has run under systemd.
 
 ## The panel reader

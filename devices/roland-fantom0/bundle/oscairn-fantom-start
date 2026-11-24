@@ -141,7 +141,9 @@ run "$root/start-chroot.sh" true || fail "start-chroot.sh failed"
 # 3. Roland's application.
 if [ -n "$cold" ]; then
 	[ -z "$(named mi078)" ] || fail "--cold, but Roland's application (mi078) runs"
-elif command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
+# Only with mi078 running: after a power-on into Oscairn, weston-term is oscairn-fantom-boot,
+# and stopping it would kill the panel holder in its control group.
+elif [ -n "$(named mi078)" ] && command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
 	say "stopping Roland's application (systemctl stop weston-term)"
 	run systemctl stop weston-term || fail "systemctl stop weston-term failed"
 elif [ -n "$(named mi078)" ]; then

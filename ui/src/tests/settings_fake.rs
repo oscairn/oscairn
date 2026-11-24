@@ -332,7 +332,7 @@ impl Settings {
     }
 
     fn job_json(&self, id: u64, state: &str, error: &str, root: &str, claimed: &str) -> Value {
-        json!({"job": id, "state": state, "error": error, "repository": "", "name": "", "claimedName": claimed, "rootKey": root, "serial": 0, "packages": [], "package": "", "version": "", "installed": {"added": 0, "skipped": 0, "notes": [], "code": []}})
+        json!({"job": id, "state": state, "error": error, "repository": "", "name": "", "claimedName": claimed, "rootKey": root, "serial": 0, "packages": [], "package": "", "version": "", "installed": {"added": 0, "skipped": 0, "notes": [], "code": [], "dependencies": []}})
     }
 
     /// The repositories' requests (json_rpc.cpp:1036-1122), the errors as the real engine words them.
@@ -415,6 +415,10 @@ impl Settings {
                     Some(Reads::Fails(why)) => self.job_json(id, "failed", &why, "", ""),
                     None => self.job_json(id, "failed", &format!("not a usable repository: cannot fetch repository.json: cannot reach {source}/repository.json: Could not connect to the server."), "", ""),
                 };
+                // This device's name for the repository at `source`, empty when it knows none.
+                if let Some(r) = self.repos.iter().find(|r| r.address == source) {
+                    answer["name"] = json!(r.name);
+                }
                 if answer["state"] == "done" {
                     if let Some((_, pkgs)) = self.offers.iter().find(|s| s.0 == source) {
                         answer["packages"] = json!(pkgs);

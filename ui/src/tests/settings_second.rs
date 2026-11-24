@@ -728,3 +728,49 @@ fn refresh_reads_the_lists_again() {
     assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.list").count(), 2, "both repositories are listed again");
     assert_eq!(labels(r.ui()), ["Alpha Plugin", "Beta Pack", "Delta Pack", "Epsilon Pack", "Gamma Library"], "the list is the same after a refresh");
 }
+
+// The version shown is the one the engine would install, as the Catalog picks it: the newest stable one this device
+// can install, never a beta, a yanked, an incompatible or a withdrawn one; a package with none is faint and the panel
+// says why. The kind is what is installed says, else what the version holds: a library holding plugins is a library.
+#[test]
+fn the_available_version_is_the_one_the_engine_would_install() {
+    let version = |v: &str, channel: &str, yanked: &str, incompatible: &str, withdrawn: Value, types: Value| {
+        json!({"version": v, "channel": channel, "yanked": yanked, "incompatible": incompatible, "sha256": "", "size": 10, "installed": 0, "types": types, "dependencies": [], "withdrawn": withdrawn, "exports": []})
+    };
+    let package = |id: &str, name: &str, versions: Vec<Value>| json!({"id": id, "name": name, "summary": "", "license": "", "publisher": "", "publisherKey": "", "tags": [], "versions": versions});
+    let clap = json!({"clap": 1});
+    let mut e = Fake::new();
+    e.sources = vec![("https://packages.oscairn.org".into(), Reads::Done("Oscairn".into(), "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into()))];
+    e.offers = vec![(
+        "https://packages.oscairn.org".into(),
+        vec![
+            package("org.many", "Many Versions", vec![
+                version("2.0.0", "stable", "", "", Value::Null, clap.clone()),
+                version("3.0.0", "beta", "", "", Value::Null, clap.clone()),
+                version("2.5.0", "stable", "it crashes", "", Value::Null, clap.clone()),
+                version("4.0.0", "stable", "", "it needs a system update: Oscairn 9 or later", Value::Null, clap.clone()),
+                version("5.0.0", "stable", "", "", json!({"repository": "Oscairn", "reason": "a key was stolen", "date": "2026-11-01"}), clap.clone()),
+            ]),
+            package("org.none", "None Here", vec![version("1.0.0", "stable", "", "it has no build for this device (linux-arm64)", Value::Null, clap.clone())]),
+            package("org.songs", "Songs With Synths", vec![version("1.0.0", "stable", "", "", Value::Null, json!({"oscairn.performance": 4, "clap": 1}))]),
+            package("org.mine", "Mine Installed", vec![version("1.0.0", "stable", "", "", Value::Null, clap.clone())]),
+        ],
+    )];
+    e.installed_packages = vec![package_installed("org.mine", "Mine Installed", "1.0.0", "library")];
+    let mut r = Rig::new("available-versions", None, e);
+    r.page(Id::Available);
+    r.later_all();
+    assert_eq!(value_of(r.ui(), "Many Versions"), "Plugin 2.0.0", "the newest stable version this device can install");
+    assert_eq!(value_of(r.ui(), "Songs With Synths"), "Library 1.0.0", "a package holding more than plugins installs as a library");
+    assert_eq!(value_of(r.ui(), "Mine Installed"), "Library 1.0.0  ·  Installed", "what is installed says its kind");
+    let off: Vec<bool> = rows(r.ui()).iter().map(|x| x.off).collect();
+    assert_eq!(off, [false, false, true, false], "only the package with no version for this device is faint: {:?}", labels(r.ui()));
+    for _ in 0..3 {
+        r.act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(info(r.ui()).iter().any(|l| l.contains("no build for this device")), "the panel says why: {:?}", info(r.ui()));
+}
+
+fn package_installed(id: &str, name: &str, version: &str, kind: &str) -> Value {
+    package(id, name, version, kind, "https://packages.oscairn.org", &[])
+}

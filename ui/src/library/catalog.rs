@@ -279,7 +279,7 @@ pub fn offers(listings: &[(String, Listing)], installed: &BTreeMap<String, Insta
 const SEPARATOR: &str = "  ·  ";
 
 /// Why a version cannot be installed here: this device, or a revocation list withdrawing it.
-fn why_not(v: &Version) -> String {
+pub fn why_not(v: &Version) -> String {
     if !v.incompatible.is_empty() {
         return v.incompatible.clone();
     }

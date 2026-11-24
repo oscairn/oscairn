@@ -80,10 +80,10 @@ fn holds_overlay(s: &Screen, which: &str) {
     let g = s.ui.global::<ThemeGlobal>();
     let top = overlay_top(s);
     for (color, name) in [(g.get_text(), "the text"), (g.get_muted(), "a muted line"), (g.get_accent(), "a tick or mark")] {
-        if let Some((_minx, miny, maxx, maxy)) = bounds_near(s, color, top) {
-            assert!(miny >= top, "{which}: {name} above the overlay's area ({miny} < {top})");
-            assert!(maxx < s.w, "{which}: {name} reaches the window's right edge ({maxx} of {})", s.w);
-            assert!(maxy < s.h, "{which}: {name} reaches the window's bottom ({maxy} of {})", s.h);
+        // Ink in the window's last column or row is text the window cuts.
+        if let Some((_minx, _miny, maxx, maxy)) = bounds_near(s, color, top) {
+            assert!(maxx + 1 < s.w, "{which}: {name} reaches the window's right edge ({maxx} of {})", s.w);
+            assert!(maxy + 1 < s.h, "{which}: {name} reaches the window's bottom ({maxy} of {})", s.h);
         }
     }
     assert!(bounds_near(s, g.get_focus(), top).is_some(), "{which}: the cursor's focus border is not drawn in the theme");

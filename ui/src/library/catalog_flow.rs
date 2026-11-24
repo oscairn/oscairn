@@ -417,10 +417,7 @@ impl Screen {
     /// `packages.install`: a job in the engine, asked about every 100 ms until it ends.
     pub(super) fn install_package(&mut self, ctx: Ctx) {
         self.say(format!("Installing {} {}...", ctx.id, ctx.version));
-        let mut params = json!({"source": ctx.source, "id": ctx.id, "acceptUnsignedCode": ctx.accept, "replace": ctx.replace});
-        if !ctx.version.is_empty() {
-            params["version"] = json!(ctx.version);
-        }
+        let params = install_params(&ctx);
         self.push(Request::Pkg(Req::Install(ctx)), "packages.install", params);
     }
 
@@ -432,31 +429,22 @@ impl Screen {
                 return false;
             }
         };
-        if state["state"] == "running" {
-            self.push_after(Duration::from_millis(100), Request::Pkg(Req::InstallPoll(ctx, job)), "packages.job", json!({"job": job}));
-            return false;
+        match install_ended(&state, &ctx) {
+            Ended::Running => self.push_after(Duration::from_millis(100), Request::Pkg(Req::InstallPoll(ctx, job)), "packages.job", json!({"job": job})),
+            Ended::Code(q) => {
+                self.say("");
+                self.notice = Some((q.title.clone(), q.message.clone(), q.buttons.clone()));
+                self.notice_for = Some(NoticeFor::Code(ctx, q));
+            }
+            Ended::Failed(error) => {
+                self.say("");
+                self.alert("Not installed", &error);
+            }
+            Ended::Done(said) => {
+                self.say(said);
+                self.refresh_after_job(); // its items, listed again
+            }
         }
-        let error = state["error"].as_str().unwrap_or_default().to_string();
-        if state["state"] == "failed" && error.contains("unknown source") {
-            // Code this device does not trust asks first, as installing an archive does.
-            let code: Vec<Signer> = state["installed"]["code"].as_array().into_iter().flatten().map(Signer::from_json).collect();
-            let q = code_question(&code, state["name"].as_str().unwrap_or_default(), &ctx.publisher, &ctx.publisher_key);
-            self.say("");
-            self.notice = Some((q.title.clone(), q.message.clone(), q.buttons.clone()));
-            self.notice_for = Some(NoticeFor::Code(ctx, Box::new(q)));
-            return false;
-        }
-        if state["state"] == "failed" {
-            self.say("");
-            self.alert("Not installed", &error);
-            return false;
-        }
-        let mut said = format!("{} {} installed.", state["package"].as_str().unwrap_or_default(), state["version"].as_str().unwrap_or_default());
-        for n in state["installed"]["notes"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-            said += &format!(" {n}.");
-        }
-        self.say(said);
-        self.refresh_after_job(); // its items, listed again
         false
     }
 
@@ -479,14 +467,8 @@ impl Screen {
             return self.say(e.message);
         }
         self.trusting_left = keys.len();
-        for (public, id) in keys {
-            // For plugins, beside whatever else the key is trusted for; by the publisher's name only where the repository vouches for it.
-            let (mut name, mut scope) = (if id == ctx.publisher_key && !ctx.publisher.is_empty() { ctx.publisher.clone() } else { format!("Key {id}") }, vec!["plugins".to_string()]);
-            if let Some(h) = had.iter().find(|h| h["key"] == public) {
-                name = h["name"].as_str().unwrap_or_default().to_string();
-                scope = h["scope"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).chain(std::iter::once("plugins".to_string())).collect();
-            }
-            self.push(Request::Pkg(Req::TrustSet(ctx.clone())), "trust.set", json!({"key": public, "name": name, "scope": scope, "revoked": false}));
+        for params in trust_params(&ctx, &keys, &had) {
+            self.push(Request::Pkg(Req::TrustSet(ctx.clone())), "trust.set", params);
         }
     }
 
@@ -500,6 +482,67 @@ impl Screen {
             self.install_package(Ctx { accept: false, ..ctx });
         }
     }
+}
+
+// The install itself, the one way both the Catalog here and the Settings app's Available page (settings_available.rs)
+// install a package from a repository: the request, what its job comes to, and the keys trusted when the user says so.
+
+/// `packages.install`'s params for an install.
+pub fn install_params(ctx: &Ctx) -> Value {
+    let mut params = json!({"source": ctx.source, "id": ctx.id, "acceptUnsignedCode": ctx.accept, "replace": ctx.replace});
+    if !ctx.version.is_empty() {
+        params["version"] = json!(ctx.version);
+    }
+    params
+}
+
+/// What an install's `packages.job` answer comes to.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Ended {
+    /// Ask again in 100 ms.
+    Running,
+    /// Refused for code this device does not trust: the question to ask (its answer goes to `trust_params` or an
+    /// install again with `accept`).
+    Code(Box<CodeQuestion>),
+    /// Failed: the engine's words.
+    Failed(String),
+    /// Done: "ID VERSION installed." and the notes.
+    Done(String),
+}
+
+pub fn install_ended(state: &Value, ctx: &Ctx) -> Ended {
+    if state["state"] == "running" {
+        return Ended::Running;
+    }
+    let error = state["error"].as_str().unwrap_or_default().to_string();
+    if state["state"] == "failed" && error.contains("unknown source") {
+        // Code this device does not trust asks first, as installing an archive does.
+        let code: Vec<Signer> = state["installed"]["code"].as_array().into_iter().flatten().map(Signer::from_json).collect();
+        return Ended::Code(Box::new(code_question(&code, state["name"].as_str().unwrap_or_default(), &ctx.publisher, &ctx.publisher_key)));
+    }
+    if state["state"] == "failed" {
+        return Ended::Failed(error);
+    }
+    let mut said = format!("{} {} installed.", state["package"].as_str().unwrap_or_default(), state["version"].as_str().unwrap_or_default());
+    for n in state["installed"]["notes"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        said += &format!(" {n}.");
+    }
+    Ended::Done(said)
+}
+
+/// `trust.set`'s params for each key a code question named, `had` being `trust.list`'s `keys`: for plugins, beside
+/// whatever else the key is trusted for; by the publisher's name only where the repository vouches for it.
+pub fn trust_params(ctx: &Ctx, keys: &[(String, String)], had: &[Value]) -> Vec<Value> {
+    keys.iter()
+        .map(|(public, id)| {
+            let (mut name, mut scope) = (if *id == ctx.publisher_key && !ctx.publisher.is_empty() { ctx.publisher.clone() } else { format!("Key {id}") }, vec!["plugins".to_string()]);
+            if let Some(h) = had.iter().find(|h| h["key"] == public.as_str()) {
+                name = h["name"].as_str().unwrap_or_default().to_string();
+                scope = h["scope"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).chain(std::iter::once("plugins".to_string())).collect();
+            }
+            json!({"key": public, "name": name, "scope": scope, "revoked": false})
+        })
+        .collect()
 }
 
 /// What a row of an opened package does.

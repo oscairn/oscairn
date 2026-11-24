@@ -805,7 +805,7 @@ fn an_update_is_installed_after_the_question_and_the_lists_read_again() {
     r.e.installs = vec![(
         "https://friend.example.org".into(), "org.beta".into(), "2.5.0".into(),
         json!({"added": 1, "skipped": 0, "notes": ["It installed the samples it needs first"], "code": [], "dependencies": [{"id": "org.deps", "version": "1.0.0"}]}),
-        json!({"id": "org.beta", "version": "2.5.0", "kind": "asset", "repository": "https://friend.example.org", "name": "Beta Pack"}),
+        package("org.beta", "Beta Pack", "2.5.0", "asset", "https://friend.example.org", &[]),
     )];
     r.act(Action::Move { pane: None, by: 1 });
     r.act(Action::Move { pane: None, by: 1 }); // Beta Pack, offered by A Friend's
@@ -885,4 +885,47 @@ fn an_install_a_job_already_runs_for_says_busy() {
     assert!(r.danger_lines().join(" ").contains("a package job is running; wait for it to finish"), "{:?}", r.danger_lines());
     assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows come back");
     assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.repositories").count(), 0, "a busy refusal is not a re-read");
+}
+
+// Plugin code this device does not trust: the install asks as the Library's Catalog asks (catalog_flow.rs
+// `install_ended`, the same question), and "Trust and install" trusts the publisher's key for plugins beside what it
+// is trusted for (trust.list, then trust.set) and installs again; nothing is trusted or installed before the answer.
+#[test]
+fn untrusted_plugin_code_asks_and_trusting_installs() {
+    const PUBLIC: &str = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
+    let mut r = available();
+    let signer = json!({"kind": "clap", "name": "Fuzz", "version": "1.0", "platform": "macos-arm64", "status": "unknown", "key": "1234abcd5678ef90", "keyName": "", "publicKey": PUBLIC});
+    r.e.install_code = vec![("org.delta".into(), json!([signer]))];
+    r.e.installs = vec![(
+        "https://packages.oscairn.org".into(), "org.delta".into(), "3.0.0".into(),
+        json!({"added": 1, "skipped": 0, "notes": [], "code": [], "dependencies": []}),
+        json!({"id": "org.delta", "version": "3.0.0", "kind": "asset", "repository": "https://packages.oscairn.org", "sha256": "", "signers": [], "otherBuild": false, "withdrawn": null, "dependency": false, "name": "Delta Pack"}),
+    )];
+    // The listing names the publisher and its key, as the index does.
+    for (_, pkgs) in r.e.offers.iter_mut() {
+        for p in pkgs.iter_mut().filter(|p| p["id"] == "org.delta") {
+            p["publisher"] = json!("Delta Audio");
+            p["publisherKey"] = json!("1234abcd5678ef90");
+        }
+    }
+    r.tool("Refresh");
+    r.later_all();
+    for _ in 0..3 {
+        r.act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(info(r.ui()).contains(&"Delta Pack".to_string()), "Delta Pack, not installed: {:?}", info(r.ui()));
+    r.tool("Install");
+    r.answer_notice("Install");
+    r.e.calls.clear();
+    r.later_all();
+    let (title, _, choices) = r.notice.clone().expect("the code question");
+    assert_eq!(title, "Trust Delta Audio to install plugins?");
+    assert_eq!(choices, ["Trust and install".to_string(), "Cancel".to_string()]);
+    assert!(r.e.called("trust.set").is_empty() && r.e.called("packages.install").is_empty(), "nothing before the answer: {:?}", r.e.methods());
+    r.answer_notice("Trust and install");
+    r.later_all();
+    assert_eq!(r.e.called("trust.set"), [json!({"key": PUBLIC, "name": "Delta Audio", "scope": ["plugins"], "revoked": false})], "the publisher's key, for plugins");
+    assert_eq!(r.e.called("packages.install"), [json!({"source": "https://packages.oscairn.org", "id": "org.delta", "version": "3.0.0", "acceptUnsignedCode": false, "replace": false})], "installed again, not accepting unsigned code");
+    assert!(r.said().contains("org.delta 3.0.0 installed."), "{:?}", r.said());
+    assert_eq!(value_of(r.ui(), "Delta Pack"), "Samples 3.0.0  ·  Installed");
 }

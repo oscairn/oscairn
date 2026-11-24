@@ -89,7 +89,7 @@ enum JobKind {
     /// A listing of `source`.
     List { source: String, polls: u32 },
     /// An install of `id@version`: what its done job answers, and the `packages.installed` record added on success.
-    Install { id: String, version: String, polls: u32, installed: Value, record: Value },
+    Install { source: String, id: String, version: String, accept: bool, polls: u32, installed: Value, record: Value },
 }
 
 pub struct Settings {
@@ -123,6 +123,12 @@ pub struct Settings {
     pub installs: Vec<(String, String, String, Value, Value)>,
     /// A `packages.install` refused at once because another package job runs (reason `busy`).
     pub install_busy: bool,
+    /// The plugin code a package's install brings, by id: `installed.code`'s signers (`{kind,name,version,platform,
+    /// status,key,keyName,publicKey}`). One `unsigned`, or `unknown` with a key not trusted for plugins, refuses the
+    /// install unless `acceptUnsignedCode` (performance.cpp `CodeRefused`).
+    pub install_code: Vec<(String, Value)>,
+    /// The trust store's keys beside the root keys (`trust.list`'s `{id,key,name,scope,revoked}`).
+    pub trust: Vec<Value>,
     pub release: String,
     /// The next this many requests that are not session ones are refused as busy.
     pub busy: u32,
@@ -169,6 +175,8 @@ impl Settings {
             jobs: vec![],
             installs: vec![],
             install_busy: false,
+            install_code: vec![],
+            trust: vec![],
             release: "0.1.0-alpha.1".into(),
             busy: 0,
             calls: vec![],
@@ -425,7 +433,8 @@ impl Settings {
                 }
                 let (installed, record) = self.installs.iter().find(|(a, i, v, _, _)| a == &source && i == &id && (version.is_empty() || v == &version)).map(|x| (x.3.clone(), x.4.clone())).unwrap_or_default();
                 let job = self.jobs.len() as u64 + 1;
-                self.jobs.push((job, JobKind::Install { id, version, polls: 0, installed, record }));
+                let accept = p["acceptUnsignedCode"] == true;
+                self.jobs.push((job, JobKind::Install { source, id, version, accept, polls: 0, installed, record }));
                 Ok(json!({"job": job}))
             }
             "packages.job" => {
@@ -466,16 +475,25 @@ impl Settings {
                         }
                         Ok(answer)
                     }
-                    JobKind::Install { id: pid, version, polls, installed, record, .. } => {
+                    JobKind::Install { source, id: pid, version, accept, polls, installed, record } => {
                         if *polls != u32::MAX && *polls < limit {
                             *polls += 1;
                             return Ok(self.job_json(id, "running", "", "", ""));
                         }
                         *polls = u32::MAX;
                         // Asking about it once it has unpacked moves it into place (docs).
-                        let (pid, version, installed, record) = (pid.clone(), version.clone(), installed.clone(), record.clone());
+                        let (source, pid, version, accept, installed, record) = (source.clone(), pid.clone(), version.clone(), *accept, installed.clone(), record.clone());
                         let mut answer = self.job_json(id, "done", "", "", "");
-                        if installed.is_null() {
+                        answer["name"] = json!(self.repos.iter().find(|r| r.address == source).map(|r| r.name.clone()).unwrap_or_default());
+                        let code = self.install_code.iter().find(|c| c.0 == pid).map(|c| c.1.clone()).unwrap_or(json!([]));
+                        let for_plugins = |k: &Value| self.trust.iter().any(|t| t["key"] == *k && t["scope"].as_array().is_some_and(|s| s.iter().any(|x| x == "plugins")));
+                        let blocked = code.as_array().is_some_and(|c| c.iter().any(|s| s["status"] == "unsigned" || (s["status"] == "unknown" && !for_plugins(&s["publicKey"]))));
+                        if blocked && !accept {
+                            // Refused before anything is installed, its signers listed to ask about (json_rpc.cpp `installed.code`).
+                            answer["state"] = "failed".into();
+                            answer["error"] = json!("it runs code from an unknown source: Fuzz 1.0; install it accepting unsigned code to go ahead");
+                            answer["installed"]["code"] = code;
+                        } else if installed.is_null() {
                             answer["state"] = "failed".into();
                             answer["error"] = "the package needs an asset library this repository does not offer".into();
                         } else {
@@ -568,6 +586,20 @@ impl Settings {
             }
             m if m.starts_with("keys.") => self.keys(m, p),
             m if m.starts_with("packages.") => self.packages(m, p),
+            // The trust store (json_rpc.cpp `trust.list`, `trust.set`): the root keys for repositories, and the rest.
+            "trust.list" => {
+                self.fields(p, &[])?;
+                let mut keys: Vec<Value> = self.trusted.iter().filter(|k| !self.trust.iter().any(|t| t["key"] == k.as_str())).map(|k| json!({"id": key_id(k), "key": k, "name": "", "scope": ["repositories"], "revoked": false})).collect();
+                keys.extend(self.trust.iter().cloned());
+                Ok(json!({"keys": keys}))
+            }
+            "trust.set" => {
+                self.fields(p, &["key", "name", "scope", "revoked"])?;
+                let key = p["key"].as_str().unwrap_or_default().to_string();
+                self.trust.retain(|t| t["key"] != key.as_str());
+                self.trust.push(json!({"id": key_id(&key), "key": key, "name": p["name"], "scope": p["scope"], "revoked": p["revoked"] == true}));
+                Ok(json!({"accepted": true}))
+            }
             "library.libraries" => {
                 self.fields(p, &[])?;
                 let list: Vec<Value> = self.libraries.iter().map(|(id, name, items)| json!({"id": id, "name": name, "items": items})).collect();

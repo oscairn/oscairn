@@ -53,7 +53,7 @@
 # what it would do, changing nothing but the log. --supervise is step 4 alone, for an Oscairn
 # already started (and for tests: with --dry-run, the fallback is printed and not taken).
 set -u
-root=$(cd "$(dirname "$0")" && pwd)
+root=$(cd -P "$(dirname "$0")" && pwd -P) # the real folder: /proc/mounts names it so, never the oscairn-current link
 dry="" supervise=""
 for a in "$@"; do
 	case "$a" in

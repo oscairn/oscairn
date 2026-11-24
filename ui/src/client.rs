@@ -365,4 +365,36 @@ pub mod tests {
         while rx.recv_timeout(WAIT).unwrap() != "connected" {}
         let _ = std::fs::remove_file(&path);
     }
+
+    // The long requests that open a Performance, and only those, are loads: exact names, no empty
+    // or near-miss method.
+    #[test]
+    fn is_load_recognizes_each_load_and_no_other_name() {
+        for m in ["library.load", "performance.load", "performance.prepare", "performance.reopen"] {
+            assert!(is_load(m), "{m} is a load");
+        }
+        for m in ["", "perf", "performance.", "performance.prepares", "library.Load", "library.load ", "audition", "scenes.select", "packages.install", "library.save"] {
+            assert!(!is_load(m), "{m:?} is not a load");
+        }
+    }
+
+    // A busy answer's message is the player's words for a load, the engine's own otherwise.
+    #[test]
+    fn busy_message_tells_the_player_for_a_load_else_the_engine() {
+        assert_eq!(busy_message("library.load"), "Still opening a Performance. Try again in a moment.");
+        assert_eq!(busy_message("performance.reopen"), "Still opening a Performance. Try again in a moment.");
+        assert_eq!(busy_message(""), "The engine is busy. Try again in a moment.");
+        assert_eq!(busy_message("scenes.select"), "The engine is busy. Try again in a moment.");
+    }
+
+    // A request refused as busy keeps its message exactly (a load's already the player's words, any
+    // other the engine's); any other error says the engine's reason, prefixed.
+    #[test]
+    fn refusal_in_each_kind_of_answer_keeps_its_own_words() {
+        let load = Error { code: BUSY, message: busy_message("library.load") };
+        assert_eq!(refusal(&load), "Still opening a Performance. Try again in a moment.", "a busy load names no method, says no \"refused\"");
+        let other = Error { code: BUSY, message: busy_message("scenes.select") };
+        assert_eq!(refusal(&other), "The engine is busy. Try again in a moment.", "a busy non-load keeps the engine's calm words");
+        assert_eq!(refusal(&Error { code: -32602, message: "no room".into() }), "The engine refused: no room");
+    }
 }

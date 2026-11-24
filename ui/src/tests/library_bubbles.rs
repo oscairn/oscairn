@@ -380,10 +380,13 @@ pub(super) fn one_library(name: &str, display: &str, count: usize) -> Shelf {
     s
 }
 
-/// `one_library` shown as bubbles.
+/// `one_library` shown as bubbles (the view outlives a Shelf, so a second press would show lines again).
 fn count_bubbles(name: &str, display: &str, count: usize) -> Shelf {
     let mut s = one_library(name, display, count);
-    press_view_button(&mut s);
+    if !s.ui().global::<LibraryState>().get_bubbles() {
+        press_view_button(&mut s);
+    }
+    assert!(s.ui().global::<LibraryState>().get_bubbles(), "the sidebar shows bubbles");
     s
 }
 

@@ -81,4 +81,78 @@ mod tests {
         assert_eq!(h.tap(2).unwrap().name, "Setlist");
         assert!(h.tap(9).is_none());
     }
+
+    #[test]
+    fn no_known_apps_offers_no_tiles() {
+        let mut h = Home::new(&["oscairn.unknown".into(), "com.nobody.nothing".into()], 3);
+        assert!(h.tiles.is_empty(), "a profile offering nothing known shows no tiles");
+        assert!(h.cursor.at.is_none(), "no cursor on an empty Home");
+        assert!(h.act(Action::Confirm(None)).is_none());
+        assert!(h.act(Action::Move { pane: None, by: 1 }).is_none() && h.cursor.at.is_none());
+        assert!(h.act(Action::Arrow { dx: 1, dy: 1 }).is_none() && h.cursor.at.is_none());
+        assert!(h.tap(0).is_none(), "a tap on nothing opens nothing");
+    }
+
+    #[test]
+    fn one_offered_app_is_the_only_tile() {
+        let mut h = Home::new(&["oscairn.performance".into()], 3);
+        assert_eq!(h.tiles.len(), 1);
+        assert!(h.act(Action::Confirm(None)).is_none(), "no cursor to confirm yet");
+        assert!(h.act(Action::Move { pane: None, by: 1 }).is_none(), "the first move shows the one tile");
+        assert_eq!(h.cursor.at, Some(0));
+        assert_eq!(h.act(Action::Confirm(None)).unwrap().id, "oscairn.performance");
+    }
+
+    #[test]
+    fn zero_columns_is_one_column() {
+        assert_eq!(Home::new(&[], 0).columns, 1, "columns are clamped to at least one");
+        let mut h = Home::new(&[], 3);
+        assert_eq!(h.cursor.at, None);
+        assert!(h.act(Action::Arrow { dx: 1, dy: 0 }).is_none(), "the first move shows the first tile");
+        assert_eq!(h.cursor.at, Some(0));
+    }
+
+    #[test]
+    fn arrows_stop_at_either_end() {
+        let mut h = Home::new(&[], 3);
+        assert!(h.act(Action::Arrow { dx: 0, dy: 1 }).is_none()); // shows the first tile
+        assert_eq!(h.cursor.at, Some(0));
+        assert!(h.act(Action::Arrow { dx: -4, dy: -9 }).is_none()); // far past the start
+        assert_eq!(h.cursor.at, Some(0), "an arrow never goes before the first tile");
+        assert!(h.act(Action::Arrow { dx: 30, dy: 30 }).is_none()); // far past the end
+        assert_eq!(h.cursor.at, Some(h.tiles.len() - 1), "an arrow never goes past the last tile");
+    }
+
+    #[test]
+    fn page_and_end_reach_the_ends() {
+        let mut h = Home::new(&[], 3);
+        assert!(h.act(Action::End(1)).is_none(), "the first move shows the first tile");
+        assert_eq!(h.cursor.at, Some(0));
+        assert!(h.act(Action::End(1)).is_none());
+        assert_eq!(h.cursor.at, Some(h.tiles.len() - 1), "End reaches the last app");
+        assert_eq!(h.act(Action::Confirm(None)).unwrap().name, "Settings");
+        assert!(h.act(Action::End(-1)).is_none());
+        assert_eq!(h.cursor.at, Some(0), "End back reaches the first app");
+        assert!(h.act(Action::End(-1)).is_none());
+        assert_eq!(h.cursor.at, Some(0), "End back on the first stays there");
+        assert!(h.act(Action::Page(1)).is_none());
+        assert_eq!(h.cursor.at, Some(h.tiles.len() - 1), "Page Down reaches the last app");
+    }
+
+    #[test]
+    fn a_tap_drops_a_live_cursor() {
+        let mut h = Home::new(&[], 3);
+        assert!(h.act(Action::Move { pane: None, by: 1 }).is_none());
+        assert!(h.act(Action::Arrow { dx: 2, dy: 0 }).is_none());
+        assert_eq!(h.cursor.at, Some(2));
+        assert_eq!(h.tap(2).unwrap().name, "Setlist");
+        assert!(h.cursor.at.is_none(), "a tap drops the cursor, as it does in the JUCE lists");
+    }
+
+    #[test]
+    fn taps_on_the_first_and_last_open_them() {
+        let mut h = Home::new(&[], 3);
+        assert_eq!(h.tap(0).unwrap().id, "oscairn.performance", "the first tile");
+        assert_eq!(h.tap(h.tiles.len() - 1).unwrap().id, "oscairn.settings", "the last tile");
+    }
 }

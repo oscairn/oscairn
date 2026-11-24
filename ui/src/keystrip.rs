@@ -166,4 +166,40 @@ mod tests {
         assert_eq!(range_text(0, 127), "All keys");
         assert_eq!(range_text(60, 72), "C4 – C5");
     }
+
+    #[test]
+    fn a_share_outside_the_strip_clamps_to_the_nearest_end() {
+        assert_eq!(key_at(-0.5), 0); // before the first key is C-1
+        assert_eq!(key_at(0.), 0);
+        assert_eq!(key_at(2.), 127); // past the last key is G9
+        assert_eq!(key_at(1.), 127);
+    }
+
+    #[test]
+    fn a_black_key_is_detected_by_pitch_class() {
+        assert!(!black(0) && !black(12) && !black(24)); // C
+        assert!(black(1) && black(13)); // C-sharp in any octave
+        assert!(!black(-1)); // one below C-1, outside the keyboard
+        assert!(!black(127)); // G9 is a white key
+    }
+
+    #[test]
+    fn the_end_keys_draw_flat() {
+        let k = keys();
+        assert_eq!((k[0].key, k[0].x, k[0].w, k[0].black), (0, 0., 1., false));
+        assert_eq!((k[127].key, k[127].x, k[127].w, k[127].black), (127, 74., 1., false));
+        // A black key sits 0.6 wide, centered on the line between its neighbors.
+        assert_eq!((k[1].key, k[1].x, k[1].w, k[1].black), (1, 0.7, 0.6, true));
+    }
+
+    #[test]
+    fn dragging_the_middle_to_the_low_end_stops_at_the_keyboard() {
+        let width = 750.; // ten pixels a white key
+        let (low, high) = (60, 72);
+        let a = left(low) * 10.;
+        let b = right(high) * 10.;
+        let mut d = Drag::begin(low, high, (a + b) / 2. / width, width);
+        let (l, h) = d.to(0.); // the finger goes to the far left
+        assert_eq!((l, h), (0, high - low)); // the range keeps its width, held at 0
+    }
 }

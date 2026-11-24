@@ -487,6 +487,11 @@ rust_ui() {
 	if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston.service; then
 		say "stopping Roland's display server (systemctl stop weston.service)"
 		systemctl stop weston.service || say "systemctl stop weston.service failed"
+		# Weston lets go of the screen only as its process ends: a frame drawn before that is lost,
+		# and the UI repaints only what changes (a cold start showed a blank screen). 5 s at most.
+		i=0
+		while [ -n "$(named weston)" ] && [ $i -lt 50 ]; do i=$((i + 1)); nap; done
+		[ -z "$(named weston)" ] || say "Weston still runs after 5 s; the UI starts anyway"
 	fi
 	touch_rule
 	( trap '' HUP; keep_ui ) < /dev/null >> "$state/log/ui-keeper.out" 2>&1 &

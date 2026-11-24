@@ -765,3 +765,99 @@ impl Screen {
         self.show();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The meters' scale is -60..+6 dB across the bar, in hundredths: silence (and anything quieter
+    // than -60 dB) sits at 0, 0 dB is 91 hundredths up, loud tops out and clamps at 1.
+    #[test]
+    fn meter_is_the_juce_scale_in_hundredths() {
+        assert_eq!(meter(1.), 0.91); // 0 dB, 60 of the 66 dB of travel
+        assert_eq!(meter(0.1), 0.61); // -20 dB
+        assert_eq!(meter(0.5), 0.82); // -6 dB
+        assert_eq!(meter(0.), 0.);
+        assert_eq!(meter(1e-6), 0.); // quieter than -60 dB
+        assert_eq!(meter(-5.), 0.);
+        assert_eq!(meter(2.), 1.); // +6 dB and louder
+    }
+
+    // A level's dB as the JUCE strip says it: one decimal, the word for minus infinity at nothing
+    // (and at any non-positive).
+    #[test]
+    fn db_is_one_decimal_and_silent_below_something() {
+        assert_eq!(db(1.), "0.0 dB");
+        assert_eq!(db(0.01), "-40.0 dB");
+        assert_eq!(db(100.), "40.0 dB");
+        assert_eq!(db(0.), "−∞ dB");
+        assert_eq!(db(-3.), "−∞ dB");
+    }
+
+    #[test]
+    fn thousandths_rounds_to_three_places() {
+        assert_eq!(thousandths(1.23456), 1.235);
+        assert_eq!(thousandths(-0.23456), -0.235);
+        assert_eq!(thousandths(0.5), 0.5);
+        assert_eq!(thousandths(0.0004), 0.);
+    }
+
+    // A send moves by a fortieth of the slider a click, held at the ends, nothing past them.
+    #[test]
+    fn stepped_moves_a_fortieth_a_click_and_holds_at_the_ends() {
+        assert_eq!(stepped(0., 1), 0.025);
+        assert_eq!(stepped(0.5, 1), 0.525);
+        assert_eq!(stepped(0.4, 0), 0.4);
+        assert_eq!(stepped(1., 100), 1.);
+        assert_eq!(stepped(0., -100), 0.);
+    }
+
+    // graph.get read as the JUCE mixer page reads it: the non-bus parts, then the buses, each with
+    // its state and the send to each bus in the order of the buses (None where there is none), and
+    // the master's own level and pan.
+    #[test]
+    fn read_parts_then_buses_with_sends_in_bus_order() {
+        let g = json!({
+            "parts": [
+                {"id": 1, "name": "Lead", "input": {"kind": "wave"}, "level": 0.5, "mute": true, "solo": false, "pan": -1., "sends": [{"bus": 101, "level": 0.25}]},
+                {"id": 101, "name": "FX1", "input": {"kind": "bus"}, "level": 0.7},
+                {"id": 2, "name": "Drums", "input": {"kind": "sample"}, "level": 0.3, "sends": [{"bus": 999, "level": 0.9}, {"bus": 102, "level": 0.5}]}
+            ],
+            "master": {"level": 1.5, "pan": 0.5},
+            "wires": []
+        });
+        let (strips, buses, master) = read(&g);
+        assert_eq!(buses, vec![(101, "FX1".to_string())]);
+        // The parts, then the bus: Lead, Drums, FX1.
+        assert_eq!(strips.iter().map(|s| &s.name).collect::<Vec<_>>(), vec!["Lead", "Drums", "FX1"]);
+        assert_eq!((strips[0].id, strips[0].bus, strips[0].mute, strips[0].pan), (1, false, true, -1.));
+        assert_eq!(strips[0].sends, vec![Some(0.25)]); // the send to FX1, the only bus
+        assert_eq!(strips[1].sends, vec![None]); // Drums' send is to an unknown bus
+        assert!(strips[2].bus);
+        assert_eq!(strips[2].sends, vec![None]);
+        assert_eq!(master, (1.5, 0.5));
+    }
+
+    // A strip another part solos through a wire is silenced even though it is not muted; its own
+    // solo and mute, the level and pan defaults, and the master's all fall back when missing.
+    #[test]
+    fn read_defaults_missing_fields_and_silences_by_anothers_solo() {
+        let g = json!({
+            "parts": [
+                {"id": 1, "input": {}, "level": 0.4},
+                {"id": 2, "input": {}, "level": 0.5}
+            ],
+            "wires": [{"owner": "part", "part": 1, "fader": true, "mute": true}],
+            "master": {}
+        });
+        let (strips, _buses, master) = read(&g);
+        assert!(strips[0].silenced); // the other part's solo mutes it
+        assert!(!strips[1].silenced);
+        assert_eq!(master, (1., 0.));
+        // Nothing at all: the master alone, quiet and centered.
+        let (strips, buses, master) = read(&json!({}));
+        assert!(strips.is_empty());
+        assert!(buses.is_empty());
+        assert_eq!(master, (1., 0.));
+    }
+}

@@ -2606,12 +2606,16 @@ std::vector<std::string> Session::assetLibraryUsers(const std::string& id) {
 
 namespace {
 // A package another installed package depends on is not removed: the dependents are named, as an
-// asset library's users are.
-void refuseDependents(Session& s,const std::string& id){
-    const auto dependents=s.packageDependents(id);
-    if(dependents.empty())return;
-    std::string list;for(const auto& d:dependents)list+=(list.empty()?"":", ")+d;
-    bad(id+" is needed by "+list+"; remove "+(dependents.size()==1?"it":"them")+" first");
+// asset library's users are. Who depends on it, at its version, is what packages.removal reckons, so
+// the two never disagree (a library locking another version of a plugin package is no dependent).
+void refuseDependents(Session& s,const std::string& id,const std::string& version,const std::string& kind){
+    const auto all=s.installedPackages();
+    const auto p=std::find_if(all.begin(),all.end(),[&](const auto& x){return x.id==id && x.kind==kind && (version.empty() || x.version==version);});
+    if(p==all.end())return; // not installed as a package: nothing names it
+    std::string list;size_t n=0;
+    for(const auto& d:s.packageRemoval(id,p->version).dependents)
+        if(d.kind=="library" || d.kind=="plugin" || d.kind=="asset"){list+=(list.empty()?"":", ")+d.id+(d.version.empty()?"":" "+d.version);++n;}
+    if(n)bad(id+" is needed by "+list+"; remove "+(n==1?"it":"them")+" first");
 }
 }
 
@@ -2763,7 +2767,7 @@ void Session::uninstallLibrary(const std::string& id,bool evenIfUsed) {
     auto& l=library();
     const auto all=l.installed();
     if(std::none_of(all.begin(),all.end(),[&](const auto& x){return x.id==id;}))bad("no such library installed");
-    if(!evenIfUsed)refuseDependents(*this,id);
+    if(!evenIfUsed)refuseDependents(*this,id,{},"library");
     fs::remove_all(l.libraries()/id); // readPackage: the ID is a plain name
     l.rescan();l.forgetOrphans();
     forgetRemoved();
@@ -2812,9 +2816,9 @@ void Session::removePlugin(const std::string& format,const std::string& id,const
     if(p.id!=id || p.version!=version || p.format!=format)bad("that plugin is not installed");
     // This device's build of a plugin of a package another package needs.
     if(!evenIfUsed && (forPlatform.empty() || forPlatform==platform())){
-        std::vector<std::string> holders;
-        {std::lock_guard lock(recordedMutex);for(const auto& r:readRecorded())if(std::count(r.plugins.begin(),r.plugins.end(),std::make_tuple(format,id,version)))holders.push_back(r.package.id);}
-        for(const auto& h:holders)refuseDependents(*this,h);
+        std::vector<InstalledPackage> holders;
+        {std::lock_guard lock(recordedMutex);for(const auto& r:readRecorded())if(std::count(r.plugins.begin(),r.plugins.end(),std::make_tuple(format,id,version)))holders.push_back(r.package);}
+        for(const auto& h:holders)refuseDependents(*this,h.id,h.version,h.kind);
     }
     if(forPlatform.empty() || forPlatform==platform()){
         const auto here=(folder/platform()).string()+"/";
@@ -2976,7 +2980,7 @@ std::vector<Control::PackagePart> Session::uninstallPackage(const std::string& i
             removed.push_back({p.id,p.version,p.kind,p.name.empty()?p.id:p.name});
         }
     };
-    remove(id,version,evenIfUsed);
+    remove(id,version,true); // what uses it was reckoned above, by the same removal
     // In the order reckoned, each after what used it; never anyway, so one something still uses now stays.
     std::string last;
     for(const auto& u:removal.unused)if(u.id!=std::exchange(last,u.id) && (allUnused || std::count(withUnused.begin(),withUnused.end(),u.id)))remove(u.id,{},false);

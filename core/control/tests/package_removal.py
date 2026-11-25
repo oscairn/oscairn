@@ -156,6 +156,33 @@ with tempfile.TemporaryDirectory(prefix='oscairn-removal-') as temporary:
         removed = rpc('packages.uninstall', {'id': SYNTH, 'withUnused': True, 'evenIfUsed': True})['removed']
         check([r['id'] for r in removed] == [SYNTH, 'org.kick.factory'] and installed() == ['My-Pack', 'org.kick.init'] and SYNTH not in [x['id'] for x in rpc('plugins.list')['plugins']],
               'asked anyway it goes, with its unused asset library; the libraries stay: ' + json.dumps(removed))
+
+        # Two versions of a plugin package side by side, a library locking the newer: the older goes, the newer is refused naming the library.
+        rpc('packages.uninstall', {'id': 'My-Pack'})
+        rpc('packages.uninstall', {'id': 'org.kick.init'})
+        for v in ('2', '3'):
+            b = temp / 'builds' / v / 'Synth.clap'
+            b.parent.mkdir()
+            shutil.copyfile(fixture, b)
+            run(tool, 'build', key, 'clap', SYNTH, v, here, b)
+            run(tool, 'plugin-package', '--license', 'MIT', '--key', key, temp / f'synth-{v}.olib', 'clap', SYNTH, v, 'Test Synth', f'{here}={b}')
+            rpc('library.install', {'file': str(temp / f'synth-{v}.olib'), 'asLibrary': False})
+        library('org.kick.lock', 'Locked Pack', SYNTH, '3')
+        install('org.kick.lock', True)
+        versions = sorted(r['version'] for r in rpc('packages.installed')['packages'] if r['id'] == SYNTH)
+        check(versions == ['2', '3'], 'both versions are installed: ' + json.dumps(versions))
+        older = rpc('packages.removal', {'id': SYNTH, 'version': '2'})
+        check(older['dependents'] == [], 'nothing needs the older: ' + json.dumps(older['dependents']))
+        newer = rpc('packages.removal', {'id': SYNTH, 'version': '3'})
+        check([d['id'] for d in newer['dependents']] == ['org.kick.lock'], 'the library locking the newer needs it: ' + json.dumps(newer['dependents']))
+        error = rpc('packages.uninstall', {'id': SYNTH, 'version': '3'}, expect_error=True)
+        check('Locked Pack' in error, 'and its uninstall is refused naming the library, as the removal said: ' + error)
+        error = rpc('plugins.remove', {'format': 'clap', 'id': SYNTH, 'version': '3'}, expect_error=True)
+        check('needed by org.kick.lock' in error, 'as is removing its plugin alone: ' + error)
+        removed = rpc('packages.uninstall', {'id': SYNTH, 'version': '2'})['removed']
+        versions = sorted(r['version'] for r in rpc('packages.installed')['packages'] if r['id'] == SYNTH)
+        check([(r['id'], r['version']) for r in removed] == [(SYNTH, '2')] and versions == ['3'],
+              'the older uninstalls, as the removal said, and the newer stays: ' + json.dumps(removed))
     finally:
         p.stdin.close()
         p.wait(timeout=30)

@@ -874,7 +874,7 @@ pub struct LfoRun {
 /// The wave at `x` (0 to 1 across the plot) from -1 to 1; `step` gives a user step's level (0 to 1) of `steps`.
 pub fn lfo_at(kind: Wave, x: f64, run: LfoRun, step: &dyn Fn(usize) -> f64, steps: usize) -> f64 {
     let LfoRun { cycles, phase, delay, fade } = run;
-    if x < delay {
+    if x < delay || delay >= 1. {
         return 0.;
     }
     let t = ((x - delay) / (1. - delay) * cycles + phase) % 1.;
@@ -990,4 +990,131 @@ fn envelope_drag(e: &Envelope, c: &Ctx, k: usize, at: (f32, f32)) -> Vec<(usize,
         out.push((c.members[v], refs[v].denorm(f64::from(up))));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(id: u32, field: &str, index: u64, view: u64, max: f64) -> Param {
+        Param { id, field: field.into(), index, view, max, ..Default::default() }
+    }
+    const ONE: LfoRun = LfoRun { cycles: 1., phase: 0., delay: 0., fade: 0. };
+
+    /// `lfo_at`, `wave_named` and `lfo_of` at the edges of their inputs.
+    #[test]
+    fn waves_and_lfos_cover_their_edges() {
+        let none = |_: usize| 0.;
+        // A delay that leaves no room: nothing plays, not even at the far edge (was NaN at x == delay == 1).
+        assert_eq!(lfo_at(Wave::Sine, 0.5, LfoRun { delay: 1., ..ONE }, &none, 0), 0.);
+        assert_eq!(lfo_at(Wave::Sine, 1.0, LfoRun { delay: 1., ..ONE }, &none, 0), 0.);
+        assert_eq!(lfo_at(Wave::Sine, 1.0, LfoRun { delay: 1.2, ..ONE }, &none, 0), 0., "a delay past the plot");
+        // A stepped wave with no steps stays a level, without asking for a step it has not.
+        let half = |_: usize| 0.5;
+        assert_eq!(lfo_at(Wave::Steps, 0.5, ONE, &half, 0), 0.);
+        assert!(lfo_at(Wave::Sine, 1.0, ONE, &none, 0).abs() < 1e-9, "a whole cycle ends back at the start");
+        // A wave named by its text, whatever the case or the whitespace; unreadable text is none.
+        assert_eq!(wave_named("Sine"), Wave::Sine);
+        assert_eq!(wave_named("sine"), Wave::Sine);
+        assert_eq!(wave_named(" SINE "), Wave::Sine);
+        assert_eq!(wave_named("正弦"), Wave::None);
+        assert_eq!(wave_named("Pulse width"), Wave::Square);
+        assert_eq!(wave_named("Random"), Wave::Random);
+        assert_eq!(wave_named("Step"), Wave::Steps);
+        assert_eq!(wave_named(""), Wave::None);
+        // An LFO found by its names: matched without case, a Fade In by either of its names, not by an
+        // unrelated page that happens to carry "Wave".
+        let l = lfo_of(&["wave", "rate"]);
+        assert_eq!((l.wave, l.speed), (Some(0), Some(1)));
+        let l = lfo_of(&["Attack"]);
+        assert_eq!(l.fade, Some(0), "Attack is a fade-in of the reference");
+        let l = lfo_of(&["Empty"]).empty();
+        assert!(l, "no names, no view");
+        let l = lfo_of(&["User Step 1", "User Step 2"]);
+        assert_eq!(l.steps, [0, 1], "the user steps, in order, until the first gap");
+        let l = lfo_of(&["User Step 1", "User Step 3"]);
+        assert_eq!(l.steps, [0], "a gap ends the run of steps");
+    }
+
+    /// `filter_named`, `filter_db` and `filter_of` at the edges of their inputs.
+    #[test]
+    fn filters_cover_their_edges() {
+        use Response as R;
+        // A name with both cuts is a band pass; poles are guessed from the steepness letters in any order.
+        assert_eq!(filter_named("HP and LP"), (R::BandPass, 2));
+        assert_eq!(filter_named("N"), (R::Notch, 2), "a name that begins N");
+        assert_eq!(filter_named("24 dB"), (R::Unknown, 4), "the steepness alone is not a cut");
+        assert_eq!(filter_named("6 dB"), (R::Unknown, 1));
+        assert_eq!(filter_named("低通滤波"), (R::Unknown, 2), "a name in another alphabet is not read");
+        assert_eq!(filter_named(""), (R::Unknown, 2));
+        assert_eq!(filter_named("LPF24D"), (R::LowPass, 4));
+        // The response's shape and its bounds as the poles change: no poles is flat, unknown is flat.
+        let q = 0.707;
+        assert_eq!(filter_db(R::LowPass, 0, 10., q), 0.);
+        assert_eq!(filter_db(R::Unknown, 2, 10., q), 0.);
+        assert_eq!(filter_db(R::Notch, 4, 1., q), -48., "clamped to the floor");
+        assert_eq!(filter_db(R::HighPass, 4, 0.01, q), -48., "four poles below the floor");
+        // Found by the reference's names, without case: a Frequency and a Q, a Filter Type.
+        let f = filter_of(&["Frequency", "Q", "Filter Type"]);
+        assert_eq!((f.cutoff, f.resonance, f.kind), (Some(0), Some(1), Some(2)));
+        let f = filter_of(&["gain", "Q", "resonance"]);
+        assert_eq!(f.resonance, Some(2), "Resonance meets the lower-case name before Q");
+        assert!(filter_of(&[]).empty(), "no names, no filter");
+    }
+
+    /// `map_of`: every zone of the view, sorted, and one index's scaling; `is_map_field` names.
+    #[test]
+    fn maps_cover_their_edges() {
+        let params = vec![
+            p(1, "keyLow", 1, 1, 127.),
+            p(2, "keyHigh", 1, 1, 127.),
+            p(3, "velocityLow", 1, 1, 127.),
+            p(4, "breakpoint", 1, 1, 127.),
+            p(5, "leftDepth", 1, 1, 99.),
+            p(6, "keyLow", 2, 1, 127.),
+            p(7, "keyLow", 1, 2, 127.),
+        ];
+        let m = map_of(&params, 1, 1);
+        assert!(!m.empty());
+        assert_eq!(m.zones.iter().map(|z| z.index).collect::<Vec<_>>(), [1, 2], "both zones, sorted");
+        let z = &m.zones[0];
+        assert_eq!((z.key_low, z.key_high, z.velocity_low), (Some(0), Some(1), Some(2)), "index 1's keys");
+        assert_eq!(z.velocity_high, None);
+        assert_eq!((m.breakpoint, m.left_depth), (Some(3), Some(4)), "index 1's scaling");
+        assert_eq!(m.zones[1].key_low, Some(5), "the other zone, without index 1's scaling");
+        let only = map_of(&params, 2, 1);
+        assert_eq!(only.zones.len(), 1, "only the view's own zones");
+        assert_eq!(only.zones[0].key_low, Some(6), "view 2's sole key, at its place in the names");
+        assert!(only.breakpoint.is_none(), "no scaling without the view's fields");
+        assert!(map_of(&params, 0, 1).empty(), "no view, no map");
+        assert!(map_of(&[], 1, 1).empty(), "no parameters, no map");
+        for field in ["keyLow", "keyHigh", "velocityLow", "velocityHigh", "breakpoint", "leftDepth", "rightDepth", "leftCurve", "rightCurve", "velocityDepth", "velocityCurve"] {
+            assert!(is_map_field(field), "{field}");
+        }
+        for field in ["", "level", "attack", "index"] {
+            assert!(!is_map_field(field), "{field}");
+        }
+    }
+
+    /// The path builders at their edges: empty and one point, the insets, crisp pixels.
+    #[test]
+    fn paths_cover_their_edges() {
+        assert_eq!(poly(&[]), "");
+        assert_eq!(poly(&[(1.0, 2.0), (3.0, 4.0)]), "M 1.00 2.00 L 3.00 4.00");
+        assert_eq!(rect_path(0., 0., 10., 10.), "M 0.00 0.00 L 10.00 0.00 L 10.00 10.00 L 0.00 10.00 Z");
+        let a = (2., 4., 12., 14.);
+        assert_eq!(inner_rect(a, 2.), rect_path(3., 5., 8., 8.), "a stroke sits inside its edge");
+        assert_eq!((width_of(a), height_of(a)), (10., 10.));
+        assert_eq!(crisp(3.4), 3.5, "a pixel row sits on its pixel");
+        assert_eq!(crisp(-1.2), -1.5, "negative too");
+    }
+
+    /// Which held touches set a value where they land, and take one.
+    #[test]
+    fn only_a_level_bar_sets_on_grab() {
+        assert!(drags_on_grab(&Held::Level { param: 1 }));
+        assert!(!drags_on_grab(&Held::Node(0)));
+        assert!(!drags_on_grab(&Held::Select(0)));
+        assert!(!drags_on_grab(&Held::Algorithm { param: 1, start: 0., from: (0., 0.) }));
+    }
 }

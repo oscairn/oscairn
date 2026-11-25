@@ -495,15 +495,32 @@ keep_ui() {
 		sleep $((1 << (fails - 1)))
 	done
 }
+# The splash (usr/share/oscairn/splash-720x1280.bgrx.gz, from branding/splash.png) on the console's
+# frame buffer, which the screen shows from Weston's end to the Rust UI's first frame (an empty
+# console, about 2.4 s at a power-on). Written only where fb0 has the geometry the file was made
+# for, its cursor's blink off (it would draw over the picture); nothing else is written to it.
+fb=${OSCAIRN_FB_DEVICE:-/dev/fb0}
+splash() {
+	img=$root/usr/share/oscairn/splash-720x1280.bgrx.gz g=$sys/class/graphics/fb0
+	geometry=$(cat "$g/virtual_size" "$g/bits_per_pixel" "$g/stride" 2>/dev/null | tr '\n' ' ')
+	if [ ! -f "$img" ]; then say "no splash in the bundle: not shown"; return 0; fi
+	if [ ! -w "$fb" ]; then say "no frame buffer $fb: the splash not shown"; return 0; fi
+	if [ "$geometry" != "720,1280 32 2880 " ]; then say "$fb is ${geometry:-of unknown geometry}, not 720,1280 32 2880: the splash not shown"; return 0; fi
+	if [ -n "$dry" ]; then say "would show the splash on $fb ($1)"; return 0; fi
+	echo 0 > "$sys/class/graphics/fbcon/cursor_blink" 2>/dev/null
+	if zcat "$img" > "$fb" 2>/dev/null; then say "the splash on $fb ($1)"; else say "writing the splash to $fb failed ($1)"; fi
+}
 # The Rust UI on the display, the engine started (or, under --dry-run, what would be done).
 rust_ui() {
 	if [ -n "$dry" ]; then
+		splash "before Weston stops, and again once it has ended"
 		say "would run: systemctl stop weston.service (when it is active)"
 		[ -z "$matrix" ] || say "would write $rules/99-oscairn-touch.rules (LIBINPUT_CALIBRATION_MATRIX $matrix) and run udevadm trigger"
 		say "would run: $root/start-chroot.sh env HOME=/root XKB_CONFIG_ROOT=/usr/share/X11/xkb SLINT_BACKEND=linuxkms-software SLINT_KMS_ROTATION=$rotation /usr/bin/oscairn-ui --profile $OSCAIRN_PROFILE --socket /run/oscairn/engine.sock --handover /tmp/oscairn-handover, again after each JUCE screen it hands the display to"
 		return 0
 	fi
 	if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston.service; then
+		( trap '' HUP; splash "before Weston stops" ) &
 		say "stopping Roland's display server (systemctl stop weston.service)"
 		systemctl stop weston.service || say "systemctl stop weston.service failed"
 		# Weston lets go of the screen only as its process ends: a frame drawn before that is lost,
@@ -512,6 +529,9 @@ rust_ui() {
 		while [ -n "$(named weston)" ] && [ $i -lt 50 ]; do i=$((i + 1)); nap; done
 		[ -z "$(named weston)" ] || say "Weston still runs after 5 s; the UI starts anyway"
 	fi
+	# Again once Weston has ended: systemd resets and clears its tty7 as it stops (TTYReset,
+	# TTYVTDisallocate), and once more a second later; in the background, the UI not kept waiting.
+	( trap '' HUP; splash "Weston has ended"; sleep 1; splash "a second later" ) &
 	touch_rule
 	( trap '' HUP; keep_ui ) < /dev/null >> "$state/log/ui-keeper.out" 2>&1 &
 	say "the Rust UI runs on the display (var/oscairn/log/oscairn-ui.log)"

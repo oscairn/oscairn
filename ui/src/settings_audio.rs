@@ -340,3 +340,148 @@ impl Page for Audio {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn audio(devices: Option<Devices>) -> Audio {
+        Audio { devices, ..Default::default() }
+    }
+
+    fn busy_audio(devices: Option<Devices>) -> Audio {
+        Audio { devices, busy: true, ..Default::default() }
+    }
+
+    fn device(name: &str, rates: Vec<f64>, sizes: Vec<u32>) -> Device {
+        Device { name: name.into(), rates, sizes }
+    }
+
+    #[test]
+    fn hertz_from_a_rate() {
+        assert_eq!(hertz(48000.), "48000 Hz");
+        assert_eq!(hertz(44100.), "44100 Hz");
+        assert_eq!(hertz(0.), "0 Hz");
+    }
+
+    #[test]
+    fn hertz_rounds_a_fraction() {
+        assert_eq!(hertz(44100.5), "44101 Hz");
+        assert_eq!(hertz(44101.4), "44101 Hz");
+    }
+
+    #[test]
+    fn samples_shows_ms_from_frames_and_rate() {
+        assert_eq!(samples(128, 48000.), "128 samples (2.7 ms)");
+        assert_eq!(samples(64, 48000.), "64 samples (1.3 ms)");
+        assert_eq!(samples(0, 48000.), "0 samples (0.0 ms)");
+    }
+
+    #[test]
+    fn samples_with_no_rate_or_a_bad_one_shows_no_ms() {
+        assert_eq!(samples(128, 0.), "128 samples");
+        assert_eq!(samples(128, -48000.), "128 samples");
+    }
+
+    #[test]
+    fn from_json_reads_the_devices_reply() {
+        let d = Devices::from_json(&json!({
+            "outputs": [{"name": "Built-in", "sampleRates": [48000., 44100.], "bufferSizes": [128, 256]}],
+            "inputs": [{"name": "Mic", "sampleRates": [], "bufferSizes": []}],
+            "output": "Built-in", "input": "Mic",
+            "sampleRate": 48000., "bufferSize": 128,
+            "source": "user", "notice": "", "fixed": true,
+        }));
+        assert_eq!(d.outputs, vec![device("Built-in", vec![48000., 44100.], vec![128, 256])]);
+        assert_eq!(d.inputs, vec![device("Mic", vec![], vec![])]);
+        assert_eq!(d.output, "Built-in");
+        assert_eq!(d.input, "Mic");
+        assert_eq!(d.rate, 48000.);
+        assert_eq!(d.size, 128);
+        assert_eq!(d.source, "user");
+        assert_eq!(d.notice, "");
+        assert!(d.fixed);
+    }
+
+    #[test]
+    fn from_json_tolerates_missing_and_wrong_typed_fields() {
+        let d = Devices::from_json(&json!({
+            "outputs": "not-a-list",
+            "output": 5, "input": true,
+            "sampleRate": "48000", "bufferSize": "128",
+            "source": null, "notice": [], "fixed": "yes",
+        }));
+        assert_eq!(d, Devices::default());
+    }
+
+    #[test]
+    fn from_json_of_an_empty_reply_is_default() {
+        assert_eq!(Devices::from_json(&json!({})), Devices::default());
+    }
+
+    #[test]
+    fn from_json_skips_a_device_with_no_list_shape() {
+        let d = Devices::from_json(&json!({
+            "outputs": [{"name": "Broken", "sampleRates": 48000, "bufferSizes": [256]}],
+        }));
+        assert_eq!(d.outputs, vec![device("Broken", vec![], vec![256])]);
+    }
+
+    #[test]
+    fn open_finds_the_device_whose_name_is_the_output() {
+        let d = Devices { outputs: vec![device("A", vec![], vec![]), device("B", vec![], vec![])], output: "B".into(), ..Default::default() };
+        assert_eq!(d.open().map(|o| o.name.as_str()), Some("B"));
+    }
+
+    #[test]
+    fn open_returns_none_when_nothing_is_named_or_named_is_absent() {
+        assert_eq!(Devices::default().open(), None);
+        let d = Devices { outputs: vec![device("A", vec![], vec![])], output: "Mia".into(), ..Default::default() };
+        assert_eq!(d.open(), None);
+    }
+
+    #[test]
+    fn shown_lists_the_input_row_only_where_inputs_came_back() {
+        assert_eq!(audio(None).shown(), vec![Which::Output, Which::Rate, Which::Size]);
+        let no_inputs = audio(Some(Devices { outputs: vec![device("A", vec![], vec![])], ..Default::default() }));
+        assert_eq!(no_inputs.shown(), vec![Which::Output, Which::Rate, Which::Size]);
+        let with_inputs = audio(Some(Devices { inputs: vec![device("Mic", vec![], vec![])], ..Default::default() }));
+        assert_eq!(with_inputs.shown(), vec![Which::Output, Which::Input, Which::Rate, Which::Size]);
+    }
+
+    #[test]
+    fn no_devices_means_no_options_and_reading() {
+        let a = audio(None);
+        assert_eq!(a.options(Which::Output), Vec::<String>::new());
+        assert_eq!(a.current(Which::Output), "Reading...");
+        assert_eq!(a.current(Which::Rate), "Reading...");
+    }
+
+    #[test]
+    fn rate_options_come_from_the_open_device_only() {
+        let d = Devices { outputs: vec![device("A", vec![48000., 44100.], vec![]), device("B", vec![96000.], vec![])], output: "B".into(), rate: 96000., ..Default::default() };
+        let a = audio(Some(d));
+        assert_eq!(a.options(Which::Rate), vec!["96000 Hz".to_string()]);
+        assert_eq!(a.current(Which::Rate), "96000 Hz");
+    }
+
+    #[test]
+    fn a_current_that_is_not_among_the_options_shows_a_dash() {
+        let d = Devices { outputs: vec![device("A", vec![], vec![])], output: "A".into(), rate: 44000., size: 64, ..Default::default() };
+        let a = audio(Some(d));
+        assert_eq!(a.current(Which::Rate), "–");
+        assert_eq!(a.current(Which::Size), "–");
+    }
+
+    #[test]
+    fn enabled_needs_a_choice_and_is_off_while_busy_or_the_output_is_fixed() {
+        let one = audio(Some(Devices { outputs: vec![device("A", vec![], vec![])], ..Default::default() }));
+        assert!(!one.enabled(Which::Output), "one output is no choice");
+        let two = audio(Some(Devices { outputs: vec![device("A", vec![], vec![]), device("B", vec![], vec![])], ..Default::default() }));
+        assert!(two.enabled(Which::Output));
+        let fixed = audio(Some(Devices { fixed: true, outputs: vec![device("A", vec![], vec![]), device("B", vec![], vec![])], ..Default::default() }));
+        assert!(!fixed.enabled(Which::Output), "a fixed device has no choice of output");
+        let busy = busy_audio(Some(Devices { outputs: vec![device("A", vec![], vec![]), device("B", vec![], vec![])], ..Default::default() }));
+        assert!(!busy.enabled(Which::Output), "busy rows cannot be changed");
+    }
+}

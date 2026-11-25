@@ -388,3 +388,91 @@ fn item_lines(i: &Item, detail: bool) -> Vec<InfoLine> {
     }
     lines
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn kind_word_picks_the_word_for_a_kind() {
+        assert_eq!(kind_word("plugin"), "Plugin");
+        assert_eq!(kind_word("asset"), "Samples");
+        assert_eq!(kind_word("library"), "Library");
+        assert_eq!(kind_word(""), "Library", "anything else is a library");
+        assert_eq!(kind_word("sound"), "Library");
+    }
+
+    #[test]
+    fn items_reads_an_array_and_defaults_on_missing_or_wrong() {
+        let r = json!({"p": [1, 2], "s": "x", "n": null});
+        assert_eq!(items(&r, "p"), vec![json!(1), json!(2)]);
+        assert!(items(&r, "absent").is_empty());
+        assert!(items(&r, "s").is_empty(), "a string is not an array");
+        assert!(items(&r, "n").is_empty(), "null is not an array");
+    }
+
+    #[test]
+    fn item_params_name_a_package_for_removal() {
+        let plain = Item { id: "p".into(), kind: "asset".into(), version: "3".into(), ..Default::default() };
+        assert_eq!(plain.params(), json!({"id": "p"}));
+        let plugin = Item { id: "p".into(), kind: "plugin".into(), version: "1.0".into(), ..Default::default() };
+        assert_eq!(plugin.params(), json!({"id": "p", "version": "1.0"}), "a plugin names its version");
+        let bare = Item { id: "p".into(), kind: "plugin".into(), version: String::new(), ..Default::default() };
+        assert_eq!(bare.params(), json!({"id": "p"}), "a plugin with no version names only the id");
+    }
+
+    #[test]
+    fn item_is_the_same_package_still_listed() {
+        let plain = |v: &str| Item { id: "p".into(), kind: "asset".into(), version: v.into(), ..Default::default() };
+        assert!(plain("1").is(&plain("1")));
+        assert!(plain("1").is(&plain("9")), "a non-plugin is the same whatever the version");
+        let plug = |v: &str| Item { id: "p".into(), kind: "plugin".into(), version: v.into(), ..Default::default() };
+        assert!(plug("1").is(&plug("1")));
+        assert!(!plug("1").is(&plug("2")), "a plugin's versions install side by side");
+    }
+
+    #[test]
+    fn list_merges_a_library_into_its_package_and_sorts_clearly() {
+        let s = Installed {
+            packages: vec![
+                Item { id: "a".into(), kind: "library".into(), name: "Alpha".into(), version: "1".into(), ..Default::default() },
+                Item { id: "b".into(), kind: "library".into(), name: "b".into(), version: "1".into(), ..Default::default() },
+            ],
+            libraries: vec![
+                Item { id: "a".into(), kind: "library".into(), name: "Alpha".into(), items: Some(4), ..Default::default() },
+                Item { id: "b".into(), kind: "library".into(), name: "Beta".into(), items: Some(7), ..Default::default() },
+                Item { id: "c".into(), kind: "library".into(), name: "Gamma".into(), items: Some(2), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let all = s.list();
+        assert_eq!(all.len(), 3, "a library with no package is listed too");
+        assert_eq!((all[0].id.as_str(), all[0].name.as_str(), all[0].items), ("a", "Alpha", Some(4)), "the package keeps its name and takes the item count");
+        assert_eq!((all[1].id.as_str(), all[1].name.as_str(), all[1].items), ("b", "Beta", Some(7)), "a package named by its id shows the library's name");
+        assert_eq!(all[2].id, "c");
+    }
+
+    #[test]
+    fn list_is_empty_with_nothing_installed() {
+        assert!(Installed::default().list().is_empty());
+    }
+
+    #[test]
+    fn panel_shows_a_libraries_detail_in_full() {
+        let i = Item { id: "p1".into(), version: "".into(), kind: "plugin".into(), name: "MyPack".into(), repository: String::new(), signers: vec!["abcdefgh".into(), "ijkl".into()], items: None, package: true };
+        let lines = item_lines(&i, true);
+        let line_text = |n: usize| lines[n].text.as_str();
+        assert!(lines[0].head && line_text(0) == "Plugin");
+        assert_eq!(line_text(1), "MyPack");
+        assert!(lines[2].head && line_text(2) == "ID");
+        assert_eq!(line_text(3), "p1");
+        assert!(lines[4].head && line_text(4) == "Version");
+        assert_eq!(line_text(5), "—", "a package with no version shows a dash");
+        assert!(lines[6].head && line_text(6) == "Publisher");
+        assert_eq!(line_text(7), "installed from a file");
+        assert!(lines[8].head && line_text(8) == "Key fingerprint");
+        assert_eq!(line_text(9), "abcd efgh");
+        assert_eq!(line_text(10), "ijkl");
+    }
+}

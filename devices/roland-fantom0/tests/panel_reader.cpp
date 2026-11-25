@@ -99,6 +99,10 @@ namespace
         check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
               "slider 8 (analog 16) and knob 1 on 0 to 127");
         check(near(analog(7, 1023).input.value, 1) && analog(7, 1023).control == "lever:1" && analog(8, 5).control == "lever:2" && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:1" && analog(6, 5).control == "wheel:2", "WHEEL1, WHEEL2 and the lever's two axes on 0 to 1023");
+        // WHEEL2's raw value falls as it is pushed away from the player (the owner, 2026-11-25: read as it came, the top was off):
+        // at the top (raw 0) full modulation, at the bottom (raw 1023) none. WHEEL1 and the lever are read as they come.
+        check(near(analog(6, 0).input.value, 1) && near(analog(6, 1023).input.value, 0) && near(analog(6, 256).input.value, 767 / 1023.), "WHEEL2 at the top is full modulation, at the bottom none");
+        check(near(analog(5, 0).input.value, 0) && near(analog(5, 1023).input.value, 1) && near(analog(7, 0).input.value, 0) && near(analog(8, 1023).input.value, 1) && near(analog(8, 0).input.value, 0), "WHEEL1 and the lever's axes are not inverted");
         check(analog(2, 127).control == "footswitch:1" && near(analog(2, 127).input.value, 1) && near(analog(2, 64).input.value, 64 / 127.), "the HOLD jack (analog 2) is footswitch:1, a position on 0 to 127");
         check(analog(0, 1023).control == "knob:9" && near(analog(0, 1023).input.value, 1) && near(analog(1, 512).input.value, 512 / 1023.), "CUTOFF and RESONANCE on 0 to 1023");
         // The pads as the owner pressed them on November 12: from the bottom left, left to right,
@@ -600,9 +604,10 @@ namespace
             move(5, 512);
             check(bend() == 8192, "and the wheel springs back");
             // Modulation: the owner's example, step by step.
+            // WHEEL2 is inverted in the map: its raw value is 1023 less the position (511 is halfway, 0 the top).
             check(cc() == 0, "no mod wheel yet");
-            move(6, 512);
-            check(cc() == 64, "WHEEL2 at 512 sets CC 1 halfway: " + std::to_string(cc()));
+            move(6, 511);
+            check(cc() == 64, "WHEEL2 halfway sets CC 1 halfway: " + std::to_string(cc()));
             move(8, 307);
             check(cc() == 64, "the lever pushed to 0.3 changes nothing: " + std::to_string(cc()));
             move(8, 512);
@@ -610,9 +615,12 @@ namespace
             check(std::abs(cc() - 99) <= 1, "pushed past the wheel's value it takes over and follows: " + std::to_string(cc()));
             move(8, 0);
             check(cc() == 0, "released to 0, the value is 0 though the wheel is still at 0.5: " + std::to_string(cc()));
-            move(6, 530);
+            move(6, 493);
             check(cc() == 66, "the wheel nudged takes over at once: " + std::to_string(cc()));
             move(6, 0);
+            check(cc() == 127, "WHEEL2 at the top (raw 0) is CC 1 at 127: " + std::to_string(cc()));
+            move(6, 1023);
+            check(cc() == 0, "WHEEL2 at the bottom (raw 1023) is CC 1 at 0: " + std::to_string(cc()));
             move(8, 1023);
             check(cc() == 127 && s.controllerState().touched == "lever:2", "the lever alone reaches CC 1 at 127, and controllers.get names it by its own id: " + s.controllerState().touched);
             move(8, 0);
@@ -660,10 +668,10 @@ namespace
             // The owner's case: the mod wheel set to a part's volume plays that and the engines get no CC 1, unless set to do both (passes).
             s.setPartLevel(pd, .5, false);
             s.assign("wheel:2", level); s.commit(); s.service();
-            move(6, 512); move(6, 1023); solo(1);
+            move(6, 511); move(6, 0); solo(1);
             check(s.parts()[3].level > .9 && cc() == 100, "the mod wheel set to a part's volume moves it and sends no CC 1: " + std::to_string(cc()));
             s.assign("wheel:2", level, 0, true); s.commit(); s.service();
-            move(6, 0); solo(1);
+            move(6, 1023); solo(1);
             check(s.parts()[3].level < .1 && cc() == 0, "set to do both, it moves the volume and every part gets CC 1 too: " + std::to_string(cc()));
             check(s.assignments().back().passes && s.assignments().back().part == 0, "the Performance's own assignment reports passes");
             s.assign("wheel:2", {}); s.commit();

@@ -440,8 +440,37 @@ fn a_refused_removal_says_why_and_the_row_stays() {
     r.act(Action::Move { pane: None, by: -2 }); // Field Recordings
     r.e.fail.clear();
     r.tool("Remove");
-    assert!(r.notice.is_none());
+    let (_, message, choices) = r.notice.take().unwrap();
+    assert!(message.starts_with("What uses it could not be read: ") && message.contains("no package lib-2 is installed") && choices == ["OK"], "the open question says so: {message} {choices:?}");
     assert!(r.danger_lines().join(" ").contains("no package lib-2 is installed"), "{:?}", r.danger_lines());
+    r.c.noticed(Some(0));
+    r.settle();
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "packages.uninstall").count(), 1, "OK removes nothing");
+}
+
+// Remove opens its question at once, saying it is checking, with only Cancel: what the engine answers fills it in
+// (P2); Cancel before the answer leaves it unasked.
+#[test]
+fn the_remove_question_opens_before_the_engine_answers() {
+    let mut r = installed();
+    r.act(Action::Move { pane: None, by: 1 }); // Example Reverb
+    r.e.calls.clear();
+    let at = r.c.bar_tools().iter().position(|t| t.label.starts_with("Remove")).unwrap();
+    r.c.tool(at);
+    assert_eq!(r.c.take_notice(), Some(("Remove Example Reverb?".to_string(), "Checking what uses it...".to_string(), vec!["Cancel".to_string()])), "the question is open before any answer");
+    assert!(r.e.calls.is_empty() && r.c.out.len() == 1 && r.c.out[0].call.method == "packages.removal");
+    r.settle();
+    let (_, message, choices) = r.notice.take().unwrap();
+    assert!(message.starts_with("Used by: Wicked Synths") && choices == ["Cancel", "Remove anyway"], "the answer fills it in: {message} {choices:?}");
+    r.c.noticed(Some(0));
+    // Cancelled while checking: the answer that comes after asks nothing and the rows are back.
+    r.c.tool(at);
+    assert!(r.c.take_notice().is_some());
+    r.c.noticed(Some(0));
+    assert!(rows(r.ui()).iter().all(|x| !x.off), "the rows are back at once");
+    r.settle();
+    assert!(r.notice.is_none(), "no question after Cancel");
+    assert_eq!(r.e.methods(), ["packages.removal", "packages.removal"], "nothing removed");
 }
 
 // A row confirmed opens its detail: name, id, version, the publisher (the repository it came from), the key

@@ -2858,9 +2858,8 @@ Control::PackageRemoval Session::packageRemoval(const std::string& id,const std:
                 if(p.kind=="plugin")u.plugins.insert(r.plugins.begin(),r.plugins.end()); // builds a library archive carried stay in the store when it goes
                 u.needs=r.needs;
             }
-            if(p.kind=="library")u.part.bytes=bytes(library().libraries()/p.id);
-            if(p.kind=="asset"){u.part.bytes=bytes(assets_.libraryRoot(p.id,{}));const auto held=assets_.hashes(p.id);u.hashes.insert(held.begin(),held.end());}
-            for(const auto& [f,i,v]:u.plugins){u.part.bytes+=bytes(storeFolder(f,i,v));u.folders.push_back((storeFolder(f,i,v)/platform()).string()+"/");}
+            if(p.kind=="asset"){const auto held=assets_.hashes(p.id);u.hashes.insert(held.begin(),held.end());}
+            for(const auto& [f,i,v]:u.plugins)u.folders.push_back((storeFolder(f,i,v)/platform()).string()+"/");
             units.push_back(std::move(u));
         }
     }
@@ -2936,10 +2935,18 @@ Control::PackageRemoval Session::packageRemoval(const std::string& id,const std:
         return out;
     };
 
+    // A package's size, walked only for what the answer reports (every package's files took seconds on a device).
+    auto sized=[&](const Unit& u){
+        uint64_t n=0;
+        if(u.part.kind=="library")n+=bytes(library().libraries()/u.part.id);
+        if(u.part.kind=="asset")n+=bytes(assets_.libraryRoot(u.part.id,{}));
+        for(const auto& [f,i,v]:u.plugins)n+=bytes(storeFolder(f,i,v));
+        return n;
+    };
     PackageRemoval out;
     const std::pair<std::string,std::string> target{id,version};
     std::vector<std::string> wanted,candidates;
-    for(const auto& u:units)if(u.listed && among({target},u)){if(wanted.empty()){out.package=u.part;wanted.push_back(id);}else{out.package.version.clear();out.package.bytes+=u.part.bytes;}}
+    for(const auto& u:units)if(u.listed && among({target},u)){if(wanted.empty()){out.package=u.part;out.package.bytes=sized(u);wanted.push_back(id);}else{out.package.version.clear();out.package.bytes+=sized(u);}}
     if(wanted.empty())bad("no package "+id+(version.empty()?"":" "+version)+" is installed");
     out.dependents=dependentsOf(target,{});
     // Its dependencies, direct and through them; then, to a fixed point, each that nothing staying uses.
@@ -2951,7 +2958,7 @@ Control::PackageRemoval Session::packageRemoval(const std::string& id,const std:
         for(const auto& c:candidates){
             if(std::any_of(going.begin(),going.end(),[&](const auto& g){return g.first==c;}) || !dependentsOf({c,{}},going).empty())continue;
             bool here=false;
-            for(const auto& u:units)if(u.listed && u.part.id==c){out.unused.push_back(u.part);here=true;}
+            for(const auto& u:units)if(u.listed && u.part.id==c){out.unused.push_back(u.part);out.unused.back().bytes=sized(u);here=true;}
             if(here){going.push_back({c,{}});more=true;}
         }
     return out;

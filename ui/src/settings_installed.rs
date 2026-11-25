@@ -7,7 +7,8 @@
 //! lost connection is the app's usual failed row.
 //! Confirming a row opens its detail in the panel (id, kind, version, the publisher and the key fingerprint of what
 //! signed it; Back closes it on the same row; no trust flag, which the handler does not report). The bar's Remove...
-//! works on every row: `packages.removal` is asked first, and its answer words the questions: what uses the package
+//! works on every row: its question opens at once ("Checking what uses it..."), `packages.removal` is asked, and its
+//! answer words the questions: what uses the package
 //! (Cancel / Remove anyway), else the plain Remove?; then, when it has dependencies nothing else uses, whether those
 //! go too, each with its size. One `packages.uninstall` follows, and the lists are read until the package is gone.
 
@@ -89,6 +90,8 @@ pub struct Installed {
     package_error: String,
     libraries_error: String,
     asking: Option<Asking>,
+    /// The item `packages.removal` is out for: its question is open, saying it is checking, until the answer fills it in.
+    checking: Option<Item>,
     /// While a removal is asked about or runs, or the lists are read back afterwards: every row faint.
     busy: bool,
     /// The item `packages.uninstall` removed, and the reads of the list made since: the lists are read again until it no longer shows.
@@ -213,8 +216,11 @@ impl Installed {
             (Step::Libraries, Err(e)) => {
                 self.libraries_error = e.message;
             }
+            // Cancelled while checking, or the page left: the answer asks nothing.
+            (Step::Removal(item), _) if self.checking.as_ref() != Some(&item) => self.busy = false,
             (Step::Removal(item), Ok(r)) => {
                 self.busy = false;
+                self.checking = None;
                 let dependents: Vec<String> = items(&r, "dependents")
                     .iter()
                     .map(|d| {
@@ -237,7 +243,13 @@ impl Installed {
                 });
                 self.asking = Some(Asking { item, used: !dependents.is_empty(), unused, second: false });
             }
-            (Step::Removal(item), Err(e)) | (Step::Uninstall(item), Err(e)) => {
+            (Step::Removal(item), Err(e)) => {
+                self.rest();
+                self.checking = None;
+                c.notice = Some((format!("Remove {}?", item.name), format!("What uses it could not be read: {}", e.message), vec!["OK".into()]));
+                self.refused = (item.id, e.message);
+            }
+            (Step::Uninstall(item), Err(e)) => {
                 self.rest();
                 self.refused = (item.id, e.message);
             }
@@ -252,6 +264,7 @@ impl Installed {
 impl Page for Installed {
     fn open(&mut self, c: &mut Ctx) {
         self.asking = None;
+        self.checking = None;
         self.rest();
         self.refused = (String::new(), String::new());
         self.detail = None;
@@ -320,13 +333,19 @@ impl Page for Installed {
             return;
         }
         let Some(item) = at.and_then(|a| self.list().get(a).cloned()) else { return };
-        // What removing it means is asked first: its answer words the question.
+        // What removing it means is asked first: the question opens at once and its answer words it.
         self.busy = true;
         self.refused = (String::new(), String::new());
+        self.checking = Some(item.clone());
+        c.notice = Some((format!("Remove {}?", item.name), "Checking what uses it...".into(), vec!["Cancel".into()]));
         c.ask(Any::Installed(Step::Removal(item.clone())), "packages.removal", item.params());
     }
 
     fn noticed(&mut self, choice: Option<usize>, c: &mut Ctx) {
+        if self.checking.take().is_some() {
+            self.busy = false; // Cancel before the answer
+            return;
+        }
         let Some(mut a) = self.asking.take() else { return };
         // Cancel, or the question closed: nothing happens.
         match (a.second, a.used, choice) {

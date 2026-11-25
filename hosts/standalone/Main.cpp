@@ -18,6 +18,8 @@
 // desktop shows that tab (Part, Mixer, Routing or Controls) or Play. External MIDI controllers
 // with a profile (built in: smk37-elite, modx-m-usb; or --controller FILE, as many as wanted) join
 // the device's controls when their MIDI ports are connected (RFC 0024); not with --snapshot or --audio null.
+// On a computer the interface is the Rust UI, oscairn-ui beside this program, against this app's
+// engine, unless OSCAIRN_UI=juce (docs/rust-ui.md, "On a computer").
 
 #include "Controllers.h"
 #include "DesktopShell.h"
@@ -40,13 +42,17 @@
 #include "Splash.h"
 #include "TextKeyboard.h"
 #include "Executable.h"
+#include "EngineProcess.h"
 #include "PaintCounter.h"
 
 #include <BinaryData.h>
 #include <oscairn/plugin_host.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include <csignal>
 #include <cstdio>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <memory>
 #include <utility>
 
@@ -307,8 +313,10 @@ namespace oscairn::standalone
         void leave()
         {
             if( homeQuits_ ) { timing( "quit requested" ); juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
-            else showHome();
+            else { showHome(); if( onLeave ) onLeave(); }
         }
+        // After Home: on a computer whose interface is the Rust UI, this window gives it back (Application::startRustUi).
+        std::function<void()> onLeave;
         // Home (RFC 0030): the launcher, as the window's content on the desktop, over the screen
         // on a panel. What it replaces goes after it is in place: a panel points at its overlay.
         void showHome()
@@ -419,6 +427,7 @@ namespace oscairn::standalone
 
         void menuItemSelected( int id, int ) override
         {
+            if( !isVisible() ) { setVisible( true ); toFront( true ); } // hidden behind the Rust UI: the menu brings it out
             if(id==5000 || id==5001) {
                 const bool save=id==5000;
                 const auto initial=save?juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("Untitled.oscairn"):juce::File();
@@ -1124,6 +1133,10 @@ namespace oscairn::standalone
                     if( engine_->canPrepareSounds() && !args.contains( "--play" ) ) { SoundAction reopen; reopen.kind = SoundAction::ReopenPerformance; engine_->soundAction( reopen ); }
                 }
                 if( const auto app = argument( args, "--app" ); app.isNotEmpty() ) window_->openApp( app.toLowerCase() );
+                // A computer's interface is the Rust UI (docs/rust-ui.md) unless OSCAIRN_UI=juce, or no oscairn-ui is beside this program.
+                else if( !offscreen && !args.contains( "--view" ) && ( !profile.screen() || profile.screen()->surface == "desktop" )
+                         && juce::SystemStats::getEnvironmentVariable( "OSCAIRN_UI", {} ) != "juce" )
+                    startRustUi();
                 if( const auto view = argument( args, "--view" ); view.isNotEmpty() )
                 {
                     DesktopShell::Tab tab;
@@ -1165,6 +1178,8 @@ namespace oscairn::standalone
 
         void shutdown() override
         {
+            uiWatch_.stopTimer();
+            if( ui_ > 0 ) { ::kill( ui_, SIGTERM ); ::waitpid( ui_, nullptr, 0 ); ui_ = -1; }
             if( starting_.valid() ) // quit while starting: the engine is let go here, once started
                 try { starting_.get(); } catch( const std::exception& ) {}
             controllers_.reset(); // they play through the engine
@@ -1177,6 +1192,40 @@ namespace oscairn::standalone
         }
 
     private:
+        // The Rust UI as this app's interface on a computer: oscairn-ui beside this program, against
+        // this app's engine, in a window of its own at the OS's scale (no profile, so no scale is
+        // forced); this window hidden. A screen not yet ported ends it with status 3 and its name,
+        // as on a device: this window shows that screen, and its Home starts the Rust UI again. The
+        // menu bar's items (macOS: with this app in front) bring this window out beside it; its Home hides it.
+        // Its window closed (status 0): the app quits. Anything else: this window, as before.
+        // shortcut: one Rust window and the JUCE one in turn; the separate windows are on docs/rust-ui.md's desktop list.
+        void startRustUi()
+        {
+            const auto ui = executableFile().getSiblingFile( "oscairn-ui" );
+            if( !ui.existsAsFile() || engine_->socketPath().empty() ) return; // the JUCE window stays
+            handover_ = juce::File::getSpecialLocation( juce::File::tempDirectory ).getChildFile( "oscairn-handover-" + juce::String( int( ::getpid() ) ) ); // one an instance
+            try { ui_ = host::spawnChild( { ui.getFullPathName().toStdString(), "--socket", engine_->socketPath(), "--handover", handover_.getFullPathName().toStdString() }, STDERR_FILENO, { "OSCAIRN_PROFILE=" } ); }
+            catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: the Rust UI did not start: %s\n", e.what() ); return; }
+            timing( "rust ui started" );
+            window_->setVisible( false );
+            window_->onLeave = [this] { if( ui_ > 0 ) window_->setVisible( false ); else startRustUi(); };
+            uiWatch_.tick = [this] { rustUiEnded(); };
+            uiWatch_.startTimer( 100 );
+        }
+        void rustUiEnded()
+        {
+            int status = 0;
+            if( ui_ <= 0 || ::waitpid( ui_, &status, WNOHANG ) != ui_ ) return;
+            ui_ = -1; uiWatch_.stopTimer();
+            const auto app = handover_.loadFileAsString().trim(); handover_.deleteFile();
+            window_->setVisible( true ); window_->toFront( true );
+            const int code = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+            if( code == 3 && app.isNotEmpty() )
+                try { window_->openApp( app ); return; } catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: the Rust UI handed over %s: %s\n", app.toRawUTF8(), e.what() ); }
+            if( code == 0 ) { systemRequestedQuit(); return; } // asked over this window when changes are unsaved
+            std::fprintf( stderr, "oscairn: the Rust UI ended (status %d); the JUCE window instead\n", status );
+        }
+
         // The splash screen until the window is up: the whole display on a device's panel, a
         // small window in the middle of the screen on the desktop.
         void showSplash( const Profile& profile )
@@ -1254,6 +1303,10 @@ namespace oscairn::standalone
         std::vector<Profile> controllerProfiles_;
         std::future<std::unique_ptr<Engine>> starting_;
         juce::Component::SafePointer<juce::Component> asking_; // the quit's prompt, while it shows
+        // The Rust UI while it is this app's interface (startRustUi), the file it names a JUCE screen in, and its watch.
+        pid_t ui_ = -1;
+        juce::File handover_;
+        struct Watch : juce::Timer { std::function<void()> tick; void timerCallback() override { tick(); } } uiWatch_;
     };
 }
 

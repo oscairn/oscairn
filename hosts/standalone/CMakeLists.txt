@@ -148,6 +148,14 @@ add_custom_command(TARGET oscairn_standalone POST_BUILD
         ${bundled_plugin_files}
         $<TARGET_FILE_DIR:oscairn_standalone>/plugins
     VERBATIM)
+# The Rust UI beside the app, which starts it as its interface on a computer (docs/rust-ui.md);
+# the top level orders its build first. A device's build installs it to bin/ (ui/CMakeLists.txt).
+if(OSCAIRN_UI AND NOT CMAKE_CROSSCOMPILING)
+    set_property(TARGET oscairn_standalone APPEND PROPERTY LINK_DEPENDS "${CMAKE_BINARY_DIR}/ui-cargo/release/oscairn-ui")
+    add_custom_command(TARGET oscairn_standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_BINARY_DIR}/ui-cargo/release/oscairn-ui" $<TARGET_FILE_DIR:oscairn_standalone>/oscairn-ui
+        VERBATIM)
+endif()
 
 install(TARGETS oscairn_standalone RUNTIME DESTINATION bin BUNDLE DESTINATION Applications)
 # Built-in themes (with their fonts) are ordinary theme folders; Linux finds them under share/.

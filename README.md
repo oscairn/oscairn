@@ -160,12 +160,13 @@ checks). Layouts are described in
 ### The Rust UI (optional)
 
 The UI is moving from JUCE to Rust, one screen at a time ([Rust UI](docs/rust-ui.md)). The Rust
-shell, `oscairn-ui`, has Home, the Setlist and Play; every other screen is the JUCE app, which
-stays the default unless a device profile says `"ui": "rust"`. To build the shell, add
-`-DOSCAIRN_UI=ON` (cargo downloads its crates on the first build), or run `cd ui && cargo build`;
-it connects to a running engine's socket, `oscairn-ui --socket PATH`. CI does not build it
-(only the owner's macOS builds have run it here), and a JUCE screen's tile on a computer says where
-that screen is instead of opening it. The `ui-rust` test is registered only with `-DOSCAIRN_UI=ON`.
+shell, `oscairn-ui`, is the default interface, on a device and on a computer, wherever it is built:
+screens not yet ported (the Groovebox, Recordings) hand over to the JUCE app, and `OSCAIRN_UI=juce`
+(or a screen's `"ui": "juce"` in a device profile) starts the JUCE app alone. To build it, add
+`-DOSCAIRN_UI=ON` (cargo downloads its crates on the first build): the desktop app then carries it
+and starts it against its own engine; or run `cd ui && cargo build` and `oscairn-ui --socket PATH`
+against a running engine. CI does not build it (only the owner's macOS builds have run it here);
+without it the desktop app is the JUCE window as before. The `ui-rust` test is registered only with `-DOSCAIRN_UI=ON`.
 
 The display's sound picker prepares Basic Synth variations (or a loaded instrument's
 presets), switches new notes while preserving held notes, and retires unused sounds.

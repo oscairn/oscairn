@@ -82,6 +82,9 @@ add_subdirectory(hosts)
 option(OSCAIRN_UI "Build the Rust UI, oscairn-ui (downloads its crates)" OFF)
 if(OSCAIRN_UI)
     add_subdirectory(ui)
+    if(TARGET oscairn_standalone)
+        add_dependencies(oscairn_standalone oscairn_ui) # the app carries it (hosts/standalone/CMakeLists.txt)
+    endif()
 endif()
 
 # Every test runs with a home, a data folder and a settings folder of its own under the build tree, so no

@@ -208,6 +208,12 @@ check "without ipcrm: says so and goes on" "[ $status = 0 ] && echo \"\$out\" | 
 rm -rf "$shm"
 
 export OSCAIRN_BOOT_DIR="$bundle/bootdir" OSCAIRN_BOOT_RUN="$bundle/bootrun"
+# Oscairn at once unless roland-first is in the boot folder: the dry run of the direct start first.
+mkdir -p "$OSCAIRN_BOOT_DIR"
+out=$(OSCAIRN_KEY_HELD="sh -c 'exit 1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?
+check "boot, TEMPO up, no roland-first: Oscairn at once (oscairn-fantom-start --cold; dry: Roland's application after)" "[ $status = 3 ] && echo \"\$out\" | grep -q 'starting Oscairn (oscairn-fantom-start --cold)' && echo \"\$out\" | grep -q 'a dry run' && ! echo \"\$out\" | grep -q 'would write .*attempt and run'"
+# The rest of the boot checks are the takeover's: roland-first kept in the boot folder.
+: > "$OSCAIRN_BOOT_DIR/roland-first"
 mkdir -p "$OSCAIRN_BOOT_RUN"
 boot() { out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
 roland='go.sh runs /home/root/mi078'
@@ -244,6 +250,7 @@ check "boot, the panel free again: Roland's application, nothing still holds" "[
 # line around it.
 fb=$bundle/fakeboot
 mkdir -p "$fb/b" "$fb/run" "$fb/dir" "$fb/proc"
+: > "$fb/dir/roland-first"
 cp "$scripts/oscairn-fantom-boot" "$fb/b/"
 printf '#!/bin/sh\necho systemd-run "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/sysrun-fails" ]\n' > "$fb/b/systemd-run"
 cat > "$fb/b/oscairn-fantom-start" <<'EOF'
@@ -260,6 +267,10 @@ printf '#!/bin/sh\necho stop "$@" >> "$(dirname "$0")/ran"\n' > "$fb/b/oscairn-f
 chmod +x "$fb/b"/*
 real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_SYSTEMD_RUN="$fb/b/systemd-run" "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
 fresh() { rm -rf "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/fails-early" "$fb/b/hang" "$fb/b/sysrun-fails" "$fb/proc"/*; }
+# The direct start for real: no roland-first, the stand-in start failing: its stop, then Roland's application.
+fresh; rm -f "$fb/dir/roland-first"; : > "$fb/b/fails"; real
+check "real, no roland-first: a failed --cold start is stopped, attempt removed, Roland's application" "[ $status = 3 ] && grep -q 'start --cold' '$fb/b/ran' && grep -q 'stop --panel' '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ] && ! grep -q systemd-run '$fb/b/ran'"
+: > "$fb/dir/roland-first"
 fresh; real
 check "real: the takeover scheduled in a unit of its own, attempt left, then Roland's application without the started marker" "[ $status = 3 ] && grep -q 'systemd-run --unit=oscairn-takeover --collect --no-block --description=Oscairn takes over from Roland.s application $fb/b/oscairn-fantom-boot --takeover' '$fb/b/ran' && [ -e '$fb/dir/attempt' ] && [ ! -e '$fb/run/oscairn-boot-started' ] && echo \"\$out\" | grep -q 'Oscairn takes over once it has set up the sound' && ! grep -q '^start' '$fb/b/ran'"
 real

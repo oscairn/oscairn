@@ -235,6 +235,24 @@ if [ -w "$printk" ]; then
 	fi
 fi
 
+# 5b. The audio port's receive side. The SoC's SAI sends in step with its receiver, and the driver
+# sets the receiver's frame up only when capture opens (the BMCs are the clock master): left at its
+# reset values, the outputs stay silent. Roland's application opens capture at its start and its
+# settings stay after it ends, so only a cold start lacks them (notes/w27/audio-init-2026-11-25.md;
+# measured 2026-11-25: RCR4 00000010 -> 080f1f30, RCR5 0 -> 1f1f1f00, RMR 0 -> ffffffc0, and sound).
+# One short capture with Roland's format sets them; nothing reaches the DSPs. At most 5 seconds.
+if command -v arecord > /dev/null 2>&1; then
+	setup="arecord -D hw:1,0 -c 6 -f S32_LE -r 48000 -s 4800 /dev/null"
+	if [ -n "$dry" ]; then say "would run: $setup (the audio port's receive side)"
+	else
+		$setup > "$state/log/capture-setup.log" 2>&1 & capture=$!
+		( exec > /dev/null 2>&1; sleep 5 && kill "$capture" ) & dog=$!
+		if wait "$capture"; then say "the audio port's receive side set up ($setup)"
+		else say "$setup failed (var/oscairn/log/capture-setup.log): the outputs may stay silent"; fi
+		kill "$dog" 2>/dev/null
+	fi
+fi
+
 # 6. The app, or the engine alone, with the profile's options. The cores its audio threads keep to: this script's
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
 # compute.audioThreadCores); none, anywhere. OSCAIRN_WORKER_BUDGET_US and

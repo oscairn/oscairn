@@ -1112,3 +1112,106 @@ pub fn layout_routing(g: &Graph, collapsed: bool, expanded: &BTreeSet<u64>, m: &
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn port(channels: u64) -> Port {
+        Port { id: 0, name: "Main".into(), channels }
+    }
+
+    // role_of: each role from a node's audio ports and notes (the model's `roleOf`): an instrument, a
+    // generator, an effect, an analyzer, a sequencer and the notes; one with nothing is Notes.
+    #[test]
+    fn role_of_from_ports_and_notes() {
+        let node = |i: u64, o: u64, ni: u64, no: u64| NodeInfo {
+            inputs: if i > 0 { vec![port(i)] } else { vec![] },
+            outputs: if o > 0 { vec![port(o)] } else { vec![] },
+            note_inputs: ni,
+            note_outputs: no,
+            ..Default::default()
+        };
+        assert_eq!(role_of(&NodeInfo::default()), "Notes", "no ports, no notes");
+        assert_eq!(role_of(&node(0, 0, 1, 1)), "Notes", "notes in and out, no audio");
+        assert_eq!(role_of(&node(0, 0, 1, 0)), "Notes", "notes in alone");
+        assert_eq!(role_of(&node(0, 0, 0, 1)), "Sequencer", "notes out alone");
+        assert_eq!(role_of(&node(0, 2, 0, 0)), "Generator", "audio out alone");
+        assert_eq!(role_of(&node(0, 2, 1, 0)), "Instrument", "notes in, audio out");
+        assert_eq!(role_of(&node(2, 2, 0, 0)), "Effect", "audio in and out");
+        assert_eq!(role_of(&node(2, 0, 0, 0)), "Analyzer", "audio in alone");
+        assert_eq!(role_of(&node(2, 0, 1, 0)), "Analyzer", "audio in still rules without audio out");
+    }
+
+    // wire_channels: the source channels a wire's pairs take, else the whole source port's (at least 1);
+    // 1 for a note wire, for a port the source does not have and for a source that is gone.
+    #[test]
+    fn wire_channels_counts_and_defaults() {
+        let g = Graph {
+            nodes: vec![NodeInfo { id: 1, outputs: vec![port(2)], ..Default::default() }],
+            inputs: vec![port(2)],
+            outputs: vec![port(2)],
+            ..Default::default()
+        };
+        let wire = |from: u64, from_port: u64, notes: bool| Wire { id: 1, from, from_port, notes, ..Default::default() };
+        assert_eq!(wire_channels(&wire(1, 0, false), &g), 2, "the source port's channels");
+        assert_eq!(wire_channels(&wire(1, 7, false), &g), 1, "a port the source does not have");
+        assert_eq!(wire_channels(&wire(3, 0, false), &g), 1, "a source that is gone");
+        assert_eq!(wire_channels(&wire(GRAPH_INPUT, 0, false), &g), 2, "from the graph's input");
+        assert_eq!(wire_channels(&wire(GRAPH_INPUT, 9, false), &g), 1, "a port the graph input does not have");
+        assert_eq!(wire_channels(&wire(1, 0, true), &g), 1, "a note wire is one");
+        let mut both = wire(1, 0, false);
+        both.channels = vec![(0, 0), (2, 1)];
+        assert_eq!(wire_channels(&both, &g), 2, "two separate source channels in its pairs");
+    }
+
+    // Graph::read defaults a missing or wrong-typed field (a node's name, plugin and notes, a wire's kind,
+    // level, channels and flags) and never panics on a partial graph; a draining note connection is kept.
+    #[test]
+    fn read_defaults_a_missing_or_wrong_typed_field() {
+        let g = Graph::read(&json!({
+            "audioInputs": [{}],
+            "audioOutputs": [{"id": 0, "name": "Out", "channels": 2}],
+            "nodes": [{"id": 5}, {"id": 6, "name": "Hall", "plugin": {"id": null, "lanes": "no"}, "audioInputs": "no", "audioOutputs": 3, "noteInputs": "no", "noteOutputs": null, "enabled": "no"}],
+            "parts": [{"id": 1, "name": "Keys", "chain": []}],
+            "wires": [{"id": 2, "kind": "abc", "owner": "part", "part": 7, "from": 5, "to": 6, "fromPort": "no", "toPort": null, "channels": "no", "level": "no", "mute": null, "connected": null, "split": "no"}],
+            "mappings": [{"from": "no", "lane": "no"}],
+            "connections": [{"kind": "notes", "from": 5, "to": 6, "draining": true}, {"kind": "audio", "from": 5, "to": 6, "draining": true}],
+            "controls": [{"id": 9, "source": null, "targets": []}]
+        }));
+        let n = &g.nodes[1];
+        assert_eq!((n.id, n.name.as_str(), n.plugin.as_str()), (6, "Hall", ""));
+        assert_eq!((n.note_inputs, n.note_outputs), (0, 0));
+        assert!(n.enabled && !n.ringing && n.inputs.is_empty() && n.outputs.is_empty(), "no audio ports");
+        let w = &g.wires[0];
+        assert!(!w.notes && w.part == Some(7) && w.channels.is_empty(), "a kind that is not notes, a part wire");
+        assert_eq!((w.from, w.to, w.from_port, w.to_port, w.split), (5, 6, 0, 0, 0));
+        assert_eq!((w.level, w.pan), (1., 0.), "level and pan default");
+        assert!(!w.mute && !w.solo && w.connected && w.enabled, "flags default");
+        assert_eq!(g.inputs[0].name, "", "an unnamed input name defaults to empty");
+        assert_eq!(g.mappings[0].source, 0);
+        assert!(g.draining.contains(&(5, 6)) && !g.draining.contains(&(5, 7)), "only the note connection drains");
+        assert_eq!(g.macros[0].source, None, "a missing lane source");
+    }
+
+    // name_of names "a plugin" a node that is gone; Routing.find finds an end by its port, a plugin by node.
+    #[test]
+    fn name_of_and_routing_find() {
+        let g = Graph { nodes: vec![NodeInfo { id: 1, name: "Hall".into(), ..Default::default() }], ..Default::default() };
+        assert_eq!(g.name_of(1), "Hall");
+        assert_eq!(g.name_of(9), "a plugin", "a node that is gone");
+        let r = Routing {
+            nodes: vec![
+                RoutingNode { node: GRAPH_INPUT, port: NOTES_PORT, name: "Keys & MIDI".into(), ..Default::default() },
+                RoutingNode { node: GRAPH_INPUT, port: 3, name: "Line in".into(), ..Default::default() },
+                RoutingNode { node: 1, port: 0, name: "Hall".into(), ..Default::default() },
+            ],
+        };
+        assert!(r.find(GRAPH_INPUT, NOTES_PORT).is_some());
+        assert!(r.find(GRAPH_INPUT, 3).is_some());
+        assert!(r.find(GRAPH_INPUT, 4).is_none(), "a port the end does not have");
+        assert_eq!(r.find(1, 99).unwrap().name, "Hall", "a plugin by node alone, whatever the port");
+        assert!(r.find(2, 0).is_none(), "a node the view does not show");
+    }
+}

@@ -460,6 +460,211 @@ fn at_rest_it_costs_no_request_and_no_frame() {
     assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
 }
 
+// The whole Mixer walked with panel moves only: Home → the Performance tile → Play → the top bar's
+// Edit → the Parts list's Mixer button, then every control of every strip and the master's, the
+// count the screen's own view declares (never hard-coded), each pressed to a real request on the
+// fake engine — a fader's `parts.level`, M's mute, S's solo, the pan, a send to the bus of its place,
+// and the master's `master.set` — nothing switching before the press.
+#[test]
+fn mixer_walked_with_panel_moves_only() {
+    let mut g = parts_graph();
+    // Every part's and bus's fader held mid-travel and the master mid-range, so a dial click always
+    // moves the fader (a part at either end would hold and send nothing).
+    for p in g["parts"].as_array_mut().unwrap() {
+        p["level"] = json!(0.5);
+    }
+    g["master"]["level"] = json!(1.0);
+    // The strips as read() orders them: parts first, then the buses; a send goes to the bus of its place.
+    let strip_id = [("Keys", 10), ("Low", 11), ("Pad", 14), ("Empty", 15), ("Reverb", 12), ("Delay", 13)];
+    let buses = [12u64, 13u64]; // the two buses, in the order the sends list them
+    let mut f = Fixture::new("mixer-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    // A quiet engine: every request out is answered with the strips' graph until none comes for a moment.
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "graph.get" => g.clone(),
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "library.query" => json!({"items": [], "total": 0}),
+                "library.libraries" => json!({"libraries": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": [], "failures": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Panel moves only, from Home: the cursor onto the Performance tile, confirmed, opens Play.
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut move_nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    move_nav(&mut f, "move", 0); // the first read is only a baseline
+    settle(&mut f);
+    move_nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    settle(&mut f);
+    move_nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play → the top bar (the third pane is a panel move) → Edit → the Parts list.
+    let edit_at = |_f: &Fixture| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == "Edit" && a.enabled);
+    let bar_cursor = |_f: &Fixture| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.cursor);
+    move_nav(&mut f, "move:2", 1);
+    settle(&mut f);
+    assert!(ui.global::<crate::Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let mut moves = 0;
+    while bar_cursor(&f).is_none() {
+        move_nav(&mut f, "move", 1);
+        settle(&mut f);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached its actions");
+    }
+    moves = 0;
+    while edit_at(&f).is_none() || bar_cursor(&f) != edit_at(&f) {
+        move_nav(&mut f, "move", 1);
+        settle(&mut f);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached Edit");
+    }
+    move_nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 9, "Edit opens the Parts list");
+    // The Parts list: the dial down the rows to the Mixer button, pressed.
+    let mixer_tool = |_f: &Fixture| ui.global::<crate::PartsState>().get_tools().iter().position(|t| t.label == "Mixer").expect("the Mixer button is declared");
+    let tool_cursor = |_f: &Fixture| ui.global::<crate::PartsState>().get_tools().iter().position(|t| t.cursor);
+    moves = 0;
+    loop {
+        if tool_cursor(&f) == Some(mixer_tool(&f)) {
+            break;
+        }
+        move_nav(&mut f, "move", 1);
+        settle(&mut f);
+        moves += 1;
+        assert!(moves < 120, "the dial never reached the Mixer button");
+    }
+    move_nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 10, "the Mixer button opens the Mixer");
+    // The strips and the controls each offers, from the screen's own view: a part's fader, M, S, pan
+    // and a send per bus; a bus' fader, M, S, pan; the master's fader and pan.
+    let state = ui.global::<crate::MixerState>();
+    let n_buses = state.get_buses() as usize;
+    assert_eq!(state.get_send_names().iter().count(), n_buses, "the walk's window shows every bus, so a send's cursor is its place among the buses");
+    let shown = state.get_view();
+    let strips_total: usize = shown.as_str().rsplit(" of ").next().unwrap_or("0").parse().unwrap_or(0);
+    let n_parts = strips_total.saturating_sub(n_buses);
+    let declared = n_parts * (4 + n_buses) + n_buses * 4 + 2; // parts' controls, buses' controls, master's
+    drop(state);
+    // The press of a dial step waits for the one edit it sends and answers the polls between.
+    let grab = |f: &mut Fixture, want: &str| -> serde_json::Value {
+        loop {
+            let r = f.engine.request();
+            let method = r["method"].as_str().unwrap_or_default();
+            if method == want {
+                return r;
+            }
+            let result = match method {
+                "parts.meters" => json!({"meters": []}),
+                "graph.commit" => json!({"accepted": true}),
+                "graph.get" => g.clone(),
+                _ => panic!("the walk met an unexpected request {method}: {r}"),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    let editing_now = |ui: &Shell| -> bool {
+        if let Some(r) = strips(ui).into_iter().find(|r| r.1 >= 0) {
+            return r.2;
+        }
+        master(ui).1
+    };
+    let id_of = |name: &str| -> u64 { strip_id.iter().find(|(n, _)| *n == name).map(|(_, id)| *id).unwrap_or_else(|| panic!("no strip {name}")) };
+    // The strip's live mute and solo, as the window shows them: the press turns the one it is on, so
+    // the fader keeps what it had and M or S sends the turned one.
+    let row_state = |ui: &Shell, name: &str| -> (bool, bool) {
+        let r = ui.global::<crate::MixerState>().get_strips().iter().find(|r| r.name.as_str() == name).expect("the strip is shown");
+        (r.mute, r.solo)
+    };
+    let mut visited: Vec<(String, i32)> = vec![];
+    let mut last = (String::new(), -1);
+    let mut rounds = 0;
+    while rounds < 400 {
+        rounds += 1;
+        let Some((name, control)) = at(&ui) else {
+            move_nav(&mut f, "move", 1); // the first move shows the cursor on the first fader
+            settle(&mut f);
+            continue;
+        };
+        let here = (name.clone(), control);
+        if here == last {
+            break; // the dial stopped: past the last control
+        }
+        if !visited.contains(&here) {
+            visited.push(here.clone());
+            if control == 1 {
+                let (was_mute, _) = row_state(&ui, &name);
+                move_nav(&mut f, "confirm", 1); // Mute
+                let r = grab(&mut f, "parts.level");
+                assert_eq!(r["params"]["part"].as_u64(), Some(id_of(&name)), "{name} M: the mute is its own strip");
+                assert_eq!(r["params"]["mute"], json!(!was_mute), "{name} M: the press turns the mute from {was_mute}");
+            } else if control == 2 {
+                let (_, was_solo) = row_state(&ui, &name);
+                move_nav(&mut f, "confirm", 1); // Solo
+                let r = grab(&mut f, "parts.solo");
+                assert_eq!(r["params"]["part"].as_u64(), Some(id_of(&name)), "{name} S: the solo is its own strip");
+                assert_eq!(r["params"]["solo"], json!(!was_solo), "{name} S: the press turns the solo from {was_solo}");
+            } else {
+                // A value control: the press starts the change (the row is being changed), the dial makes
+                // the one-step edit, the press lays it down.
+                move_nav(&mut f, "confirm", 1);
+                assert!(editing_now(&ui), "{name} control {control}: the press starts the change");
+                move_nav(&mut f, "move", 1); // one step of the dial
+                if name == "Master" {
+                    let r = grab(&mut f, "master.set");
+                    if control == 3 {
+                        assert!(r["params"]["pan"].as_f64().unwrap() > 0., "the master pan moved toward the right");
+                        assert!(r["params"]["level"].as_f64().unwrap() > 1.0, "the master keeps its level");
+                    } else {
+                        assert!(r["params"]["level"].as_f64().unwrap() > 1.0, "the master fader moved up");
+                        assert_eq!(r["params"]["pan"].as_f64().unwrap(), 0., "the master fader keeps its pan");
+                    }
+                } else if control == 0 {
+                    let (was_mute, _) = row_state(&ui, &name);
+                    let r = grab(&mut f, "parts.level");
+                    assert_eq!(r["params"]["part"].as_u64(), Some(id_of(&name)), "{name}: the fader is its own strip");
+                    assert_eq!(r["params"]["mute"], json!(was_mute), "{name}: the fader keeps the mute it had");
+                    assert!(r["params"]["level"].as_f64().unwrap() > 0.5, "{name}: the fader moved up");
+                } else if control == 3 {
+                    let r = grab(&mut f, "parts.pan");
+                    assert_eq!(r["params"]["part"].as_u64(), Some(id_of(&name)), "{name}: the pan is its own strip");
+                    assert!(r["params"]["pan"].as_f64().unwrap() > 0., "{name}: the pan moved toward the right");
+                } else {
+                    let r = grab(&mut f, "parts.send");
+                    assert_eq!(r["params"]["part"].as_u64(), Some(id_of(&name)), "{name}: the send is its own strip");
+                    assert_eq!(r["params"]["bus"].as_u64(), Some(buses[control as usize - 4]), "{name}: the send goes to the bus of its place");
+                    assert!(r["params"]["level"].as_f64().unwrap() > 0., "{name}: the send moved up");
+                }
+                move_nav(&mut f, "confirm", 1);
+                assert!(!editing_now(&ui), "{name} control {control}: the second press ends the change");
+            }
+        }
+        last = here;
+        move_nav(&mut f, "move", 1); // the dial one control on
+        settle(&mut f);
+    }
+    assert_eq!(visited.len(), declared, "the walk reached {visited:?}: the screen declares {declared} controls");
+    assert_eq!(visited.iter().collect::<std::collections::HashSet<_>>().len(), visited.len(), "a control reached twice: {visited:?}");
+}
+
 // The Mixer in every built-in theme and the two odd ones, at the keyboard's 1280x720, a small device's 800x480,
 // the FANTOM-07's scale and an 800-wide window: pictures in target/screens and target/theme-shots for a look
 // by eye. A cursor and a fader being changed are drawn in each.

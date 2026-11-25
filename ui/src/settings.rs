@@ -152,4 +152,41 @@ mod tests {
         assert_eq!(over(profile, &doc), MeterSettings { cpu: Show::Percent, ram: Show::Bar }); // an odd value leaves the profile's
         assert_eq!(over(profile, &Value::Null), profile);
     }
+
+    #[test]
+    fn over_keeps_the_profile_for_a_missing_or_wrong_typed_field() {
+        let profile = MeterSettings { cpu: Show::Both, ram: Show::Bar };
+        // A missing key, and fields that are not the documented words, leave each meter alone.
+        for doc in [
+            r#"{}"#,
+            r#"{"cpu":3,"ram":false}"#,
+            r#"{"cpu":null,"ram":[1]}"#,
+            r#"{"cpu":{"bar":true}}"#,
+            r#"{"cpu":"","ram":"  "}"#,
+        ] {
+            let doc: Value = serde_json::from_str(doc).unwrap();
+            assert_eq!(over(profile, &doc), profile, "doc {doc}");
+        }
+        // An unknown word is not a choice (the JUCE app writes "none", "bar", "percent", "both").
+        let doc: Value = serde_json::from_str(r#"{"cpu":"banana"}"#).unwrap();
+        assert_eq!(over(profile, &doc), profile);
+    }
+
+    #[test]
+    fn over_takes_each_meter_on_its_own() {
+        let profile = MeterSettings { cpu: Show::Bar, ram: Show::Bar };
+        // A real choice moves just the meter it names; the other stays on the profile's.
+        let doc: Value = serde_json::from_str(r#"{"cpu":"both","ram":"nonsense"}"#).unwrap();
+        assert_eq!(over(profile, &doc), MeterSettings { cpu: Show::Both, ram: Show::Bar });
+        let doc: Value = serde_json::from_str(r#"{"ram":"none"}"#).unwrap();
+        assert_eq!(over(profile, &doc), MeterSettings { cpu: Show::Bar, ram: Show::None });
+    }
+
+    #[test]
+    fn library_view_text_has_the_words_in_order() {
+        assert_eq!(library_view_text(true, true), "compact pills");
+        assert_eq!(library_view_text(true, false), "compact list");
+        assert_eq!(library_view_text(false, true), "comfortable pills");
+        assert_eq!(library_view_text(false, false), "comfortable list");
+    }
 }

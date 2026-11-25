@@ -210,12 +210,12 @@ mkdir -p "$OSCAIRN_BOOT_RUN"
 boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
 roland='go.sh runs /home/root/mi078'
 boot 0
-check "boot, MENU held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
-check "boot logs to its folder outside the bundle" "grep -q 'MENU is held' '$OSCAIRN_BOOT_DIR/boot.log'"
+check "boot, TEMPO held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO is held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
+check "boot logs to its folder outside the bundle" "grep -q 'TEMPO is held' '$OSCAIRN_BOOT_DIR/boot.log'"
 boot 2
-check "boot, MENU unreadable: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'MENU cannot be read' && echo \"\$out\" | grep -q '$roland'"
+check "boot, TEMPO unreadable: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO cannot be read' && echo \"\$out\" | grep -q '$roland'"
 boot 1
-check "boot, MENU up: Oscairn, cold (dry: Roland's application after)" "[ $status = 3 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && echo \"\$out\" | grep -q 'a dry run'"
+check "boot, TEMPO up: Oscairn, cold (dry: Roland's application after)" "[ $status = 3 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && echo \"\$out\" | grep -q 'a dry run'"
 : > "$OSCAIRN_BOOT_DIR/stock-next-boot"
 boot 1
 check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$OSCAIRN_BOOT_DIR/stock-next-boot' ]"
@@ -255,7 +255,7 @@ fresh; : > "$fb/dir/dry-run"; real
 check "real: the dry-run file logs the decision and starts nothing" "[ $status = 3 ] && grep -q 'a dry run' '$fb/dir/boot.log' && ! grep -q 'start --cold\$' '$fb/b/ran' && [ ! -e '$fb/run/oscairn-boot-started' ]"
 rm -f "$fb/dir/dry-run"
 fresh; real 0
-check "real: MENU held, nothing started" "[ $status = 3 ] && [ ! -e '$fb/b/ran' ]"
+check "real: TEMPO held, nothing started" "[ $status = 3 ] && [ ! -e '$fb/b/ran' ]"
 gosh() { sh -c '[ -x "$1" ] && "$1" && [ -e "$2/oscairn-boot-started" ] && exit 0; echo mi078' sh "$1" "$fb/run" 2>/dev/null; }
 fresh; : > "$fb/b/fails"
 check "go.sh: a failed start runs mi078" "[ \"\$(OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$fb/proc' OSCAIRN_BOOT_DIR='$fb/dir' OSCAIRN_BOOT_RUN='$fb/run' gosh '$fb/b/oscairn-fantom-boot' | tail -n 1)\" = mi078 ]"

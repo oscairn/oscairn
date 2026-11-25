@@ -13,7 +13,7 @@
 # tickgen.
 #
 #   1. Roland's application (exit 3) when: this script already ran this boot
-#      (/run/oscairn-boot-tried); MENU is held (gpio-keys, key 139; WRITE held at power-on is the
+#      (/run/oscairn-boot-tried); TEMPO is held (gpio-keys, key 152; WRITE held at power-on is the
 #      bootloader's update mode) or cannot be read within 10 seconds; the file stock-next-boot in
 #      the boot folder exists (removed as it is honored); the last power-on's start did not finish
 #      (the file attempt is left while Oscairn starts and removed once it runs: a start that
@@ -41,7 +41,7 @@
 # application showed "program version error"; whether it starts cleanly after Oscairn has used
 # the link first is not tried. It is never left to start while another process holds the panel's
 # device (a second open can crash the kernel): then this exits 0 and the screen stays as it is.
-# The sure way back is holding MENU at the next power-on; Roland's update procedure reinstalls
+# The sure way back is holding TEMPO at the next power-on; Roland's update procedure reinstalls
 # go.sh.
 #
 # Logged to stdout and boot.log in the boot folder, /home/root/oscairn-boot (outside the bundle,
@@ -49,7 +49,7 @@
 #
 #   ./oscairn-fantom-boot [--dry-run] [--supervise]
 #
-# --dry-run reads MENU (mounting the chroot to run oscairn-key-held) and the files, and prints
+# --dry-run reads TEMPO (mounting the chroot to run oscairn-key-held) and the files, and prints
 # what it would do, changing nothing but the log. --supervise is step 4 alone, for an Oscairn
 # already started (and for tests: with --dry-run, the fallback is printed and not taken).
 set -u
@@ -63,7 +63,7 @@ for a in "$@"; do
 	esac
 done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
-key_held=${OSCAIRN_KEY_HELD:-'"$root/start-chroot.sh" /usr/bin/oscairn-key-held gpio-keys 139'}
+key_held=${OSCAIRN_KEY_HELD:-'"$root/start-chroot.sh" /usr/bin/oscairn-key-held gpio-keys 152'}
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
 proc=${OSCAIRN_PROC:-/proc}
 poll=${OSCAIRN_BOOT_POLL:-1}
@@ -139,8 +139,8 @@ if [ -z "$dry" ]; then
 fi
 bounded 10 eval "$key_held"
 held=$?
-[ $held -ne 0 ] || roland "MENU is held"
-[ $held -eq 1 ] || roland "MENU cannot be read (oscairn-key-held exited $held)"
+[ $held -ne 0 ] || roland "TEMPO is held"
+[ $held -eq 1 ] || roland "TEMPO cannot be read (oscairn-key-held exited $held)"
 if [ -e "$boot/stock-next-boot" ]; then
 	if [ -n "$dry" ]; then say "would remove $boot/stock-next-boot"; else rm -f "$boot/stock-next-boot"; fi
 	roland "stock-next-boot was set"

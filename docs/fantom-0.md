@@ -1054,9 +1054,9 @@ with `XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0`, runs `/
 `oscairn-fantom-boot` ([source](../devices/roland-fantom0/bundle/oscairn-fantom-boot)) is meant
 to take that last line's place, after everything before it has run:
 
-1. **Roland's app when asked for:** MENU held at power-on (read with `oscairn-key-held`, which
-   asks `gpio-keys` for key 139's state once, read-only; WRITE held at power-on is the
-   bootloader's update mode, so MENU is the choice key), or MENU that cannot be read within 10
+1. **Roland's app when asked for:** TEMPO held at power-on (read with `oscairn-key-held`, which
+   asks `gpio-keys` for key 152's state once, read-only; WRITE held at power-on is the
+   bootloader's update mode and MENU held shows its version screen, so TEMPO is the choice key), or TEMPO that cannot be read within 10
    seconds, or one of these: the script already ran this boot (`/run/oscairn-boot-tried`); the
    file `stock-next-boot` in the boot folder `/home/root/oscairn-boot` (removed as it is
    honored: one boot of Roland's app); the file `attempt` there, left by a start that never
@@ -1093,9 +1093,9 @@ appears).
 
 The fallback is best effort: started again after it had run earlier in the same boot, Roland's
 app showed "program version error", and whether it starts cleanly after Oscairn has used the
-link first (Local Switch among it) is not tried. The sure way back is holding MENU at the next
+link first (Local Switch among it) is not tried. The sure way back is holding TEMPO at the next
 power-on. `oscairn-key-held` itself has not run on the unit (its bit lookup is tested); it
-answers 2, and so Roland's app, when it cannot read MENU.
+answers 2, and so Roland's app, when it cannot read TEMPO.
 
 The change the owner would make, when he decides to: `/home/root/oscairn-current`, a link to
 the bundle in use (replaced by a link, never a hash in `go.sh`), and in `/home/root/go.sh`, in

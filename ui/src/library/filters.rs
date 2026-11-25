@@ -112,4 +112,61 @@ mod tests {
         let names: Vec<String> = f.tag_list(&tags).into_iter().map(|t| t.0).collect();
         assert_eq!(names, ["pad", "bass", "keys", "lead"]);
     }
+
+    #[test]
+    fn a_chosen_tag_comes_first_even_rare_and_nothing_chosen_is_most_used() {
+        let mut f = Filters::default();
+        f.toggle_tag("rare");
+        let tags = vec![("hot".to_string(), 99), ("rare".to_string(), 1)];
+        let names: Vec<String> = f.tag_list(&tags).into_iter().map(|t| t.0).collect();
+        assert_eq!(names, ["rare", "hot"]);
+        // nothing chosen: the most used lead, the ties keep their order.
+        let tags = vec![("a".to_string(), 2), ("b".to_string(), 9), ("c".to_string(), 2)];
+        let names: Vec<String> = Filters::default().tag_list(&tags).into_iter().map(|t| t.0).collect();
+        assert_eq!(names, ["b", "a", "c"]);
+        assert!(Filters::default().tag_list(&[]).is_empty(), "no tags at all lists none");
+    }
+
+    #[test]
+    fn a_sources_name_is_everything_my_own_or_the_librarys() {
+        let libraries = [Installed { id: "factory".into(), name: "Factory".into(), items: 40 }];
+        let f = Filters::default();
+        assert_eq!(f.source_name("", &libraries), "Everything");
+        assert_eq!(f.source_name("mine", &libraries), "My own");
+        assert_eq!(f.source_name("factory", &libraries), "Factory");
+        // a source the engine no longer lists is shown by its id.
+        assert_eq!(f.source_name("gone", &libraries), "gone");
+    }
+
+    #[test]
+    fn the_libraries_to_choose_are_everything_my_own_then_each_installed() {
+        let f = Filters::default();
+        assert_eq!(f.sources(&[]), vec![
+            (String::new(), "Everything".to_string(), None),
+            ("mine".into(), "My own".to_string(), None),
+        ]);
+        let libraries = [Installed { id: "factory".into(), name: "Factory".into(), items: 40 }];
+        assert_eq!(f.sources(&libraries), vec![
+            (String::new(), "Everything".to_string(), None),
+            ("mine".into(), "My own".to_string(), None),
+            ("factory".to_string(), "Factory".to_string(), Some(40)),
+        ]);
+    }
+
+    #[test]
+    fn a_chosen_alone_narrows_and_leaves_the_other_fields_out_of_the_query() {
+        assert_eq!(Filters { favorites: true, ..Default::default() }.params(Kind::Performance), json!({"kind": "performance", "limit": 1000, "favorites": true}));
+        assert_eq!(Filters { source: "factory".into(), ..Default::default() }.params(Kind::Setlist), json!({"kind": "setlist", "limit": 1000, "source": "factory"}));
+        assert_eq!(Filters { source: "factory".into(), chosen: vec!["keys".into()], ..Default::default() }.params(Kind::Setlist), json!({"kind": "setlist", "limit": 1000, "source": "factory", "tags": ["keys"]}));
+    }
+
+    #[test]
+    fn anything_chosen_narrows_the_list() {
+        assert!(!Filters::default().narrowed());
+        assert!(Filters { search: "x".into(), ..Default::default() }.narrowed());
+        assert!(Filters { recent: true, ..Default::default() }.narrowed());
+        let mut f = Filters::default();
+        f.toggle_tag("keys");
+        assert!(f.narrowed());
+    }
 }

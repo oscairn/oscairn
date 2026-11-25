@@ -403,3 +403,53 @@ impl Repositories {
         c.prompt = Some(("The repository's https:// address".into(), String::new()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(address: &str, origin: &str, enabled: bool) -> Repository {
+        Repository { address: address.into(), name: String::new(), key: String::new(), id: String::new(), origin: origin.into(), enabled }
+    }
+
+    // What a row is comes from its origin first (official and this device's can be turned off, never removed), and a
+    // user one is described only while it is turned off; an enabled user one has nothing to add (R1, `under`).
+    #[test]
+    fn what_says_the_origin_and_only_a_turned_off_user_repository() {
+        assert_eq!(repo("https://a", "official", true).what(), Some("Oscairn's own: it can be turned off, never removed"));
+        assert_eq!(repo("https://a", "official", false).what(), Some("Oscairn's own: it can be turned off, never removed"));
+        assert_eq!(repo("https://a", "device", true).what(), Some("This device's: it can be turned off, never removed"));
+        assert_eq!(repo("https://a", "device", false).what(), Some("This device's: it can be turned off, never removed"));
+        assert_eq!(repo("https://a", "user", false).what(), Some("turned off: the Catalog reads nothing from it"));
+        assert_eq!(repo("https://a", "user", true).what(), None);
+        assert_eq!(repo("https://a", "", false).what(), Some("turned off: the Catalog reads nothing from it"));
+        assert_eq!(repo("https://a", "", true).what(), None);
+    }
+
+    // A row past the list's end is nothing, however large the index is (the Add row and the panel answer that way).
+    #[test]
+    fn at_reads_a_row_and_nothing_past_the_end() {
+        let mut r = Repositories::default();
+        assert!(r.at(0).is_none());
+        r.repos.push(repo("https://a", "user", true));
+        assert_eq!(r.at(0).map(|x| x.address.as_str()), Some("https://a"));
+        assert!(r.at(1).is_none());
+        assert!(r.at(usize::MAX).is_none());
+    }
+
+    // The row the cursor is over answers first; when it is elsewhere (the cursor past the list, or Add), the selected
+    // repository answers for Remove, and a selection the list has lost answers nothing.
+    #[test]
+    fn target_uses_the_row_first_then_the_selected_repository() {
+        let mut r = Repositories::default();
+        r.repos.push(repo("https://a", "user", true));
+        r.repos.push(repo("https://b", "user", true));
+        assert_eq!(r.target(Some(1)).map(|x| x.address.as_str()), Some("https://b"));
+        assert!(r.target(Some(2)).is_none());
+        r.selected = Some("https://a".into());
+        assert_eq!(r.target(None).map(|x| x.address.as_str()), Some("https://a"));
+        assert_eq!(r.target(Some(9)).map(|x| x.address.as_str()), Some("https://a"));
+        r.repos.retain(|x| x.address != "https://a");
+        assert!(r.target(None).is_none());
+    }
+}

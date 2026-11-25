@@ -117,8 +117,11 @@ is a literal.
   out of it (the soft shadow where `depth` is soft), rounded by the radius + 1. In a column the track is a
   column; in a rail it is the rail, edge to edge.
 - `folder`: every tab is a folder piece, rounded at the side away from the page (the top of a row's tabs, the
-  left of a column's or rail's); a rule runs along the page side. The selected one reaches the rule and the page past it;
-  the others stop short of it and sit 4 px back, outlined by the hairline.
+  left of a column's or rail's); a rule runs along the page side. In a row every tab is the row's whole height, on the rule,
+  the theme's gap between them, the first one at the row's left edge, rounded by the corner: the selected one differs by fill
+  and ink only, not size, and the row is as tall as what stands beside it (the Library's search box: tests/library_tabs.rs, in
+  every theme at 1.55 and 1). In a column or rail the selected one reaches the rule and the page past it; the others stop short
+  of it and sit 4 px back, outlined by the hairline.
 - The selected tab is told by its fill, not an outline: `Theme.tab-on` with its text `Theme.tab-on-ink` in
   bold, against an unselected tab's `Theme.tab-off` with `Theme.tab-off-ink` in regular weight. They are set
   from the theme by src/palette.rs `tabs`: the selected fill is the accent where the accent holds

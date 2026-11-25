@@ -800,4 +800,83 @@ mod tests {
             assert!(Setlist::parse(&serde_json::from_str(bad).unwrap()).is_err());
         }
     }
+
+    /// A slot's or a Performance's color: #RRGGBB exactly, anything else not a color (drawn without one).
+    #[test]
+    fn color_is_exactly_six_hex_digits_after_the_hash() {
+        for (hex, (r, g, b)) in [
+            ("#3366cc", (51, 102, 204)),
+            ("#000000", (0, 0, 0)),
+            ("#ffffff", (255, 255, 255)),
+            ("#FF00FF", (255, 0, 255)), // the hex digits are not case sensitive
+        ] {
+            let c = color(hex).unwrap();
+            assert_eq!((c.red(), c.green(), c.blue()), (r, g, b), "{hex}");
+        }
+        for hex in ["", "3366cc", "#3366c", "#3366cc11", "#3366cG", "#gggggg"] {
+            assert_eq!(color(hex), None, "{hex:?}");
+        }
+    }
+
+    /// `a` and `b` mixed `f` toward `b`, as Slint's `Color.mix`: at 0 the first color, at 1 the second, halfway the middle.
+    #[test]
+    fn mix_moves_the_channels_halfway_between() {
+        let (black, white, red, blue) = (Color::from_rgb_u8(0, 0, 0), Color::from_rgb_u8(255, 255, 255), Color::from_rgb_u8(255, 0, 0), Color::from_rgb_u8(0, 0, 255));
+        assert_eq!(mix(red, blue, 0.), red);
+        assert_eq!(mix(red, blue, 1.), blue);
+        assert_eq!(mix(black, white, 0.5), Color::from_rgb_u8(128, 128, 128), "halfway is the middle of each channel");
+        assert_eq!(mix(black, red, 0.5), Color::from_rgb_u8(128, 0, 0), "a channel the colors share stays put");
+    }
+
+    /// A placeholder name's ink: the theme's muted color wherever it reads on the box (3 to 1, large text), else the
+    /// ink that does (white or black on the box), so a placeholder never relies on its color to be read.
+    #[test]
+    fn placeholder_ink_reads_on_the_box() {
+        let (white, black) = (Color::from_rgb_u8(255, 255, 255), Color::from_rgb_u8(0, 0, 0));
+        // Muted reads on a box of the other extreme (21 to 1): the muted ink is used, whichever way round.
+        assert_eq!(placeholder_ink(white, black), black);
+        assert_eq!(placeholder_ink(black, white), white);
+        // Muted and the box are the same (1 to 1): the ink that reads on the box is used instead.
+        assert_eq!(placeholder_ink(black, black), white);
+        assert_eq!(placeholder_ink(white, white), black);
+        // Whatever the box, the name reads on it (3 to 1, WCAG's threshold for large text).
+        for fill in [black, white, Color::from_rgb_u8(229, 72, 77), Color::from_rgb_u8(255, 224, 130), Color::from_rgb_u8(51, 51, 51)] {
+            let ink = placeholder_ink(fill, white);
+            assert!(crate::palette::contrast(ink, fill) >= 3., "{fill:?}: {ink:?}");
+        }
+    }
+
+    /// A bank without a name is offered as its number, so the dropdown always has something to say.
+    #[test]
+    fn a_bank_without_a_name_is_its_number() {
+        let doc: Value = serde_json::from_str(r##"{"format":"oscairn.setlist","version":2,"info":{},"display":{},
+            "pages":[{"name":"","slots":[]},{"name":"Encore","slots":[]},{"name":"","slots":[]}]}"##).unwrap();
+        let s = Setlist::parse(&doc).unwrap();
+        assert_eq!(bank_name(&s, 0), "Bank 1");
+        assert_eq!(bank_name(&s, 1), "Encore");
+        assert_eq!(bank_name(&s, 2), "Bank 3");
+        assert_eq!(bank_name(&sample(), 0), "Set 1", "a named bank keeps its name");
+    }
+
+    /// The JUCE Setlist's state file: the setlist open and the slot playing, when it says them; anything else, none.
+    #[test]
+    fn read_state_takes_the_setlist_and_the_slot_playing() {
+        let dir = std::env::temp_dir().join(format!("oscairn-ui-setlist-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("state.json");
+        std::fs::remove_file(&file).ok();
+        std::fs::write(&file, r#"{"setlist":"s1","current":12}"#).unwrap();
+        assert_eq!(read_state(&file), Some(("s1".into(), Some(12))));
+        std::fs::write(&file, r#"{"setlist":"s1"}"#).unwrap();
+        assert_eq!(read_state(&file), Some(("s1".into(), None)), "no slot playing: no current");
+        std::fs::write(&file, r#"{"current":3}"#).unwrap();
+        assert_eq!(read_state(&file), None, "no setlist: no state");
+        std::fs::write(&file, r#"{"setlist":4}"#).unwrap();
+        assert_eq!(read_state(&file), None, "a setlist that is not a name: no state");
+        std::fs::write(&file, r#"not json{"#).unwrap();
+        assert_eq!(read_state(&file), None, "a broken file: no state");
+        std::fs::remove_file(&file).ok();
+        assert_eq!(read_state(&file), None, "no file: no state");
+        std::fs::remove_dir(&dir).ok();
+    }
 }

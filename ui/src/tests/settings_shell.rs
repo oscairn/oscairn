@@ -350,3 +350,79 @@ fn every_page_by_panel_moves_is_idle_at_rest() {
         }
     }
 }
+
+// W16: every action of the MIDI controllers page reached from Home by the panel's moves alone (no touch): the dial
+// walks to the Settings tile, a press opens the app, up to the page rail and along it to the MIDI controllers tab, a
+// press shows the page, then the dial walks every row the page shows (a port's choice of profile, its Ignore switch)
+// and each is pressed, held against the request the fake engine got and the view that changed. The walk visits as
+// many rows as the page shows, no row twice.
+#[test]
+fn midi_controllers_reachable_from_home_by_panel_moves() {
+    let mut e = Fake::new();
+    e.ports = vec![
+        super::settings_fake::port("Pad Controller", &[("pads-a", "Pad Box"), ("pads-b", "Pad Box Mk 2")]),
+        super::settings_fake::port("Wooden Keys", &[]),
+        super::settings_fake::port("Mixer Surface", &[("mixer", "Mixer Surface")]),
+    ];
+    let mut s = Shelf::with("w16-midi-walk", e);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": json!(total.clone())}})));
+        s.f.pump();
+        s.serve();
+    };
+    // Home → the Settings tile → the Rust app; up to the rail, along it to the MIDI controllers tab, a press shows it.
+    nav(&mut s, "move", 0); // the first read is only a baseline
+    for _ in 0..5 {
+        nav(&mut s, "move", 1); // onto the Settings tile
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    nav(&mut s, "move", -1); // the list's cursor
+    nav(&mut s, "move", -1); // the page rail, not the top bar
+    let mut tries = 0;
+    while ui.global::<crate::SettingsState>().get_page_cursor() != 2 {
+        nav(&mut s, "move", 1); // along the rail to the MIDI controllers tab
+        tries += 1;
+        assert!(tries <= 9, "the rail reaches the MIDI controllers tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.global::<crate::SettingsState>().get_page(), 2, "a press shows the MIDI controllers page");
+    assert_eq!(title(&ui), "Settings › MIDI controllers");
+    // Down past the rail's last tab to the list: the cursor on the first row.
+    while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+        nav(&mut s, "move", 1);
+    }
+    // The rows the page shows, then a press on each: a port's profile (a list opens, a chosen item is one request)
+    // and its Ignore switch (a press turns it over). Every row the screen shows is visited, none twice.
+    let n = rows(&ui).len();
+    assert!(n >= 4, "the page shows a row per port's profile and its Ignore switch: {n}");
+    for step in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        let name = s.e.ports[step / 2].name.clone();
+        if rows(&ui)[step].switch {
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert_eq!(s.e.called("controllers.ignore").last().unwrap(), &json!({"input": name, "ignored": true}), "the Ignore switch turns {name} off");
+            assert_eq!(rows(&ui)[step].value, "On", "the switch is now On");
+        } else {
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert!(ui.global::<MenuState>().get_open(), "{name}: the press opens the profile choice");
+            nav(&mut s, "move", 1); // to "None" (Automatic is first)
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert_eq!(s.e.called("controllers.choose").last().unwrap(), &json!({"input": name, "profiles": []}), "{name}: the choice laid down");
+            assert!(!ui.global::<MenuState>().get_open(), "the choice closed the menu");
+        }
+        if step + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+}

@@ -113,6 +113,190 @@ fn keyboard_without_touch() {
     assert_eq!(k.act(Action::Confirm(None)), Outcome::Accept("qww".into()));
 }
 
+// Reachability: every key of the text keyboard reached and activated from Home with panel moves only
+// (move, confirm, cancel/EXIT), no touch. The walk turns the dial so the cursor stops on every key
+// the keyboard's own model declares — never a hard-coded count — and presses (Confirm) each: a
+// letter, digit, punctuation or space key types that character into the field, Del erases the last,
+// the caret keys move the caret, Clear empties it, Shift and Caps switch to upper case (and Caps
+// stays), 123 switches to the symbols layer and flips the labels, Cancel/EXIT closes the keyboard
+// back onto the Part screen and Done accepts the name to the engine (a `parts.name` request with the
+// new name). An action a key offers that the dial cannot reach would be a product gap.
+#[test]
+fn keyboard_reachable_from_home_by_panel_moves() {
+    let mut f = Fixture::new("keyboard-reach");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let graph = super::part::part_graph();
+    let ui = f.screen.ui.clone_strong();
+    // A quiet engine: every request out is answered until none comes for a moment.
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "library.libraries" => json!({"libraries": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => json!({"presets": []}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Home → the Performance tile → Play.
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move", 0); // the first read is only a baseline
+    nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play: the dial down to the first part, pressed, opens the Part screen.
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (4, "Keys".to_string()), "the press on a part opens the Part screen");
+    // The Part list's cursor down to the name row, pressed: the text keyboard opens. The FANTOM-07
+    // profile says textEntry is onScreen, so it shows its rows of keys.
+    let part_rows = |ui: &Shell| ui.global::<crate::PartState>().get_rows().iter().collect::<Vec<_>>();
+    for _ in 0..200 {
+        let at = part_rows(&ui).iter().position(|r| r.cursor);
+        if at.is_some_and(|a| part_rows(&ui)[a].label.as_str() == "Name") {
+            break;
+        }
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+    }
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    let state = ui.global::<crate::KeyboardState>();
+    assert!(state.get_open() && state.get_keys_shown(), "the press on the name opens the on-screen keyboard");
+    assert_eq!(state.get_title().as_str(), "Name of the part");
+    // The whole keyboard the model declares: counted from KeyboardState.keys, never hard-coded.
+    let n = state.get_keys().iter().count();
+    assert!(n > 20, "the keyboard shows its rows of keys, {n}");
+    // Reachability: the dial to the first key, then across every key; each is a cursor stop, and
+    // nothing is pressed (a move sends nothing and nothing switches).
+    let mut reached = Vec::new();
+    while cursor(&ui) != Some(0) {
+        nav(&mut f, "move", -1);
+        settle(&mut f);
+        reached.push(cursor(&ui).unwrap());
+    }
+    reached.push(0);
+    for _ in 1..n as i64 {
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+        reached.push(cursor(&ui).unwrap());
+    }
+    reached.sort_unstable();
+    reached.dedup();
+    assert_eq!(reached.len(), n, "the walk reached {reached:?}, the keyboard declares {n}");
+    assert!(reached.iter().enumerate().all(|(want, &at)| want == at as usize), "every key stop, none missed and none twice: {reached:?}");
+    // The dial lands the cursor on a key; Confirm presses it. The field is what the keyboard types.
+    let goto = |nav: &mut dyn FnMut(&mut Fixture, &str, i64), f: &mut Fixture, k: i64, settle: &dyn Fn(&mut Fixture)| {
+        nav(f, "move", k - i64::from(cursor(&f.screen.ui).unwrap()));
+        settle(f);
+        assert_eq!(cursor(&f.screen.ui), Some(k as i32), "the cursor on key {k}");
+    };
+    let field = |ui: &Shell| {
+        let s = ui.global::<crate::KeyboardState>();
+        (s.get_before().to_string(), s.get_after().to_string())
+    };
+    let typed = |ui: &Shell| {
+        let (b, a) = field(ui);
+        b.len() + a.len()
+    };
+    // A key found by the label the keyboard shows (a letter in either case), never by its place.
+    let index_of = |ui: &Shell, label: &str| -> i64 {
+        let keys: Vec<_> = ui.global::<crate::KeyboardState>().get_keys().iter().collect();
+        keys.iter().find(|k| k.label.as_str().eq_ignore_ascii_case(label)).unwrap_or_else(|| panic!("no key shows {label:?}")).index.into()
+    };
+    let on = |ui: &Shell, i: i64| ui.global::<crate::KeyboardState>().get_keys().iter().any(|k| i64::from(k.index) == i && k.on);
+    let (shift, caps, layer, q) = (index_of(&ui, "Shift"), index_of(&ui, "Caps"), index_of(&ui, "123"), index_of(&ui, "q"));
+    // The modals, on the letters' layer where they work: Shift for one character, Caps that stays,
+    // and 123 that swaps every label to the symbols layer and back.
+    goto(&mut nav, &mut f, shift, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(on(&ui, shift), "Shift engages");
+    goto(&mut nav, &mut f, q, &settle); // q, now upper for one character
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(!on(&ui, shift), "Shift is for the next character only");
+    goto(&mut nav, &mut f, caps, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(on(&ui, caps), "Caps engages");
+    goto(&mut nav, &mut f, q, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(on(&ui, caps), "Caps stays on");
+    goto(&mut nav, &mut f, layer, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(state.get_keys().iter().any(|k| i64::from(k.index) == q && k.label.as_str() == "1"), "123: the letters' keys show the symbols layer");
+    goto(&mut nav, &mut f, layer, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    goto(&mut nav, &mut f, caps, &settle); // Caps off again, back on the letters
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    // Press every key but the two that leave (Cancel and Done, kept for last), each with its effect,
+    // told by the label it shows as it is pressed: a character or space types, Del erases, the caret
+    // keys move the caret, Clear empties the field.
+    let label_at = |ui: &Shell, k: i64| ui.global::<crate::KeyboardState>().get_keys().iter().find(|x| i64::from(x.index) == k).unwrap().label.to_string();
+    for k in 0..n as i64 {
+        let label = label_at(&ui, k);
+        if label == "Cancel" || label == "Done" {
+            continue; // the walk's last two presses
+        }
+        goto(&mut nav, &mut f, k, &settle);
+        let before = typed(&ui);
+        nav(&mut f, "confirm", 1);
+        settle(&mut f);
+        match label.as_str() {
+            "<" | ">" => assert_eq!(typed(&ui), before, "key {k}: the caret moves, nothing is typed"),
+            "Clear" => assert_eq!(field(&ui), (String::new(), String::new()), "key {k} (Clear) empties the field"),
+            "Del" => assert_eq!(typed(&ui) + 1, before, "key {k} (Del) erases the last character"),
+            "Shift" | "Caps" | "123" | "abc" => assert_eq!(typed(&ui), before, "key {k} ({label}) switches a layer, nothing is typed"),
+            _ => assert_eq!(typed(&ui), before + 1, "key {k} ({label}) types a character"),
+        }
+    }
+    // The last two: Cancel closes the keyboard and EXIT comes back to the Part screen; Done accepts
+    // the text to the engine — a `parts.name` request with the name, kept for the end.
+    let cancel = index_of(&ui, "Cancel");
+    goto(&mut nav, &mut f, cancel, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert!(!state.get_open(), "Cancel closes the keyboard");
+    assert_eq!(ui.get_screen(), 4, "Cancel: EXIT comes back to the Part screen");
+    nav(&mut f, "confirm", 1); // the name row again, a new keyboard
+    settle(&mut f);
+    assert!(state.get_open(), "the name opens the keyboard again");
+    goto(&mut nav, &mut f, q, &settle);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    let done = index_of(&ui, "Done");
+    goto(&mut nav, &mut f, done, &settle);
+    nav(&mut f, "confirm", 1);
+    let request = f.engine.try_request(std::time::Duration::from_secs(2)).expect("Done sends the part's new name");
+    assert_eq!(request["method"], "parts.name");
+    assert_eq!(request["params"]["part"], json!(10));
+    assert_eq!(request["params"]["name"], "Keysq", "the name typed on the keyboard reaches the engine");
+    settle(&mut f); // graph.commit and the rest
+}
+
 // A screen with a typing keyboard (the profile's textEntry is `keyboard`): no rows of keys, only the
 // top row; typed characters, Backspace, the arrows, Return and Escape do the typing.
 #[test]

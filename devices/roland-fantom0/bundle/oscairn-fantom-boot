@@ -139,7 +139,13 @@ if [ -z "$dry" ]; then
 fi
 bounded 10 eval "$key_held"
 held=$?
-[ $held -ne 0 ] || roland "TEMPO is held"
+if [ $held -eq 0 ]; then
+	# Roland's app opens its expansion screen when it starts with TEMPO still down: wait (60 s at
+	# most) for the hand to let go first.
+	i=0
+	while [ $i -lt "${OSCAIRN_BOOT_RELEASE:-120}" ]; do bounded 10 eval "$key_held"; [ $? -eq 0 ] || break; i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1; done
+	roland "TEMPO was held"
+fi
 [ $held -eq 1 ] || roland "TEMPO cannot be read (oscairn-key-held exited $held)"
 if [ -e "$boot/stock-next-boot" ]; then
 	if [ -n "$dry" ]; then say "would remove $boot/stock-next-boot"; else rm -f "$boot/stock-next-boot"; fi

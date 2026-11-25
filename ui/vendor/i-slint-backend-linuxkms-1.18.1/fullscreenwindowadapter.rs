@@ -97,6 +97,22 @@ impl FullscreenWindowAdapter {
         renderer: Box<dyn FullscreenRenderer>,
         rotation: RenderingRotation,
     ) -> Result<Rc<Self>, PlatformError> {
+        // Oscairn: at a cold start the UI once opened the display and never got a frame on it (the
+        // console stayed on the screen); started again it drew at once. So a UI with no frame on
+        // the glass within OSCAIRN_FIRST_FRAME_SECS (8) exits, and the start script's keeper starts it again.
+        static WATCH: std::sync::Once = std::sync::Once::new();
+        WATCH.call_once(|| {
+            let secs = std::env::var("OSCAIRN_FIRST_FRAME_SECS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(8);
+            if secs > 0 {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                    if !FIRST_FRAME_SHOWN.load(std::sync::atomic::Ordering::Acquire) {
+                        eprintln!("oscairn: no frame on the display within {secs} s: ending, so that the keeper starts the UI again");
+                        std::process::exit(4);
+                    }
+                });
+            }
+        });
         let size = renderer.size();
         let rotation_degrees = rotation.degrees();
         eprintln!(
@@ -196,6 +212,8 @@ impl FullscreenWindowAdapter {
             })?;
             if !matches!(outcome, DrawOutcome::Success) {
                 self.redraw_requested.set(true);
+            } else {
+                FIRST_FRAME_SHOWN.store(true, std::sync::atomic::Ordering::Release);
             }
             self.log_frame(now);
             // Check once after rendering if we have running animations and
@@ -218,6 +236,9 @@ impl FullscreenWindowAdapter {
         Ok(())
     }
 }
+
+/// Oscairn: set once a frame has been presented (the first-frame watch in `new`).
+static FIRST_FRAME_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl FullscreenWindowAdapter {
     fn log_frame(self: &Rc<Self>, start: std::time::Instant) {

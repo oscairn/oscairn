@@ -207,11 +207,15 @@ rm -rf "$shm"
 
 export OSCAIRN_BOOT_DIR="$bundle/bootdir" OSCAIRN_BOOT_RUN="$bundle/bootrun"
 mkdir -p "$OSCAIRN_BOOT_RUN"
-boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
+boot() { out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
 roland='go.sh runs /home/root/mi078'
 boot 0
-check "boot, TEMPO held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO is held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
-check "boot logs to its folder outside the bundle" "grep -q 'TEMPO is held' '$OSCAIRN_BOOT_DIR/boot.log'"
+check "boot, TEMPO held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO was held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
+check "boot logs to its folder outside the bundle" "grep -q 'TEMPO was held' '$OSCAIRN_BOOT_DIR/boot.log'"
+# Held for the first 3 reads, then let go: Roland's app waits for the release (4 reads), not the bound (10).
+reads="$bundle/key-reads"; rm -f "$reads"
+out=$(OSCAIRN_BOOT_RELEASE=10 OSCAIRN_KEY_HELD="sh -c 'n=\$(cat $reads 2>/dev/null || echo 0); echo \$((n + 1)) > $reads; [ \$n -lt 3 ]'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?
+check "boot, TEMPO held: Roland's app starts once it is let go" "[ $status = 3 ] && [ \"\$(cat '$reads')\" = 4 ] && echo \"\$out\" | grep -q 'TEMPO was held'"
 boot 2
 check "boot, TEMPO unreadable: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO cannot be read' && echo \"\$out\" | grep -q '$roland'"
 boot 1
@@ -241,7 +245,7 @@ cp "$scripts/oscairn-fantom-boot" "$fb/b/"
 printf '#!/bin/sh\necho start "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/hang" ] || exec sleep 30\n[ ! -e "$(dirname "$0")/fails" ] || exit 1\n' > "$fb/b/oscairn-fantom-start"
 printf '#!/bin/sh\necho stop "$@" >> "$(dirname "$0")/ran"\n' > "$fb/b/oscairn-fantom-stop"
 chmod +x "$fb/b"/*
-real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
+real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
 fresh() { rm -f "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/hang"; }
 fresh; : > "$fb/b/fails"; real
 check "real: a failed start falls back (stop --panel) to Roland's application, attempt cleared" "[ $status = 3 ] && grep -q 'stop --panel' '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ]"

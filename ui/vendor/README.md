@@ -19,6 +19,10 @@ on devices (`ui/Cargo.toml`'s feature `kms`, through `[patch.crates-io]`).
   `experiment/rust-setlist`, on combining the two).
 - **The patch:** `frame-cap.patch` (apply with `patch -p1` inside the crate's folder), in
   `fullscreenwindowadapter.rs`, and one line in `display/swdisplay.rs`:
+  - A first-frame watch (`fullscreenwindowadapter.rs`): with no frame presented within
+    `OSCAIRN_FIRST_FRAME_SECS` seconds (8; 0 turns it off) the UI exits with status 4, and the
+    start script's keeper starts it again. At a cold start on the FANTOM-07 the UI once opened the
+    display and never got a frame on it (the console stayed on the screen); started again it drew.
   - `SLINT_KMS_MAX_FPS=N`: frames start at least 1/N s (less 2 ms, so a frame lands on every
     n-th vblank instead of slipping to the next) after the one before; a redraw asked sooner
     waits on a single-shot timer. Upstream renders on every request, at up to the display's

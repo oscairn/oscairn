@@ -10,7 +10,8 @@
 // what comes in its first moments dropped, a held note ended when the device ends, and no spinning
 // while it is gone. With localOff: the Local Switch frames, byte for byte, written once, only
 // after the device is raw with echo off, nothing else ever, and reading goes on; a device that
-// cannot be made raw gets nothing.
+// cannot be made raw gets nothing. With a cold start's value: the panel's start word before
+// Local Switch off, selector 2 and selector 3 after it, exactly, once, and the status frames that follow read without a log line.
 //
 // With OSCAIRN_BMC_CAPTURE naming a capture of a unit's link (kept off the repository), it also
 // parses that from every byte offset of its first 2 KiB and prints the counts.
@@ -289,6 +290,55 @@ namespace
         ::unlink( file );
     }
 
+    // A cold start: the panel's start word, Local Switch off, then selector 2 with its value, then selector 3, exactly and
+    // once; then the status frames those start, 10 a second, read and dropped without a log line.
+    void coldStart()
+    {
+        check( Bytes( bmcPanelStart.begin(), bmcPanelStart.end() ) == Bytes{ 0x0c, 0x00, 0x75, 0x00, 0x80, 0x30, 0x00, 0x00, 0x01, 0x00, 0x00, 0x04 }, "the panel's start word, as traced" );
+        check( Bytes( bmcSelector3.begin(), bmcSelector3.end() ) == Bytes{ 0x12, 0x00, 0xe1, 0x03, 0xff, 0xff, 0x00, 0x00, 0xe8, 0x3c, 0xe9, 0x00 }, "selector 3, as traced" );
+        const auto up = bmcLinuxUp( 1 );
+        check( Bytes( up.begin(), up.end() ) == Bytes{ 0x12, 0x00, 0xe1, 0x02, 0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0xc1, 0x04 }, "selector 2 with the unit's value 1, as traced" );
+        const auto other = bmcLinuxUp( 0x04030201 );
+        check( other[4] == 1 && other[5] == 2 && other[6] == 3 && other[7] == 4, "selector 2's value low byte first" );
+        const int master = ::posix_openpt( O_RDWR | O_NOCTTY );
+        check( master >= 0 && ::grantpt( master ) == 0 && ::unlockpt( master ) == 0, "a pty" );
+        const std::string path = ::ptsname( master );
+        ::fcntl( master, F_SETFL, O_NONBLOCK );
+        std::mutex lock;
+        Messages heard;
+        std::vector<std::string> logged;
+        Bytes sent, expected( bmcPanelStart.begin(), bmcPanelStart.end() );
+        expected.insert( expected.end(), bmcLocalOff.begin(), bmcLocalOff.end() );
+        expected.insert( expected.end(), up.begin(), up.end() );
+        expected.insert( expected.end(), bmcSelector3.begin(), bmcSelector3.end() );
+        auto drain = [&] { uint8_t b[256]; ssize_t n; while( ( n = ::read( master, b, sizeof b ) ) > 0 ) sent.insert( sent.end(), b, b + n ); };
+        {
+            BmcLinkReader reader( path, [&]( size_t, const uint8_t* b, size_t n ) { std::lock_guard l( lock ); heard.emplace_back( b, b + n ); },
+                                  [&]( const std::string& line ) { std::lock_guard l( lock ); logged.push_back( line ); }, 0ms, true, 1u );
+            for( auto until = std::chrono::steady_clock::now() + 3s; sent.size() < expected.size() && std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) ) drain();
+            check( sent == expected, "a cold open writes the panel's start word, Local Switch off, selector 2, selector 3, exactly" );
+            std::this_thread::sleep_for( 200ms );
+            for( int i = 0; i < 20; ++i ) // two seconds' status frames, then a key
+            {
+                const auto s = longFrame( 112 );
+                check( ::write( master, s.data(), s.size() ) == ssize_t( s.size() ), "a status frame" );
+            }
+            const auto k = key( true, 60, 100 );
+            check( ::write( master, k.data(), k.size() ) == ssize_t( k.size() ), "a key" );
+            for( auto until = std::chrono::steady_clock::now() + 3s; std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) ) { std::lock_guard l( lock ); if( !heard.empty() ) break; }
+            {
+                std::lock_guard l( lock );
+                check( heard == Messages{ { 0x90, 60, 100 } } && reader.stats().unknown == 0 && reader.stats().frames >= 21, "the status frames are read and dropped, the key after them heard" );
+                check( logged.size() == 3 && logged[0] == "cold start: the panel's start word sent" && logged[1] == "Local Switch off sent" && logged[2].find( "cold start" ) == 0 && logged[2].find( "value 1" ) != std::string::npos,
+                       "a line for each step, none for the status frames" );
+            }
+            std::this_thread::sleep_for( 200ms );
+            drain();
+            check( sent.size() == expected.size(), "and nothing else is written" );
+        }
+        ::close( master );
+    }
+
     // Hostile bytes, for a sanitizer build to watch: the unknown frames a unit logged, long frames of
     // every awkward length split at every byte, and random streams cut at random places. Nothing to
     // compare, only that the parser stays inside its buffer and every frame it hands on is whole.
@@ -346,6 +396,7 @@ int main()
     else std::printf( "OSCAIRN_BMC_CAPTURE unset: the capture check is skipped\n" );
     reader();
     localSwitch();
+    coldStart();
     if( failures ) return 1;
     std::printf( "ok: the link's frames, their place found again, and its reader\n" );
     return 0;

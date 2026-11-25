@@ -23,8 +23,8 @@ namespace oscairn::host
 
     void BmcLinkReader::standardError( const std::string& line ) { std::fprintf( stderr, "oscairn: keys: %s\n", line.c_str() ); }
 
-    BmcLinkReader::BmcLinkReader( std::string path, Message message, Log log, std::chrono::milliseconds settle, bool localOff )
-        : path_( std::move( path ) ), message_( std::move( message ) ), log_( std::move( log ) ), settle_( settle ), localOff_( localOff ), thread_( [this] { run(); } ) {}
+    BmcLinkReader::BmcLinkReader( std::string path, Message message, Log log, std::chrono::milliseconds settle, bool localOff, std::optional<uint32_t> cold )
+        : path_( std::move( path ) ), message_( std::move( message ) ), log_( std::move( log ) ), settle_( settle ), localOff_( localOff ), cold_( cold ), thread_( [this] { run(); } ) {}
 
     BmcLinkReader::~BmcLinkReader()
     {
@@ -47,7 +47,7 @@ namespace oscairn::host
 
     bool BmcLinkReader::open( bool report )
     {
-        const int fd = ::open( path_.c_str(), ( localOff_ ? O_RDWR : O_RDONLY ) | O_NOCTTY | O_NONBLOCK | O_CLOEXEC );
+        const int fd = ::open( path_.c_str(), ( localOff_ || cold_ ? O_RDWR : O_RDONLY ) | O_NOCTTY | O_NONBLOCK | O_CLOEXEC );
         if( fd < 0 ) { if( report && log_ ) log_( "cannot open " + path_ + ": " + std::strerror( errno ) ); return false; }
         // Echo off before any read: with it on, the tty layer would send each byte received back to the sound chips.
         termios t{};
@@ -67,11 +67,26 @@ namespace oscairn::host
             ::close( fd );
             return false;
         }
+        if( cold_ ) // first, as Roland's app sends it: a cold start's panel stays dead without it
+        {
+            const auto n = ::write( fd, bmcPanelStart.data(), bmcPanelStart.size() );
+            if( log_ ) log_( n == ssize_t( bmcPanelStart.size() ) ? "cold start: the panel's start word sent" : "cold start: the panel's start word not sent: " + std::string( n < 0 ? std::strerror( errno ) : "a short write" ) );
+        }
         if( localOff_ ) // raw with echo off by now: Local Switch off, once
         {
             localOff_ = false;
             const auto n = ::write( fd, bmcLocalOff.data(), bmcLocalOff.size() );
             if( log_ ) log_( n == ssize_t( bmcLocalOff.size() ) ? "Local Switch off sent" : "Local Switch off not sent: " + std::string( n < 0 ? std::strerror( errno ) : "a short write" ) );
+        }
+        if( cold_ ) // after Local Switch off: a cold start's outputs stay silent without these
+        {
+            const auto up = bmcLinuxUp( *cold_ );
+            const auto value = std::to_string( *cold_ );
+            cold_.reset();
+            const auto n = ::write( fd, up.data(), up.size() );
+            const auto m = n == ssize_t( up.size() ) ? ::write( fd, bmcSelector3.data(), bmcSelector3.size() ) : 0;
+            if( log_ ) log_( m == ssize_t( bmcSelector3.size() ) ? "cold start: the sound engine told the Linux side is up (selector 2, value " + value + ", then selector 3)"
+                                                                 : "cold start: the Linux side's start not sent: " + std::string( n < 0 || m < 0 ? std::strerror( errno ) : "a short write" ) );
         }
         fd_ = fd;
         parser_.reset();

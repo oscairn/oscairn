@@ -15,6 +15,7 @@
 #include <cstring>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -190,6 +191,26 @@ namespace oscairn::host
         0x0e, 0x00, 0xef, 0x01, 0x00, 0x00, 0x00, 0xcf, 0x00, 0x00, 0x00, 0x05,
         0x10, 0x00, 0xef, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x0c, 0xff, 0x07 };
 
+    /// What a cold start (Roland's app not run since power-on) sends first, before Local Switch
+    /// off: the panel's start word, kind 6 to 0x75, Roland's app's first write at its start. Without
+    /// it the panel (knobs, buttons, dial, sustain pedal) stays dead; with it, on 2026-11-25, the
+    /// panel worked. Byte 8 is 01 as traced (what it means is not known).
+    inline constexpr std::array<uint8_t, 12> bmcPanelStart{ 0x0c, 0x00, 0x75, 0x00, 0x80, 0x30, 0x00, 0x00, 0x01, 0x00, 0x00, 0x04 };
+
+    /// What a cold start also sends, after Local Switch off:
+    /// without these two the outputs stay silent; with them, on 2026-11-25, Oscairn sounded
+    /// (notes/w27/unit-changes.md). Both kind 9 to 0xE1 (the BMC's control task) as Roland's app
+    /// sent them at its start (notes/w27/audio-init-3-2026-11-25.md), each a frame of its own.
+    /// Selector 2, "the Linux side is up" (the BMC's 10/s status frames start after it), carries
+    /// the 32-bit word at offset 16 of Roland's ROLAND/FANTOM/ADJUST/KY019.ADJ (2 without the file),
+    /// which the BMC's handler is not seen to read; selector 3 carries nothing, and what handles it
+    /// is not known. Bytes past each count are stale bytes of Roland's app's memory, kept as traced.
+    inline std::array<uint8_t, 12> bmcLinuxUp( uint32_t value )
+    {
+        return { 0x12, 0x00, 0xe1, 0x02, uint8_t( value ), uint8_t( value >> 8 ), uint8_t( value >> 16 ), uint8_t( value >> 24 ), 0x6c, 0x00, 0xc1, 0x04 };
+    }
+    inline constexpr std::array<uint8_t, 12> bmcSelector3{ 0x12, 0x00, 0xe1, 0x03, 0xff, 0xff, 0x00, 0x00, 0xe8, 0x3c, 0xe9, 0x00 };
+
     /// The link's MIDI sources, by sender address, in the order their inputs are listed: the keys
     /// (0x02), then the addresses Roland's app takes MIDI from its MIDI ports on (docs/fantom-0.md;
     /// which is DIN and which USB is not known, so each is named by its address).
@@ -201,7 +222,8 @@ namespace oscairn::host
     /// from their MIDI words (bmcMidi). Before reading it makes the device raw with echo and flow
     /// control off, checked by reading the settings back; where they do not hold it neither reads
     /// nor writes. It writes nothing but, with `localOff`, bmcLocalOff once, the first time the
-    /// device is open and raw (read-only otherwise); a failed write is logged and reading goes on. It polls with a timeout (so stopping waits at
+    /// device is open and raw (read-only otherwise), and with `cold` (a cold start, its value
+    /// selector 2's) bmcPanelStart before it and bmcLinuxUp then bmcSelector3 right after; a failed write is logged and reading goes on. It polls with a timeout (so stopping waits at
     /// most that), and reads without pause while open: the sound chips queue what is not read, and
     /// Roland's engine then holds its notes. A device that fails or ends is opened again a second
     /// later.
@@ -221,7 +243,7 @@ namespace oscairn::host
         using Message = std::function<void( size_t input, const uint8_t* bytes, size_t size )>;
         using Log = std::function<void( const std::string& )>; // empty: no log
         static void standardError( const std::string& line );
-        BmcLinkReader( std::string path, Message message, Log log = standardError, std::chrono::milliseconds settle = std::chrono::milliseconds( 500 ), bool localOff = false );
+        BmcLinkReader( std::string path, Message message, Log log = standardError, std::chrono::milliseconds settle = std::chrono::milliseconds( 500 ), bool localOff = false, std::optional<uint32_t> cold = {} );
         ~BmcLinkReader(); // stops and joins
         BmcLinkReader( const BmcLinkReader& ) = delete;
         BmcLinkReader& operator=( const BmcLinkReader& ) = delete;
@@ -242,6 +264,7 @@ namespace oscairn::host
         Log log_;
         std::chrono::milliseconds settle_;
         bool localOff_; // still to be sent (reader thread)
+        std::optional<uint32_t> cold_; // the same
         std::mutex lock_; // the pause's wake
         std::condition_variable stopped_;
         std::atomic<bool> stop_{ false };

@@ -332,3 +332,129 @@ pub fn two_lines(label: &str) -> (String, String) {
         None => (label.to_string(), String::new()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grid::Param;
+    use serde_json::json;
+
+    fn placed(param: usize, tab: Option<usize>, heading: &str) -> Placed {
+        Placed { param, tab, heading: heading.into() }
+    }
+
+    /// A page whose tabs are exactly the indexes of one view (all of its parameters are of that view, each on the
+    /// tab carrying its index, with an algorithm field for the view's overview).
+    fn voices(params: &[Param], tabs: &[&str]) -> Model {
+        let params_on: Vec<Placed> = params.iter().enumerate().map(|(i, _)| placed(i, Some(i), "")).collect();
+        Model { pages: vec![Page { name: "Voices".into(), tabs: tabs.iter().map(|t| t.to_string()).collect(), params: params_on, indexed: None }] }
+    }
+
+    /// The model folds the two tabs (each the whole of one view's parameters, named "N", carrying index N) into a
+    /// master and a detail; the tabs go and every parameter sits above.
+    #[test]
+    fn a_pages_tabs_that_are_one_views_indexes_fold_into_a_master_and_detail() {
+        let params = vec![
+            Param { id: 0, view: 7, index: 1, field: "algorithm".into(), ..Default::default() },
+            Param { id: 1, view: 7, index: 2, field: "algorithm".into(), ..Default::default() },
+        ];
+        let mut model = voices(&params, &["Voices 1", "Voices 2"]);
+        model.fold_indexed(&params);
+        assert_eq!(model.pages[0].tabs, Vec::<String>::new());
+        assert!(model.pages[0].params.iter().all(|x| x.tab.is_none()), "a folded view's parameters sit above the tabs");
+        assert_eq!(model.pages[0].indexed, Some(Indexed { view: 7, names: vec![(1, "Voices 1".into()), (2, "Voices 2".into())] }));
+    }
+
+    /// A page whose own unnamed tab ("General", see `Declared`) is among the others still folds when two named
+    /// tabs are whole views; the unnamed tab's parameters have no index and stay above like the rest.
+    #[test]
+    fn the_pages_own_unnamed_tab_stays_above_a_folded_view() {
+        let params = vec![
+            Param { id: 0, view: 9, index: 1, field: "algorithm".into(), ..Default::default() },
+            Param { id: 1, view: 9, index: 2, field: "algorithm".into(), ..Default::default() },
+            Param { id: 2, ..Default::default() },
+        ];
+        let mut model = voices(&params, &["Voices 1", "Voices 2", ""]);
+        model.fold_indexed(&params);
+        assert_eq!(model.pages[0].indexed, Some(Indexed { view: 9, names: vec![(1, "Voices 1".into()), (2, "Voices 2".into())] }));
+        assert!(model.pages[0].params.iter().all(|x| x.tab.is_none()));
+    }
+
+    /// Tabs that are not each a whole of one view stay tabs: a parameter carrying the wrong index, parameters of
+    /// different views, and a tab whose name has no number.
+    #[test]
+    fn tabs_that_are_not_one_views_indexes_stay_tabs() {
+        // The second tab's parameter carries the wrong index.
+        let wrong_index = vec![
+            Param { id: 0, view: 7, index: 1, field: "algorithm".into(), ..Default::default() },
+            Param { id: 1, view: 7, index: 5, field: "algorithm".into(), ..Default::default() },
+        ];
+        let mut a = voices(&wrong_index, &["Voices 1", "Voices 2"]);
+        a.fold_indexed(&wrong_index);
+        assert_eq!(a.pages[0].indexed, None);
+        assert_eq!(a.pages[0].tabs, ["Voices 1", "Voices 2"]);
+        // The two tabs carry different views.
+        let mixed_views = vec![
+            Param { id: 0, view: 7, index: 1, field: "algorithm".into(), ..Default::default() },
+            Param { id: 1, view: 8, index: 2, field: "algorithm".into(), ..Default::default() },
+        ];
+        let mut b = voices(&mixed_views, &["Voices 1", "Voices 2"]);
+        b.fold_indexed(&mixed_views);
+        assert_eq!(b.pages[0].indexed, None);
+        // A tab whose name has no trailing number.
+        let unnamed = vec![
+            Param { id: 0, view: 7, index: 1, field: "algorithm".into(), ..Default::default() },
+            Param { id: 1, view: 7, index: 2, field: "algorithm".into(), ..Default::default() },
+        ];
+        let mut c = voices(&unnamed, &["Voices 1", "Mixed"]);
+        c.fold_indexed(&unnamed);
+        assert_eq!(c.pages[0].indexed, None);
+    }
+
+    /// `declared_in` reads nothing when a `params.list` answer declares no tabs: `uiTabs`
+    /// absent, not an array or empty.
+    #[test]
+    fn declared_in_reads_ui_tabs_or_none() {
+        assert_eq!(declared_in(&json!({})), None);
+        assert_eq!(declared_in(&json!({"parameters": []})), None);
+        assert_eq!(declared_in(&json!({"uiTabs": []})), None);
+        assert_eq!(declared_in(&json!({"uiTabs": "not an array"})), None);
+        let two = json!({"uiTabs": [{"id": 2, "parent": 1, "name": "Env"}, {"id": 3, "parent": 1, "name": "Op"}]});
+        assert_eq!(declared_in(&two), Some(Declared { entries: vec![(2, 1, "Env".into()), (3, 1, "Op".into())] }));
+    }
+
+    /// A page's groups read those above the tabs first, then the tab's, each heading's parameters together; a
+    /// page out of range has nothing.
+    #[test]
+    fn groups_put_what_is_above_a_tab_first_and_a_page_out_of_range_has_nothing() {
+        let model = Model { pages: vec![Page {
+            name: "Env".into(),
+            tabs: vec!["A".into(), "B".into()],
+            params: vec![placed(0, None, "h1"), placed(1, Some(0), "h1"), placed(2, Some(1), "h2"), placed(3, Some(0), "h2")],
+            indexed: None,
+        }] };
+        assert_eq!(model.groups(0, Some(0)), vec![("h1".to_string(), vec![0, 1]), ("h2".to_string(), vec![3])]);
+        assert_eq!(model.groups(0, Some(1)), vec![("h1".to_string(), vec![0]), ("h2".to_string(), vec![2])]);
+        assert_eq!(model.groups(9, None), Vec::<(String, Vec<usize>)>::new());
+    }
+
+    /// The heading of a parameter is its module path below the page it is on and, where its tab's name is the
+    /// path's second level, below that too; a page or tab the path does not start with leaves the path alone.
+    #[test]
+    fn a_parameters_heading_is_its_module_path_below_the_page_and_tab() {
+        assert_eq!(heading_below("Env/A/Beat", "Env", Some("A")), "Beat");
+        assert_eq!(heading_below("Env/A/Beat", "Env", None), "A/Beat");
+        assert_eq!(heading_below("Env/Other", "Env", None), "Other");
+        assert_eq!(heading_below("Env/Other/Odd", "Env", Some("A")), "Other/Odd");
+        assert_eq!(heading_below("Amp/Out", "Env", None), "Amp/Out");
+    }
+
+    /// What a row of names all share is taken off whole words, so a shared leading word is still a full word
+    /// when the names are not ASCII.
+    #[test]
+    fn abbreviate_takes_off_a_shared_word_whole_across_unicode() {
+        let row = vec!["Громкость 1".to_string(), "Громкость 2".to_string()];
+        let a = abbreviate(&row);
+        assert_eq!((a.heading.as_str(), a.shorts), ("Громкость", vec!["1".to_string(), "2".to_string()]));
+    }
+}

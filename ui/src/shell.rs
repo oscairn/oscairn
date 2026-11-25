@@ -1002,6 +1002,7 @@ impl App {
             Request::Info => {
                 self.performance_id = r["id"].as_str().unwrap_or_default().to_string();
                 self.performance_name = r["name"].as_str().unwrap_or_default().to_string();
+                self.setlist.open_performance(&self.performance_id);
                 let name = self.performance_name.clone();
                 self.on_parts(|p| p.performance(&name));
                 self.follow();

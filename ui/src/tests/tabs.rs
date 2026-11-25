@@ -462,8 +462,8 @@ fn a_long_name_shrinks_to_seventy_percent_and_is_then_cut() {
             let long = width(&s);
             shot(&s, &format!("tabs-long-{}-{label}@1.55", t.id));
             println!("{} {label}: the selected tab of the short name {short:.0} px wide, of the long one {long:.0} (a touch target is {touch:.0}, four and a half {:.0})", t.id, 4.5 * touch);
-            // The fill is the box less the cursor's ring and a hair on each side.
-            let fill = 2. * 3. * 1.55;
+            // A segmented tab's fill is the box less the cursor's ring and a hair on each side; a folder tab's the whole box.
+            let fill = if style == TabStyle::Segmented { 2. * 3. * 1.55 } else { 0. };
             assert!(short >= touch - fill - 1., "a short name's tab is a touch target: {short}");
             assert!(long <= 4.5 * touch - fill + 1., "a long name's tab stops at four and a half touch targets: {long}");
             assert!(long > 3. * touch, "and is wide, not squeezed: {long}");

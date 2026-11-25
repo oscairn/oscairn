@@ -1645,6 +1645,7 @@ mod library_bubbles;
 mod library_compact;
 mod library_info;
 mod library_rows;
+mod library_tabs;
 mod panel_steps;
 mod theme_pictures;
 

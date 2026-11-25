@@ -454,8 +454,8 @@ export struct TabLabel {
 
 // A tab's box by the theme's `tabs` style, over the whole of its parent: segmented, the selected one a piece lifted
 // out of the track; folder, every tab a piece, rounded at the side away from the page (the top of a row's tabs, the
-// left of a column's, rail's included), the selected one reaching the rule and the page past it, the others
-// stopping short of it and sitting back. The cursor is a ring round the whole box.
+// left of a column's, rail's included). A row's tabs are all the row's height, told apart by fill and ink only; in a
+// column the selected one reaches the rule and the page past it, the others stopping short of it and sitting back. The cursor is a ring round the whole box.
 component TabShape inherits Rectangle {
     in property <bool> selected;
     in property <bool> cursor;
@@ -483,13 +483,10 @@ component TabShape inherits Rectangle {
         border-radius: Theme.inner(root.inset);
         background: Theme.tab-on;
     }
+    // A row's folder tab is the whole box, selected or not: the row's height, on its rule (the row's gap is between them, HTabs).
     if !root.segmented && !root.vertical: Rectangle {
-        x: root.inset;
-        y: root.selected ? root.inset : root.inset + root.back;
-        width: parent.width - 2 * root.inset;
-        height: (root.selected ? parent.height : parent.height - Theme.hair) - self.y;
-        border-top-left-radius: Theme.inner(root.inset);
-        border-top-right-radius: Theme.inner(root.inset);
+        border-top-left-radius: Theme.corner;
+        border-top-right-radius: Theme.corner;
         background: root.selected ? Theme.tab-on : Theme.tab-off;
         border-width: root.selected ? 0px : Theme.hair;
         border-color: Theme.rule;
@@ -653,6 +650,7 @@ component HTabs inherits Rectangle {
         width: self.preferred-width;
         height: 0px;
         alignment: start;
+        spacing: root.segmented ? 0px : Theme.gap;
         for name in root.names: TabItem {
             text: name == "" ? root.empty-name : name;
         }
@@ -679,6 +677,7 @@ component HTabs inherits Rectangle {
             width: self.preferred-width;
             height: parent.height;
             alignment: start;
+            spacing: root.segmented ? 0px : Theme.gap;
             if root.short: TabHeading {
                 text: root.heading;
             }

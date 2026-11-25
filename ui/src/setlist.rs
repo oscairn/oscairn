@@ -611,6 +611,13 @@ impl Screen {
         }
     }
 
+    /// DEC (-) and INC (+): the bank `by` before or after, as the bar's Previous and Next; stops at the ends, no wrap.
+    pub fn turn_bank(&mut self, by: i32) {
+        let last = self.setlist.as_ref().map_or(0, |s| s.pages.len() - 1) as i64;
+        self.show_bank((self.page as i64 + i64::from(by)).clamp(0, last) as usize);
+        self.show();
+    }
+
     /// A press on a stop of the setlist bar: a dropdown's list is made for the shell to open, Previous and Next
     /// show the bank before or after. A stop that is off does nothing.
     fn press(&mut self, stop: usize) {

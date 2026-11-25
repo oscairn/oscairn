@@ -205,7 +205,7 @@ namespace oscairn
             try
             {
                 std::lock_guard lock(lock_);
-                navigation_[navigationKey(navigation.action, navigation.pane)] += navigation.action == Navigation::Action::Move ? navigation.steps : 1;
+                navigation_[navigationKey(navigation.action, navigation.pane)] += navigation.action == Navigation::Action::Move || navigation.action == Navigation::Action::Step ? navigation.steps : 1;
             }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
         }

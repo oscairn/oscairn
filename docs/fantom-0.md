@@ -1354,7 +1354,7 @@ the controls' names are as sure as the rest of the map; what each does on the un
 | E1 and E6 pushed | `pushE1`, `pushE6` | confirm in the first and the last pane |
 | ENTER | `enter` | confirms in the pane last touched |
 | EXIT | `exit` | drops the cursors; with none, goes back as the shell's Back does |
-| DEC and INC | `dec`, `inc` | move the cursor one back and forward |
+| DEC and INC | `dec`, `inc` | step one back and forward (`step`): on the Setlist the bank before or after; elsewhere they move the cursor one back and forward |
 | CURSOR UP and DOWN | `cursorUp`, `cursorDown` | move it one back and forward |
 
 E2 to E5 have no `navigate`: on Play and the editors they play the page's parameters as before.

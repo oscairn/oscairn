@@ -345,7 +345,9 @@ sidebar and no footer.
   stops, pane 1 (E6) over the slots, and each drops the other's. The VALUE dial and Up and Down walk
   through both: up out of the first bank's first slot is the bar's last stop, down past it the slots
   again, and up out of the bar's first stop is the top bar. A stop that is off can hold the cursor;
-  a press on it does nothing.
+  a press on it does nothing. **DEC and INC** turn the bank, as Previous and Next do (nothing opens,
+  no wrap): the panel map gives them `step`, its own total in `controllers.navigation`; with a menu
+  or an overlay over the Setlist, and on every other screen, a step is the `move` it was before.
 - **The previous and next song** are not on the screen any more but work as before: Left, Right, Page
   Up and Page Down here, as in the JUCE Setlist (page turners send them), and Play's Previous and
   Next and its page keys (`step_by`, as the JUCE Play asks the Setlist app to). The bank shown follows
@@ -362,8 +364,7 @@ sidebar and no footer.
 
 The setlist open and the slot playing are kept in the JUCE Setlist app's own state file (the data
 folder's `AppData/oscairn.setlist/state.json`), so either opens where the other left off. Not yet:
-editing; DEC and INC turning the bank (the FANTOM's panel map gives them the dial's `move`, so the UI
-cannot tell them from the dial; they move the cursor like it).
+editing.
 
 ## Play
 

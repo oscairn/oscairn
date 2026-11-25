@@ -719,6 +719,38 @@ fn the_screen_opens_on_the_bank_playing() {
     assert_eq!((slots(&f)[0].number, playing(&f)), (13, vec![]), "none playing: the bank last shown");
 }
 
+// DEC and INC (the engine's `step` total) turn the bank on the Setlist as Previous and Next do: no request, no wrap, the
+// slot cursor untouched otherwise; with the banks' dropdown open, and on Home, they move the cursor as they always did.
+#[test]
+fn dec_and_inc_turn_the_bank_and_move_elsewhere() {
+    let mut f = on_twice("setlist-dec-inc");
+    let n = |m: i64, s: i64| json!({"move": m, "step": s, "confirm": 0, "cancel": 0});
+    f.navigation(n(0, 0)); // the baseline
+    for (step, first) in [(1, 13), (2, 25), (3, 25), (2, 13), (-1, 1), (-3, 1)] {
+        f.navigation(n(0, step));
+        assert_eq!(slots(&f)[0].number, first, "step total {step}");
+    }
+    assert!(slots(&f).iter().all(|s| !s.cursor) && stops(&f).iter().all(|s| !s.cursor), "no cursor shown by a step");
+    asks_nothing(&mut f, "DEC and INC");
+    // The banks' dropdown open: a step moves its cursor, the bank shown stays.
+    shell::act(Action::Move { pane: Some(0), by: 1 });
+    shell::act(Action::Move { pane: Some(0), by: 1 });
+    shell::act(Action::Confirm(None));
+    f.screen.frame();
+    f.navigation(n(0, -2));
+    let at = menu(&f).get_rows().iter().position(|r| r.cursor);
+    assert_eq!((menu(&f).get_open(), at, slots(&f)[0].number), (true, Some(1), 1), "INC in the dropdown: one down");
+    shell::act(Action::Cancel(None));
+    // Home: a step is the move it was.
+    shell::act(Action::Cancel(None));
+    assert_eq!(f.screen.ui.get_screen(), 0);
+    let cursor = |f: &Fixture| f.screen.ui.global::<HomeState>().get_tiles().iter().position(|t| t.cursor);
+    f.navigation(n(0, -1));
+    f.navigation(n(0, 0));
+    assert_eq!(cursor(&f), Some(1), "on Home DEC and INC move the cursor");
+    asks_nothing(&mut f, "DEC and INC on Home");
+}
+
 // The picture the owner asked for: one Performance in two slots of a bank, both marked, at 1280 x 720 at the
 // keyboard's scale (target/screens/setlist-follow.png).
 #[test]

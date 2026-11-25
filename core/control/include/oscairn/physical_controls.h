@@ -128,20 +128,21 @@ namespace oscairn
     struct ControlInput { enum class Kind { Absolute, Relative, Switch } kind = Kind::Absolute; double value = 0; };
     // What a device's panel controls do in a list, whatever the device: move a pane's cursor by
     // `steps` (an encoder's turn, or a pair of buttons' press of 1 and -1), confirm the item under it,
-    // or cancel. `pane` counts the list panes on screen from the left (0); -1: the pane last touched.
+    // or cancel; or step by `steps` (a pair of buttons for a screen's own previous and next, the FANTOM's DEC and INC: a
+    // screen without its own takes it as a move). `pane` counts the list panes on screen from the left (0); -1: the pane last touched.
     // Which control produces which is the device's panel map (`navigate`); the app knows only these.
     struct Navigation
     {
-        enum class Action { Move, Confirm, Cancel } action = Action::Move;
+        enum class Action { Move, Confirm, Cancel, Step } action = Action::Move;
         int pane = -1;
         int steps = 1;
         bool operator==( const Navigation& ) const = default;
     };
-    // A navigation's key in ControllerState::navigation: "move", "confirm", "cancel", and with a pane
+    // A navigation's key in ControllerState::navigation: "move", "confirm", "cancel", "step", and with a pane
     // "move:0", "confirm:1".
     inline std::string navigationKey( Navigation::Action a, int pane )
     {
-        const char* name = a == Navigation::Action::Move ? "move" : a == Navigation::Action::Confirm ? "confirm" : "cancel";
+        const char* name = a == Navigation::Action::Move ? "move" : a == Navigation::Action::Confirm ? "confirm" : a == Navigation::Action::Step ? "step" : "cancel";
         return pane < 0 ? std::string( name ) : std::string( name ) + ':' + std::to_string( pane );
     }
     inline std::optional<std::pair<Navigation::Action, int>> parseNavigationKey( const std::string& key )
@@ -158,6 +159,7 @@ namespace oscairn
         if( name == "move" ) return std::pair{ Navigation::Action::Move, pane };
         if( name == "confirm" ) return std::pair{ Navigation::Action::Confirm, pane };
         if( name == "cancel" ) return std::pair{ Navigation::Action::Cancel, pane };
+        if( name == "step" ) return std::pair{ Navigation::Action::Step, pane };
         return std::nullopt;
     }
     class ControllerMapping

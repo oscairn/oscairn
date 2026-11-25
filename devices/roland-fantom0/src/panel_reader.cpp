@@ -203,13 +203,13 @@ namespace oscairn
                 fields(n, {"action", "pane", "steps"}, "a control's navigate");
                 Navigation nav;
                 const auto action = text(member(n, "action"), "a navigate's action");
-                require(action == "move" || action == "confirm" || action == "cancel", "a navigate's action is move, confirm or cancel");
-                nav.action = action == "move" ? Navigation::Action::Move : action == "confirm" ? Navigation::Action::Confirm : Navigation::Action::Cancel;
+                require(action == "move" || action == "confirm" || action == "cancel" || action == "step", "a navigate's action is move, confirm, cancel or step");
+                nav.action = action == "move" ? Navigation::Action::Move : action == "confirm" ? Navigation::Action::Confirm : action == "step" ? Navigation::Action::Step : Navigation::Action::Cancel;
                 require(c.kind != Kind::Encoder || nav.action == Navigation::Action::Move, "an encoder's navigate is move");
                 if(const auto* pane = member(n, "pane")) nav.pane = int(whole(pane, "a navigate's pane", 0, 15));
                 if(const auto* s = member(n, "steps"))
                 {
-                    require(c.kind == Kind::SwitchOn && nav.action == Navigation::Action::Move, "only a switch that moves has steps");
+                    require(c.kind == Kind::SwitchOn && (nav.action == Navigation::Action::Move || nav.action == Navigation::Action::Step), "only a switch that moves or steps has steps");
                     nav.steps = int(number(s, "a navigate's steps", -64, 64));
                     require(nav.steps != 0, "a navigate's steps is not 0");
                 }

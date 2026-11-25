@@ -117,3 +117,35 @@ impl Screen {
         self.push(Request::Plugins, "packages.installed", json!({}));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // No notes: the message is the whole line.
+    #[test]
+    fn a_reply_with_no_notes_says_only_the_message() {
+        assert_eq!(with_notes("Installed 2.".into(), &json!([])), "Installed 2.");
+        assert_eq!(with_notes("Installed 2.".into(), &json!(null)), "Installed 2.");
+        assert_eq!(with_notes("Installed 2.".into(), &json!({"why": "kept"})), "Installed 2.");
+        assert_eq!(with_notes("Installed 2.".into(), &json!("Skipped one")), "Installed 2.");
+    }
+
+    // Each string note becomes a sentence after the message; the others are left out.
+    #[test]
+    fn the_notes_are_said_each_as_a_sentence_and_the_rest_are_left_out() {
+        assert_eq!(
+            with_notes("Installed 2.".into(), &json!(["Skipped one", "the old key kept", 5, null, true, {"n": 1}])),
+            "Installed 2. Skipped one. the old key kept."
+        );
+    }
+
+    // A one-sentence note, and long and non-ASCII text all go on as-is.
+    #[test]
+    fn a_notes_text_is_kept_however_it_is_written() {
+        assert_eq!(with_notes("Exported.".into(), &json!(["Signed with mine"])), "Exported. Signed with mine.");
+        let long = "a".repeat(40_000);
+        assert_eq!(with_notes("Done.".into(), &json!([long.clone()])), format!("Done. {long}."));
+        assert_eq!(with_notes("Done.".into(), &json!(["ルーラーと音楽"])), "Done. ルーラーと音楽.");
+    }
+}

@@ -52,6 +52,11 @@ check "a child of the start script has signal 42 ignored" "[ -s '$bundle/sigign'
 
 cp "$bundle/etc/default/oscairn-engine" "$bundle/engine-defaults"
 printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
+# No OSCAIRN_UI anywhere: the Rust UI, the default (docs/rust-ui.md).
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "no ui chosen: the engine alone, then the Rust UI" "[ $status = 0 ] && echo \"\$out\" | grep -q '/usr/bin/oscairn-ui --profile fantom-07 --socket /run/oscairn/engine.sock --handover' && ! echo \"\$out\" | grep -q -e /usr/bin/Oscairn -e /usr/bin/Xorg"
+# OSCAIRN_UI=juce forces the JUCE app (for a fault): the app's steps below.
+export OSCAIRN_UI=juce
 out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "a profile with a screen: the app, by its full path, on the display" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env DISPLAY=:0 sh -c .ulimit -l unlimited; exec' && echo \"\$out\" | grep -q 'sh /usr/bin/Oscairn --profile fantom-07 --plugins /usr/lib/clap' && ! echo \"\$out\" | grep -q oscairn-engine-run"
 check "and the display its own first: Weston stopped, the bundle's X server on :0" "echo \"\$out\" | grep -q 'would run: systemctl stop weston.service' && echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh /usr/bin/Xorg :0 vt7'"

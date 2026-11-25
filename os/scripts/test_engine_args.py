@@ -22,10 +22,11 @@ assert engine.engine_args(fantom) == [
     "--input-keys", "gpio-keys", "--input-key-map", "139=menu,152=tempo,157=write",
     "--keyboard-device", "/dev/ttyGS0", "--keyboard-local", "off"], engine.engine_args(fantom)
 assert engine.settings(fantom)["OSCAIRN_HEADLESS"] == "0"
-assert (engine.settings(fantom)["OSCAIRN_UI"], engine.settings(fantom)["OSCAIRN_UI_ROTATION"]) == ("juce", "90"), "the JUCE app until the owner switches it; the panel turned a quarter"
-rust = dict(fantom, screens=[dict(fantom["screens"][0], ui="rust")])
-assert engine.settings(rust)["OSCAIRN_UI"] == "rust"
-assert (engine.settings(load("kick"))["OSCAIRN_UI"], engine.settings(load("kick"))["OSCAIRN_UI_ROTATION"]) == ("juce", "0")
+assert "ui" not in fantom["screens"][0], "the FANTOM-07 takes the default"
+assert (engine.settings(fantom)["OSCAIRN_UI"], engine.settings(fantom)["OSCAIRN_UI_ROTATION"]) == ("rust", "90"), "no ui: the Rust UI, the default; the panel turned a quarter"
+juce = dict(fantom, screens=[dict(fantom["screens"][0], ui="juce")])
+assert engine.settings(juce)["OSCAIRN_UI"] == "juce", "a screen may still ask for the JUCE app"
+assert (engine.settings(load("kick"))["OSCAIRN_UI"], engine.settings(load("kick"))["OSCAIRN_UI_ROTATION"]) == ("rust", "0")
 assert engine.settings(fantom)["OSCAIRN_RELIABILITY"] == "instrument"
 assert engine.settings(fantom)["OSCAIRN_PROFILE"] == "fantom-07"
 

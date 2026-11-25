@@ -72,7 +72,10 @@ until OK (a notice that went by itself after 8 s could be missed at a start). An
 running when the app comes back keeps what it has. It opens what was saved, not edits made since:
 the desktop app asks before a quit would lose them ([RFC 0030](0030-system-shell-launcher-and-navigation.md)). Until a budget is set the engine knows none, so
 it opens nothing before the app has connected; the boot ordering above (the last Performance before
-the UI) waits for the engine to know its budget at start.
+the UI) waits for the engine to know its budget at start. Since 2026-11-24 an engine not
+started by a desktop app opens the last one itself as it starts listening (the FANTOM with the
+Rust UI), admitted by the budget its device profile set (none without one);
+`--startup-performance` keeps the startup Performance for measurements and tests.
 
 The image also sets up memory for the engine (proposed in
 [RFC 0025](0025-resource-budgets.md#linux)): a cgroup v2 subtree delegated to it, a locked-memory

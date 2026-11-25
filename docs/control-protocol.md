@@ -1103,13 +1103,19 @@ the control thread meanwhile (other clients are answered, refused as busy: [Long
 `performance.reopen` takes `{}` and returns `{"notice":""}`: at the app's start, once it has set
 the budget, the engine opens the Performance last opened or saved on this device (a library item,
 or a folder saved with `performance.save`), as `performance.load` would. The engine remembers it
-in the data folder's `library/last.json` (`{"performance":"/path"}`), from this call on, at each
-`performance.load`, `performance.save`, `library.load`, `library.save` and kept audition; an engine
-never asked remembers nothing. An engine that has opened, saved or edited anything before it is
-asked, or was asked before (one still running when the app comes back), keeps what it has. One
-that is gone, in a format this build does not read, over the budget, or needing a plugin that is
-not installed is not opened: Untitled stays and `notice` (also in `session.status`'s `notices`)
-says why.
+in the data folder's `library/last.json` (`{"performance":"/path","id":"..."}`: the folder, and the
+Performance's ID, by which a library item the library has moved is found again), from this call on,
+at each `performance.load`, `performance.save`, `library.load`, `library.save` and kept audition,
+written (synced, then renamed into place) only when it changes; an engine never asked remembers
+nothing. An engine that has opened, saved or edited anything before it is asked, or was asked
+before (one still running when the app comes back), keeps what it has. One that is gone, in a
+format this build does not read, over the budget, or needing a plugin that is not installed is
+not opened: Untitled stays and `notice` (also in `session.status`'s `notices`) says why.
+`oscairn-engine` not started by a desktop app (`--managed`) asks this itself as it starts
+listening, as a client of its own would, so the other clients are answered meanwhile as during
+any long request (`session.status` too, or refused as busy); its startup Performance plays until
+the last one has opened, and stays when that one does not. `--startup-performance` keeps the
+startup Performance (measurements, tests) and leaves the engine unasked.
 The current note/tail audio is not saved. Resource/state/format failures use `-32005`;
 malformed RPC arguments use `-32602`. These control-thread calls can take time; remote
 wrappers allow 30 seconds, and callers must reread the graph after a timeout before retrying

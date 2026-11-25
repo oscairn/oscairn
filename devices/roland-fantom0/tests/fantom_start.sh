@@ -65,10 +65,12 @@ check "the app with the audio threads' cores" "echo \"\$out\" | grep -q 'setsid 
 out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1); status=$?
 check "--engine-only: the engine alone" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && ! echo \"\$out\" | grep -q Oscairn"
 check "and the display left as it is" "! echo \"\$out\" | grep -q -e weston.service -e Xorg"
+check "and the startup Performance, not the one last open" "echo \"\$out\" | grep -q 'oscairn-engine-run --output-device .* --startup-performance'"
 # The Rust UI (docs/rust-ui.md): the engine alone, then oscairn-ui on the display without X,
 # turned by the screen's rotation, touch with it; never the JUCE app at the start.
 out=$(OSCAIRN_UI=rust OSCAIRN_UI_ROTATION=90 OSCAIRN_UDEV_RULES="$bundle/rules" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "ui rust: the engine alone, then the Rust UI" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && echo \"\$out\" | grep -q 'SLINT_KMS_ROTATION=90 /usr/bin/oscairn-ui --profile fantom-07 --socket /run/oscairn/engine.sock --handover' && ! echo \"\$out\" | grep -q -e /usr/bin/Oscairn -e /usr/bin/Xorg"
+check "and the engine opens the Performance last open" "! echo \"\$out\" | grep -q -- --startup-performance"
 check "and touch turned with it, by a rule at run time" "echo \"\$out\" | grep -q 'would write $bundle/rules/99-oscairn-touch.rules (LIBINPUT_CALIBRATION_MATRIX 0 1 0 -1 0 1)' && [ ! -e \"$bundle/rules\" ]"
 # The splash on the console's frame buffer (stand-ins for fb0, its sysfs geometry and the file).
 check "no splash in the bundle: not shown" "echo \"\$out\" | grep -q 'no splash in the bundle: not shown'"

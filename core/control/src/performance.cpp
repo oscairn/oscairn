@@ -3090,7 +3090,13 @@ void Session::loadPerformanceFromLibrary(const std::string& id) {
 void Session::remember(const fs::path& folder) {
     opened_=true;
     if(last_.empty())return;
-    try{writeAtomically(last_,"{\"performance\":"+quote(fs::weakly_canonical(folder).string())+"}\n");}
+    try{
+        // Its library ID, found again where the library has moved it, and its folder for one outside the library.
+        auto text="{\"performance\":"+quote(fs::weakly_canonical(folder).string())+(info_.id.empty()?std::string():",\"id\":"+quote(info_.id))+"}\n";
+        if(text==remembered_)return; // written only when it changes: the same one opened again writes nothing
+        writeAtomically(last_,text);
+        remembered_=std::move(text);
+    }
     catch(const std::exception& e){std::fprintf(stderr,"oscairn: the open Performance is not remembered: %s\n",e.what());}
 }
 
@@ -3098,9 +3104,16 @@ std::string Session::reopenPerformance() {
     // Once, in an engine that has opened, saved and edited nothing: one still running when a UI comes back keeps what it has.
     const bool first=last_.empty();
     last_=dataHome()/"library"/"last.json";
-    if(!first || opened_ || !undo_.empty())return {};
+    if(!first)return {};
+    if(opened_ || !undo_.empty()){std::fprintf(stderr,"oscairn: the last Performance is not reopened: this engine has %s already\n",opened_?"opened or saved one":"been edited (a control moved counts)");return {};}
     std::string folder;
-    try{const auto bytes=state_files::read(last_,64*1024);const std::unique_ptr<json_value_s,decltype(&std::free)> doc(json_parse(bytes.data(),bytes.size()),&std::free);folder=text(field(doc.get(),"performance"));}
+    try{
+        const auto bytes=state_files::read(last_,64*1024);const std::unique_ptr<json_value_s,decltype(&std::free)> doc(json_parse(bytes.data(),bytes.size()),&std::free);
+        folder=text(field(doc.get(),"performance"));
+        remembered_.assign(bytes.begin(),bytes.end());
+        if(const auto id=member(doc.get(),"id"))
+            if(const auto* item=library().find(text(id)); item && item->kind=="performance")folder=item->path;
+    }
     catch(const std::exception&){return {};} // none remembered
     const auto refusedBefore=refusedLoads_;
     try{

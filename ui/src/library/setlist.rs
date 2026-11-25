@@ -126,3 +126,79 @@ impl Screen {
         self.push(Request::Setlist(Step::Save(name)), "setlists.save", json!({"setlist": doc}));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A state file in a scratch folder; `None` leaves the file absent.
+    fn state_file(name: &str, content: Option<&str>) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("oscairn-ui-setlist-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("state.json");
+        if let Some(c) = content {
+            std::fs::write(&file, c).unwrap();
+        }
+        file
+    }
+
+    #[test]
+    fn read_state_reads_the_setlist_and_the_slot() {
+        let c = state_file("good", Some(r#"{"setlist": "l1", "current": 2}"#));
+        assert_eq!(read_state(&c), Some(("l1".to_string(), Some(2))));
+    }
+
+    #[test]
+    fn read_state_with_no_slot_playing() {
+        let c = state_file("no_current", Some(r#"{"setlist": "l1"}"#));
+        assert_eq!(read_state(&c), Some(("l1".to_string(), None)));
+    }
+
+    #[test]
+    fn read_state_of_a_missing_or_unreadable_file() {
+        let c = state_file("absent", None);
+        assert_eq!(read_state(&c), None);
+    }
+
+    #[test]
+    fn read_state_of_something_that_is_not_json() {
+        let c = state_file("junk", Some("not json"));
+        assert_eq!(read_state(&c), None);
+    }
+
+    #[test]
+    fn read_state_without_or_with_a_blank_setlist() {
+        let missing = state_file("no_setlist", Some(r#"{"current": 1}"#));
+        assert_eq!(read_state(&missing), None, "no setlist field");
+        let blank = state_file("blank_setlist", Some(r#"{"setlist": ""}"#));
+        assert_eq!(read_state(&blank), None, "a blank setlist field");
+    }
+
+    #[test]
+    fn read_state_of_a_wrong_typed_setlist_or_current() {
+        let setlist_number = state_file("setlist_number", Some(r#"{"setlist": 5}"#));
+        assert_eq!(read_state(&setlist_number), None, "setlist is a number, not a string");
+        let current_float = state_file("current_float", Some(r#"{"setlist": "l1", "current": 1.5}"#));
+        assert_eq!(read_state(&current_float), Some(("l1".to_string(), None)), "a fractional slot is not a slot");
+        let current_negative = state_file("current_negative", Some(r#"{"setlist": "l1", "current": -1}"#));
+        assert_eq!(read_state(&current_negative), Some(("l1".to_string(), None)), "a negative slot is not a slot");
+        let current_text = state_file("current_text", Some(r#"{"setlist": "l1", "current": "two"}"#));
+        assert_eq!(read_state(&current_text), Some(("l1".to_string(), None)), "a text slot is not a slot");
+    }
+
+    #[test]
+    fn new_document_makes_a_first_page_enough() {
+        let doc = new_document("My Set");
+        assert_eq!(doc["format"], "oscairn.setlist");
+        assert_eq!(doc["version"], 2);
+        assert_eq!(doc["info"]["id"], "");
+        assert_eq!(doc["info"]["name"], "My Set");
+        assert_eq!(doc["display"]["mode"], "list");
+        assert_eq!(doc["display"]["columns"], 4);
+        assert_eq!(doc["display"]["rows"], 3);
+        assert_eq!(doc["pages"].as_array().map(Vec::len), Some(1));
+        assert_eq!(doc["pages"][0]["name"], "Page 1");
+        assert_eq!(doc["pages"][0]["slots"].as_array().map(Vec::len), Some(0));
+    }
+}

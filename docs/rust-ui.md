@@ -809,7 +809,8 @@ keyboard's text.
 
 - `cd ui && cargo build` (a window, on a computer); `cargo build --release --no-default-features
   --features kms` for a device. `oscairn-ui --socket PATH` against a running engine; without a
-  `--handover` file a JUCE screen's tile says where that screen is instead.
+  `--handover` file a JUCE screen's tile says where that screen is instead. The desktop app
+  starts it itself (On a computer, below).
 - `cargo test` (or ctest's `ui-rust`): every test renders headless through Slint's software
   renderer into a buffer (no window opens), with data and configuration folders of their own;
   `OSCAIRN_ENGINE=…/oscairn-engine cargo test` adds the test against the real engine, started with
@@ -825,6 +826,68 @@ to its JUCE app by an environment variable of the UI process, for a fault found 
 `OSCAIRN_UI_SETTINGS=0` (a value other than `0` forces the Rust app on). A rail label of one word too wide for the rail at 70% of
 the type goes across two lines before it is cut; a list row keeps the theme's padding between its label and its value; the
 Catalog's rows are columns (name, version, publisher, state and summary) each shrunk and cut on its own.
+
+## On a computer
+
+Since 2026-11-25 the desktop app's interface is the Rust UI ("make rust the default now"). The app
+(`Oscairn`, hosts/standalone/Main.cpp) starts its engine as before, then `oscairn-ui` from beside
+itself (`Contents/MacOS/oscairn-ui` in the macOS bundle, `bin/oscairn-ui` installed on Linux; the
+build copies it there with `-DOSCAIRN_UI=ON`) with `--socket` the engine's and a `--handover`
+file, in a window of its own, and hides its JUCE window (`Application::startRustUi`). No profile
+is given (`OSCAIRN_PROFILE=` is cleared), so no screen scale is forced: Slint's winit backend takes
+the window's own scale factor from the OS. A screen not yet ported ends the Rust UI with status 3
+and its name, as on a device: the JUCE window comes out on that screen, and its Home hides it and
+starts the Rust UI again. Its window closed (status 0) quits the app, asking about unsaved changes
+over the JUCE window; any other end shows the JUCE window, as before.
+
+The JUCE app stays reachable: `OSCAIRN_UI=juce` in the app's environment starts it as before (the
+JUCE window, no Rust UI); so does a build without `oscairn-ui` beside the app, `--in-process`,
+`--app`, `--view` and `--snapshot`, and a profile with a panel screen (a device). On macOS the
+app's menu bar (with Oscairn in front) brings the JUCE window out beside the Rust one; its Home
+hides it again.
+
+### Desktop: still to do
+
+The window structure first (the owner, 2026-11-25: "make sure the things that are missing are on
+the todo list, including window structure"); none of this is built:
+
+1. **Separate windows where the JUCE app opens them**, each resizable and responsive, in place of
+   one Rust window and the JUCE one in turn: the Library app (`showLibraryApp`, an `AppWindow` of
+   900 by 700, Main.cpp); Plugins and appearance (`LibraryWindow`, Main.cpp, the Plugins menu);
+   the Groovebox (`openGroovebox`/`showGroovebox`); Recordings (`showRecordings`, 760 by 600); the
+   Library's picker (`showPicker`, 760 by 620, for Import Performance and Load Sound); Settings
+   and the Setlist (app processes in windows of their own, AppProcesses.cpp, apps/settings and
+   apps/setlist); the Performance window's tabs detached into windows (`DesktopShell::detach`:
+   Part, Mixer, Routing, Controls); the on-screen keyboards (KeyboardWindow.cpp, `Keyboards`).
+2. **Plugin editor windows**: a plugin's own GUI (`Engine::openPluginWindow`, the control's
+   `showPluginWindow`, opened from the JUCE Parts view, PartsView.cpp). The Rust UI cannot open
+   one yet; it must, for plugins that draw their own editors.
+3. **One app, not two processes**: the Rust UI runs as a child with its own Dock icon and menu;
+   the JUCE process holds the engine, the MIDI ports (Controllers.cpp) and the menu bar.
+4. **Native scaling verified** on a Retina and a non-Retina display, and a window moved between
+   them (main.rs sets `SLINT_SCALE_FACTOR` only from a profile's screen); not yet checked.
+5. **Resizable and responsive**: every Rust screen at small and large window sizes, and its least
+   size (the JUCE main window's limits are 900 by 620 to 1800 by 1200).
+6. **Menus**: the JUCE menu bar (`getMenuBarNames`, Main.cpp): Performance (Save, Save As New,
+   Import, Export, Install Library, Color, Save to Folder, Open Folder), Edit (Undo, Redo), View
+   (layouts), Plugins, Appearance (themes, Manage themes), Apps, Part (Load Sound, Update from
+   Library, Save Sound, Save Sound As New). The Rust UI has none; on Linux the JUCE menu is inside
+   its hidden window, so only the handover reaches it.
+7. **File dialogs** for import and export: `juce::FileChooser` in Main.cpp (Save to Folder, Open
+   Folder, Export), LibraryPane.cpp, PluginBrowser.cpp, Screen.cpp and Setlist.cpp.
+8. **Drag and drop**: neither UI takes dropped files yet (no `FileDragAndDropTarget` in the JUCE
+   app); decide what a drop does (a Performance, a Sound, a library, a sample).
+9. **Keyboard shortcuts**: Cmd-Z and Shift-Cmd-Z (`Window::keyPressed`, Main.cpp) and the menus'
+   keys; the Rust UI has Escape for Back and the playing keyboard's keys.
+10. **The Mac's audio and MIDI device choice**: the Rust Settings app's Audio and MIDI controllers
+    pages (settings_audio.rs, settings_controllers.rs; AudioPage.cpp the reference) are not yet
+    tried on a computer with the Rust UI as the interface.
+11. **Multiple monitors**: the JUCE app places its windows by the displays (DesktopProfile.cpp,
+    KeyboardWindow.cpp, DeviceScreen.cpp); the Rust window opens where winit puts it, its place
+    and size not kept.
+12. **Screens still JUCE**: the Groovebox, Recordings and the Plugins window (above), handed over.
+13. **Quitting**: the Rust UI has no question about unsaved changes of its own; the JUCE window
+    asks it when the Rust window closes.
 
 ## On a device: the run recipe (not yet run on a unit)
 

@@ -249,8 +249,16 @@ Decided 2026-11-08, from what the milestone test found:
      [status](rfcs/0011-performance-ui-and-editors.md#step-6-status))
    - [x] Play, the Performance app's first view ([status](rfcs/0011-performance-ui-and-editors.md#play-status))
    - [ ] the UI in Rust, replacing the JUCE app's screens one at a time ([Rust UI](rust-ui.md)): the
-     shell with Home, the Setlist and Play is built and tested off the device; every other screen is
-     still JUCE, which stays the default unless a profile says `"ui": "rust"`; not yet run on a unit
+     default interface since 2026-11-25, on the FANTOM bundle (a screen without `"ui"` is rust) and
+     in the desktop app (it starts `oscairn-ui` against its engine); the Groovebox and Recordings
+     still hand over to JUCE, and `OSCAIRN_UI=juce` forces the JUCE app
+     - [ ] the other images (kick, ignite, imx8mm-evk, qemu-aarch64, modx-m): their
+       `oscairn-session` starts the JUCE app under X and reads no `OSCAIRN_UI`
+     - [ ] the desktop's window structure and the rest of [Desktop: still to do](rust-ui.md#desktop-still-to-do):
+       separate windows where the JUCE app opens them, resizable and responsive; plugin editor
+       windows; one app, not two processes; native scaling checked on Retina and non-Retina
+       displays; menus; file dialogs; drag and drop; keyboard shortcuts; the audio and MIDI device
+       choice; multiple monitors; the Groovebox and Recordings; quitting
    - [x] the engine thread's core (note routing, the voice budget) and the graph's audio in Rust,
      each tested bit for bit against its C++ reference (`engine-core-diff`, `engine-audio-diff`,
      `engine-run-diff`); the reference deleted once the Rust core had run on the keyboard, its outputs

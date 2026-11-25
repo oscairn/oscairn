@@ -16,10 +16,13 @@
 # libcomposite, g_serial and tickgen.
 #
 #   1. Roland's application alone when: this script already ran this boot
-#      (/run/oscairn-boot-tried); TEMPO is held (gpio-keys, key 152; WRITE held at power-on is the
-#      bootloader's update mode; Roland's application waits for its release, held into its start
-#      it opens its expansion screen) or cannot be read within 10 seconds; the file stock-next-boot
-#      in the boot folder exists (removed as it is honored); the last power-on's takeover did not
+#      (/run/oscairn-boot-tried); TEMPO (gpio-keys, key 152; WRITE held at power-on is the
+#      bootloader's update mode) is pressed within OSCAIRN_BOOT_TAP_SECS seconds (2) of this
+#      script's start, while Roland's FANTOM picture shows (held from power-on it is not a press:
+#      Roland's side has seen it already and opens its expansion screen, so Roland's application
+#      runs as it would; either way it waits for the release, held into its start Roland's
+#      application opens its expansion screen) or cannot be read within 10 seconds; the file
+#      stock-next-boot in the boot folder exists (removed as it is honored); the last power-on's takeover did not
 #      finish (the file attempt is left while Oscairn takes over and removed once it runs or gives
 #      up: a takeover that crashes or hangs the unit gives the next power-on to Roland's
 #      application alone, and the one after it to the takeover again); the file dry-run in the boot
@@ -45,7 +48,7 @@
 #   5. The fallback, when the warm start fails or runs out of time, or the app and engine end
 #      without oscairn-fantom-stop: oscairn-fantom-stop --panel. Roland's application is not
 #      started again: started again after it had run earlier in the same boot it showed "program
-#      version error". A power cycle, TEMPO held if Oscairn would take over again, gives Roland's
+#      version error". A power cycle, TEMPO pressed at the FANTOM picture if Oscairn would start again, gives Roland's
 #      system. A start that failed before Roland's application was stopped leaves it running.
 #
 # Logged to stdout and boot.log in the boot folder, /home/root/oscairn-boot (outside the bundle,
@@ -126,7 +129,7 @@ fallback() {
 	if [ -n "$takeover" ] && [ -n "$(named mi078)" ]; then leave "Roland's application (mi078) was not stopped"; fi
 	if [ -n "$dry" ]; then say "would run: $root/oscairn-fantom-stop --panel"; else bounded 60 "$root/oscairn-fantom-stop" --panel; rm -f "$boot/attempt"; fi
 	if [ -n "$takeover" ]; then
-		say "Roland's application cannot be started again this boot (it shows \"program version error\" after a restart); a power cycle, holding TEMPO if needed, gives Roland's system"
+		say "Roland's application cannot be started again this boot (it shows \"program version error\" after a restart); a power cycle, pressing TEMPO at the FANTOM picture if needed, gives Roland's system"
 		exit 0
 	fi
 	roland "Oscairn did not start or did not keep running"
@@ -188,16 +191,33 @@ if [ -z "$dry" ]; then
 	[ ! -e "$run/oscairn-boot-tried" ] || roland "this script already ran this boot"
 	: > "$run/oscairn-boot-tried" || roland "cannot write $run/oscairn-boot-tried"
 fi
-bounded 10 eval "$key_held"
-held=$?
-if [ $held -eq 0 ]; then
+# TEMPO counts only when pressed after this script starts (about 1 s after power-on, while Roland's
+# FANTOM picture shows): Roland's side notices a TEMPO held from power-on before or outside this
+# script and opens its expansion screen whatever this script does (seen on the unit, 2026-11-25).
+release() {
 	# Roland's app opens its expansion screen when it starts with TEMPO still down: wait (60 s at
 	# most) for the hand to let go first.
 	i=0
 	while [ $i -lt "${OSCAIRN_BOOT_RELEASE:-120}" ]; do bounded 10 eval "$key_held"; [ $? -eq 0 ] || break; i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1; done
-	roland "TEMPO was held"
+}
+bounded 10 eval "$key_held"
+held=$?
+if [ $held -eq 0 ]; then
+	say "TEMPO was already down when this script started (held from power-on): not taken as a press; Roland's side has seen it and opens its expansion screen"
+	release
+	roland "TEMPO was held from power-on"
 fi
 [ $held -eq 1 ] || roland "TEMPO cannot be read (oscairn-key-held exited $held)"
+# OSCAIRN_BOOT_TAP_SECS: how long after the script starts a press of TEMPO asks for Roland's
+# application (whole seconds; 2 by default).
+tap=${OSCAIRN_BOOT_TAP_SECS:-2}
+bounded $((tap + 5)) eval "$key_held $((tap * 1000))"
+held=$?
+if [ $held -eq 0 ]; then
+	release
+	roland "TEMPO was pressed within $tap seconds of the start"
+fi
+[ $held -eq 1 ] || roland "TEMPO cannot be read (oscairn-key-held exited $held while watching for a press)"
 if [ -e "$boot/stock-next-boot" ]; then
 	if [ -n "$dry" ]; then say "would remove $boot/stock-next-boot"; else rm -f "$boot/stock-next-boot"; fi
 	roland "stock-next-boot was set"

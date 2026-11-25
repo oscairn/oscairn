@@ -266,6 +266,22 @@ check "boot, TEMPO up: the takeover scheduled through systemd-run (dry: printed)
 boot 1
 check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$OSCAIRN_BOOT_DIR/stock-next-boot' ]"
 rm -f "$OSCAIRN_BOOT_DIR/stock-next-boot"
+# TEMPO counts only when pressed after the script starts. The stand-in answers a plain read (its $0 "sh") up, and
+# the wait for a press (its $0 the milliseconds) as $1 says, writing the milliseconds it was given.
+asked="$bundle/key-asked"
+tap() { rm -f "$asked"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'case \$0 in [0-9]*) echo \$0 > $asked; $1;; esac; exit 1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
+boot 0
+check "boot, TEMPO down when the script starts (held from power-on): not a press, Roland's application as it would run, logged" "[ $status = 3 ] && echo \"\$out\" | grep -q 'already down when this script started (held from power-on): not taken as a press' && echo \"\$out\" | grep -q '$roland' && grep -q 'not taken as a press' '$OSCAIRN_BOOT_DIR/boot.log'"
+tap 'exit 0'
+check "boot, TEMPO pressed within the window: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO was pressed within 2 seconds of the start' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'would write'"
+tap 'exit 1'
+check "boot, no press: Oscairn (here the takeover, roland-first being set), the press watched for 2000 ms" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would write $OSCAIRN_BOOT_DIR/attempt and run' && [ \"\$(cat '$asked')\" = 2000 ]"
+rm -f "$asked"
+out=$(OSCAIRN_BOOT_TAP_SECS=1 OSCAIRN_KEY_HELD="sh -c 'case \$0 in [0-9]*) echo \$0 > $asked;; esac; exit 1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1)
+check "OSCAIRN_BOOT_TAP_SECS sets the window" "[ \"\$(cat '$asked')\" = 1000 ]"
+began=$(date +%s)
+out=$(OSCAIRN_BOOT_TAP_SECS=1 OSCAIRN_KEY_HELD="sh -c 'case \$0 in [0-9]*) exec sleep 30 >/dev/null 2>&1;; esac; exit 1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?
+check "a wait for a press that hangs is ended past the window (6 s for 1 s) and leaves Roland's application" "[ $status = 3 ] && [ \$((\$(date +%s) - $began)) -lt 15 ] && echo \"\$out\" | grep -q 'TEMPO cannot be read (oscairn-key-held exited 143 while watching for a press)'"
 sh -c 'exec 3< "$1"; exec sleep 30' sh "$OSCAIRN_PANEL_DEVICE" &
 holder=$!
 sleep 0.3

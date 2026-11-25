@@ -1065,12 +1065,19 @@ in the boot folder keeps the takeover instead (items 2 and 3): Roland's app firs
 roughly the settle time (below) plus Oscairn's own start later. Before November 25 a cold start
 gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
 
-1. **Roland's app alone when asked for:** TEMPO held at power-on (read with `oscairn-key-held`,
-   which asks `gpio-keys` for key 152's state once, read-only; WRITE held at power-on is the
-   bootloader's update mode). Let it go once Roland's screen is up: the script waits for the
-   release, since Roland's app opens its expansion screen when it starts with TEMPO down. Also
-   when TEMPO cannot be read within 10 seconds, or: the script already ran this boot
-   (`/run/oscairn-boot-tried`); the file `stock-next-boot` in the boot folder
+1. **Roland's app alone when asked for:** TEMPO **pressed** while Roland's FANTOM picture shows,
+   within `OSCAIRN_BOOT_TAP_SECS` seconds (2) of the script's start, about 1 s after power-on
+   (`oscairn-key-held gpio-keys 152 2000`, which asks for key 152's state, then reads the
+   device's key events until it goes down or the time is up, read-only; WRITE held at power-on
+   is the bootloader's update mode). Holding TEMPO from power-on does not work: on the unit
+   (November 25) the script saw it held, waited for its release at 7 s and Roland's app started at
+   9 s, and Roland's system still opened its expansion screen, so Roland's side notices the hold
+   before or outside the script. TEMPO already down when the script starts is therefore not
+   taken as a press: it is logged, and Roland's app runs as it would with its expansion screen.
+   Either way the script waits for the release, since Roland's app opens its expansion screen
+   when it starts with TEMPO down. Also when TEMPO cannot be read within 10 seconds (or the wait
+   for a press does not end within 5 seconds past its window), or: the script already ran this
+   boot (`/run/oscairn-boot-tried`); the file `stock-next-boot` in the boot folder
    `/home/root/oscairn-boot` (removed as it is honored: one boot of Roland's app); the file
    `attempt` there, left by a takeover that never finished (one that crashed or hung the unit:
    the next power-on is Roland's alone, the one after it the takeover's again); the file
@@ -1097,7 +1104,7 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
 4. **The fallback:** when the start fails or runs out of time, or the app and engine end without
    `oscairn-fantom-stop`, it runs `oscairn-fantom-stop --panel` and ends, logging that Roland's
    app cannot be started again this boot: started again after it had run earlier in the same
-   boot it showed "program version error". A power cycle, holding TEMPO if needed, gives
+   boot it showed "program version error". A power cycle, pressing TEMPO at the FANTOM picture if needed, gives
    Roland's system. A start that fails before it stopped Roland's app leaves the app running.
 
 Every line the boot script and `oscairn-fantom-start` log is synced: a power cut seconds after a

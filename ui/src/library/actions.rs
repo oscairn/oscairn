@@ -113,7 +113,11 @@ impl Screen {
     /// A choice in the menu the screen opened.
     pub fn chosen(&mut self, choice: usize) -> Outcome {
         let Some(what) = self.menu_for.take() else { return Outcome::Stay };
-        let color_of = |choice: usize| (choice >= entry::COLOR).then(|| choice - entry::COLOR).map(|n| if n == 0 { "" } else { COLORS[n - 1].1 }.to_string());
+        let color_of = |choice: usize| match choice.checked_sub(entry::COLOR) {
+            Some(0) => Some(String::new()),
+            Some(n) => COLORS.get(n - 1).map(|c| c.1.to_string()),
+            None => None,
+        };
         let outcome = match what {
             MenuFor::Tag(tag) => {
                 let current = self.tag_colors.iter().find(|(t, _)| *t == tag).map(|(_, c)| c.clone()).unwrap_or_default();
@@ -265,5 +269,66 @@ impl Screen {
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A library screen on a headless window (no engine), its list and mode as the test sets them.
+    fn screen() -> (crate::tests::Screen, Screen) {
+        let t = crate::tests::Screen::new();
+        let c = Screen::new(&t.ui);
+        (t, c)
+    }
+
+    /// `edit_save` sends the tags split on commas, trimmed, emptied, each once in order, with the color kept; a
+    /// Performance without a name is saved under "Untitled" (LibraryPane.cpp `editItem`'s fallback).
+    #[test]
+    fn edit_save_normalizes_tags_and_names() {
+        let (_t, mut c) = screen();
+        let edited = |c: &mut Screen, tags: &str, name: &str| {
+            c.mode = Mode::Edit(Draft { id: "p1".into(), name: name.into(), description: String::new(), tags: tags.into(), color: String::new() });
+            c.out.clear();
+            c.edit_save();
+            c.out.last().expect("edit_save sends a save").params.clone()
+        };
+        assert_eq!(edited(&mut c, "", "A")["tags"], json!([]), "no tags");
+        assert_eq!(edited(&mut c, "jazz", "A")["tags"], json!(["jazz"]));
+        assert_eq!(edited(&mut c, " jazz  ", "A")["tags"], json!(["jazz"]), "a tag is trimmed");
+        assert_eq!(edited(&mut c, "jazz,,", "A")["tags"], json!(["jazz"]), "empty tokens are dropped");
+        assert_eq!(edited(&mut c, ", ,", "A")["tags"], json!([]), "only whitespace: none");
+        assert_eq!(edited(&mut c, "a, b , a, b", "A")["tags"], json!(["a", "b"]), "each once, the first kept, in order");
+        assert_eq!(edited(&mut c, "jazz, народ, folk", "A")["tags"], json!(["jazz", "народ", "folk"]), "Unicode kept");
+        let long = format!("tag{}", "x".repeat(500));
+        assert_eq!(edited(&mut c, &long, "A")["tags"], json!([long]), "a very long tag is kept whole");
+        // A Performance with no name is saved under Untitled while the name is sent as typed.
+        let p = edited(&mut c, "", "");
+        assert_eq!(p["name"], "", "the empty name is sent as it was typed");
+        assert_eq!(c.out.last().unwrap().request, Request::Do(Do::Edit("Untitled".into())), "saved under Untitled");
+    }
+
+    /// A color choice maps to its hex (None, the first entry, clears it), the first and last of the colors; a choice
+    /// past them is ignored rather than reading past the list.
+    #[test]
+    fn a_color_choice_maps_to_its_hex_or_nothing() {
+        let (_t, mut c) = screen();
+        c.items = vec![Item { id: "p1".into(), kind: "performance".into(), name: "A".into(), ..Default::default() }];
+        c.menu_for = Some(MenuFor::Item("p1".into()));
+        let color_of = |c: &mut Screen, choice: usize| {
+            // `chosen` takes `menu_for` for the call, so a fresh one each time.
+            c.menu_for = Some(MenuFor::Item("p1".into()));
+            c.out.clear();
+            c.chosen(choice);
+            c.out.last().map(|s| s.params["color"].as_str().unwrap_or_default().to_string()).unwrap_or_default()
+        };
+        assert_eq!(color_of(&mut c, entry::COLOR), "", "None clears the color");
+        assert_eq!(color_of(&mut c, entry::COLOR + 1), COLORS[0].1, "the first, Red");
+        assert_eq!(color_of(&mut c, entry::COLOR + COLORS.len()), COLORS[COLORS.len() - 1].1, "the last");
+        c.menu_for = Some(MenuFor::Item("p1".into()));
+        c.out.clear();
+        c.chosen(entry::COLOR + COLORS.len() + 1);
+        assert!(c.out.is_empty(), "a choice past the colors is ignored, not an index out of bounds");
     }
 }

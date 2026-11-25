@@ -389,6 +389,151 @@ fn a_tinted_row_keeps_the_text_readable() {
     assert_eq!(odd.green(), ((0x21 as f32) * 0.7 + 0xaa as f32 * 0.3).round() as u8, ".3 on an odd row");
 }
 
+// `valid_id` (theme ids are lowercase ASCII letters, digits and hyphens, up to 64): the empty id,
+// a unicode one (multi-byte), one of exactly 64 characters, and 65, and a trailing hyphen.
+#[test]
+fn valid_id_takes_only_lowercase_ascii_names() {
+    for ok in ["a", "oscairn-dark", "123", "a-b-9", "x".repeat(64).as_str()] {
+        assert!(valid_id(ok), "{ok:?}");
+    }
+    for bad in ["", "Dark", "a_b", "a b", "é", "å", "x".repeat(65).as_str()] {
+        assert!(!valid_id(bad), "{bad:?}");
+    }
+}
+
+// `ThemeData::ink`: the color named by its INKS slot, and, for an unknown name, the first (the
+// background) as `unwrap_or_default` picks index 0.
+#[test]
+fn ink_names_its_slot_and_unknown_is_the_first() {
+    let data = ThemeData::default();
+    for (i, name) in INKS.iter().enumerate() {
+        assert_eq!(data.ink(name), data.colors[i], "{name} is slot {i}");
+    }
+    assert_eq!(data.ink("no-such-role"), data.colors[0], "an unknown role reads as the background");
+}
+
+// `hex` (#RRGGBB): an exact value, lowercase hex taken, and every mistyped or out-of-range input
+// — a missing field, a non-string, a short or long value, a non-hex digit — refused.
+#[test]
+fn hex_parses_and_refuses_mistyped_and_out_of_range() {
+    fn h(v: Option<&Value>) -> Result<Color, Refused> {
+        hex(v)
+    }
+    assert_eq!(h(Some(&json!("#aabbcc"))), Ok(c(0xaabbcc)), "lowercase hex");
+    assert_eq!(h(Some(&json!("#FF0000"))), Ok(c(0xff0000)));
+    assert_eq!(h(Some(&json!("#000000"))), Ok(c(0)));
+    for v in [None, Some(&json!("")), Some(&json!("#FFF")), Some(&json!("#1234567")), Some(&json!("FF0000")), Some(&json!("#GGGGGG")), Some(&json!(7)), Some(&json!(true)), Some(&json!([]))] {
+        assert_eq!(h(v), Err("Theme colors must be #RRGGBB"), "{v:?}");
+    }
+}
+
+// The WCAG 2 luminance and contrast (the reference's): black is 0, white is 1, the same color is
+// 1:1, and the maximum black-on-white ratio is exactly 21.
+#[test]
+fn luminance_and_contrast_are_the_wcag_ratios() {
+    let (black, white) = (c(0), c(0xffffff));
+    assert_eq!(luminance(black), 0.);
+    assert_eq!(luminance(white), 1.);
+    assert_eq!(contrast(white, black), 21.);
+    assert_eq!(contrast(black, white), 21., "order does not matter");
+    assert_eq!(contrast(black, black), 1.);
+    assert_eq!(contrast(white, white), 1.);
+    assert!(contrast(c(0xf6f8fa), c(0x111317)) >= 4.5, "the dark theme's text on its background reads");
+}
+
+// `brightness` (JUCE's perceived brightness): pure black is 0, white is 1. `dark` reads a
+// background as dark when that brightness is under one half.
+#[test]
+fn brightness_and_dark_split_backgrounds_at_one_half() {
+    let (black, white) = (c(0), c(0xffffff));
+    assert_eq!(brightness(black), 0.);
+    assert_eq!(brightness(white), 1.);
+    assert!(dark(c(0x111317)) && dark(c(0x15181d)), "the built-in dark backgrounds");
+    assert!(!dark(c(0xeef1f5)), "the light theme's background");
+    assert!(!dark(white) && dark(black), "white is not dark, black is");
+    // A saturated red is dark by brightness (0.49) though it reads best with black: that is why
+    // `apply` uses `most_readable` for the warning chip, not `contrasting`.
+    assert!(brightness(c(0xff0000)) < 0.5);
+    assert_eq!(contrasting(c(0xff0000)), c(0xffffff), "red is dark to `contrasting`");
+    assert_eq!(most_readable(c(0xff0000)), c(0), "but black reads better on it by WCAG");
+    assert_eq!(contrasting(c(0x00ffff)), c(0), "cyan is bright to `contrasting`");
+    assert_eq!(contrasting(black), c(0xffffff), "black gets white");
+    assert_eq!(contrasting(white), c(0), "white gets black");
+}
+
+// `white_first` (the ink for large text on a box): white wherever white on the color reads as
+// large text does (3:1), black once the color is too light for that — the boundary in both
+// directions, and a mid gray that is not quite light enough for white.
+#[test]
+fn white_first_takes_white_on_dark_and_black_on_light() {
+    let white = c(0xffffff);
+    assert_eq!(white_first(c(0)), white, "white on black");
+    assert_eq!(white_first(c(0xffffff)), c(0), "black on white");
+    assert_eq!(white_first(c(0xff0000)), white, "saturated red: white still clears 3:1");
+    assert_eq!(white_first(c(0x10161e)), white, "the light theme's text color");
+    assert_eq!(white_first(c(0xaaaaaa)), c(0), "a light gray too light for white on it");
+}
+
+// `most_readable` (the chip's ink, chosen by WCAG contrast, not brightness): black on each of the
+// bright and saturated colors, white on the dark ones, matching the contrast rule the reference
+// uses for its own text so the chip reads on any warning color a theme chooses.
+#[test]
+fn most_readable_is_black_or_white_by_contrast() {
+    assert_eq!(most_readable(c(0)), c(0xffffff));
+    assert_eq!(most_readable(c(0xffffff)), c(0));
+    assert_eq!(most_readable(c(0x00ff00)), c(0));
+    assert_eq!(most_readable(c(0xffff00)), c(0));
+    assert_eq!(most_readable(c(0x00ffff)), c(0));
+    assert_eq!(most_readable(c(0xff0000)), c(0));
+    assert_eq!(most_readable(c(0x0000ff)), c(0xffffff), "pure blue is dark enough for white");
+    assert_eq!(most_readable(c(0x8b0000)), c(0xffffff), "a dark red");
+    for col in [c(0xffffff), c(0), c(0xff0000), c(0x00ff00), c(0x0000ff)] {
+        let ink = most_readable(col);
+        assert!(contrast(ink, col) >= 3., "the chip's ink reads on {col:?}: {ink:?}");
+    }
+}
+
+// A font buffer's `fontContainer` check: a minimal TrueType signature with the six required
+// tables and a CFF is taken, and each part of the shape — a signature, the table count, a table
+// past the end of the file, or a missing required table — is what fails it.
+#[test]
+fn font_container_accepts_a_minimal_font_and_refuses_the_rest() {
+    fn font(tags: &[&[u8; 4]], offsets: &[(usize, usize)]) -> Vec<u8> {
+        let mut b = vec![0u8; 12 + 16 * tags.len()];
+        b[0..4].copy_from_slice(&[0, 1, 0, 0]);
+        b[4..6].copy_from_slice(&(tags.len() as u16).to_be_bytes());
+        for (i, (&tag, &(off, len))) in tags.iter().zip(offsets).enumerate() {
+            let at = 12 + 16 * i;
+            b[at..at + 4].copy_from_slice(tag);
+            b[at + 8..at + 12].copy_from_slice(&(off as u32).to_be_bytes());
+            b[at + 12..at + 16].copy_from_slice(&(len as u32).to_be_bytes());
+        }
+        b
+    }
+    let req: Vec<&[u8; 4]> = vec![b"cmap", b"head", b"hhea", b"hmtx", b"maxp", b"name"];
+    let mut with_cff = req.clone();
+    with_cff.push(b"CFF ");
+    let none = vec![(0usize, 0usize); with_cff.len()];
+    assert!(font_container(&font(&with_cff, &none)), "the six required tables and a CFF");
+    let with_glyf_loca = vec![b"cmap", b"head", b"hhea", b"hmtx", b"maxp", b"name", b"glyf", b"loca"];
+    let none = vec![(0usize, 0usize); with_glyf_loca.len()];
+    assert!(font_container(&font(&with_glyf_loca, &none)), "glyf and loca in place of a CFF");
+    assert!(!font_container(&[]), "no bytes");
+    assert!(!font_container(&b"xy"[..]), "too short");
+    let mut wrong = font(&with_cff, &none);
+    wrong[0..4].copy_from_slice(b"xxxx");
+    assert!(!font_container(&wrong), "a wrong signature, the rest a good font");
+    assert!(!font_container(&font(&with_cff, &[(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (200, 8)])), "a table past the end of the file");
+    let mut no_cmap = with_cff.clone();
+    no_cmap[0] = b"caxp";
+    assert!(!font_container(&font(&no_cmap, &none)), "a required table missing");
+    let no_outline = req.clone();
+    assert!(!font_container(&font(&no_outline, &none)), "neither CFF nor glyf/loca");
+    let mut b69 = font(&with_cff, &none);
+    b69[5] = 0;
+    assert!(!font_container(&b69), "no tables is not a font");
+}
+
 // The screens take their colors, corners, strokes and sizes from the `Theme` global: no .slint file
 // but theme.slint has a literal color, or a literal corner radius or font size.
 #[test]

@@ -757,7 +757,16 @@ impl App {
                 "controllers" => {
                     self.wake_meters();
                     self.on_play(|p| p.controllers(&params)); // the control moved last, for Learn
-                    for action in self.totals.read(&params["navigation"]) {
+                    let actions = self.totals.read(&params["navigation"]);
+                    // DEC and INC: on the Setlist (nothing over it) the bank before or after; elsewhere the move they always were.
+                    match self.totals.take_steps() {
+                        0 => {}
+                        by if self.screen == Screen::Setlist && self.keyboard.is_none() && self.piano.is_none() && self.question.is_none() && self.menu.is_none() => {
+                            self.on_setlist(|s| s.turn_bank(by))
+                        }
+                        by => self.act(Action::Move { pane: None, by }),
+                    }
+                    for action in actions {
                         self.act(action);
                     }
                 }

@@ -226,7 +226,7 @@ namespace oscairn::standalone
             if(!baseline || !parsed || total==was)continue;
             const auto [action,pane]=*parsed;
             ListAction list;list.pane=pane;
-            list.kind=action==Navigation::Action::Move?ListAction::Kind::Move:action==Navigation::Action::Confirm?ListAction::Kind::Confirm:ListAction::Kind::Cancel;
+            list.kind=action==Navigation::Action::Move||action==Navigation::Action::Step?ListAction::Kind::Move:action==Navigation::Action::Confirm?ListAction::Kind::Confirm:ListAction::Kind::Cancel;
             list.steps=int(std::clamp<int64_t>(total-was,-1000,1000));
             const bool taken=onList && onList(list);
             if(!taken && list.kind==ListAction::Kind::Cancel && goBack)goBack();

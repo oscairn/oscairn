@@ -49,11 +49,11 @@
           "step": { "type": "number", "minimum": -1, "maximum": 1, "not": { "const": 0 }, "description": "Encoder only: its change per step; negative turns it round" },
           "navigate": {
             "type": "object",
-            "description": "What the control does in the app's lists, whatever the device: move (an encoder's steps, or a switch's press by `steps`) a list pane's cursor, confirm the item under it, or cancel. `pane` counts the list panes on screen from the left (0); without it, the pane last touched; a pane beyond the last is the last. A device without such an entry has no such control. An analog control cannot navigate",
+            "description": "What the control does in the app's lists, whatever the device: move (an encoder's steps, or a switch's press by `steps`) a list pane's cursor, confirm the item under it, cancel, or step (a switch's press by `steps`: a screen's own previous and next, as the Setlist's banks; a screen without its own takes it as a move). `pane` counts the list panes on screen from the left (0); without it, the pane last touched; a pane beyond the last is the last. A device without such an entry has no such control. An analog control cannot navigate",
             "properties": {
-              "action": { "enum": ["move", "confirm", "cancel"], "description": "An encoder's is move" },
+              "action": { "enum": ["move", "confirm", "cancel", "step"], "description": "An encoder's is move" },
               "pane": { "type": "integer", "minimum": 0, "maximum": 15 },
-              "steps": { "type": "number", "minimum": -64, "maximum": 64, "not": { "const": 0 }, "description": "A switch that moves: the steps a press moves by, negative towards the start; default 1" }
+              "steps": { "type": "number", "minimum": -64, "maximum": 64, "not": { "const": 0 }, "description": "A switch that moves or steps: the steps a press moves by, negative towards the start; default 1" }
             },
             "required": ["action"],
             "additionalProperties": false

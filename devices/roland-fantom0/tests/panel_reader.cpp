@@ -140,7 +140,7 @@ namespace
         // and, above them, the value's top five or the step's top four.
         // List navigation, as the map says (its `navigate`): the FANTOM's dial moves the pane last touched by the
         // steps of its message, the first and last knobs under the screen the first and second panes, their pushes
-        // confirm there, ENTER confirms, EXIT cancels, and DEC and INC move by one a press.
+        // confirm there, ENTER confirms, EXIT cancels, and DEC and INC step by one a press (a screen's own previous and next).
         {
             auto nav = [&](std::array<uint8_t, 4> m) { return decode(fantom, m).navigation; };
             const auto dial = nav({0x83, 6, 0xF << 3, 0xD});    // the VALUE dial, a step of -3
@@ -150,7 +150,8 @@ namespace
             check(!nav({0x83, 2, 0, 1}) && !nav({0x83, 0, 0, 0}), "E3 has none, and an encoder step of 0 is not a move");
             check(nav({0xA2, 40, 0, 0}) && nav({0xA2, 40, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 40, 0, 0})->pane == 0 && nav({0xA2, 57, 0, 0})->pane == 1, "E1's push confirms pane 0 and E6's pane 1");
             check(nav({0xA2, 62, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 62, 0, 0})->pane == -1 && nav({0xA2, 55, 0, 0})->action == Navigation::Action::Cancel, "ENTER confirms and EXIT cancels");
-            check(nav({0xA2, 58, 0, 0})->steps == 1 && nav({0xA2, 59, 0, 0})->steps == -1 && !nav({0x81, 58, 0, 0}) && !nav({0x81, 62, 0, 0}), "INC and DEC move by one a press, a release does nothing");
+            check(nav({0xA2, 58, 0, 0})->steps == 1 && nav({0xA2, 59, 0, 0})->steps == -1 && !nav({0x81, 58, 0, 0}) && !nav({0x81, 62, 0, 0}), "INC and DEC by one a press, a release does nothing");
+            check(nav({0xA2, 58, 0, 0})->action == Navigation::Action::Step && nav({0xA2, 59, 0, 0})->action == Navigation::Action::Step && nav({0xA2, 46, 0, 0})->action == Navigation::Action::Move, "INC and DEC step, CURSOR UP moves");
             check(!nav({0xA2, 60, 0, 0}) && !nav({0xA2, 17, 0, 0}), "CURSOR LEFT and PLAY have none");
             check(decode(fantom, {0xA2, 18, 0, 0}).control == "record", "the FANTOM's REC button is the record function");
         }
@@ -178,6 +179,7 @@ namespace
             check(decode(other, {0x82, 25, 0, 0}).control == "record", "any button can be the record button: the map names it");
             check(refused(mapJson(R"({"kind": "analog", "id": 1, "control": "slider:1", "navigate": {"action": "move"}})")), "an absolute control cannot navigate");
             check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "confirm"}})")), "an encoder only moves");
+            check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "step"}})")), "an encoder does not step");
             check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "move", "steps": 2}})")), "steps are a switch's");
             check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "x", "navigate": {"action": "jump"}})")), "an unknown action");
             check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "x", "navigate": {"action": "move", "steps": 0}})")), "steps of 0");

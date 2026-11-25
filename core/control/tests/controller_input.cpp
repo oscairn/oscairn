@@ -380,12 +380,15 @@ namespace
         check(total("move") == 6 && total("move:1") == -2, "totals, the pane's kept apart and negative steps summed");
         s.controllerControl("ok", {Kind::Switch, 1}, confirm); s.controllerControl("ok", {Kind::Switch, 1}, confirm);
         check(total("confirm:1") == 2 && total("cancel") == 0, "a confirm counts a press");
+        Navigation step; step.action = Navigation::Action::Step; step.steps = -1;
+        s.controllerControl("dec", {Kind::Switch, 1}, step); s.controllerControl("dec", {Kind::Switch, 1}, step);
+        check(total("step") == -2 && total("move") == 6, "a step is its own total, its steps summed, apart from the moves");
         check(s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 6 && s.controllerState().touched == "button:101", "a control that plays what it is assigned plays it and does not navigate");
         s.setControlView({std::nullopt, std::nullopt, true, {}});
         check(!s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 9 && s.controllerState().touches == 1, "with the screen showing lists it navigates and plays nothing");
         s.setControlView({std::nullopt, std::nullopt, false, {}});
         check(s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 9, "and plays again when it shows none");
-        check(parseNavigationKey("move:12") && parseNavigationKey("move:12")->second == 12 && parseNavigationKey("cancel")->first == Navigation::Action::Cancel
+        check(parseNavigationKey("move:12") && parseNavigationKey("move:12")->second == 12 && parseNavigationKey("cancel")->first == Navigation::Action::Cancel && parseNavigationKey("step")->first == Navigation::Action::Step
               && !parseNavigationKey("move:") && !parseNavigationKey("jump") && !parseNavigationKey("move:x"), "keys parse");
     }
 

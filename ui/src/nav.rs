@@ -57,10 +57,10 @@ pub fn from_key(text: &str) -> Option<Action> {
 }
 
 /// The panel's navigation as the engine counts it (`controllers.get`'s `navigation`): totals since
-/// the engine started, by key (`move`, `move:N`, `confirm[:N]`, `cancel[:N]`). The first read sets
-/// the baseline; each later one gives the actions since the last.
+/// the engine started, by key (`move`, `move:N`, `step`, `confirm[:N]`, `cancel[:N]`). The first read sets
+/// the baseline; each later one gives the actions since the last, and the steps (DEC and INC) apart, for `take_steps`.
 #[derive(Default)]
-pub struct Totals(Option<HashMap<String, i64>>);
+pub struct Totals(Option<HashMap<String, i64>>, i32);
 
 impl Totals {
     pub fn read(&mut self, navigation: &Value) -> Vec<Action> {
@@ -76,6 +76,7 @@ impl Totals {
             let (what, pane) = key.split_once(':').map_or((key.as_str(), None), |(w, n)| (w, n.parse::<u8>().ok()));
             match what {
                 "move" => actions.push(Action::Move { pane, by: delta.clamp(-1000, 1000) as i32 }),
+                "step" => self.1 = (i64::from(self.1) + delta).clamp(-1000, 1000) as i32,
                 // A count gone back (an engine started again) is nothing to press.
                 "confirm" if delta > 0 => actions.extend((0..delta.min(4)).map(|_| Action::Confirm(pane))),
                 "cancel" if delta > 0 => actions.extend((0..delta.min(4)).map(|_| Action::Cancel(pane))),
@@ -90,6 +91,11 @@ impl Totals {
             _ => (2, None),
         });
         actions
+    }
+
+    /// The steps (DEC and INC, negative towards the start) read since the last time, taken.
+    pub fn take_steps(&mut self) -> i32 {
+        std::mem::take(&mut self.1)
     }
 
     /// A new connection's first read is a baseline again (the engine may have started again).
@@ -165,6 +171,11 @@ mod tests {
         t.forget();
         assert!(t.read(&json!({"move": 99})).is_empty());
         assert!(t.read(&json!(null)).is_empty());
+        // DEC and INC: their own total, apart from the moves.
+        t.forget();
+        assert!(t.read(&json!({"move": 99, "step": 5})).is_empty() && t.take_steps() == 0, "a baseline");
+        assert!(t.read(&json!({"move": 99, "step": 3})).is_empty(), "steps are no action");
+        assert_eq!((t.take_steps(), t.take_steps()), (-2, 0), "taken once");
     }
 
     #[test]

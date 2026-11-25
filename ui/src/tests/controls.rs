@@ -919,3 +919,390 @@ fn long_names_fit_the_small_screens_and_draw_in_the_light_theme() {
     shot(&s, "controls-long-light");
     at_fantom_scale(&mut s, "controls-long-light", || c.shown());
 }
+
+/// A navigation move or press as the device's panel reaches the shell: the `controllers` totals.
+fn walk_nav(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, key: &str, by: i64) {
+    *total.entry(key.into()).or_default() += by;
+    f.navigation(json!(total.clone()));
+}
+
+/// A quiet engine: every request out is answered until none comes for a moment, the parameters' names
+/// as the engine would give them, so the page's own rows say what a target drives.
+fn walk_settle(f: &mut Fixture, g: &serde_json::Value) {
+    while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(20)) {
+        let method = r["method"].as_str().unwrap_or_default().to_string();
+        let result = match method.as_str() {
+            "params.list" => list_reply(),
+            "graph.get" | "controls.targets" => g.clone(),
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+            "library.query" => json!({"items": [], "total": 0}),
+            "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+            "window.info" => json!({"available": false}),
+            "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+            _ => json!({}),
+        };
+        f.reply(&r, json!({"result": result}));
+    }
+}
+
+/// The menu or text keyboard the press opened, closed by EXIT before the walk goes on.
+fn walk_close_overlay(f: &mut Fixture, total: &mut std::collections::BTreeMap<String, i64>, g: &serde_json::Value, ui: &crate::Shell) {
+    let mut closes = 0;
+    while ui.global::<MenuState>().get_open() || ui.global::<crate::KeyboardState>().get_open() {
+        walk_nav(f, total, "cancel", 1);
+        walk_settle(f, g);
+        closes += 1;
+        assert!(closes < 6, "EXIT never closed the overlay");
+    }
+}
+
+/// The next request the press sent, answered quiet ones as an engine would: the walk's effect on the
+/// screen has to be the request the engine got, so an action is asserted by the request it sends.
+fn walk_expect(f: &mut Fixture, g: &serde_json::Value, want: &str, what: &str) -> serde_json::Value {
+    for _ in 0..40 {
+        let Some(r) = f.engine.try_request(std::time::Duration::from_millis(200)) else {
+            panic!("{what}: {want} never reached the engine");
+        };
+        if r["method"] == want {
+            return r;
+        }
+        let result = match r["method"].as_str().unwrap() {
+            "params.list" => list_reply(),
+            "graph.get" => g.clone(),
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+            _ => json!({}),
+        };
+        f.reply(&r, json!({"result": result}));
+    }
+    panic!("{what}: {want} never reached the engine");
+}
+
+// A NO-TOUCH WALK of the Controls page, from Home by panel moves only: the Performance tile, the top
+// bar's Edit, the Parts list's Controls button, then every action the page offers, counted from its
+// own rows and tools (never a hard-coded count), each asserted by its real effect -- the request the
+// engine received with its parameters, or the view that changed (a menu, the text keyboard, the By
+// scene table). An action that cannot be reached by the dial would fail here with its line.
+#[test]
+fn controls_reachable_from_home_by_panel_moves() {
+    let g = graph();
+    let mut f = Fixture::new("controls-reach");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    // Home → the Performance tile → Play: the walk from Home is the panel's moves, no taps.
+    walk_nav(&mut f, &mut total, "move", 0); // the first read is only a baseline
+    walk_nav(&mut f, &mut total, "move", 1); // the cursor onto the Performance tile
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    walk_settle(&mut f, &g);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play → the top bar's Edit → the Parts list.
+    let edit_at = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == "Edit" && a.enabled)
+    };
+    let bar_cursor = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<crate::Bar>().get_actions().iter().position(|a| a.cursor)
+    };
+    walk_nav(&mut f, &mut total, "move:2", 1);
+    walk_settle(&mut f, &g);
+    assert!(ui.global::<crate::Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let mut moves = 0;
+    while bar_cursor(&f).is_none() {
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &g);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached its actions");
+    }
+    while edit_at(&f) != bar_cursor(&f) {
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &g);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached Edit");
+    }
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    walk_settle(&mut f, &g);
+    assert_eq!(ui.get_screen(), 9, "Edit opens the Parts list");
+    // The Parts list: the dial down the rows to the buttons under the list, on to Controls, pressed.
+    let controls_tool_at = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<PartsState>().get_tools().iter().position(|t| t.label == "Controls")
+    };
+    let tool_cursor_at = |f: &Fixture| -> Option<usize> {
+        f.screen.ui.global::<PartsState>().get_tools().iter().position(|t| t.cursor)
+    };
+    moves = 0;
+    loop {
+        if tool_cursor_at(&f) == controls_tool_at(&f) {
+            break;
+        }
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &g);
+        moves += 1;
+        assert!(moves < 120, "the dial never reached the Controls button");
+    }
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    walk_settle(&mut f, &g);
+    assert_eq!((ui.get_screen(), crate::tests::title(&ui)), (11, "Parts › Controls".to_string()), "the Controls button opens the page");
+    // The cells the page offers, from its own rows: a control's four, a target's ends, curve,
+    // Relative, Now (not on a morph) and Scenes (with scenes) and Remove.
+    let has_scenes = ui.global::<ControlsState>().get_has_scenes();
+    let cells_of = |kind: i32, row_now: bool| -> Vec<i32> {
+        let mut v = vec![0, 1, 2, 3, 6];
+        if row_now {
+            v.push(4);
+        }
+        if has_scenes {
+            v.push(5);
+        }
+        if kind == 0 {
+            v = vec![0, 1, 2, 3];
+        }
+        v.sort();
+        v
+    };
+    let key = |kind: i32, name: &str, cell: i32, table: bool| -> String {
+        format!("{} {name} · {cell}", if table { "table" } else if kind == 0 { "control" } else { "target" })
+    };
+    let mut expected: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut pressed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // The cells of every row are pressed as the dial reaches them; a control's own Remove is left
+    // until every control is walked (it collapses the control and its targets), then each control is
+    // removed in its turn. The page's own rows and tools are what the walk is counted against.
+    //
+    // The list cells, walked by the dial: a press does what the cell says, each asserted by its
+    // effect. A control's Remove (cell 3) is deferred so its targets are walked too.
+    let mut guard = 0;
+    let mut table_shown = false;
+    loop {
+        guard += 1;
+        assert!(guard < 500, "the list walk never ended");
+        if table_shown {
+            break; // the By scene table is walked below
+        }
+        let rs = rows(&ui);
+        for (i, (kind, name, _, _)) in rs.iter().enumerate() {
+            let row_now = ui.global::<ControlsState>().get_rows().row_data(i).map(|r| r.now).unwrap_or(false);
+            for c in cells_of(*kind, row_now) {
+                expected.insert(key(*kind, name, c, false));
+            }
+        }
+        for (label, _, _) in tools(&ui) {
+            expected.insert(format!("tool {label}"));
+        }
+        let tool_at = tools(&ui).iter().position(|t| t.2);
+        let by_scene_at = tools(&ui).iter().position(|t| t.0 == "By scene");
+        let Some((i, cell)) = cursor(&ui) else {
+            if tool_at == by_scene_at {
+                // Every row's cells walked: press By scene, which shows the table, and leave.
+                assert!(!pressed.contains("tool By scene"), "By scene walked twice");
+                pressed.insert("tool By scene".into());
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<ControlsState>().get_table(), "By scene shows the table");
+                table_shown = true;
+                continue;
+            }
+            walk_nav(&mut f, &mut total, "move", 1); // the cursor is down: the dial shows it
+            walk_settle(&mut f, &g);
+            continue;
+        };
+        let (kind, name, _, _) = rows(&ui)[i].clone();
+        let k = key(kind, &name, cell, false);
+        if pressed.contains(&k) || (kind == 0 && cell == 3) {
+            walk_nav(&mut f, &mut total, "move", 1); // already pressed, or a Remove put aside
+            walk_settle(&mut f, &g);
+            continue;
+        }
+        match (kind, cell) {
+            (0, 0) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<crate::KeyboardState>().get_open(), "{name}: the press opens the text keyboard for its name");
+                walk_close_overlay(&mut f, &mut total, &g, &ui);
+                assert_eq!(ui.get_screen(), 11, "{name}: the keyboard closed, the walk still on the page");
+            }
+            (0, 1) => {
+                // The fader: a change the dial makes, laid down by a second press.
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(rows(&ui)[i].3, "{name}: the press starts the change");
+                walk_nav(&mut f, &mut total, "move", 1);
+                let r = walk_expect(&mut f, &g, "controls.set", &format!("{name} fader dial"));
+                assert!(r["params"]["control"].is_number() && r["params"]["value"].as_f64().is_some_and(|v| (0. ..=1.).contains(&v)), "{name}: the fader's dial sent a control and a value");
+                f.reply(&r, json!({"result": {}}));
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(!rows(&ui)[i].3, "{name}: the second press ends the change");
+            }
+            (0, 2) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<MenuState>().get_open(), "{name}: + Target opens the menu");
+                walk_close_overlay(&mut f, &mut total, &g, &ui);
+            }
+            (1, 0) | (1, 1) => {
+                // An end of the range: the dial steps it in the direction that moves it (a range runs
+                // start at 0 to end at 1, so start is dialed up and end is dialed down).
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(rows(&ui)[i].3, "{name}: the press starts the change");
+                walk_nav(&mut f, &mut total, "move", if cell == 0 { 1 } else { -1 });
+                let r = walk_expect(&mut f, &g, "controls.targets", &format!("{} end dial", name));
+                assert!(r["params"]["control"].is_number() && r["params"]["targets"].as_array().is_some(), "{name}: the end's dial sent the targets");
+                f.reply(&r, json!({"result": {}}));
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(!rows(&ui)[i].3, "{name}: the second press ends the change");
+            }
+            (1, 2) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<MenuState>().get_open(), "{name}: the curve opens the menu");
+                walk_close_overlay(&mut f, &mut total, &g, &ui);
+            }
+            (1, 3) => {
+                let relative_was = ui.global::<ControlsState>().get_rows().row_data(i).map(|r| r.relative).unwrap_or(false);
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                let r = walk_expect(&mut f, &g, "controls.targets", &format!("{name} relative"));
+                let ts = r["params"]["targets"].as_array().expect("{name}: Relative sent the targets");
+                assert!(r["params"]["control"].is_number() && ts.iter().any(|t| t["relative"] != relative_was), "{name}: Relative sent the targets with it switched");
+                f.reply(&r, json!({"result": {}}));
+                walk_settle(&mut f, &g);
+            }
+            (1, 4) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<MenuState>().get_open(), "{name}: Now... opens the menu");
+                walk_close_overlay(&mut f, &mut total, &g, &ui);
+            }
+            (1, 5) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(ui.global::<MenuState>().get_open(), "{name}: Scenes... opens the menu");
+                walk_close_overlay(&mut f, &mut total, &g, &ui);
+            }
+            (_, 6) => {
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                let r = walk_expect(&mut f, &g, "controls.targets", &format!("{name} remove"));
+                assert!(r["params"]["control"].is_number() && r["params"]["targets"].as_array().is_some(), "{name}: removing a target sent the targets");
+                f.reply(&r, json!({"result": {}}));
+                walk_settle(&mut f, &g);
+            }
+            _ => panic!("the walk pressed {name} cell {cell}, which it knows no effect of"),
+        }
+        pressed.insert(k);
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &g);
+    }
+    // The By scene table: a column per scene, a row per mapping; a press switches a mapping in a scene.
+    let mut table_left = false;
+    loop {
+        guard += 1;
+        assert!(guard < 800, "the table walk never ended");
+        if !ui.global::<ControlsState>().get_table() {
+            break; // back on the list
+        }
+        // The cells the table shows, a column per scene, counted as the page offers them.
+        for cell in ui.global::<ControlsState>().get_table_cells().iter() {
+            if let Some(row) = ui.global::<ControlsState>().get_table_rows().row_data(cell.row as usize) {
+                expected.insert(key(1, row.label.as_ref(), cell.col, true));
+            }
+        }
+        let tool_at = tools(&ui).iter().position(|t| t.2);
+        let by_scene_at = tools(&ui).iter().position(|t| t.0 == "By scene");
+        // The cell under the cursor, as the table's own model shows it.
+        let cur: Option<(String, i32)> = ui.global::<ControlsState>().get_table_cells().iter().find(|c| c.cursor).map(|c| {
+            let row = ui.global::<ControlsState>().get_table_rows().row_data(c.row as usize).expect("the table row");
+            (row.label.to_string(), c.col)
+        });
+        if cur.is_none() {
+            if tool_at == by_scene_at {
+                // Every mapping's cells walked: press By scene to leave the table.
+                assert!(!table_left, "By scene left the table twice");
+                table_left = true;
+                walk_nav(&mut f, &mut total, "confirm", 1);
+                walk_settle(&mut f, &g);
+                assert!(!ui.global::<ControlsState>().get_table(), "By scene leaves the table");
+                continue;
+            }
+            walk_nav(&mut f, &mut total, "move", 1);
+            walk_settle(&mut f, &g);
+            continue;
+        }
+        let (label, col) = cur.unwrap();
+        let k = key(1, &label, col, true);
+        if pressed.contains(&k) {
+            walk_nav(&mut f, &mut total, "move", 1);
+            walk_settle(&mut f, &g);
+            continue; // already switched in this scene: on
+        }
+        pressed.insert(k);
+        walk_nav(&mut f, &mut total, "confirm", 1);
+        let r = walk_expect(&mut f, &g, "controls.targets", &format!("{label} table {col}"));
+        assert!(r["params"]["control"].is_number() && r["params"]["targets"].as_array().is_some(), "{label}: switching a mapping in a scene sent its targets");
+        f.reply(&r, json!({"result": {}}));
+        walk_settle(&mut f, &g);
+        walk_nav(&mut f, &mut total, "move", 1); // the press leaves the cursor: on
+        walk_settle(&mut f, &g);
+    }
+    // Every control is left until its targets were walked; remove each in its turn. The page reads
+    // the graph again after the edit, which puts a removed control back on this engine (the graph the
+    // walk answers is static), so each removal is pressed once and then passed by, counted against the
+    // cells the page offered.
+    let mut remove_guard = 0;
+    loop {
+        let unpressed: Vec<String> = expected.iter().filter(|k| k.starts_with("control ") && k.ends_with(" · 3") && !pressed.contains(*k)).cloned().collect();
+        if unpressed.is_empty() {
+            break;
+        }
+        remove_guard += 1;
+        assert!(remove_guard < 400, "the remove walk never ended");
+        let Some((i, cell)) = cursor(&ui) else {
+            walk_nav(&mut f, &mut total, "move", 1);
+            walk_settle(&mut f, &g);
+            continue;
+        };
+        let (kind, name, _, _) = rows(&ui)[i].clone();
+        let k = key(kind, &name, cell, false);
+        if !(kind == 0 && cell == 3 && unpressed.contains(&k)) {
+            walk_nav(&mut f, &mut total, "move", 1);
+            walk_settle(&mut f, &g);
+            continue;
+        }
+        assert!(!pressed.contains(&k), "{name} removed twice");
+        pressed.insert(k);
+        walk_nav(&mut f, &mut total, "confirm", 1);
+        let r = walk_expect(&mut f, &g, "controls.remove", &format!("{name} remove"));
+        assert!(r["params"]["control"].is_number(), "{name}: controls.remove with its control");
+        f.reply(&r, json!({"result": {}}));
+        walk_settle(&mut f, &g);
+    }
+    // The last action: + Control adds one.
+    let mut add_guard = 0;
+    loop {
+        add_guard += 1;
+        assert!(add_guard < 100, "the dial never reached + Control");
+        if tools(&ui).iter().position(|t| t.0 == "+ Control" && t.2).is_some() {
+            break;
+        }
+        walk_nav(&mut f, &mut total, "move", 1);
+        walk_settle(&mut f, &g);
+    }
+    assert!(!pressed.contains("tool + Control"), "+ Control walked twice");
+    pressed.insert("tool + Control".into());
+    walk_nav(&mut f, &mut total, "confirm", 1);
+    let r = walk_expect(&mut f, &g, "controls.add", "+ Control");
+    assert!(r["params"]["name"].as_str().is_some(), "+ Control sent the name");
+    f.reply(&r, json!({"result": {}}));
+    walk_settle(&mut f, &g);
+    // What the walk pressed against what the page offered: every cell (and the two tools) the page
+    // showed was reached, exactly once each -- counted from the page's own rows, table and tools.
+    let misses: Vec<String> = expected.iter().filter(|k| !pressed.contains(*k)).cloned().collect();
+    assert!(misses.is_empty(), "the page offered cells the walk never pressed: {misses:?}");
+    let extras: Vec<String> = pressed.iter().filter(|k| !expected.contains(*k)).cloned().collect();
+    assert!(extras.is_empty(), "the walk pressed cells the page never offered: {extras:?}");
+    let cells = |s: &std::collections::HashSet<String>| s.iter().filter(|k| !k.starts_with("tool ")).count();
+    assert_eq!(cells(&pressed), cells(&expected), "the walk pressed {} of the {} cells the page offers", cells(&pressed), cells(&expected));
+    assert!(pressed.contains("tool By scene") && pressed.contains("tool + Control"), "the page's tools were walked ({pressed:?})");
+}

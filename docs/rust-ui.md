@@ -59,8 +59,10 @@ How (a) works:
   Rust Home after a dark moment. Audio plays on throughout. That wait is acceptable for Settings,
   the Library and the editors and never needed on stage, where Home, Setlist and Play are
   Rust and draw without X. While a JUCE screen is open it has the X cost as today.
-- **One profile setting switches it:** a screen's `"ui": "rust"`; absent or `"juce"`, the start
-  script starts the JUCE app as today. JUCE stays the default until the owner switches it.
+- **One profile setting switches it:** a screen's `"ui"`: absent or `"rust"`, the Rust UI;
+  `"juce"`, the start script starts the JUCE app as before. The Rust UI is the default since
+  2026-11-25 (the owner: "make rust the default now"); `OSCAIRN_UI=juce` in the start script's
+  environment forces the JUCE app, for a fault. Screens not yet ported still hand over to JUCE.
 
 ### 2. Where it lives and how it builds
 
@@ -829,7 +831,7 @@ Catalog's rows are columns (name, version, publisher, state and summary) each sh
 1. Build the bundle (`os/fantom-bundle.sh`): it carries `usr/bin/oscairn-ui` and its libraries,
    with the start and stop scripts and the JUCE app of the same tree.
 2. Unpack it as any bundle; nothing is copied in by hand.
-3. Start: `OSCAIRN_UI=rust ./oscairn-fantom-start` (the profile still says JUCE); stop with
+3. Start: `./oscairn-fantom-start` (the Rust UI is the default; `OSCAIRN_UI=juce` for the JUCE app); stop with
    `./oscairn-fantom-stop`. `SLINT_KMS_FRAME_STATS=1` in `etc/default/oscairn-engine` is not passed
    on; for frame statistics run `oscairn-ui` by hand through `start-chroot.sh` with it set.
 4. Measure, with ST Final playing and keys held, as the prototype's runs: the engine's deadline

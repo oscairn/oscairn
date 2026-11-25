@@ -1013,9 +1013,10 @@ user's, creator gone) with `ipcrm`, so a crash loop cannot fill memory that way 
 
 ### The Rust UI on the display without X (not yet run on a unit)
 
-The UI moves to Rust screen by screen ([rust-ui.md](rust-ui.md)). A profile whose screen says
-`"ui": "rust"` (the FANTOM-07's does not yet: the JUCE app stays the default until the owner
-switches it; `OSCAIRN_UI=rust` in the start script's environment tries it once) makes
+The UI moves to Rust screen by screen ([rust-ui.md](rust-ui.md)). A profile whose screen does not
+say `"ui": "juce"` (the Rust UI is the default since 2026-11-25, the FANTOM-07's included;
+`OSCAIRN_UI=juce` in the start script's environment or in `etc/default/oscairn-engine` forces the
+JUCE app, for a fault) makes
 `oscairn-fantom-start` start the engine alone (as `--engine-only`), then:
 
 - `systemctl stop weston.service`, and no X server: `/usr/bin/oscairn-ui` draws through Slint's

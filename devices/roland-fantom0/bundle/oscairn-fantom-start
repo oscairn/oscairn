@@ -46,9 +46,9 @@
 #
 #   ./oscairn-fantom-start [--dry-run] [--cold] [--engine-only]
 #
-# With the profile's screen saying "ui": "rust" (etc/default/oscairn-engine's OSCAIRN_UI, or this
-# script's environment), step 6 starts the engine alone and then the Rust UI on the display without
-# X (docs/rust-ui.md): oscairn-ui through Slint's KMS backend, its picture and touch turned by the
+# Unless the profile's screen says "ui": "juce" (etc/default/oscairn-engine's OSCAIRN_UI, or this
+# script's environment: OSCAIRN_UI=juce forces the JUCE app, for a fault), step 6 starts the
+# engine alone and then the Rust UI on the display without X (docs/rust-ui.md): oscairn-ui through Slint's KMS backend, its picture and touch turned by the
 # screen's rotation (OSCAIRN_UI_ROTATION; touch through a udev rule under /run/udev/rules.d, gone at
 # the next power-on and taken away by oscairn-fantom-stop). For a screen not yet ported it ends
 # with status 3, and the UI keeper gives the display to the bundle's X server and the JUCE app
@@ -272,7 +272,7 @@ if [ -n "$merged" ]; then
 	plug="$(printf '%s\n' "$merged" | tr '\n' ' ')" # unquoted below: no spaces in a value
 fi
 cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
-ui=${ui:-${OSCAIRN_UI:-juce}} rotation=${rotation:-${OSCAIRN_UI_ROTATION:-0}}
+ui=${ui:-${OSCAIRN_UI:-rust}} rotation=${rotation:-${OSCAIRN_UI_ROTATION:-0}}
 case "$ui" in juce|rust) ;; *) fail "OSCAIRN_UI must be juce or rust, not $ui" ;; esac
 # The Rust UI draws the screen: the engine starts alone below, the UI after it.
 rust=""

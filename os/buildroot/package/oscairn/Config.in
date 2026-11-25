@@ -66,8 +66,8 @@ config BR2_PACKAGE_OSCAIRN_UI
 	  KMS with Slint's software renderer, no X server and no GPU
 	  library; touch and keys through libinput. Its crates come
 	  from the oscairn-ui-crates package, so cargo runs offline.
-	  A profile's screen chooses it ("ui": "rust"); the app stays
-	  the default.
+	  The default for a profile's screen; "ui": "juce" chooses
+	  the app.
 
 comment "the Rust UI needs udev and a glibc toolchain"
 	depends on !BR2_PACKAGE_HAS_UDEV || !BR2_TOOLCHAIN_USES_GLIBC

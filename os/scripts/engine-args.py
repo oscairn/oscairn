@@ -28,8 +28,8 @@
                          thread and helpers keep to in place of audioThreadCores; empty: those
     OSCAIRN_WORKER_AUDIO_CORES  compute.workerAudioCores likewise for workers' audio threads; with
                          chain or pool, each worker process one of them, round-robin
-    OSCAIRN_UI           the first screen's ui: juce (absent) for the JUCE app under X, rust for the
-                         Rust UI on the display without X (docs/rust-ui.md)
+    OSCAIRN_UI           the first screen's ui: rust (absent) for the Rust UI on the display without X,
+                         juce for the JUCE app under X (docs/rust-ui.md)
     OSCAIRN_UI_ROTATION  the first screen's rotation in degrees (0 absent), for the Rust UI and its touch
 
     engine-args.py PROFILE.json
@@ -93,7 +93,7 @@ def settings(profile):
         "OSCAIRN_WORKERS": (profile.get("compute") or {}).get("workers", ""),
         "OSCAIRN_ENGINE_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("engineAudioCores", [])),
         "OSCAIRN_WORKER_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("workerAudioCores", [])),
-        "OSCAIRN_UI": ((profile.get("screens") or [{}])[0]).get("ui", "juce"),
+        "OSCAIRN_UI": ((profile.get("screens") or [{}])[0]).get("ui", "rust"),
         "OSCAIRN_UI_ROTATION": str(((profile.get("screens") or [{}])[0]).get("rotation", 0)),
     }
 

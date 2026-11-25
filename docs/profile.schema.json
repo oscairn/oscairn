@@ -673,7 +673,7 @@
             "maximum": 240
           },
           "ui": {
-            "description": "Which program draws this screen on a device (docs/rust-ui.md): juce, the JUCE app under X (absent: this); rust, the Rust UI straight to the display, handing it to X and the JUCE app for a screen not yet ported. The device's start script reads it",
+            "description": "Which program draws this screen on a device (docs/rust-ui.md): rust, the Rust UI straight to the display, handing it to X and the JUCE app for a screen not yet ported (absent: this); juce, the JUCE app under X. The device's start script reads it (only the FANTOM bundle's so far)",
             "enum": ["juce", "rust"]
           },
           "rotation": {

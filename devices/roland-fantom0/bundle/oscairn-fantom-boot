@@ -208,7 +208,24 @@ if [ -e "$boot/attempt" ]; then
 fi
 [ ! -e "$boot/dry-run" ] || dry=1
 
-# 2. The takeover scheduled, then Roland's application.
+# 2. Oscairn at once: oscairn-fantom-start --cold sets up the audio port's receive side itself
+# (its step 5b), which is all a cold start lacked for sound. The file roland-first in the boot
+# folder keeps the takeover below instead (Roland's application first, Oscairn after it).
+if [ ! -e "$boot/roland-first" ]; then
+	say "starting Oscairn (oscairn-fantom-start --cold)"
+	if [ -n "$dry" ]; then
+		bounded "$limit" "$root/oscairn-fantom-start" --dry-run --cold || roland "oscairn-fantom-start --dry-run --cold failed"
+		say "would stay in the foreground while the engine runs, and fall back to Roland's application if it ends without oscairn-fantom-stop"
+		roland "a dry run"
+	fi
+	: > "$boot/attempt" || roland "cannot write $boot/attempt"
+	: > "$run/oscairn-boot-started" || roland "cannot write $run/oscairn-boot-started"
+	bounded "$limit" "$root/oscairn-fantom-start" --cold || fallback "oscairn-fantom-start --cold failed or ran out of its $limit seconds"
+	rm -f "$boot/attempt"
+	watch
+fi
+
+# 2b. The takeover scheduled, then Roland's application.
 set -- --unit=oscairn-takeover --collect --no-block --description="Oscairn takes over from Roland's application" "$root/oscairn-fantom-boot" --takeover
 if [ -n "$dry" ]; then
 	say "would write $boot/attempt and run: $systemd_run $*"

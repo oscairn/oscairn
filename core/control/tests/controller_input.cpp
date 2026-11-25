@@ -19,6 +19,9 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <sstream>
 #include <cstdlib>
 #include <unistd.h>
 #include <random>
@@ -812,6 +815,118 @@ namespace
         check(blocksToStep.size() == 20 && std::stoull(worstOf(blocksToStep)) <= 2, "a glide's first step heard within 2 blocks of its service tick, every glide: " + worstOf(blocksToStep));
         check(blocksToEnd.size() == 20 && std::stoull(worstOf(blocksToEnd)) <= 30, "a glide's end heard within 30 blocks (the 80 ms this once was), every glide: " + worstOf(blocksToEnd));
     }
+
+    bool refused(const std::function<void()>& f) { try { f(); } catch(const std::exception&) { return true; } return false; }
+
+    // A converted Performance's controller boxes (notes/box-law-for-host.md): a part's mod wheel moves its
+    // insertion effect's parameter through a measured table curve, polarity as the offset of the curve's
+    // output and the ratio as the swing (relative targets: unipolar start .5, end .5 + swing; bipolar
+    // .5 -+ swing / 2), several boxes on one destination summed, then clamped; a stepped parameter
+    // switching halfway; all read back from the Performance's file.
+    void tables(const char* fixture)
+    {
+        // The box law's linear curve, c = s(v) / 1024: 8 v up to 64, then 512 + (v - 64) 512 / 63.
+        std::vector<double> linear(128), falling(128);
+        for(int v = 0; v < 128; ++v) { linear[v] = (v <= 64 ? 8.0 * v : 512 + (v - 64) * 512 / 63.0) / 1024; falling[v] = -linear[v]; }
+        {
+            MacroTarget t; t.curve = MacroTarget::Curve::Table; t.points = linear;
+            check(t.validCurve() && t.shape(0) == 0 && t.shape(1) == 1 && near(t.shape(64 / 127.0), .5) && near(t.shape(100 / 127.0), linear[100]), "128 points: one per 7-bit value, the ends exact");
+            check(near(t.shape(64.5 / 127), (linear[64] + linear[65]) / 2), "a 14-bit value between two points is between them, linearly");
+            t.points = {0, 1, .25};
+            check(t.shape(.25) == .5 && t.shape(.5) == 1 && t.shape(.75) == .625 && t.shape(1) == .25, "fewer points spread evenly over 0..1");
+            t.points = falling; t.start = .5; t.end = 1;
+            check(t.shape(1) == -1 && t.point(1) == 0 && near(t.point(64 / 127.0), .25), "a falling curve takes the target below its start");
+            for(const auto& bad : std::vector<std::vector<double>>{{}, {.5}, std::vector<double>(129, 0), {0, 1.5}, {-1.01, 0}, {0, std::nan("")}})
+                { t.points = bad; check(!t.validCurve(), "a table of " + std::to_string(bad.size()) + " points out of range is refused"); }
+        }
+
+        char home[] = "/tmp/oscairn-table-curves-XXXXXX";
+        if(!::mkdtemp(home)) { check(false, "a folder for the test"); return; }
+        const std::filesystem::path root(home);
+        uint32_t pedal = 0;
+        {
+            Session s(48000, frames);
+            const auto synth = s.add("synth", fixture, "org.kick.test.synth"), fx = s.add("fx", fixture, "org.kick.test.effect"), speed = s.add("speed", fixture, "org.kick.test.stepped");
+            s.setParameter(synth, 7, .5); s.setParameter(fx, 7, .1); s.setParameter(speed, 7, 0); s.setParameter(speed, 8, 0); // the switch's own plugin silent
+            const auto organ = s.addPart("Organ"); s.insertIntoPart(organ, 0, synth); s.insertIntoPart(organ, 1, fx);
+            const auto rotary = s.addPart("Rotary"); s.insertIntoPart(rotary, 0, speed); s.commit();
+            // The organ's mod wheel: unipolar, ratio +32 (swing .5), the linear table.
+            const auto wheel = s.addMacro("Mod Wheel", organ);
+            MacroTarget box; box.kind = MacroTarget::Kind::Parameter; box.node = fx; box.param = 7; box.relative = true; box.curve = MacroTarget::Curve::Table; box.points = linear; box.start = .5; box.end = 1;
+            s.setMacroTargets(wheel, {box});
+            // A second box on the same parameter: bipolar, ratio +32 (nothing at c = 512, a quarter either way).
+            pedal = s.addMacro("Foot", organ);
+            MacroTarget second = box; second.start = .25; second.end = .75;
+            s.setMacroTargets(pedal, {second});
+            // The rotary's speed switch: unipolar, ratio +64 (swing 1), stepped 0/1.
+            const auto lever = s.addMacro("Speed", rotary);
+            MacroTarget step = box; step.node = speed; step.param = 8; step.end = 1.5;
+            s.setMacroTargets(lever, {step});
+            s.assign("wheel:2", {Assignment::Kind::Control, 0, 0, wheel}, organ);
+            s.assign("wheel:2", {Assignment::Kind::Control, 0, 0, lever}, rotary);
+            MacroTarget wide = box; wide.end = 3.01;
+            check(refused([&] { s.setMacroTargets(wheel, {wide}); }), "a range past -2..3 is refused");
+            wide = box; wide.points = {0, 2};
+            check(refused([&] { s.setMacroTargets(wheel, {wide}); }), "a table past -1..1 is refused");
+            std::string why; try { s.setMacroSource(pedal, synth, 0); } catch(const std::exception& e) { why = e.what(); }
+            check(why.find("table") != std::string::npos, "a lane's control with a table below it is refused: " + why);
+            s.savePerformance((root / "organ").string());
+        }
+        // The file as a converter writes it: the table read back whole.
+        std::string text;
+        { std::ifstream in(root / "organ" / "performance.json"); std::stringstream b; b << in.rdbuf(); text = b.str(); }
+        check(text.find("\"curve\":{\"kind\":\"table\",\"points\":[0,0.0078125,") != std::string::npos, "the table is written as its points");
+
+        Session s(48000, frames);
+        s.loadPerformance((root / "organ").string());
+        const auto fx = s.nodeId("fx"), speed = s.nodeId("speed");
+        // wheel:2, the modulation wheel: the pitch wheel's group first, as on the keyboards.
+        auto pitch = group(Role::Assign, "wheels", 1, {3}); pitch.functions = {"pitchBend"};
+        auto mod = group(Role::Assign, "wheels", 1, {1}); mod.functions = {"modulation"};
+        s.setControllers({pitch, mod}, {{"SMK-37 Elite -Master", "smk", 1}});
+        Control::SessionStatus status; status.midiInputs = {{MidiEndpoint::Kind::Usb, smk, "SMK-37 Elite -Master"}};
+        s.setHostStatus(status);
+        settle(s);
+        s.note(true, 60, 1); render(s); render(s);
+        s.setMacro(pedal, 64 / 127.0); s.service(); // the bipolar box at c = 512 adds nothing
+        check(near(s.parameter(fx, 7), .1) && near(render(s), .5 * .1), "loaded: the effect at its base, the boxes at rest: " + std::to_string(s.parameter(fx, 7)));
+        for(const int v : {0, 40, 64, 100, 127})
+        {
+            cc(s, 1, v);
+            const double gain = .1 + .5 * linear[v];
+            check(near(render(s), .5 * gain), "the wheel's box on the effect heard at the next block at " + std::to_string(v) + ": " + std::to_string(render(s)));
+            s.service();
+            check(near(s.parameter(fx, 7), gain), "and the model's at " + std::to_string(v) + ": " + std::to_string(s.parameter(fx, 7)));
+            check(s.parameter(speed, 8) == (v >= 64 ? 1 : 0), "the rotary switches at half its box's swing, at " + std::to_string(v) + ": " + std::to_string(s.parameter(speed, 8)));
+        }
+        // Two boxes summing: the bipolar one at its top adds a quarter.
+        s.setMacro(pedal, 1); s.service();
+        check(near(s.parameter(fx, 7), .1 + .5 + .25), "two boxes on one destination add: " + std::to_string(s.parameter(fx, 7)));
+        // And clamping: both down, the sum below the range.
+        cc(s, 1, 0); s.setMacro(pedal, 0); s.service();
+        check(near(s.parameter(fx, 7), 0), "the sum clamped to the range: " + std::to_string(s.parameter(fx, 7)));
+        // A continuous source (the built-in wheel, 0..1) between two points.
+        s.setMacro(pedal, 64 / 127.0);
+        ControlGroup builtInPitch{Role::Assign, "wheels", 1}, builtIn{Role::Assign, "wheels", 1}; builtInPitch.functions = {"pitchBend"}; builtIn.functions = {"modulation"};
+        s.setControllers({builtInPitch, builtIn}, {}); s.service();
+        s.controllerControl("wheel:2", {ControlInput::Kind::Absolute, 0}); // picked up where the control is
+        s.controllerControl("wheel:2", {ControlInput::Kind::Absolute, 100.5 / 127}); render(s); s.service();
+        check(near(s.parameter(fx, 7), .1 + .5 * (linear[100] + linear[101]) / 2), "a continuous wheel between two points: " + std::to_string(s.parameter(fx, 7)));
+
+        // Bad tables in the file are refused.
+        const auto at = text.find("\"points\":[") + 10;
+        for(const auto& [what, edited] : std::vector<std::pair<std::string, std::string>>{
+                {"a value past 1", text.substr(0, at) + "1.5," + text.substr(at)}, {"129 points", text.substr(0, at) + "0," + text.substr(at)},
+                {"one point", text.substr(0, at) + "0]" + text.substr(text.find(']', at))}, {"a string", text.substr(0, at) + "\"a\"," + text.substr(at)}})
+        {
+            std::filesystem::create_directories(root / "bad");
+            std::filesystem::copy(root / "organ", root / "bad", std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+            { std::ofstream out(root / "bad" / "performance.json", std::ios::trunc); out << edited; }
+            Session other(48000, frames);
+            check(refused([&] { other.loadPerformance((root / "bad").string()); }), "a file's table with " + what + " is refused");
+        }
+        std::filesystem::remove_all(root);
+    }
 }
 
 int main(int argc, char** argv)
@@ -822,6 +937,13 @@ int main(int argc, char** argv)
         try { loneWheels(argv[1], std::string(argv[2]) == "--wheels-clap"); }
         catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
         if(!failures) std::puts("ok: the built-in wheels reach a plugin as MIDI events whatever dialect it prefers");
+        return failures ? 1 : 0;
+    }
+    if(argc > 2 && std::string(argv[2]) == "--tables")
+    {
+        try { tables(argv[1]); }
+        catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
+        if(!failures) std::puts("ok: a part's wheel moves its effect's parameters through measured curves by the box law");
         return failures ? 1 : 0;
     }
     try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); loneWheels(argv[1], false); navigation(); sceneButtons(argv[1]); switches(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }

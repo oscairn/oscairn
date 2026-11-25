@@ -7753,13 +7753,14 @@
                       },
                       "start": {
                         "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
+                        "minimum": -2,
+                        "maximum": 3,
+                        "description": "As fractions of the destination's range, within -2..3: a controller box's swing reaches up to two ranges past its base (the destination is clamped to its range all the same)"
                       },
                       "end": {
                         "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
+                        "minimum": -2,
+                        "maximum": 3
                       },
                       "curve": {
                         "oneOf": [
@@ -7814,6 +7815,30 @@
                             ],
                             "additionalProperties": false,
                             "description": "The control's value to the power exponent"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "table"
+                              },
+                              "points": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 128,
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1,
+                                  "maximum": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "points"
+                            ],
+                            "additionalProperties": false,
+                            "description": "A measured curve: the points evenly over the control's 0..1 (with 128, one per 7-bit controller value 0..127), linear between; a value below 0 takes the target below its start (a falling controller box)"
                           }
                         ]
                       },
@@ -10814,13 +10839,14 @@
         },
         "start": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "minimum": -2,
+          "maximum": 3,
+          "description": "As fractions of the destination's range, within -2..3: a controller box's swing reaches up to two ranges past its base (the destination is clamped to its range all the same)"
         },
         "end": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "minimum": -2,
+          "maximum": 3
         },
         "curve": {
           "oneOf": [
@@ -10875,6 +10901,30 @@
               ],
               "additionalProperties": false,
               "description": "The control's value to the power exponent"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "table"
+                },
+                "points": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 128,
+                  "items": {
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "points"
+              ],
+              "additionalProperties": false,
+              "description": "A measured curve: the points evenly over the control's 0..1 (with 128, one per 7-bit controller value 0..127), linear between; a value below 0 takes the target below its start (a falling controller box)"
             }
           ]
         },
@@ -10992,13 +11042,14 @@
         },
         "start": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "minimum": -2,
+          "maximum": 3,
+          "description": "As fractions of the destination's range, within -2..3: a controller box's swing reaches up to two ranges past its base (the destination is clamped to its range all the same)"
         },
         "end": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "minimum": -2,
+          "maximum": 3
         },
         "curve": {
           "oneOf": [
@@ -11053,6 +11104,30 @@
               ],
               "additionalProperties": false,
               "description": "The control's value to the power exponent"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "table"
+                },
+                "points": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 128,
+                  "items": {
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "points"
+              ],
+              "additionalProperties": false,
+              "description": "A measured curve: the points evenly over the control's 0..1 (with 128, one per 7-bit controller value 0..127), linear between; a value below 0 takes the target below its start (a falling controller box)"
             }
           ]
         },

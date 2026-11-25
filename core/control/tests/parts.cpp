@@ -2165,8 +2165,8 @@ namespace
         MacroTarget back; back.kind = MacroTarget::Kind::Macro; back.macro = super;
         bool refused = false; try { s.setMacroTargets(assign, {back}); } catch(const std::invalid_argument&) { refused = true; }
         check(refused, "a control may not drive the one above it");
-        refused = false; try { MacroTarget wide = gain; wide.end = 2; s.setMacroTargets(assign, {wide}); } catch(const std::invalid_argument&) { refused = true; }
-        check(refused, "a range beyond 0..1 is refused");
+        refused = false; try { MacroTarget wide = gain; wide.end = 3.5; s.setMacroTargets(assign, {wide}); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "a range beyond -2..3 is refused");
         // Scenes store control values.
         s.setMacro(super, .5); const auto verse = s.addScene("Verse");
         s.setMacro(super, 1); s.selectScene(verse);

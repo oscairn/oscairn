@@ -1249,12 +1249,21 @@ namespace oscairn
     {
         return {Graph::ControlCurve::Kind(t.curve), t.start, t.end, shift, t.low, t.high, t.exponent};
     }
-    double MacroTarget::shape(double value) const { return curveOf(*this, 0).shape(value); }
+    double MacroTarget::shape(double value) const
+    {
+        if(curve != Curve::Table) return curveOf(*this, 0).shape(value);
+        // The points evenly over 0..1, linear between: a 7-bit value v of 128 points is point v.
+        const double at = std::clamp(value, 0.0, 1.0) * double(points.size() - 1);
+        const size_t i = std::min(size_t(at), points.size() - 2);
+        return std::fma(points[i + 1] - points[i], at - double(i), points[i]);
+    }
+    double MacroTarget::point(double value) const { return std::fma(end - start, shape(value), start); } // Graph::ControlCurve::point
 
     bool MacroTarget::validCurve() const
     {
         if(curve == Curve::Db) return std::isfinite(low) && std::isfinite(high) && low >= -144 && low < high && high <= 0;
         if(curve == Curve::Power) return std::isfinite(exponent) && exponent >= .1 && exponent <= 10;
+        if(curve == Curve::Table) return points.size() >= 2 && points.size() <= 128 && std::all_of(points.begin(), points.end(), [](double p) { return p >= -1 && p <= 1; }); // NaN fails both
         return true;
     }
 
@@ -1262,8 +1271,7 @@ namespace oscairn
     // middle is no change. Absolute: how far that point is from the base, so alone it sets the value.
     double MacroTarget::offset(double value) const
     {
-        const double point = curveOf(*this, 0).point(value);
-        return point - (relative ? .5 : base);
+        return point(value) - (relative ? .5 : base);
     }
 
     double MacroTarget::map(double value) const { return std::clamp(base + offset(value), 0.0, 1.0); }
@@ -1297,7 +1305,7 @@ namespace oscairn
         case MacroTarget::Kind::Morph: throw std::invalid_argument("a morph's ends are its scenes");
         }
         now = std::clamp(now, 0.0, 1.0);
-        auto point = [](const MacroTarget& o, double x) { return curveOf(o, 0).point(x); };
+        auto point = [](const MacroTarget& o, double x) { return o.point(x); };
         // Read from the parameter: a client's copy of the controls does not carry their delivery.
         auto modulates = [&](const MacroTarget& o) { return o.relative && o.kind == MacroTarget::Kind::Parameter && (c.parameterInfo(o.node, o.param).flags & CLAP_PARAM_IS_MODULATABLE); };
         const bool own = modulates(t);
@@ -1376,8 +1384,8 @@ namespace oscairn
         if(targets.size() > 256) throw std::invalid_argument("at most 256 targets per control");
         for(auto& t : targets)
         {
-            if(!std::isfinite(t.start) || !std::isfinite(t.end) || t.start < 0 || t.start > 1 || t.end < 0 || t.end > 1) throw std::invalid_argument("a target's range is within 0..1");
-            if(!t.validCurve()) throw std::invalid_argument("a dB curve runs from -144 to 0 dB, low below high; a power curve's exponent is 0.1 to 10");
+            if(!(t.start >= -2 && t.start <= 3 && t.end >= -2 && t.end <= 3)) throw std::invalid_argument("a target's start and end are within -2..3");
+            if(!t.validCurve()) throw std::invalid_argument("a dB curve runs from -144 to 0 dB, low below high; a power curve's exponent is 0.1 to 10; a table has 2 to 128 points within -1..1");
             t.delivery = MacroTarget::Delivery::Value;
             switch(t.kind)
             {
@@ -1486,6 +1494,9 @@ namespace oscairn
                 if(depth > 64) return; // the tree has no loops (setMacroTargets); a bound all the same
                 for(const auto& t : m.targets)
                 {
+                    // shortcut: Graph::ControlCurve carries no points, so edits and Performances refuse a table below a lane's
+                    // control (checkControlLoops, the file) and one a Sound brings is left to its knob; carry them (engine_core.h, run.rs) when a lane needs one.
+                    if(t.curve == MacroTarget::Curve::Table) continue;
                     if(mappingScene && std::find(t.offIn.begin(), t.offIn.end(), mappingScene) != t.offIn.end()) continue; // off in this scene
                     if(t.kind == MacroTarget::Kind::Macro)
                     {
@@ -1508,7 +1519,7 @@ namespace oscairn
                         else
                         {
                             // What this target adds, at its control's value now: a relative one its offset, an absolute one its point.
-                            const double own = t.relative ? t.offset(m.value) : curveOf(t, 0).point(m.value);
+                            const double own = t.relative ? t.offset(m.value) : t.point(m.value);
                             const double rest = contributions(macros, mappingScene, t, 0, 0).at(t.base) - own;
                             full.push_back(curveOf(t, rest - (t.relative ? .5 : 0)));
                         }
@@ -1598,6 +1609,13 @@ namespace oscairn
     // plugin, directly or through the graph's connections and other lanes, would loop.
     void Session::checkControlLoops(const std::vector<Macro>& macros) const
     {
+        // Nor does it carry a table curve below it (flattenControls).
+        std::function<bool(uint32_t, size_t)> table = [&](uint32_t id, size_t depth) {
+            if(depth > macros.size()) return false;
+            for(const auto& m : macros) if(m.id == id) for(const auto& t : m.targets) if(t.curve == MacroTarget::Curve::Table || (t.kind == MacroTarget::Kind::Macro && table(t.macro, depth + 1))) return true;
+            return false;
+        };
+        for(const auto& m : macros) if(m.sourceNode && table(m.id, 0)) throw std::invalid_argument("a control a plugin's lane drives cannot have a table curve below it");
         const auto d = graph_.describe();
         std::map<NodeId, std::set<NodeId>> edges;
         for(const auto& r : d.audioRoutes) edges[r.from.node].insert(r.to.node);
@@ -1628,7 +1646,7 @@ namespace oscairn
                 if(o.sameDestination(t) && !modulated(o) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
                 {
                     const double v = m.id == macro ? value : m.value;
-                    sum.fixed += o.relative ? o.offset(v) : curveOf(o, 0).point(v);
+                    sum.fixed += o.relative ? o.offset(v) : o.point(v);
                     sum.absolute += !o.relative;
                 }
         return sum;

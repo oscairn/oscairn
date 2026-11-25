@@ -156,7 +156,7 @@ fn the_page_reads_controls_and_names_what_targets_drive() {
 // The curves' shapes and a target's point in its range are the engine's (Graph::ControlCurve).
 #[test]
 fn curves_shape_as_the_engine_shapes_them() {
-    let c = |kind, low, high, exponent| Curve { kind, low, high, exponent };
+    let c = |kind, low, high, exponent| Curve { kind, low, high, exponent, points: vec![] };
     assert_eq!(c(0, -96., 0., 2.).shape(0.3), 0.3);
     assert!((c(1, -96., 0., 2.).shape(0.5) - (2f64.exp() - 1.) / (4f64.exp() - 1.)).abs() < 1e-12);
     assert!((c(2, -96., 0., 2.).shape(1.0) - 1.0).abs() < 1e-12);
@@ -168,7 +168,12 @@ fn curves_shape_as_the_engine_shapes_them() {
     assert!((crate::controls::Target::read(&json!({"kind": "partLevel", "part": 1, "start": 0.2, "end": 0.8})).start - t.start).abs() < 1e-12);
     assert_eq!(t.json()["curve"], json!("linear"));
     assert_eq!(Target { curve: c(4, -60., -6., 2.), ..t.clone() }.json()["curve"], json!({"kind": "db", "min": -60.0, "max": -6.0}));
-    assert_eq!(Target { curve: c(5, -96., 0., 0.5), ..t }.json()["curve"], json!({"kind": "power", "exponent": 0.5}));
+    assert_eq!(Target { curve: c(5, -96., 0., 0.5), ..t.clone() }.json()["curve"], json!({"kind": "power", "exponent": 0.5}));
+    // A measured table: its points evenly over 0..1, linear between; read and written back whole.
+    let table = json!({"kind": "table", "points": [0.0, 1.0, -0.5]});
+    let read = crate::controls::Target::read(&json!({"kind": "partLevel", "part": 1, "curve": table}));
+    assert_eq!((read.curve.shape(0.25), read.curve.shape(0.75), read.curve.shape(1.0)), (0.5, 0.25, -0.5));
+    assert_eq!(Target { curve: read.curve, ..t }.json()["curve"], table);
 }
 
 // The cursor has two dimensions as the Parts list's: the dial cell by cell, row by row, then the buttons; the

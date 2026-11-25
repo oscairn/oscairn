@@ -347,13 +347,18 @@ impl TopBarPage {
     }
 }
 
+/// The saved `top-bar.json` choice of one meter: its index into `KEYS`, or the default (0, `both`) for a missing,
+/// wrongly typed, or unknown value.
+fn pick(saved: &Value, key: &str) -> usize {
+    (1..KEYS.len()).find(|&i| saved[key].as_str() == Some(KEYS[i])).unwrap_or(0)
+}
+
 impl Page for TopBarPage {
     fn open(&mut self, _c: &mut Ctx) {
         self.failure.clear();
         let saved: Value = self.file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-        let pick = |key: &str| (1..KEYS.len()).find(|&i| saved[key].as_str() == Some(KEYS[i])).unwrap_or(0);
-        self.cpu = pick("cpu");
-        self.ram = pick("ram");
+        self.cpu = pick(&saved, "cpu");
+        self.ram = pick(&saved, "ram");
     }
 
     fn rows(&self) -> Vec<SettingData> {
@@ -402,5 +407,199 @@ impl Page for TopBarPage {
         let saved = self.file().is_some_and(|f| write_atomic(&f, &text).is_ok());
         self.failure = if saved { String::new() } else { format!("Not saved: {} cannot be written.", self.file().map(|f| f.display().to_string()).unwrap_or_else(|| "the configuration folder".into())) };
         c.meters = Some(self.meters());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::topbar::Show;
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("oscairn-ui-look-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A real font file from the built-in dark theme, so `load_folder`'s font check passes.
+    fn font() -> Vec<u8> {
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../hosts/standalone/themes/oscairn-dark/fonts/Inter-Regular.ttf")).unwrap()
+    }
+
+    /// A theme.json a folder of that id and name would hold, with its font files in `fonts/`.
+    fn theme(id: &str, name: &str) -> String {
+        json!({"version": 7, "id": id, "name": name, "radius": 6,
+            "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
+            "colors": {"background": "#15181d", "surface": "#1d2127", "raised": "#2c333d", "border": "#526070", "text": "#edf1f5", "muted": "#a3aebb", "accent": "#ffa45b", "positive": "#5ad9a4", "danger": "#ff8d87"},
+            "style": {"buttons": "pill", "edges": "hairline", "depth": "soft", "sliders": "line", "tabs": "segmented", "marks": "square", "sections": "separate", "rows": "left"},
+            "wires": {"audio": "#8cc2ff", "notes": "#c29cff", "disabled": "#6b7480", "draining": "#ffa45b", "unconnected": "#ff6b63", "control": "#6fe0a8"}})
+            .to_string()
+    }
+
+    /// A folder `dir/<id>` named after its id, with a theme.json and its font files, usable to install.
+    fn theme_folder(dir: &Path, id: &str, name: &str) -> PathBuf {
+        let folder = dir.join(id);
+        std::fs::create_dir_all(folder.join("fonts")).unwrap();
+        std::fs::write(folder.join("fonts/Inter-Regular.ttf"), font()).unwrap();
+        std::fs::write(folder.join("fonts/OFL.txt"), "license\n").unwrap();
+        std::fs::write(folder.join("theme.json"), theme(id, name)).unwrap();
+        folder
+    }
+
+    // `write_atomic` writes the whole text to a new path, its folder made first, and leaves no `.tmp` beside it.
+    #[test]
+    fn write_atomic_writes_a_new_file_whole_with_no_temp_left_over() {
+        let dir = temp("atomic");
+        let file = dir.join("nested").join("notes.txt");
+        write_atomic(&file, "one\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
+        assert!(!dir.join("nested").join("notes.txt.tmp").exists(), "the temporary is renamed, not left behind");
+    }
+
+    // A file already there is replaced whole: a longer second write leaves none of the first.
+    #[test]
+    fn write_atomic_replaces_a_whole_existing_file() {
+        let dir = temp("atomic-over");
+        let file = dir.join("notes.txt");
+        write_atomic(&file, "a short line").unwrap();
+        write_atomic(&file, "a very much longer second line that must fully replace it").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "a very much longer second line that must fully replace it");
+        assert!(!dir.join("notes.txt.tmp").exists());
+    }
+
+    // `installed` takes the built-in folders named after their id first, leaving out a folder its id does not name,
+    // one whose file does not parse, and one with no file; then the installed folders not already there.
+    #[test]
+    fn installed_lists_the_built_in_folders_that_parse_and_their_id_matches() {
+        let dir = temp("installed");
+        let built_in = dir.join("built-in");
+        std::fs::create_dir_all(&built_in).unwrap();
+        std::fs::create_dir_all(built_in.join("known")).unwrap();
+        std::fs::write(built_in.join("known/theme.json"), theme("known", "Known")).unwrap();
+        std::fs::create_dir_all(built_in.join("folder1")).unwrap();
+        std::fs::write(built_in.join("folder1/theme.json"), theme("other-id", "Other")).unwrap(); // folder name is not its id
+        std::fs::create_dir_all(built_in.join("broken")).unwrap();
+        std::fs::write(built_in.join("broken/theme.json"), "{not json").unwrap();
+        std::fs::create_dir_all(built_in.join("bare")).unwrap(); // no theme.json at all
+        let places = Places { built_in: Some(built_in), installed: None };
+        let have = installed(&places);
+        let ids: Vec<&str> = have.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["known"], "only the folder whose name is its id and that parses is listed: {ids:?}");
+        assert_eq!(have[0].name, "Known");
+    }
+
+    // An installed theme whose id a built-in already has is not listed again; a new one is, after the built-in ones,
+    // in folder order.
+    #[test]
+    fn installed_leaves_out_an_installed_theme_with_a_built_in_id() {
+        let dir = temp("installed-back");
+        let built_in = dir.join("built-in");
+        std::fs::create_dir_all(&built_in).unwrap();
+        std::fs::create_dir_all(built_in.join("a")).unwrap();
+        std::fs::write(built_in.join("a/theme.json"), theme("a", "A")).unwrap();
+        let installed_dir = dir.join("installed");
+        std::fs::create_dir_all(installed_dir.join("b")).unwrap();
+        std::fs::write(installed_dir.join("b/theme.json"), theme("b", "B")).unwrap();
+        std::fs::create_dir_all(installed_dir.join("a")).unwrap();
+        std::fs::write(installed_dir.join("a/theme.json"), theme("a", "A again")).unwrap(); // same id as a built-in
+        let places = Places { built_in: Some(built_in), installed: Some(installed_dir) };
+        let have = installed(&places);
+        let ids: Vec<&str> = have.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"], "the copy of a built-in id is not listed again");
+        assert_eq!(have[1].name, "B");
+    }
+
+    // `pretty` is the name made lowercase: empty stays empty, capitals and Unicode map down, an already-lower name
+    // is unchanged.
+    #[test]
+    fn pretty_lowercases_the_style_words() {
+        assert_eq!(pretty(""), "");
+        assert_eq!(pretty("Tabs"), "tabs");
+        assert_eq!(pretty("JoinEd Sections"), "joined sections");
+        assert_eq!(pretty("ÜNÍCÖDE"), "ünícöde");
+        assert_eq!(pretty("already lower"), "already lower");
+    }
+
+    // `copy_in` copies a theme folder or its theme.json into the installed place, named after its id.
+    #[test]
+    fn copy_in_installs_a_theme_folder_or_its_theme_json() {
+        let base = temp("copy");
+        let places = Places { built_in: Some(base.join("built-in")), installed: Some(base.join("installed")) };
+        std::fs::create_dir_all(places.built_in.as_ref().unwrap()).unwrap();
+        let mut a = Appearance::new(places.clone(), "screen".into(), None);
+        let folder = theme_folder(&base, "mine", "Mine");
+        assert_eq!(a.copy_in(&folder), Ok("mine".into()));
+        let dest = places.installed.as_ref().unwrap().join("mine");
+        assert!(dest.join("theme.json").is_file() && dest.join("fonts/Inter-Regular.ttf").is_file(), "the theme's files are copied");
+        // Its theme.json itself is a mountable source too.
+        let mut a = Appearance::new(places.clone(), "screen".into(), None);
+        assert_eq!(a.copy_in(&folder.join("theme.json")), Ok("mine".into()));
+    }
+
+    // `copy_in` refuses a file that is not a theme.json, a theme whose id a built-in has, a folder already installed
+    // differently, and accepts one already installed identically.
+    #[test]
+    fn copy_in_refuses_non_theme_and_reserved_or_different_ids() {
+        let base = temp("copy-refusal");
+        let built_in = base.join("built-in");
+        std::fs::create_dir_all(built_in.join("built")).unwrap();
+        let places = Places { built_in: Some(built_in), installed: Some(base.join("installed")) };
+        let mut a = Appearance::new(places.clone(), "screen".into(), None);
+        let folder = theme_folder(&base, "mine", "Mine");
+        std::fs::write(base.join("else.txt"), "not a theme").unwrap();
+        assert_eq!(a.copy_in(&base.join("else.txt")), Err("Choose a theme folder or its theme.json"));
+        let built = theme_folder(&base, "built", "Built");
+        assert_eq!(a.copy_in(&built), Err("Built-in theme IDs are reserved"));
+        // A second, identical install is accepted; a different file is not.
+        assert_eq!(a.copy_in(&folder), Ok("mine".into()));
+        assert_eq!(a.copy_in(&folder), Ok("mine".into()));
+        let json = folder.join("theme.json");
+        std::fs::write(&json, format!("{}\n", theme("mine", "Mine"))).unwrap();
+        assert_eq!(a.copy_in(&folder), Err("That theme ID is already installed; use a new ID for a different theme"));
+    }
+
+    // `document` holds each meter's `KEYS` word, leaving a meter at the default out.
+    #[test]
+    fn document_writes_each_meter_word_and_leaves_the_default_out() {
+        let both: TopBarPage = TopBarPage::new(None);
+        assert_eq!(both.document(), Value::Object(Default::default()), "both at the default writes an empty file");
+        let mut t = TopBarPage::new(None);
+        t.cpu = 1;
+        assert_eq!(t.document(), json!({"cpu": "bar"}));
+        let mut t = TopBarPage::new(None);
+        t.ram = 3;
+        assert_eq!(t.document(), json!({"ram": "none"}));
+        let mut t = TopBarPage::new(None);
+        t.cpu = 2;
+        t.ram = 1;
+        assert_eq!(t.document(), json!({"cpu": "percent", "ram": "bar"}));
+    }
+
+    // Reading a saved `top-bar.json` back: a missing, wrongly typed, or unknown field is the default (`both`); each
+    // `KEYS` word is its meter.
+    #[test]
+    fn pick_reads_the_saved_word_and_defaults_the_rest() {
+        assert_eq!(pick(&Value::Null, "cpu"), 0);
+        assert_eq!(pick(&json!({}), "cpu"), 0);
+        assert_eq!(pick(&json!({"cpu": 1}), "cpu"), 0, "a number is not a choice");
+        assert_eq!(pick(&json!({"cpu": ["bar"]}), "cpu"), 0, "an array is not a choice");
+        assert_eq!(pick(&json!({"cpu": "sideways"}), "cpu"), 0, "an unknown word is the default");
+        assert_eq!(pick(&json!({"cpu": "both"}), "cpu"), 0, "the first key is the default, not written out");
+        assert_eq!(pick(&json!({"cpu": "bar"}), "cpu"), 1);
+        assert_eq!(pick(&json!({"cpu": "percent"}), "cpu"), 2);
+        assert_eq!(pick(&json!({"ram": "none"}), "ram"), 3);
+        assert_eq!(pick(&json!({"cpu": "bar"}), "ram"), 0, "the other meter is left alone");
+    }
+
+    // `meters`: the choice shows on the matching meter over the default (both), each word to its `Show`.
+    #[test]
+    fn meters_map_the_choice_to_what_the_top_bar_shows() {
+        let t = TopBarPage::new(None);
+        assert_eq!(t.meters(), MeterSettings::default());
+        let mut t = TopBarPage::new(None);
+        t.cpu = 3;
+        t.ram = 1;
+        assert_eq!(t.meters(), MeterSettings { cpu: Show::None, ram: Show::Bar });
     }
 }

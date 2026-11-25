@@ -2502,3 +2502,76 @@ pub fn plugins_found(found: Vec<crate::scan::Plugin>) {
 pub fn set_plugin_dir(dir: Option<String>) {
     PLUGIN_DIR.with(|d| *d.borrow_mut() = dir);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn the_status_key_is_what_the_bar_and_screens_read_of_it() {
+        let s = json!({
+            "audioDevice": "Built-in",
+            "midiInputs": 2,
+            "failures": [],
+            "heldNotes": 3,
+            "cpuLoad": 0.5,
+            "workers": [{"memory": 2097152}, {"memory": 4194304}],
+            "tempo": 120,
+        });
+        // Each worker's memory in whole MiB, the load as the whole percent the bar shows, and nothing else.
+        assert_eq!(App::status_key(&s), json!({"audioDevice":"Built-in","midiInputs":2,"failures":[],"heldNotes":3,"workerMemory":6,"cpuLoad":50}));
+        assert_eq!(App::status_key(&json!({})), json!({}));
+        // A field missing or wrong-typed: the readers of it see nothing (the load as null), a worker with no
+        // memory number does not count.
+        assert_eq!(App::status_key(&json!({"cpuLoad": "fast"})), json!({"cpuLoad": null}));
+        assert_eq!(App::status_key(&json!({"cpuLoad": f64::NAN})), json!({"cpuLoad": null}));
+        assert_eq!(App::status_key(&json!({"cpuLoad": 1.7})), json!({"cpuLoad": 100}));
+        assert_eq!(App::status_key(&json!({"cpuLoad": -0.5})), json!({"cpuLoad": 0}));
+        assert_eq!(App::status_key(&json!({"workers": [{"memory": "lots"}, {}]})), json!({"workerMemory": 0}));
+        assert_eq!(App::status_key(&json!({"workers": []})), json!({"workerMemory": 0}));
+        assert_eq!(App::status_key(&json!({"workers": "none"})), json!({}));
+    }
+
+    #[test]
+    fn the_meters_are_asked_again_only_after_what_may_make_a_sound_or_move_a_meter() {
+        for (method, wakes) in [
+            ("parts.meters", false), // the answer itself: no signal in its own asking
+            ("parts.info", true), ("notes.on", true), ("notes.send", true),
+            ("scenes.select", true), ("controls.setlevel", true), ("master.volume", true),
+            ("params.set", true), ("params.get", false), ("edit.undo", true),
+            ("library.load", true), ("performance.play", true), ("audition.note", true),
+            ("record.start", true), ("record.stop", false), ("transport.get", false),
+            ("", false), ("foo.parts", false), // no prefix matches
+        ] {
+            assert_eq!(wakes_meters(method), wakes, "{method}");
+        }
+    }
+
+    #[test]
+    fn the_meter_requests_are_which_screens_read_a_signal() {
+        assert!(is_meters(&Request::Play(play::Request::Meters)));
+        assert!(is_meters(&Request::Parts(parts::Request::Meters)));
+        assert!(is_meters(&Request::Mixer(mixer::Request::Meters)));
+        assert!(is_meters(&Request::Routing(routing::Request::Meters)));
+        assert!(!is_meters(&Request::Play(play::Request::Edit)));
+        assert!(!is_meters(&Request::Info));
+    }
+
+    #[test]
+    fn the_bar_draws_a_level_by_the_same_three_colors_as_the_meters() {
+        assert_eq!((level(Meter(Some(50))), level(Meter(Some(74)))), (0, 0)); // green
+        assert_eq!(level(Meter(Some(75))), 1); // yellow
+        assert_eq!(level(Meter(Some(90))), 2); // red
+        assert_eq!(level(Meter(None)), 0);
+    }
+
+    #[test]
+    fn a_request_the_musician_waits_on_is_a_long_load() {
+        assert!(Request::Reopen.waited_on());
+        assert!(Request::Setlist(setlist::Request::Load(0)).waited_on());
+        assert!(!Request::Setlist(setlist::Request::Performances).waited_on());
+        assert!(!Request::Info.waited_on());
+        assert!(!Request::View.waited_on());
+    }
+}

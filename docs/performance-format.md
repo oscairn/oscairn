@@ -62,7 +62,7 @@ Required top-level fields:
 | `parts[].from` | Where the part came from (RFC 0021): `{sound, revision, name, modified}`, the library Sound and revision loaded into it, its name then, and whether the part has been edited since; `null` when none. Kept wherever the Performance is saved, to the library or to a folder (an export). The part never needs the Sound: it is a copy. Planned: an export brings every asset and the Sounds of unedited parts, and optionally of edited ones ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#exporting-a-performance)) |
 | `mappings` | Source node/lane to destination node/parameter |
 | `scenes`, `sceneUntouched`, `scene` | Each scene (RFC 0011's full model): `id`, `name`, `scope` (the kinds selecting it applies: `enabled`, `mutes`, `mix`, `parameters`, `mappings`, `zones`), its transition (`glide` in milliseconds, `curve`: `linear`, `ease` or `equal-power`, `launch`: `now`, `beat` or `bar`), and as stored: `off` (plugins switched off, by node key) and `offWires` (wires switched off, each by `kind`, `part` (0 for a user wire), `from`, `to`, `fromPort`, `toPort`, `send`, `split`, `lane`, `fader`), `parts` (each part's `level`, `pan`, `mute`, `solo`, `sends` and its splits' `lanes` Mix rows, and, only where the scene memorises it, `zones`: that part's input zones in the form of a part's `input.zones` (keys, velocities, channels, `transpose`, curve, fixed velocity), which recalling the scene sets on the part; absent, the scene leaves the part's zones alone, and an empty list memorises "all keys"), `wires` (user wires' Mix rows, named the same way), `values` (every parameter scenes touch), `controls` (each control's value) and `master` (with the mix: the Performance's `level` and `pan`, as below); the parameters scenes never touch; and the scene last selected |
-| `controls` | The control tree: each control's `part` (the part that owns it, or 0 for the Performance), name, value and targets (kind, node key and parameter, part, control, for a `sendLevel` the `part` and the `bus` of one of its sends (a part's own control only on its own part's sends; a Sound, having no sends, leaves such targets out), or for a `morph` the `from` and `to` scenes; start, end, `curve` (`linear`, `exponential`, `logarithmic`, `s-curve`, or for levels `{"kind":"db","min":M,"max":X}`, −144 ≤ M < X ≤ 0, or `{"kind":"power","exponent":E}`, 0.1 ≤ E ≤ 10, as [RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree) defines them), relative, `base`: for a parameter, part level, mute or send level, the destination's base, the same on all its targets, which every target offsets and the sum is clamped ([RFC 0011's summing rule](rfcs/0011-performance-ui-and-editors.md#the-control-tree)), and `offIn`: the scenes the mapping is off in, empty in a Sound) |
+| `controls` | The control tree: each control's `part` (the part that owns it, or 0 for the Performance), name, value and targets (kind, node key and parameter, part, control, for a `sendLevel` the `part` and the `bus` of one of its sends (a part's own control only on its own part's sends; a Sound, having no sends, leaves such targets out), or for a `morph` the `from` and `to` scenes; start and end (fractions of the destination's range, each within −2..3: a converted controller box's swing reaches up to two ranges past its base, the destination clamped to its range all the same), `curve` (`linear`, `exponential`, `logarithmic`, `s-curve`, or for levels `{"kind":"db","min":M,"max":X}`, −144 ≤ M < X ≤ 0, or `{"kind":"power","exponent":E}`, 0.1 ≤ E ≤ 10, or a measured curve `{"kind":"table","points":[...]}`, 2 to 128 numbers within −1..1, as [RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree) defines them; [controller boxes](#controller-boxes) below), relative, `base`: for a parameter, part level, mute or send level, the destination's base, the same on all its targets, which every target offsets and the sum is clamped ([RFC 0011's summing rule](rfcs/0011-performance-ui-and-editors.md#the-control-tree)), and `offIn`: the scenes the mapping is off in, empty in a Sound) |
 | `lock` | The plugin builds it was saved with ([RFC 0006](rfcs/0006-packages-and-portability.md)): `plugins`, each `{format, id, version, platform, sha256}`: per platform (such as `macos-arm64`), the build's digest, a file's SHA-256 or for a bundle the SHA-256 of each file's path and SHA-256 in path order, hidden files left out. Saving writes this platform's digest for each plugin that loaded, and keeps the entries the loaded documents had for other platforms and for stand-ins. An [archive](library-archive.md) bundles a plugin's build from its `pathHint` only while that build still has the locked digest, else from the plugin store |
 | `assignments` | Physical controls' overrides ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#physical-controls)), each by the control's logical identity (`control`: `knob:N` for knobs and encoders, `fader:N`, `button:N`, `wheel:N`, `strip:N`, `jog:N`, `pedal:N`, `footswitch:N`, `aftertouch:N` (channel pressure), `breath:N` (CC 2), `lever:N`, `joystick:N` or `ribbon:N`, numbered across the device's assign groups, at most once each; `button:1` up are the assignable switches, the same on every device, and scene and mute buttons count from `button:101`) and what it plays: `kind` `parameter` with a node key and `param`, or `control`, `partLevel`, `partMute` or `scene` with that `id`, or `panic` (all notes off on every press; a `button:N` or `footswitch:N` only, `id` 0, `part` 0), and `part`: 0 for the Performance's override, or the part whose Sound's own assignment it is (only `parameter` on its plugins or `control` on its controls; the mod wheel's target, say). `passes` (true; absent means false): the control's own function (pitch bend, CC 1, a pedal's controller...) also reaches the instruments, that part's for a part's assignment, every part's for the Performance's own (`part` 0: the mod wheel set to a part's volume and still sending CC 1); without it, a part's assignment of a control replaces the control's function for that part, and the control still sends it to the other parts, and a Performance's own assignment replaces it for every part. An override whose target or part has been removed is left out at save; the controls of extra inputs (`lever:N`, `joystick:N`, `ribbon:N`: a lever's axis, a joystick's, a ribbon) are assignable like any, whether or not this device has them; a control without one plays its default layers. The Performance's are not in a Sound, and not brought by an import |
 | `unlinked` | Extra inputs the Performance has unlinked, a list of control identities (`lever:1`, `lever:2`: a lever's axes, `joystick:1`, `ribbon:1`): the device's profile links such an input by default to a logical control (`follows`: `wheel:1` the pitch control, `wheel:2` the modulation control), so it drives what the wheel drives; an unlinked one is a control of its own, assignable like any, and does nothing until assigned. Absent or empty: every extra input stays linked, as in a new or converted Performance; a save leaves it out when empty. Kept whatever device opens the Performance (on one without the control it does nothing), edited with `assignments.link`, undone with the edit |
@@ -132,6 +132,73 @@ The stand-in keeps the saved identity, ports and the parameters the snapshot and
 name, so parts, wires, scenes and controls keep it; it plays silence, is reported among the
 session's `failures` saying why, and writes its saved state back byte for byte on save, so
 installing the plugin later restores it. A document that is malformed is still refused.
+
+### Controller boxes
+
+A converted MODX controller box (a source such as the mod wheel, a curve, a ratio and a polarity,
+on a destination such as an insertion effect's parameter or a send) is a part's control, assigned
+to the source by the part's own assignment, with one target per box. The box law
+(`notes/box-law-for-host.md`) maps onto the target's fields, with no field of its own:
+
+- **Curve**: `{"kind":"table","points":[...]}`, the measured curve's 128 values (0..1024, or
+  −1024..0 for a falling family) divided by 1024. The points spread evenly over the control's
+  0..1, so with 128 points a 7-bit controller value v (the control at v / 127) is point v exactly,
+  and a 14-bit or continuous source (the built-in wheel) falls linearly between two points; fewer
+  points (2 to 128) spread the same way. The box law's own linear curve (8 v up to 64, then
+  512 + (v − 64) × 512 / 63) is not `linear` (v / 127, 0.4 % off at the middle): write it as a
+  table too (the curves file's `knots`).
+- **Ratio and polarity**: the swing is ratio / 64 of the destination's range (ratio −128..+128).
+  A relative target moves its destination from its base, so the base is the destination's stored
+  value: unipolar is `start` 0.5, `end` 0.5 + swing; bipolar is `start` 0.5 − swing / 2, `end`
+  0.5 + swing / 2 (the polarity is the offset the curve's output is taken from, not part of the
+  curve). A negative ratio gives an end below the start. Start and end may lie within −2..3 for
+  this. (An absolute target, `start` = base, `end` = base + swing, gives the same alone, but its
+  ends hold the base, so the relative form is the one to write.)
+- **Several boxes on one destination** are several targets on it: their offsets add, and the
+  sum on the base is clamped to the destination's range, as the engines add the boxes and clamp.
+  The engines also clamp the summed boxes to one span first; with the span taken as the whole
+  range, as the converter does for effect parameters and sends (neither span is measured), that
+  first clamp never changes the result (a sum past one range already takes the destination past
+  an end), so the host does not carry it.
+- **A stepped destination** (the rotary's speed switch, 0 Slow and 1 Fast) is set to whole values
+  only: a control's target rounds, so it switches where the destination reaches half a step (the
+  engine's parameter-target lanes and scene glides do the same; an assignment straight to a
+  parameter truncates). The plugin gets the value, never a glide; it ramps the rotors itself. To
+  switch at half the box's swing, as the converter maps Speed Control, give the box a swing of one
+  range (`start` 0.5, `end` 1.5 on a 0..1 switch whose base is 0).
+- A relative target on a parameter that takes CLAP modulation is modulation around the parameter's
+  own value ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)), the same law;
+  the effects' parameters do not take it, so they are set as values.
+- A control a plugin's lane drives (`source`) may not have a table curve below it: refused at load
+  and when edited, as the engine's flattened lane curves carry no points.
+
+The organ case: part 3's mod wheel (`wheel:2`) moving its rotary insertion's Speed (parameter 0 of
+the effects' tremolo-rotary in mode Rotary A, stored Slow), one unipolar box of ratio +64 through
+the measured curve of type 0, parameter 1 5, parameter 2 0 (`curves.json`, the box law's linear
+curve). Within the Performance's `controls` and `assignments`:
+
+```json
+"controls": [
+  {"id": 7, "part": 3, "name": "Mod Wheel", "value": 0, "targets": [
+    {"kind": "parameter", "node": "part-3-insertion-a", "param": 0,
+     "start": 0.5, "end": 1.5, "relative": true, "base": 0, "offIn": [],
+     "curve": {"kind": "table", "points": [0,0.0078125,0.015625,0.0234375,0.03125,0.0390625,0.046875,0.0546875,0.0625,0.0703125,0.078125,0.0859375,0.09375,0.1015625,0.109375,0.1171875,0.125,0.1328125,0.140625,0.1484375,0.15625,0.1640625,0.171875,0.1796875,0.1875,0.1953125,0.203125,0.2109375,0.21875,0.2265625,0.234375,0.2421875,0.25,0.2578125,0.265625,0.2734375,0.28125,0.2890625,0.296875,0.3046875,0.3125,0.3203125,0.328125,0.3359375,0.34375,0.3515625,0.359375,0.3671875,0.375,0.3828125,0.390625,0.3984375,0.40625,0.4140625,0.421875,0.4296875,0.4375,0.4453125,0.453125,0.4609375,0.46875,0.4765625,0.484375,0.4921875,0.5,0.5078125,0.515625,0.5234375,0.53125,0.5390625,0.546875,0.5546875,0.5634765625,0.5712890625,0.5791015625,0.5869140625,0.5947265625,0.6025390625,0.6103515625,0.6181640625,0.626953125,0.634765625,0.642578125,0.650390625,0.658203125,0.666015625,0.673828125,0.681640625,0.6904296875,0.6982421875,0.7060546875,0.7138671875,0.7216796875,0.7294921875,0.7373046875,0.7451171875,0.75390625,0.76171875,0.76953125,0.77734375,0.78515625,0.79296875,0.80078125,0.80859375,0.8173828125,0.8251953125,0.8330078125,0.8408203125,0.8486328125,0.8564453125,0.8642578125,0.8720703125,0.880859375,0.888671875,0.896484375,0.904296875,0.912109375,0.919921875,0.927734375,0.935546875,0.9443359375,0.9521484375,0.9599609375,0.9677734375,0.9755859375,0.9833984375,0.9912109375,1]}}
+  ]}
+],
+"assignments": [
+  {"control": "wheel:2", "kind": "control", "id": 7, "part": 3}
+]
+```
+
+The wheel at v gives Speed round(0 + points[v] × 1), so Fast from v = 64 (point 0.5) up and Slow
+below. `"node"` is the rotary's node key in the file; `"passes": true` on the assignment would
+also send CC 1 to the part's instruments (without it the wheel's CC 1 no longer reaches part 3's
+instrument, as a MODX box on the wheel takes it). A bipolar box of ratio +32 on the same switch
+would be `"start": 0.25, "end": 0.75`; a ratio of −64, `"start": 0.5, "end": -0.5`.
+
+Version: the table kind and the wider start and end came in without a version change (still 13,
+the Sound's 8): a file using them is refused by a host from before them ("invalid curve", "invalid
+control target range"), and every older file reads as it did.
 
 ### Where plugins are published
 

@@ -350,10 +350,20 @@ sidebar and no footer.
   Up and Page Down here, as in the JUCE Setlist (page turners send them), and Play's Previous and
   Next and its page keys (`step_by`, as the JUCE Play asks the Setlist app to). The bank shown follows
   the song stepped to.
+- **The slot playing follows the engine's open Performance**, whoever opened it (the Library, Home, a
+  program change, a panel action): each `performance.info` the shell asks (at a connection and after
+  each `graph.changed`, so nothing more at rest) gives its library `id`, and every slot whose `id` is
+  that one is marked playing (a song twice in the setlist is marked twice); none is when it is not in
+  the setlist or the Performance is not from the library. Unsaved edits keep the `id`, so the mark
+  stays. The slot stepped from (`current`, the one kept in the state file) is the slot chosen here
+  while it holds that Performance, else the first slot that does, else none (the next song is then
+  the first). While a slot opens here the report of the Performance before it is not followed. The
+  screen opens on the bank of that slot when there is one, else on the bank last shown.
 
 The setlist open and the slot playing are kept in the JUCE Setlist app's own state file (the data
 folder's `AppData/oscairn.setlist/state.json`), so either opens where the other left off. Not yet:
-editing.
+editing; DEC and INC turning the bank (the FANTOM's panel map gives them the dial's `move`, so the UI
+cannot tell them from the dial; they move the cursor like it).
 
 ## Play
 

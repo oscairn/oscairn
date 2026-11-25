@@ -30,13 +30,18 @@ fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json
 /// The Setlist shown on a fake engine with `sets` setlists, the first one read (`banks` banks of `per` slots), the
 /// connection quiet. The engine's answers are `library.query`'s and `setlists.get`'s (docs/control-protocol.md).
 fn on_setlist(name: &str, sets: usize, mode: &str, banks: usize, per: usize) -> Fixture {
+    on_setlist_doc(name, sets, doc(&format!("{name}-1"), "Night 1", mode, banks, per))
+}
+
+/// The same with the setlist read given.
+fn on_setlist_doc(name: &str, sets: usize, setlist: serde_json::Value) -> Fixture {
     let mut f = Fixture::new(name);
     f.engine.answer(); // session.hello
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
     let setlists: Vec<_> = (0..sets).map(|i| json!({"id": format!("{name}-{}", i + 1), "name": format!("Night {}", i + 1)})).collect();
     let performances: Vec<_> = (0..40).map(|i| json!({"id": format!("p{i}"), "name": song(i), "color": "", "path": format!("/lib/p{i}")})).collect();
-    f.serve(13, &json!({"setlists": setlists, "performances": performances, "setlist": doc(&format!("{name}-1"), "Night 1", mode, banks, per)}));
+    f.serve(13, &json!({"setlists": setlists, "performances": performances, "setlist": setlist}));
     quiet(&mut f);
     f
 }
@@ -614,5 +619,116 @@ fn a_placeholder_is_a_tint_not_a_solid_and_reads_on_it() {
             assert!(at(ink), "{mode} {scale}: its ink's line inside it");
         }
     }
+}
+
+/// Three banks of twelve with Performance p1 in three slots: the second and the sixth of the first bank and the second
+/// of the second (slots 2, 6 and 14).
+fn on_twice(name: &str) -> Fixture {
+    let mut d = doc(&format!("{name}-1"), "Night 1", "grid", 3, 12);
+    d["pages"][0]["slots"][5]["id"] = json!("p1");
+    d["pages"][1]["slots"][1]["id"] = json!("p1");
+    on_setlist_doc(name, 2, d)
+}
+
+/// The engine reports its open Performance as it does after any change (a Performance opened from the Library or
+/// Home, a program change, an edit): `graph.changed`, and `performance.info` answered with `info`.
+fn report(f: &mut Fixture, info: serde_json::Value) {
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "graph.changed", "params": {}})));
+    f.pump();
+    while let Some(r) = f.engine.try_request(Duration::from_millis(60)) {
+        assert_ne!(r["method"], "library.load", "a report opened something");
+        let result = if r["method"] == "performance.info" { info.clone() } else { json!({}) };
+        f.reply(&r, json!({"result": result}));
+    }
+}
+
+fn open(id: &str) -> serde_json::Value {
+    json!({"id": id, "name": id, "unsaved": false})
+}
+
+// The slots playing follow the engine's open Performance, whoever opened it: every slot holding it is marked (a song
+// twice in the setlist, twice), none when it is not in the setlist; an unsaved edit keeps it marked. Nothing is
+// opened by it. The next song steps from the first slot marked, or from the start with none.
+#[test]
+fn the_marks_follow_the_engines_open_performance() {
+    let mut f = on_twice("setlist-follow-marks");
+    assert_eq!(playing(&f), Vec::<i32>::new(), "the engine reported no Performance of the setlist");
+    report(&mut f, open("p1"));
+    assert_eq!(playing(&f), [2, 6], "both slots holding it in the bank shown");
+    state(&f).invoke_tapped_stop(3);
+    assert_eq!(playing(&f), [14], "and the one in the next bank");
+    report(&mut f, json!({"id": "p1", "name": "p1", "unsaved": true}));
+    assert_eq!(playing(&f), [14], "an edit is still that Performance");
+    report(&mut f, open("p17"));
+    assert_eq!(playing(&f), [18], "changed outside the setlist: the marks move");
+    state(&f).invoke_tapped_stop(2);
+    assert_eq!(playing(&f), Vec::<i32>::new());
+    report(&mut f, open("elsewhere"));
+    state(&f).invoke_tapped_stop(3);
+    assert_eq!(playing(&f), Vec::<i32>::new(), "not in the setlist: none marked");
+    report(&mut f, open(""));
+    assert_eq!(playing(&f), Vec::<i32>::new(), "none from the library: none marked");
+    // Stepping: from the start with none marked, from the first marked otherwise.
+    shell::act(Action::Page(1));
+    let load = f.engine.request();
+    assert_eq!(load["params"]["id"], "p0", "none marked: the first song");
+    f.reply(&load, json!({"result": {}}));
+    quiet(&mut f);
+    report(&mut f, open("p1"));
+    assert_eq!(playing(&f), [2, 6]);
+    shell::act(Action::Page(1));
+    let load = f.engine.request();
+    assert_eq!(load["params"]["id"], "p2", "the song after the first slot marked");
+}
+
+// A Performance opened by a slot here marks every slot holding it at once, and a report of the same one keeps the
+// slot chosen (the second time a song is in the set, the next song is the one after it).
+#[test]
+fn a_slot_chosen_here_stays_the_one_stepped_from() {
+    let mut f = on_twice("setlist-follow-chosen");
+    state(&f).invoke_tapped_slot(5); // slot 6, p1
+    let load = f.engine.request();
+    assert_eq!(load["params"]["id"], "p1");
+    f.reply(&load, json!({"result": {}}));
+    quiet(&mut f);
+    assert_eq!(playing(&f), [2, 6]);
+    report(&mut f, open("p1"));
+    shell::act(Action::Page(1));
+    assert_eq!(f.engine.request()["params"]["id"], "p6", "the song after the slot chosen, not after the first p1");
+}
+
+// The screen opens on the bank holding the Performance open (its first slot); with none of the setlist open, on the
+// bank last shown.
+#[test]
+fn the_screen_opens_on_the_bank_playing() {
+    let mut f = on_twice("setlist-follow-bank");
+    let away_and_back = |f: &mut Fixture, info: serde_json::Value| {
+        shell::act(Action::Cancel(None)); // Home
+        assert_eq!(f.screen.ui.get_screen(), 0);
+        report(f, info);
+        f.screen.ui.global::<HomeState>().invoke_tapped(2);
+        quiet(f);
+        assert_eq!(f.screen.ui.get_screen(), 1);
+    };
+    away_and_back(&mut f, open("p30"));
+    assert_eq!((slots(&f)[0].number, playing(&f)), (25, vec![31]), "the third bank");
+    away_and_back(&mut f, open("p1"));
+    assert_eq!((slots(&f)[0].number, playing(&f)), (1, vec![2, 6]), "the first holding it");
+    state(&f).invoke_tapped_stop(3);
+    away_and_back(&mut f, open("elsewhere"));
+    assert_eq!((slots(&f)[0].number, playing(&f)), (13, vec![]), "none playing: the bank last shown");
+}
+
+// The picture the owner asked for: one Performance in two slots of a bank, both marked, at 1280 x 720 at the
+// keyboard's scale (target/screens/setlist-follow.png).
+#[test]
+fn picture_of_a_song_twice() {
+    let mut f = on_twice("setlist-follow-pic");
+    f.screen.set_scale(1.55);
+    report(&mut f, open("p1"));
+    for _ in 0..3 {
+        f.screen.frame();
+    }
+    png(&f.screen, "setlist-follow");
 }
 

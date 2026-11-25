@@ -163,7 +163,11 @@ pub struct Screen {
     /// A dropdown's list for the shell to open as the menu, and whether the one asked for is the banks'.
     menu: Option<(String, Vec<Item>, usize)>, // its title, its rows, the row the cursor starts on (the one chosen now)
     banks_menu: bool,
+    /// The slot stepped from (Play's Previous and Next): the one chosen here, or the first holding the engine's open
+    /// Performance. Every slot holding the same Performance is marked as playing.
     current: Option<usize>,
+    /// The engine's open Performance (`performance.info`'s library `id`; empty: none from the library), once reported.
+    open: Option<String>,
     opening: bool,
     /// The slot the engine is opening (`current` may already be a later one waiting).
     opening_index: Option<usize>,
@@ -246,6 +250,7 @@ impl Screen {
             menu: None,
             banks_menu: false,
             current: None,
+            open: None,
             opening: false,
             opening_index: None,
             queued: None,
@@ -273,9 +278,41 @@ impl Screen {
         self.out.push((Request::Performances, "library.query", json!({"kind": "performance", "limit": 1000})));
     }
 
-    /// Shown: the views' sizes may have changed while it was not.
+    /// Shown: on the bank of the slot playing, if one is; the views' sizes may have changed while it was not.
     pub fn shown(&mut self) {
+        if let Some(page) = self.current_page() {
+            self.show_bank(page);
+        }
         self.show();
+    }
+
+    fn current_page(&self) -> Option<usize> {
+        self.setlist.as_ref()?.find(self.current?).map(|f| f.0)
+    }
+
+    /// The engine's open Performance (`performance.info`'s `id`), reported whenever it may have changed: the marks follow it.
+    pub fn open_performance(&mut self, id: &str) {
+        self.open = Some(id.to_string());
+        self.follow();
+        self.show();
+    }
+
+    /// `current` onto the engine's open Performance: kept while its slot holds it, else the first slot that does, else
+    /// none. Not while a slot opens here (the engine still has the one before).
+    fn follow(&mut self) {
+        let (Some(open), Some(s)) = (self.open.as_deref(), self.setlist.as_ref()) else { return };
+        if self.opening || self.queued.is_some() {
+            return;
+        }
+        let holds = |i: usize| s.slot(i).is_some_and(|x| !x.id.is_empty() && x.id == open);
+        if self.current.is_some_and(holds) {
+            return;
+        }
+        let now = (0..s.count()).find(|i| holds(*i));
+        if now != self.current {
+            self.current = now;
+            self.keep();
+        }
     }
 
     pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) {
@@ -291,6 +328,7 @@ impl Screen {
                     }
                     Request::Load(_) => {
                         self.opening = false;
+                        self.follow(); // the engine's Performance is still the one before
                         self.show();
                         self.say(format!("Did not open: {}", e.message));
                         self.next_queued();
@@ -322,11 +360,14 @@ impl Screen {
                     let restored = self.restore.take().filter(|r| r.0 == s.id).and_then(|r| r.1).filter(|c| *c < s.count());
                     if other {
                         self.current = restored;
-                        self.page = restored.and_then(|c| s.find(c)).map_or(0, |f| f.0);
                         self.slots = Cursor::new(0, 1);
                     }
                     self.page = self.page.min(s.pages.len() - 1);
                     self.setlist = Some(s);
+                    self.follow();
+                    if other {
+                        self.page = self.current_page().unwrap_or(0);
+                    }
                     self.show();
                     self.keep();
                 }
@@ -422,7 +463,8 @@ impl Screen {
             placeholder,
             empty: slot.empty,
             opens: self.opens(index),
-            playing: self.current == Some(index),
+            // Every slot holding the Performance playing (a song twice in the setlist is marked twice).
+            playing: self.current == Some(index) || (!slot.id.is_empty() && self.playing() == Some(slot.id.as_str())),
             opening: self.opening_at() == Some(index),
             cursor,
         }

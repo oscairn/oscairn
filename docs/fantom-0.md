@@ -561,8 +561,13 @@ Oscairn. Checked on the unit where it says so.
   ZONE SELECT, 60 SPLIT, 61 CHORD MEMORY, 62 ARPEGGIO, 63 TRANSPOSE, 64 and 65 OCTAVE DOWN and
   UP; 66 to 73 ZONE 1 to 8 in green and 74 to 81 in their other color; 82 S1, 83 S2; 84 to
   99 the pads, 100 to 115 their green and 116 to 131 their blue.
-- Oscairn sets no lamp yet. With Roland's app stopped the lamps keep whatever it last set
-  (inferred).
+- **Oscairn sets them** with `panel.lamps` ([the control protocol](control-protocol.md)): the
+  engine writes one such frame per change, as Roland's app does (mode 1 and level 150 for lit,
+  mode 0 and level 0 for off), through the message link it already holds. The panel map names
+  the switches' lamps (`lamp`) by the numbers above where the names agree; DEC and INC are not
+  in the list and have no number yet (55 and 57 are the gaps), nor do the zone buttons, TEMPO and
+  the pads, which have two or three colors each. Not yet seen lit on the unit by Oscairn. With
+  Roland's app stopped the lamps keep whatever it last set (inferred).
 
 ### The audio link's channels
 
@@ -1457,10 +1462,13 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
 with `OSCAIRN_ROLAND_FANTOM0`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
 timeout. Before reading or writing anything it makes the device raw with echo and flow control
 off, and reads the settings back; where they do not hold it neither reads nor writes (with echo
-on, the tty layer would send each byte received back to the BMC side). **It writes one thing
-only:** with the profile's `keyboard.localOff` (`--keyboard-local off`), the two Local Switch off
-frames ([The message link](#the-message-link)), once, the first time the device is open and raw;
-it then opens the device for reading and writing, and otherwise read-only. A failed write is
+on, the tty layer would send each byte received back to the BMC side). It opens the device for
+reading and writing, and **writes two things only:** with the profile's `keyboard.localOff`
+(`--keyboard-local off`), the two Local Switch off frames ([The message link](#the-message-link)),
+once, the first time the device is open and raw; and the lamp frames `panel.lamps` asks for
+([Lamps](#lamps)), each whole, from the engine's control thread under a lock the reader holds
+while it opens or closes the device (a lamp asked for while the device is not open is not sent,
+and is sent at the next request that names it). A failed Local Switch write is
 logged (`Local Switch off not sent: ...`, or `Local Switch off sent` when it went) and reading
 goes on. The frames are the stock BMC firmware's, as Roland's app sends them; the setting holds
 until a power cycle, and nothing turns it back on. Once

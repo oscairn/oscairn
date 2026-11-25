@@ -25,6 +25,14 @@ namespace oscairn::host
             template<class... A> explicit Held( A&&... a ) : reader( std::forward<A>( a )... ) {}
             Reader reader;
         };
+
+        PanelMap readMap( const std::string& map )
+        {
+            std::ifstream file( map, std::ios::binary );
+            if( !file ) throw std::runtime_error( "cannot read the panel map " + map );
+            std::stringstream text; text << file.rdbuf();
+            return PanelMap::parse( text.str() );
+        }
     }
 
     std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad, PlayNavigated navigate )
@@ -32,10 +40,7 @@ namespace oscairn::host
         // A device panel's own controls, played as a controller's are, by their identities; its
         // pads ("pad:N" in the map) through the Performance's pad map. The device is the panel
         // holder's (docs/fantom-0.md, "The panel holder"): the engine attaches to it.
-        std::ifstream file( map, std::ios::binary );
-        if( !file ) throw std::runtime_error( "cannot read the panel map " + map );
-        std::stringstream text; text << file.rdbuf();
-        auto parsed = PanelMap::parse( text.str() );
+        auto parsed = readMap( map );
         std::fprintf( stderr, "oscairn: panel: %s through the panel holder at %s\n", device.c_str(), panelHolderSocket );
         return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play ), pad = std::move( pad ), navigate = std::move( navigate )]( const PanelEvent& e ) {
             if( e.control.empty() || e.chatter ) return;
@@ -64,6 +69,30 @@ namespace oscairn::host
     std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff )
     {
         return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ), BmcLinkReader::standardError, std::chrono::milliseconds( 500 ), localOff );
+    }
+
+    SetLamps panelLamps( const std::string& map, DeviceReader& keyboard )
+    {
+        auto* link = dynamic_cast<Held<BmcLinkReader>*>( &keyboard );
+        if( !link ) return {};
+        std::map<std::string, uint16_t> named;
+        for( const auto& c : readMap( map ).controls ) if( c.lamp ) named[c.control] = *c.lamp;
+        auto lamps = std::make_shared<BmcLamps>( [link]( const uint8_t* frame, size_t size ) { return link->reader.send( frame, size ); } );
+        return [named = std::move( named ), lamps]( const std::vector<Control::Lamp>& set ) {
+            Control::Lamps r{ true, 0, {} };
+            std::vector<std::pair<uint16_t, bool>> numbers;
+            for( const auto& l : set )
+            {
+                const auto at = l.number ? named.end() : named.find( l.control );
+                if( l.number ) numbers.emplace_back( *l.number, l.on );
+                else if( at != named.end() ) numbers.emplace_back( at->second, l.on );
+                else r.unknown.push_back( l.control );
+            }
+            const int sent = lamps->set( numbers );
+            if( sent < 0 ) throw std::runtime_error( "Too many lamp changes at once; none set" );
+            r.sent = uint32_t( sent );
+            return r;
+        };
     }
 
     std::unique_ptr<DeviceReader> openInputKeys( const std::string& name, const std::map<uint16_t, std::string>& keys, PlayControl play )

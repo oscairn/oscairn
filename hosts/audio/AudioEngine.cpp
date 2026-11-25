@@ -246,6 +246,8 @@ namespace oscairn::host
             keyboard_ = openKeyboard( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
                 incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, -1, keyboardSources_[input] );
             }, config.keyboardLocalOff );
+        // The panel's lamps go over the keyboard's link, named by the panel map (panel.lamps).
+        if( keyboard_ && !config.panelMap.empty() ) session_->setLampHost( panelLamps( config.panelMap, *keyboard_ ) );
         openMidiOutputs();
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );
@@ -275,6 +277,7 @@ namespace oscairn::host
         stopTimer();
         panel_.reset(); // its thread plays the session's controls
         inputKeys_.reset(); // so does this one's
+        session_->setLampHost( {} ); // it writes through the keyboard's link
         keyboard_.reset();
         session_->setControllerWake( {} );
         session_->setAudioHost( {}, {} );

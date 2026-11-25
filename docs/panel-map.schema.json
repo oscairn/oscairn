@@ -57,7 +57,8 @@
             },
             "required": ["action"],
             "additionalProperties": false
-          }
+          },
+          "lamp": { "type": "integer", "minimum": 0, "maximum": 1023, "description": "Switch only: its lamp, by the number the device's lamp messages give it, which panel.lamps lights by the control's name. Left out where not known" }
         },
         "required": ["kind", "control"],
         "additionalProperties": false

@@ -248,6 +248,9 @@ namespace oscairn
         AudioDevices setAudio(const AudioSetting& setting) override;
         /// The host's audio device (AudioEngine): what audioDevices() and setAudio() call; without it they refuse.
         void setAudioHost(std::function<AudioDevices()> list, std::function<AudioDevices(const AudioSetting&)> set) { audioList_ = std::move(list); audioSet_ = std::move(set); }
+        /// The device's panel lamps (AudioEngine, on the control thread): what setLamps() calls; without it, not supported.
+        Lamps setLamps(const std::vector<Lamp>& lamps) override { return lampHost_ ? lampHost_(lamps) : Lamps{}; }
+        void setLampHost(std::function<Lamps(const std::vector<Lamp>&)> host) { lampHost_ = std::move(host); }
         uint64_t changeSequence() const override { return sequence_; }
         Changes changesAfter( uint64_t sequence ) const override;
 
@@ -698,6 +701,7 @@ namespace oscairn
         SessionStatus hostStatus_;
         std::function<AudioDevices()> audioList_;
         std::function<AudioDevices(const AudioSetting&)> audioSet_;
+        std::function<Lamps(const std::vector<Lamp>&)> lampHost_;
         std::map<NodeId,std::string> nodes_;
         PadMap padMap_;
         MusicalKey key_; // the Performance's (RFC 0033)

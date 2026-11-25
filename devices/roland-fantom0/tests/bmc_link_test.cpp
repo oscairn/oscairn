@@ -289,6 +289,45 @@ namespace
         ::unlink( file );
     }
 
+    // The panel's lamps: each frame byte for byte as Roland's app sends it (docs/fantom-0.md, "Lamps"),
+    // a repeat sending nothing, too many too soon refused whole, and the frames through the reader to the device.
+    void lamps()
+    {
+        auto bytes = []( uint16_t lamp, bool on ) { const auto f = bmcLamp( lamp, on ); return Bytes( f.begin(), f.end() ); };
+        check( bytes( 1, true ) == Bytes{ 0x0c, 0x00, 0x75, 0x00, 0x85, 0x01, 0x48, 0x16, 0, 0, 0, 0x04 }, "lamp 1 lit: level 150, as the app's" );
+        check( bytes( 1, false ) == Bytes{ 0x0c, 0x00, 0x75, 0x00, 0x85, 0x01, 0x00, 0x00, 0, 0, 0, 0x04 }, "and off" );
+        check( bytes( 131, true )[5] == 0x03 && bytes( 131, true )[6] == 0x49, "a number past 127: its top bits in byte 2" );
+        std::vector<Bytes> sent;
+        bool open = true;
+        BmcLamps l( [&]( const uint8_t* f, size_t n ) { if( open ) sent.emplace_back( f, f + n ); return open; }, 5 );
+        check( l.set( { { 1, true }, { 55, true } } ) == 2 && sent == std::vector<Bytes>{ bytes( 1, true ), bytes( 55, true ) }, "two lamps lit: two frames" );
+        check( l.set( { { 1, true }, { 55, true } } ) == 0 && sent.size() == 2, "the same again: nothing sent" );
+        check( l.set( { { 1, false } } ) == 1 && sent.back() == bytes( 1, false ), "one changed: only it" );
+        check( l.set( { { 2, true }, { 3, true }, { 4, true } } ) == -1 && sent.size() == 3, "past the rate: refused, nothing sent" );
+        open = false;
+        check( l.set( { { 2, true } } ) == 0, "the link not open: not sent" );
+        open = true;
+        std::this_thread::sleep_for( 250ms );
+        check( l.set( { { 2, true } } ) == 1 && sent.back() == bytes( 2, true ), "and sent the next time, once the rate allows" );
+
+        const int master = ::posix_openpt( O_RDWR | O_NOCTTY );
+        check( master >= 0 && ::grantpt( master ) == 0 && ::unlockpt( master ) == 0, "a pty" );
+        ::fcntl( master, F_SETFL, O_NONBLOCK );
+        {
+            BmcLinkReader reader( ::ptsname( master ), {}, {}, 0ms );
+            const auto frame = bmcLamp( 55, true );
+            bool ok = false;
+            for( auto until = std::chrono::steady_clock::now() + 3s; !ok && std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) ) ok = reader.send( frame.data(), frame.size() );
+            check( ok, "the reader writes a frame once the device is open" );
+            Bytes got;
+            uint8_t b[64];
+            for( auto until = std::chrono::steady_clock::now() + 1s; got.size() < frame.size() && std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) )
+                if( const auto n = ::read( master, b, sizeof b ); n > 0 ) got.insert( got.end(), b, b + n );
+            check( got == Bytes( frame.begin(), frame.end() ), "and the device gets it whole" );
+        }
+        ::close( master );
+    }
+
     // Hostile bytes, for a sanitizer build to watch: the unknown frames a unit logged, long frames of
     // every awkward length split at every byte, and random streams cut at random places. Nothing to
     // compare, only that the parser stays inside its buffer and every frame it hands on is whole.
@@ -346,6 +385,7 @@ int main()
     else std::printf( "OSCAIRN_BMC_CAPTURE unset: the capture check is skipped\n" );
     reader();
     localSwitch();
+    lamps();
     if( failures ) return 1;
     std::printf( "ok: the link's frames, their place found again, and its reader\n" );
     return 0;

@@ -72,7 +72,7 @@ namespace oscairn
         double value(const Assignment& target) const;
         void play(const ControllerMapping::Action& action);
         void setFader(uint32_t part, std::optional<double> level, std::optional<bool> mute);
-        void send(const Key& parameter);
+        void send(const Key& parameter, bool rounded = false); // rounded: a stepped one switches halfway (a control's target), else truncated (an assignment's)
         void queue(const Key& parameter, double plain);
         void setPlain(const Key& parameter, double plain); // a scene's value: queued if it is not the value now
         void write(uint8_t slot, double gain);

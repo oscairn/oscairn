@@ -1666,7 +1666,8 @@ namespace oscairn
                 if(graph_.contains(t.node) && hasParameter(t.node, t.param))
                 {
                     const auto info = parameterInfo(t.node, t.param);
-                    applyParameter(t.node, t.param, info.minimum + (info.maximum - info.minimum) * v);
+                    const double plain = info.minimum + (info.maximum - info.minimum) * v;
+                    applyParameter(t.node, t.param, info.stepped ? std::round(plain) : plain); // a stepped one switches halfway, as a lane's does (run.rs), not where the host's truncation would
                 }
                 break;
             case MacroTarget::Kind::PartLevel: for(auto& p : parts_) if(p.id == t.part) { p.level = v; faders = true; } break;

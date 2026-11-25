@@ -546,6 +546,120 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
 }
 
+// Home walked with panel moves only (no touch): every action it offers reached and held to a real
+// effect, counted from its own models, never hard-coded. The bar's Record and Capture (Home's own
+// bar actions, reached by the third list pane `move:2`) each pressed to the request it sends —
+// Record `record.start` with no parameters, Capture `record.start` naming the Performance and the
+// seconds the buffer keeps. Then every tile the screen's own tiles model declares: the cursor
+// moves to it and Confirm opens the screen at that tile (Performance → Play, Setlist, the Rust
+// Library and Settings, and the Groovebox last because it hands the display over), each Rust
+// tile left back on Home by Cancel (EXIT is Back in one step), the Groovebox leaving the shell
+// handing the display to the JUCE app. Nothing switches until the press.
+#[test]
+fn home_walked_with_panel_moves_only() {
+    let mut f = Fixture::new("home-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    // The Rust tiles are Home's own here (the environment's OSCAIRN_UI_LIBRARY/SETTINGS are not in play).
+    shell::library_in_rust(true);
+    shell::settings_in_rust(true);
+    // A status, so the bar knows what Capture keeps (record.get's retro): 30 s, as on a device.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    // A quiet engine: every request out is answered until none comes for a moment.
+    let settle = |f: &mut Fixture| {
+        let mut quiet = 0;
+        while quiet < 5 {
+            slint::platform::update_timers_and_animations();
+            let Some(r) = f.engine.try_request(std::time::Duration::from_millis(120)) else {
+                quiet += 1;
+                continue;
+            };
+            quiet = 0;
+            let result = match r["method"].as_str().unwrap_or_default() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => json!({"scene": 0, "scenes": [], "parts": [], "nodes": []}),
+                "edit.history" => json!({"undo": "", "redo": ""}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => json!({"presets": []}),
+                "library.query" | "packages.installed" | "packages.preinstalled" => json!({"items": [], "total": 0}),
+                "library.libraries" => json!({"libraries": []}),
+                "parts.meters" => json!({"meters": []}),
+                "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
+                "transport.get" => json!({"tempo": 120, "playing": false}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    assert!(f.screen.ui.get_screen() == 0, "the walk starts on Home");
+    // The panel's navigation as the engine counts it, totals by key (the first read is a baseline).
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    let ask = |f: &mut Fixture, what: &str| f.engine.try_request(std::time::Duration::from_secs(30)).unwrap_or_else(|| panic!("the shell sent no request: {what}"));
+    nav(&mut f, "move:0", 0); // the first read is only a baseline
+    // The bar on Home: every stop the bar itself declares. Reached by the third list pane (move:2),
+    // pressed to the request it sends, the next stop after by one more move.
+    let stops: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
+    assert!(!stops.is_empty(), "Home's bar declares its own actions");
+    for label in &stops {
+        assert_eq!(f.screen.ui.get_screen(), 0, "still on Home for {label}");
+        nav(&mut f, "move:2", 1); // enter the bar (0) then on to the next stop
+        assert!(ui.global::<crate::Theme>().get_bar_cursor(), "move:2 shows the bar's cursor on Home for {label}");
+        nav(&mut f, "confirm", 1);
+        let started = ask(&mut f, label);
+        match label.as_str() {
+            "Record" => assert_eq!((started["method"].as_str(), started["params"].clone()), (Some("record.start"), json!({})), "Record on Home starts a take with no parameters"),
+            "Capture" => assert_eq!((started["method"].as_str(), started["params"]["name"].as_str(), started["params"]["from"]["secondsAgo"].as_f64()), (Some("record.start"), Some("Grand capture"), Some(30.0)), "Capture on Home saves the Performance's last 30 s"),
+            _ => panic!("a Home bar stop the walk does not know: {label}"),
+        }
+        f.reply(&started, json!({"result": {}}));
+        settle(&mut f);
+    }
+    nav(&mut f, "move:2", 5); // past the last stop: the cursor gives the bar back to the screen
+    assert!(f.screen.ui.get_screen() == 0 && !ui.global::<crate::Theme>().get_bar_cursor(), "past the last stop the bar's cursor is gone and Home has it");
+    // Every tile the screen's own tiles model declares, reached and confirmed; the Rust ones left
+    // back on Home, the Groovebox last (it hands the display over to the JUCE app).
+    let tiles: Vec<String> = ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
+    let n = tiles.len();
+    assert!(n > 0, "the screen declares its tiles");
+    let rust: Vec<usize> = (0..n).filter(|&i| tiles[i] != "Groovebox").collect();
+    for i in rust.iter().copied().chain(std::iter::once(tiles.iter().position(|t| t == "Groovebox").expect("the profile offers the Groovebox"))) {
+        assert_eq!(f.screen.ui.get_screen(), 0, "the cursor is back on Home before the next tile");
+        nav(&mut f, "move:0", 1); // the first move shows the cursor on the first tile
+        if i > 0 {
+            nav(&mut f, "move:0", i as i64);
+        }
+        assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 1, "one cursor, on the tile it moved to");
+        nav(&mut f, "confirm", 1);
+        settle(&mut f);
+        if tiles[i] == "Groovebox" {
+            assert_eq!((f.screen.ui.get_screen(), f.screen.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")), "the Groovebox tile hands the display over to the JUCE app");
+            assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 0, "a tap or a press drops the cursor");
+            continue;
+        }
+        let expect = match tiles[i].as_str() {
+            "Performance" => 3,
+            "Library" => 13,
+            "Setlist" => 1,
+            "Settings" => 14,
+            _ => panic!("a Home tile the walk does not know: {}", tiles[i]),
+        };
+        assert_eq!(f.screen.ui.get_screen(), expect, "the {} tile opens its screen", tiles[i]);
+        nav(&mut f, "cancel", 1); // EXIT is Back, in one step from anywhere on a screen
+        settle(&mut f);
+        assert_eq!(f.screen.ui.get_screen(), 0, "back on Home from {}", tiles[i]);
+    }
+}
+
 /// A theme read from a document, as a file would be: refused (a panic here) if the reference would refuse it.
 fn theme_of(doc: serde_json::Value) -> theme::Loaded {
     let data = theme::ThemeData::parse(&doc.to_string()).expect("a theme the reference accepts");

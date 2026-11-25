@@ -1662,6 +1662,9 @@ impl App {
         }
         self.follow();
         self.refresh_wait();
+        // DEC and INC step the banks: lit where a bank lies that way (the engine does nothing for a map with no lamp for them).
+        let (p, n) = self.setlist.banks_around();
+        self.light(Screen::Setlist, &[("dec", p), ("inc", n)]);
     }
 
     /// Something for Play, then what it asks the engine sent.

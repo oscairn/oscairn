@@ -77,6 +77,29 @@ fn asks_nothing(f: &mut Fixture, what: &str) {
     assert!(f.engine.try_request(Duration::from_millis(80)).is_none(), "{what} asked the engine for something");
 }
 
+/// The lamp changes asked for since the last call (the fake engine sets them apart from other requests).
+fn lamps_asked(f: &mut Fixture, what: &str) -> Vec<serde_json::Value> {
+    asks_nothing(f, what);
+    std::mem::take(&mut f.engine.lamps)
+}
+
+// DEC and INC's lamps follow the banks: lit where a bank lies that way. Only the change is asked for, and nothing
+// when the shown bank turns to one with the same neighbors. (That the engine sends nothing for a name the panel map
+// gives no lamp is core/control/tests/json_rpc.cpp's: it answers it in `unknown`.)
+#[test]
+fn dec_and_inc_lamps_follow_the_banks() {
+    let mut f = on_setlist("setlist-lamps", 2, "grid", 3, 12);
+    let first = std::mem::take(&mut f.engine.lamps);
+    assert_eq!(first.last(), Some(&json!([{"control": "inc", "on": true}])), "the first bank: INC only (before the setlist is read, neither)");
+    state(&f).invoke_tapped_stop(3); // the second bank: a bank on both sides
+    assert_eq!(lamps_asked(&mut f, "turning the bank"), [json!([{"control": "dec", "on": true}])]);
+    state(&f).invoke_tapped_stop(3); // the last: none after it
+    assert_eq!(lamps_asked(&mut f, "turning the bank"), [json!([{"control": "inc", "on": false}])]);
+    state(&f).invoke_tapped_stop(2);
+    state(&f).invoke_tapped_stop(2); // the first again
+    assert_eq!(lamps_asked(&mut f, "turning the bank"), [json!([{"control": "inc", "on": true}]), json!([{"control": "dec", "on": false}])]);
+}
+
 // Previous and Next of the bar show the bank before or after: no request, and the song playing stays the one it was
 // (opened here first, so there is one). At the first and last bank the button is off and a press does nothing: no wrap.
 #[test]

@@ -654,6 +654,12 @@ impl Screen {
         self.show();
     }
 
+    /// Whether a bank lies before the one shown, and one after: the DEC and INC lamps.
+    pub fn banks_around(&self) -> (bool, bool) {
+        let pages = self.setlist.as_ref().map_or(0, |s| s.pages.len());
+        (self.page > 0, self.page + 1 < pages)
+    }
+
     /// The cursor is on the setlist bar's first stop: the dial moving up leaves for the top bar.
     pub fn at_top(&self) -> bool {
         self.bar.at == Some(0)

@@ -211,26 +211,41 @@ pub mod tests {
 
     /// The engine's end of a connection: reads requests, writes whatever a test wants.
     pub struct FakeEngine {
+        /// The `panel.lamps` params the shell asked, kept apart: a screen lights its lamps whenever it shows, and a test asking
+        /// for the next request is not after them (they are not answered).
+        pub lamps: Vec<Value>,
         reader: BufReader<UnixStream>,
         pub writer: UnixStream,
     }
 
     impl FakeEngine {
         pub fn new(stream: UnixStream) -> FakeEngine {
-            FakeEngine { reader: BufReader::new(stream.try_clone().unwrap()), writer: stream }
+            FakeEngine { lamps: vec![], reader: BufReader::new(stream.try_clone().unwrap()), writer: stream }
         }
         pub fn request(&mut self) -> Value {
-            let mut l = String::new();
-            self.reader.read_line(&mut l).unwrap();
-            serde_json::from_str(&l).unwrap()
+            loop {
+                let mut l = String::new();
+                self.reader.read_line(&mut l).unwrap();
+                let r: Value = serde_json::from_str(&l).unwrap();
+                if r["method"] != "panel.lamps" {
+                    return r;
+                }
+                self.lamps.push(r["params"]["set"].clone());
+            }
         }
         /// The next request if one comes within `wait`, else None (for a test that answers what it is asked until the shell is quiet).
         pub fn try_request(&mut self, wait: Duration) -> Option<Value> {
-            self.writer.set_read_timeout(Some(wait)).unwrap(); // the socket's option, shared by the reader's end
-            let mut l = String::new();
-            let read = self.reader.read_line(&mut l);
-            self.writer.set_read_timeout(None).unwrap();
-            read.ok().filter(|n| *n > 0).and_then(|_| serde_json::from_str(&l).ok())
+            loop {
+                self.writer.set_read_timeout(Some(wait)).unwrap(); // the socket's option, shared by the reader's end
+                let mut l = String::new();
+                let read = self.reader.read_line(&mut l);
+                self.writer.set_read_timeout(None).unwrap();
+                let r: Value = read.ok().filter(|n| *n > 0).and_then(|_| serde_json::from_str(&l).ok())?;
+                if r["method"] != "panel.lamps" {
+                    return Some(r);
+                }
+                self.lamps.push(r["params"]["set"].clone());
+            }
         }
         pub fn answer(&mut self) {
             let id = self.request()["id"].clone();

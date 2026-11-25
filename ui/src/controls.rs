@@ -87,22 +87,24 @@ impl Kind {
 }
 
 /// The names the JUCE combo gives the curves, in `MacroTarget::Curve`'s order.
-pub const CURVES: [&str; 6] = ["Linear", "Exponential", "Logarithmic", "S-curve", "Fader (dB)", "Power"];
+/// Table (a measured curve) is offered only to a target that has points.
+pub const CURVES: [&str; 7] = ["Linear", "Exponential", "Logarithmic", "S-curve", "Fader (dB)", "Power", "Table"];
 const CURVE_KINDS: [&str; 4] = ["linear", "exponential", "logarithmic", "s-curve"];
 
-/// A target's curve: the kind (an index into CURVES) and the numbers the dB and power curves have, kept
-/// whatever the kind so choosing a curve leaves them as they were (`MacroTarget`'s `low`, `high`, `exponent`).
+/// A target's curve: the kind (an index into CURVES) and the numbers the dB, power and table curves have, kept
+/// whatever the kind so choosing a curve leaves them as they were (`MacroTarget`'s `low`, `high`, `exponent`, `points`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Curve {
     pub kind: usize,
     pub low: f64,
     pub high: f64,
     pub exponent: f64,
+    pub points: Vec<f64>,
 }
 
 impl Default for Curve {
     fn default() -> Curve {
-        Curve { kind: 0, low: -96., high: 0., exponent: 2. }
+        Curve { kind: 0, low: -96., high: 0., exponent: 2., points: vec![] }
     }
 }
 
@@ -121,6 +123,10 @@ impl Curve {
                     c.kind = 5;
                     c.exponent = v["exponent"].as_f64().unwrap_or(c.exponent);
                 }
+                Some("table") => {
+                    c.kind = 6;
+                    c.points = v["points"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+                }
                 _ => {}
             },
             _ => {}
@@ -133,6 +139,7 @@ impl Curve {
         match self.kind {
             4 => json!({"kind": "db", "min": self.low, "max": self.high}),
             5 => json!({"kind": "power", "exponent": self.exponent}),
+            6 => json!({"kind": "table", "points": self.points}),
             k => json!(CURVE_KINDS[k.min(3)]),
         }
     }
@@ -152,6 +159,11 @@ impl Curve {
                 }
             }
             5 => x.powf(self.exponent),
+            6 if self.points.len() >= 2 => {
+                let at = x * (self.points.len() - 1) as f64;
+                let i = (at as usize).min(self.points.len() - 2);
+                (self.points[i + 1] - self.points[i]).mul_add(at - i as f64, self.points[i])
+            }
             _ => x,
         }
     }
@@ -732,7 +744,7 @@ impl Screen {
                                 name: self.describe(t).into(),
                                 start: t.start.clamp(0., 1.) as f32,
                                 end: t.end.clamp(0., 1.) as f32,
-                                curve: CURVES[t.curve.kind.min(5)].into(),
+                                curve: CURVES[t.curve.kind.min(6)].into(),
                                 relative: t.relative,
                                 scenes: if t.off_in.is_empty() { "Scenes: all" } else { "Scenes..." }.into(),
                                 now: !matches!(t.kind, Kind::Morph(..)),
@@ -1033,6 +1045,7 @@ impl Screen {
         let items = CURVES
             .iter()
             .enumerate()
+            .filter(|(k, _)| *k != 6 || !t.curve.points.is_empty())
             .map(|(k, name)| {
                 self.picks.push(Pick::Curve(id, ti, k));
                 Item::ticked(*name, self.picks.len() - 1, t.curve.kind == k)

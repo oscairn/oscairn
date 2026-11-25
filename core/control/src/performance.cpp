@@ -1442,7 +1442,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 if(!detail::curveFrom(field(t,"curve"),target))bad("invalid curve");
                 target.start=number(field(t,"start"));target.end=number(field(t,"end"));target.relative=boolean(field(t,"relative"));target.base=number(field(t,"base"));
                 for(auto id:array(field(t,"offIn"),256)){target.offIn.push_back(integer(id));if(!sceneIds.count(target.offIn.back()))bad("a mapping off in an unknown scene");}
-                if(target.start<0 || target.start>1 || target.end<0 || target.end>1)bad("invalid control target range");
+                if(!(target.start>=-2 && target.start<=3 && target.end>=-2 && target.end<=3))bad("invalid control target range");
                 macro.targets.push_back(target);
             }
             nextMacro=std::max(nextMacro,macro.id+1);macros.push_back(std::move(macro));
@@ -1453,6 +1453,12 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             for(const auto& m:macros)if(m.id==from)for(const auto& t:m.targets)if(t.kind==MacroTarget::Kind::Macro && (t.macro==to || reaches(t.macro,to,depth+1)))return true;
             return false;};
         for(const auto& m:macros)if(reaches(m.id,m.id,0))bad("controls loop");
+        // A lane's control carries no table curve below it (Session::flattenControls).
+        std::function<bool(uint32_t,size_t)> table=[&](uint32_t id,size_t depth){
+            if(depth>macros.size())return false;
+            for(const auto& m:macros)if(m.id==id)for(const auto& t:m.targets)if(t.curve==MacroTarget::Curve::Table || (t.kind==MacroTarget::Kind::Macro && table(t.macro,depth+1)))return true;
+            return false;};
+        for(const auto& m:macros)if(m.sourceNode && table(m.id,0))bad("a control a plugin's lane drives has a table curve below it");
         for(const auto& s:scenes)for(const auto& [m,v]:s.macros)if(!macroIds.count(m))bad("a scene value for an unknown control");
     }
     // Physical controls' overrides (RFC 0011), by the control's logical identity.

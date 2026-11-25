@@ -231,8 +231,8 @@ namespace oscairn
         // SendLevel: a part's send to a bus (Part::sends), a gain as PartLevel's.
         enum class Kind { Parameter, PartLevel, PartMute, Macro, Morph, SendLevel } kind = Kind::Parameter;
         // Db: evenly in decibels from `low` at 0 to `high` at 1, as a gain, and 0 at 0 (a fader's
-        // taper); Power: the value to the power `exponent`.
-        enum class Curve { Linear, Exponential, Logarithmic, SCurve, Db, Power } curve = Curve::Linear;
+        // taper); Power: the value to the power `exponent`; Table: `points`, a measured curve.
+        enum class Curve { Linear, Exponential, Logarithmic, SCurve, Db, Power, Table } curve = Curve::Linear;
         NodeId node = 0; uint32_t param = 0; // Parameter
         uint32_t part = 0;                   // PartLevel, PartMute, SendLevel
         uint32_t bus = 0;                    // SendLevel: the bus the part sends to
@@ -240,6 +240,8 @@ namespace oscairn
         uint32_t sceneFrom = 0, sceneTo = 0; // Morph: the scenes the control moves between, from at 0 to at 1
         // The range the control's 0..1 covers, as fractions of the target's range; end below
         // start reverses it. Relative targets move around `base` by half the range either way.
+        // Each within -2..3: a controller box's swing reaches up to two ranges past its base (the
+        // box law's ratio of +-128); the destination is clamped to its range all the same.
         double start = 0, end = 1;
         bool relative = false;
         // Parameters, part levels, mutes and send levels: the destination's value with no control moving it,
@@ -249,6 +251,9 @@ namespace oscairn
         std::vector<uint32_t> offIn; // the scenes this mapping is off in (RFC 0011); on in every other
         double low = -96, high = 0; // Db, in dB: -144 <= low < high <= 0
         double exponent = 2;        // Power: 0.1 to 10
+        // Table: 2 to 128 values in -1..1, evenly over the control's 0..1 (with 128, one per 7-bit
+        // controller value), linear between; a value below 0 takes the target below `start`.
+        std::vector<double> points;
         // How a parameter target reaches its parameter, worked out by the Session from the graph
         // and not saved (RFC 0011, 2026-11-09). Value: through the summing rule's stored value.
         // A relative target on a parameter that takes CLAP modulation (CLAP_PARAM_IS_MODULATABLE)
@@ -256,7 +261,8 @@ namespace oscairn
         // is driven: Modulation, sent by the Session when controls move; LaneModulation, carried
         // by a plugin's lane that reaches the same parameter (Graph::setControlTargets).
         enum class Delivery : uint8_t { Value, Modulation, LaneModulation } delivery = Delivery::Value;
-        double shape(double value) const;  // the curve: 0..1 to 0..1
+        double shape(double value) const;  // the curve: 0..1 to 0..1 (a table's to -1..1)
+        double point(double value) const;  // its point in the range, start at 0 and end at 1
         bool validCurve() const;           // its numbers within their ranges
         double offset(double value) const; // what a control value adds to the base
         // What a control value does here alone, as a fraction of the target's range.
@@ -266,7 +272,7 @@ namespace oscairn
         bool sameDestination(const MacroTarget& o) const { return sums() && o.kind == kind && o.node == node && o.param == param && o.part == part && o.bus == bus; }
         bool operator==(const MacroTarget&) const = default;
     };
-    inline constexpr std::array<const char*, 6> curveKinds{"linear", "exponential", "logarithmic", "s-curve", "db", "power"}; // as files and the control protocol name them
+    inline constexpr std::array<const char*, 7> curveKinds{"linear", "exponential", "logarithmic", "s-curve", "db", "power", "table"}; // as files and the control protocol name them
     // A control belongs to the Performance, or to a part (RFC 0021): a part's controls target only
     // its plugins, its own sends and its other controls, and go with it into a Sound (which has no
     // sends, so its send targets stay out of one).

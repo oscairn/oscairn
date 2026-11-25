@@ -65,6 +65,26 @@ check "and the display left as it is" "! echo \"\$out\" | grep -q -e weston.serv
 out=$(OSCAIRN_UI=rust OSCAIRN_UI_ROTATION=90 OSCAIRN_UDEV_RULES="$bundle/rules" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "ui rust: the engine alone, then the Rust UI" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && echo \"\$out\" | grep -q 'SLINT_KMS_ROTATION=90 /usr/bin/oscairn-ui --profile fantom-07 --socket /run/oscairn/engine.sock --handover' && ! echo \"\$out\" | grep -q -e /usr/bin/Oscairn -e /usr/bin/Xorg"
 check "and touch turned with it, by a rule at run time" "echo \"\$out\" | grep -q 'would write $bundle/rules/99-oscairn-touch.rules (LIBINPUT_CALIBRATION_MATRIX 0 1 0 -1 0 1)' && [ ! -e \"$bundle/rules\" ]"
+# The splash on the console's frame buffer (stand-ins for fb0, its sysfs geometry and the file).
+check "no splash in the bundle: not shown" "echo \"\$out\" | grep -q 'no splash in the bundle: not shown'"
+mkdir -p "$bundle/usr/share/oscairn" "$bundle/sys/class/graphics/fb0" "$bundle/sys/class/graphics/fbcon"
+printf 'splash' | gzip > "$bundle/usr/share/oscairn/splash-720x1280.bgrx.gz"
+echo 720,1280 > "$bundle/sys/class/graphics/fb0/virtual_size"; echo 32 > "$bundle/sys/class/graphics/fb0/bits_per_pixel"; echo 2880 > "$bundle/sys/class/graphics/fb0/stride"
+splash_run() { OSCAIRN_SYS="$bundle/sys" OSCAIRN_FB_DEVICE="$bundle/fb" OSCAIRN_UI=rust OSCAIRN_UDEV_RULES="$bundle/rules" "$bundle/oscairn-fantom-start" --dry-run 2>&1; }
+out=$(splash_run)
+check "no frame buffer: the splash skipped" "echo \"\$out\" | grep -q 'no frame buffer $bundle/fb: the splash not shown'"
+: > "$bundle/fb"
+out=$(splash_run)
+check "a dry run says it would show the splash" "echo \"\$out\" | grep -q 'would show the splash on $bundle/fb (before Weston stops, and again once it has ended)' && [ ! -s \"$bundle/fb\" ]"
+check "before Weston stops" "[ \$(n 'would show the splash') -lt \$(n 'stop weston.service') ]"
+echo 1280,720 > "$bundle/sys/class/graphics/fb0/virtual_size"
+out=$(splash_run)
+check "another geometry: the splash skipped" "echo \"\$out\" | grep -q '$bundle/fb is 1280,720 32 2880 , not 720,1280 32 2880: the splash not shown' && ! echo \"\$out\" | grep -q 'would show the splash'"
+echo 720,1280 > "$bundle/sys/class/graphics/fb0/virtual_size"; echo 1 > "$bundle/sys/class/graphics/fbcon/cursor_blink"
+eval "$(sed -n '/^splash()/,/^}/p' "$scripts/oscairn-fantom-start")"
+say() { :; }; dry= root=$bundle sys=$bundle/sys fb=$bundle/fb; splash test
+check "written: the file's pixels in the frame buffer, the cursor's blink off" "[ \"\$(cat \"$bundle/fb\")\" = splash ] && [ \"\$(cat \"$bundle/sys/class/graphics/fbcon/cursor_blink\")\" = 0 ]"
+rm -rf "$bundle/usr" "$bundle/sys" "$bundle/fb"
 # The touch rule written for the Rust UI and removed for the X server (which turns touch itself).
 eval "$(sed -n '/^touch_rule()/,/^}/p' "$scripts/oscairn-fantom-start")"
 say() { :; }; rules=$bundle/rules2; matrix="0 1 0 -1 0 1"

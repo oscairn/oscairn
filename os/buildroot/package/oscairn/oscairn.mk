@@ -42,11 +42,14 @@ endif
 ifeq ($(BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0),y)
 OSCAIRN_CONF_OPTS += -DOSCAIRN_ROLAND_FANTOM0=ON
 # Its start, stop and boot scripts, run from the bundle's folder outside the chroot, beside
-# start-chroot.sh (devices/roland-fantom0/bundle).
+# start-chroot.sh (devices/roland-fantom0/bundle), and the splash the start script shows on the
+# console's frame buffer, turned for the panel (Buildroot needs python3 on the build host).
 define OSCAIRN_INSTALL_FANTOM0_SCRIPTS
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-start $(TARGET_DIR)/oscairn-fantom-start
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-stop $(TARGET_DIR)/oscairn-fantom-stop
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-boot $(TARGET_DIR)/oscairn-fantom-boot
+	mkdir -p $(TARGET_DIR)/usr/share/oscairn
+	python3 $(@D)/devices/roland-fantom0/tools/splash_raw.py $(@D)/branding/splash.png $(TARGET_DIR)/usr/share/oscairn/splash-720x1280.bgrx.gz
 endef
 OSCAIRN_POST_INSTALL_TARGET_HOOKS += OSCAIRN_INSTALL_FANTOM0_SCRIPTS
 else

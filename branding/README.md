@@ -13,6 +13,7 @@ path.
 | `mark-avatar.svg`, `avatar-1024.png` | An avatar: the mark on black filling the whole 1024 px square, no transparent border, for sites that crop to a circle themselves (GitHub, Patreon) |
 | `banner.svg`, `banner.png` | The repository's title in README.md (1280 x 320) |
 | `social-preview.svg`, `social-preview.png` | GitHub's social preview (1280 x 640): set in the repository's Settings, General, Social preview |
+| `splash.py`, `splash.png` | The device splash (1280 x 720): the mark and "Oscairn" on the classic theme's background, shown on a FANTOM while the display passes to Oscairn (`python3 branding/splash.py`, which needs Pillow) |
 | `mark-hills-*` | An alternate kept for later: each wave centered on its crest |
 
 Colors: accent `#f29a3f`, light `#f3efe8`, dark `#15171c`. The mark's ink is centered on its

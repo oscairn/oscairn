@@ -1,0 +1,26 @@
+# Applies .github/labels.yml to every Oscairn repository when it changes (tools/sync-labels.sh).
+# The job's own token cannot write to other repositories, so this uses LABELS_TOKEN: a
+# fine-grained token owned by the oscairn organization, all repositories, Issues read and write.
+name: Labels
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/labels.yml, tools/sync-labels.sh]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync labels
+        env:
+          GH_TOKEN: ${{ secrets.LABELS_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::LABELS_TOKEN is not set"; exit 1; fi
+          repos=$(gh repo list oscairn --limit 200 --no-archived --json nameWithOwner --jq '.[].nameWithOwner')
+          tools/sync-labels.sh $repos

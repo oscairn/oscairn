@@ -10,12 +10,12 @@ setlists ([RFC 0012](0012-sync-external-midi-and-multi-device.md)).
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. A network transport for the control API: TLS, pairing, sessions, off by default
-- [ ] 2. Permissions per client by namespace (play, edit, library, system)
-- [ ] 3. Several clients at once: one change history, changes pushed to all
-- [ ] 4. Discovery on the local network
-- [ ] 5. The web UI: the view models drawn in a browser, served by the device
-- [ ] 6. Library sync between a device and a computer, by hash
+- [ ] 1. A network transport for the control API: TLS, pairing, sessions, off by default (#182)
+- [ ] 2. Permissions per client by namespace (play, edit, library, system) (#184)
+- [ ] 3. Several clients at once: one change history, changes pushed to all (#186)
+- [ ] 4. Discovery on the local network (#188)
+- [ ] 5. The web UI: the view models drawn in a browser, served by the device (#190)
+- [ ] 6. Library sync between a device and a computer, by hash (#192)
 
 ## Problem
 

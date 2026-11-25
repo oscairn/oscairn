@@ -9,10 +9,10 @@ plugin worker isolation ([RFC 0010](0010-plugin-worker-isolation.md)), device pr
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. The levels in the profile, and the engine's settings following from them
-- [ ] 2. A watchdog outside the engine, restarting it within a stated time
-- [ ] 3. Pass-through: audio in to out continuing through an engine failure
-- [ ] 4. Measured: missed deadlines, recovery time and pass-through, on each product's hardware
+- [ ] 1. The levels in the profile, and the engine's settings following from them (#194)
+- [ ] 2. A watchdog outside the engine, restarting it within a stated time (#196)
+- [ ] 3. Pass-through: audio in to out continuing through an engine failure (#198)
+- [ ] 4. Measured: missed deadlines, recovery time and pass-through, on each product's hardware (#200)
 
 ## Problem
 

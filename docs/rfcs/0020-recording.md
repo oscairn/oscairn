@@ -22,9 +22,9 @@ Checked when built and tested; the sections below say how.
   a bar line and the measurements on the target not yet)
 - [x] 4. Control API and UI ([status](#step-4-status); drag into a Sampler, the drive's minutes left,
   the step's socket gate with a Sampler sound and an arm button per Mixer strip not yet)
-- [ ] 5. Inputs and multitrack
-- [ ] 6. MIDI kept since capture began, and Capture and keep recording ([below](#midi-since-capture-began-planned))
-- [ ] 7. MIDI journal app ([below](#midi-journal-app-planned))
+- [ ] 5. Inputs and multitrack (#132)
+- [ ] 6. MIDI kept since capture began, and Capture and keep recording ([below](#midi-since-capture-began-planned)) (#134)
+- [ ] 7. MIDI journal app ([below](#midi-journal-app-planned)) (#136)
 
 ## Problem
 

@@ -9,12 +9,12 @@ boots into Oscairn), device profiles ([RFC 0024](0024-device-profiles.md)) and r
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. A read-only system partition, with the user's data on its own
+- [ ] 1. A read-only system partition, with the user's data on its own (#203)
 - [ ] 2. Signed A/B updates, falling back to the previous system if the new one does not start
-- [ ] 3. Factory reset that keeps or clears the user's data, as asked
-- [ ] 4. Boot time measured and reduced to each product's target
-- [ ] 5. Safe power loss: no corrupted data, checked by cutting power in tests
-- [ ] 6. Power management for battery products
+- [ ] 3. Factory reset that keeps or clears the user's data, as asked (#205)
+- [ ] 4. Boot time measured and reduced to each product's target (#207)
+- [ ] 5. Safe power loss: no corrupted data, checked by cutting power in tests (#209)
+- [ ] 6. Power management for battery products (#210)
 
 ## Problem
 

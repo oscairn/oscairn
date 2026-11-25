@@ -16,8 +16,8 @@ Checked when built and tested; the sections below say how.
 - [x] Undo for every edit ([status](#undo-status)); preset and state loads remain
 - [ ] 5. Editors: knob pages for every plugin done through [RFC 0019](0019-adaptive-ui.md)'s
       generated editors ([status](#step-5-status)); what modulates each knob and the Modular
-      grid remain
-- [ ] 6. Physical controls: default layers, overrides, learn, banks (layers, banks, overrides saved, learn on a panel's knobs, plugin roles and screen knobs following the editor page done; [status](#step-6-status))
+      grid remain (#63)
+- [ ] 6. Physical controls: default layers, overrides, learn, banks (layers, banks, overrides saved, learn on a panel's knobs, plugin roles and screen knobs following the editor page done; [status](#step-6-status)) (#64)
   - [x] [instant controls](#instant-controls): live gains for part levels, mutes, pans, send levels, the master and scene glides ([status](#live-gains-status))
   - [x] a plugin's parameters played by a controller heard without the control thread ([status](#live-gains-status))
   - [x] morphs played by a controller heard without the control thread, what plays live ([status](#live-gains-status))
@@ -27,7 +27,7 @@ Checked when built and tested; the sections below say how.
   - [x] values pushed to clients (`controls.changed`), so the UI and devices follow without reading the graph ([status](#latency-status))
   - [x] faders and mutes edited on screen shown at once and sent without waiting ([status](#screen-edits-status))
   - [x] control targets on a part's send levels, as on its level ([status](#step-6-status)); bypass and the transport remain
-- [ ] 7. Groups, pedal view, move, copy and share
+- [ ] 7. Groups, pedal view, move, copy and share (#65)
 - [x] Play: the Performance app's view for the stage ([design](#play-the-performance-apps-first-view), [status](#play-status))
 - [x] The full scene model (blocks and wires enabled per scene, what each scene saves),
       seamless on the engine's draining and retiring ([status](#scenes-status))

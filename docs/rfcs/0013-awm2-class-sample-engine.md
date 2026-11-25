@@ -17,24 +17,24 @@ Sampler (`org.oscairn.legacy-sampler`).
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. RFC 0008 step 3: multisample. Partly: all 7,647 waveforms load; loops checked on 40,
-  against a proposed criterion; the Salamander piano untested
+  against a proposed criterion; the Salamander piano untested (#75)
 - [ ] 2. Measurement harness and the first fitted tables. Partly: harness, repeatability and AEG
   checks within 2.5% at 44.1, 48 and 96 kHz; the tolerance is still proposed, indices outside the
   valid spans fail (K6–K8, K10), velocity levels miss 0.4 dB at points (K1, up to 0.77 dB), and the
-  reference comparison is not in the test suite
+  reference comparison is not in the test suite (#78)
 - [ ] 3. Element model and XA Control. Partly: key-off elements built and measured; element-scoped
-  cycle and random, assignable switches and legato rules not built; no articulation fixtures
+  cycle and random, assignable switches and legato rules not built; no articulation fixtures (#80)
 - [ ] 4. Filters and FEG. Partly: per-type responses within 1 dB and the FEG built, checked
   against the renders they were fitted from; high resonance misses (K24); no cutoff-scaling
-  breakpoint; HPF key follow and cutoff below 144 not done (K20)
+  breakpoint; HPF key follow and cutoff below 144 not done (K20) (#82)
 - [ ] 5. PEG, LFOs, pan modes and the rest. Partly: PEG and element LFO built and tested; the Part
-  LFO, element EQ (K17), pan modes, random pitch and half damper not built
+  LFO, element EQ (K17), pan modes, random pitch and half damper not built (#84)
 - [ ] 6. Drum Parts and element outputs. Partly: drum Parts play, alternate-group chokes tested,
   sound contexts and assets done; element outputs not built (K48); no drum-kit fixtures or
-  routing tests
+  routing tests (#86)
 - [ ] 7. Converter coverage. Partly: the converter still reports drops (A.SW, velocity
   crossfade, EQ, cutoff scaling, Part LFO, drum sends, key assign, the Part cutoff, resonance and
-  FEG-depth offsets); no no-loss factory report
+  FEG-depth offsets); no no-loss factory report (#88)
 
 ## Problem
 

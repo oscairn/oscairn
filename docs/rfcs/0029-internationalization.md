@@ -8,12 +8,12 @@ language's [themes and layouts](../design-language.md), adaptive UI
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Every user-facing string through a catalog, in American English (the source language)
-- [ ] 2. Translations installable as packages, chosen in settings
-- [ ] 3. Locale-aware numbers, times, dates and note names
-- [ ] 4. Layouts that fit longer text, checked with a pseudo-translation
-- [ ] 5. Right-to-left scripts and the fonts for the languages offered
-- [ ] 6. Plugins' and apps' own strings, translated the same way
+- [ ] 1. Every user-facing string through a catalog, in American English (the source language) (#211)
+- [ ] 2. Translations installable as packages, chosen in settings (#212)
+- [ ] 3. Locale-aware numbers, times, dates and note names (#213)
+- [ ] 4. Layouts that fit longer text, checked with a pseudo-translation (#214)
+- [ ] 5. Right-to-left scripts and the fonts for the languages offered (#214)
+- [ ] 6. Plugins' and apps' own strings, translated the same way (#215)
 
 ## Problem
 

@@ -15,7 +15,7 @@ Checked when built and tested; the sections below say how.
 - [x] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
 - [x] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
 - [x] 5. A database index, for libraries of tens of thousands of items
-- [ ] 6. The DJ types: tracks, crates and track analysis
+- [ ] 6. The DJ types: tracks, crates and track analysis (#164)
 
 ### Decisions made while building
 

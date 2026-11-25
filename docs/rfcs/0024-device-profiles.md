@@ -15,19 +15,19 @@ Checked when built and tested; the sections below say how.
 - [x] 1. The profile schema, and profiles for the desktop, the QEMU image, the Behringer KICK and the Ignite ([status](#step-1-status))
 - [ ] 2. The app reads its profile: surface, layouts, default mappings and app set follow from it
       (surface, layout and apps done; the control groups reach RFC 0011's physical controls,
-      which resolve each group's defaults; the panel playing faders, rows and buttons remains)
+      which resolve each group's defaults; the panel playing faders, rows and buttons remains) (#166)
 - [ ] 3. The engine reads it: audio block size, budgets and reliability level follow from it
       (block size, the budget (RFC 0025) and the audio device with its channel map
       ([status](#audio-device-status)) done, with the user's choice of device, rate and buffer
-      size over them; reliability waits for RFC 0027)
-- [ ] 4. Packages and Performances checked against it (with RFC 0006 and RFC 0025)
-- [ ] 5. A second product's profile (a desktop module or pedal) built from the same image
+      size over them; reliability waits for RFC 0027) (#168)
+- [ ] 4. Packages and Performances checked against it (with RFC 0006 and RFC 0025) (#170)
+- [ ] 5. A second product's profile (a desktop module or pedal) built from the same image (#172)
 - [ ] 6. External MIDI controllers: [controller profiles](#controllers) matched by port name,
       their controls joining the device's, each group's [default target](#default-targets)
       (parsing, defaults, resolution, encodings and pickup built; the SMK37 Elite's numbers
       read with `oscairn-midi-monitor`, all but its buttons; Mackie Control ports read and fed
       back, and knob values sent back where a profile says so ([status](#mackie-control));
-      choosing between profiles that match one port, kept by the engine, in the Settings app)
+      choosing between profiles that match one port, kept by the engine, in the Settings app) (#174)
   - [x] the mapping played by the engine, from the groups and ports the app sends it
         ([where the mapping runs](#where-the-mapping-runs))
   - [x] the musician's choices of profile per port, and ports ignored, kept and played by the

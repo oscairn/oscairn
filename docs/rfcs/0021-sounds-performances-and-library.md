@@ -35,10 +35,10 @@ Checked when built and tested; the sections below say how.
       edited since; revisions with parents for Sounds and Performances; Save and Save As New
       for Sounds; Update from library; a deleted Sound breaks nothing
 - [x] Content hashes for Sounds and Performances, in the info block and the index
-- [ ] Authors in the info block, and `modified` set by preset and state loads
+- [ ] Authors in the info block, and `modified` set by preset and state loads (#138)
 - [x] Libraries as archive files: items locked, Save As New from them, deleting items,
       uninstalling, and reinstalling to restore what is missing ([design](#libraries))
-- [ ] Factory content as a preloaded library (there is no factory content yet)
+- [ ] Factory content as a preloaded library (there is no factory content yet) (#140)
 - [x] Importing a library as a library or into your own storage, all of it or chosen items;
       importing again skips copies still unchanged (by content hash)
 - [x] The desktop's Install, Export, Delete and Uninstall (Performance menu; the Library app)
@@ -53,11 +53,11 @@ Checked when built and tested; the sections below say how.
 - [x] Exporting with every asset, the Sounds of unedited parts, and optionally those of edited
       parts ([design](#exporting-a-performance))
 - [ ] 2. Library index and tags: index, user file, Sounds and tag editing done; suggestions,
-      packages and `LibraryModel` remain
+      packages and `LibraryModel` remain (#142)
 - [ ] 3. Desktop pane: the Library app and Part menu done; the dockable pane, inspector,
-      drag to part and keyboard remain
+      drag to part and keyboard remain (#144)
 - [x] Importing a Performance, all of it or chosen parts (with what they need) and scenes ([design](#importing-a-performance))
-- [ ] 4. Plugin presets
+- [ ] 4. Plugin presets (#146)
 - [x] Engine support for seamless changes: draining note connections, retiring nodes, plugin
       sleep ([status](#seamless-switching)); loading a Sound cuts, by decision
 - [x] Seamless Performance changes: the outgoing Performance rings out beside the new one ([status](#seamless-switching))
@@ -79,9 +79,9 @@ Checked when built and tested; the sections below say how.
       ringing out and discarded; spilling to a new instance without room ([design](#formed-on-their-own))
 - [x] Audition of a Sound in a part and of a Performance in place of the open one, put back as
       it was or kept, from the Library app ([status](#audition))
-- [ ] 5. Seamless loading into a part (part transitions on RFC 0007's chain preparation)
-- [ ] 6. Panel
-- [ ] 7. Compact test layout
+- [ ] 5. Seamless loading into a part (part transitions on RFC 0007's chain preparation) (#148)
+- [ ] 6. Panel (#150)
+- [ ] 7. Compact test layout (#150)
 
 ## Problem
 

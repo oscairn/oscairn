@@ -29,12 +29,12 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. In-process actions: the registry; Library picks (Performances and Sounds), Setlist takes Performances
 - [x] 2. Apps as processes: started and supervised by the shell, actions over the control API, manifests (the Setlist)
-- [ ] 3. Choice and defaults
-- [ ] 4. Permissions and limits enforced per app (permissions and file paths built; rate limits, and the flood half of the gate, not)
-- [ ] 5. Apps in packages: signed builds, install, update, removal, data folders
-- [ ] 6. Sandboxing on Linux and macOS, and a display path that keeps apps apart on the device
-- [ ] 7. The built-in apps moved out of the desktop process, in order
-- [ ] 8. Third-party apps: a sequencer interface, then a ported DAW
+- [ ] 3. Choice and defaults (#152)
+- [ ] 4. Permissions and limits enforced per app (permissions and file paths built; rate limits, and the flood half of the gate, not) (#154)
+- [ ] 5. Apps in packages: signed builds, install, update, removal, data folders (#156)
+- [ ] 6. Sandboxing on Linux and macOS, and a display path that keeps apps apart on the device (#158)
+- [ ] 7. The built-in apps moved out of the desktop process, in order (#160)
+- [ ] 8. Third-party apps: a sequencer interface, then a ported DAW (#162)
 
 ## Problem
 

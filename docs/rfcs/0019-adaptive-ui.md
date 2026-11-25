@@ -11,19 +11,19 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. Surfaces and view models ([status](#step-1-status))
 - [ ] 2. Desktop shell: menu bar, toolbar, parts list, tabs and detached windows done; dockable
-      panes with a saved arrangement, the inspector and shortcuts remain
+      panes with a saved arrangement, the inspector and shortcuts remain (#122)
 - [ ] 3. Generated editors: parameter pages from module paths, `oscairn.ui` draft hints, panel
       row knobs, the Compact test layout and the gate's checks done (Odin 2 on Desktop, Panel
       and Compact); the editors for the engine plugins (Oscairn FM, Analog and Sampler) remain,
-      once their engines are done
+      once their engines are done (#124)
 - [ ] 4. Plugin windows: built on macOS, from workers, reopened after a restart
       ([status](#step-4-status)); the gate's editing while audio plays, Linux and an engine-placed
-      plugin remain
+      plugin remain (#126)
 - [ ] 5. Rich widgets: envelopes, key and velocity maps and FM operator views that plugins
       describe (`oscairn.ui` draft 4), drawn and edited on Desktop and Panel, done, with LFO
       previews and filter responses by name ([status](#step-5-status)); waveform, step lane, the
-      Modular grid and the gate (the Sampler's zones and envelope, once it declares them) remain
-- [ ] 6. Front panels
+      Modular grid and the gate (the Sampler's zones and envelope, once it declares them) remain (#128)
+- [ ] 6. Front panels (#130)
 
 Not a numbered step: [screens of any size](#screens-of-any-size), a Panel laid out at each
 device screen's own size and density, built and checked by `desktop-gaps` (2026-11-09).

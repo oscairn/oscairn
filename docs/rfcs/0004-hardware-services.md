@@ -8,10 +8,10 @@
 Checked when built and tested; the sections below say how.
 
 - [x] 1. Capability, clock and event contracts with CPU-only and fake-clock services ([status](#step-1-status))
-- [ ] 2. Desktop I/O through those contracts, with latency measured
-- [ ] 3. One board's timing backend, measured with loopback
-- [ ] 4. Backend discovery, reservations and one reference engine
-- [ ] 5. Accelerator failure and recovery, with measured benefit
+- [ ] 2. Desktop I/O through those contracts, with latency measured (#44)
+- [ ] 3. One board's timing backend, measured with loopback (#45)
+- [ ] 4. Backend discovery, reservations and one reference engine (#46)
+- [ ] 5. Accelerator failure and recovery, with measured benefit (#47)
 
 ## Step 1 status
 

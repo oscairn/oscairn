@@ -15,10 +15,10 @@ Checked when built and tested; the sections below say how.
 - [x] 3. Contain failure, on macOS ([status](#step-3-status))
 - [x] 4. Recover ([status](#step-4-status))
 - [x] 5. Policies: native engines in workers, placement and overrides ([status](#step-5-status))
-- [ ] 6. Memory and CPU limits, then sandboxing (limits built, sandboxing not started) ([status](#step-6-status))
-- [ ] 7. LV2 in workers
+- [ ] 6. Memory and CPU limits, then sandboxing (limits built, sandboxing not started) ([status](#step-6-status)) (#60)
+- [ ] 7. LV2 in workers (#61)
 - [ ] Measurements on native Linux and the target; workers by default in the app (workers by
-      default done, [status](#workers-in-the-desktop-app); Linux measured only in a VM, [results](#step-1-measurements); target not measured)
+      default done, [status](#workers-in-the-desktop-app); Linux measured only in a VM, [results](#step-1-measurements); target not measured) (#62)
 - [x] Workers report the plugin's CLAP sleep to the engine, so a seamless scene or Performance
       change ([RFC 0021](0021-sounds-performances-and-library.md#seamless-switching)) can
       retire a plugin in a worker as soon as it is done (the shared block's `asleep`, set after

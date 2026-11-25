@@ -15,10 +15,10 @@ against every Data List parameter, Oscairn integration work and milestones, is
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Oscillators, filters, amp, envelopes and LFOs; native sound contexts
-- [ ] 2. Wave shaper, saturators, folder, routing
-- [ ] 3. Unison, reset, drift and aging; pitch EG and LFOs
-- [ ] 4. Converter coverage
+- [ ] 1. Oscillators, filters, amp, envelopes and LFOs; native sound contexts (#98)
+- [ ] 2. Wave shaper, saturators, folder, routing (#98)
+- [ ] 3. Unison, reset, drift and aging; pitch EG and LFOs (#100)
+- [ ] 4. Converter coverage (#102)
 
 The engine is developed in its fork (`oscairn-analog`); its own repository tracks work in progress.
 

@@ -17,11 +17,11 @@ Checked when built and tested; the sections below say how.
 - [x] Input device selectors on parts ([selectors](#choosing-devices-selectors))
 - [x] 1. MIDI out ([status](#step-1-status); the Part page's control built; output nodes, latency offsets and the loopback gate not yet)
 - [x] 2. Clock out ([status](#step-2-status); clock, Start, Stop, Continue and Song Position out, chosen beside the transport on the desktop; the gate's drum machine not yet)
-- [ ] 3. Link
-- [ ] 4. External instruments
-- [ ] 5. Setlist cues
-- [ ] 6. Network ensemble
-- [ ] 7. CV and MMC
+- [ ] 3. Link (#66)
+- [ ] 4. External instruments (#67)
+- [ ] 5. Setlist cues (#69)
+- [ ] 6. Network ensemble (#71)
+- [ ] 7. CV and MMC (#73)
 
 ## Problem
 

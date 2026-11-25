@@ -21,7 +21,7 @@ Checked when built and tested; the sections below say how.
       versioned capability profiles for export (the product profiles of RFC 0024 are not export
       targets), Oscairn-native and External labels, a project manifest of requested packages and
       version ranges apart from the lock, per-device assignments and variations, and retention
-      roots for plugins (their removal is deliberate, with Used by; nothing collects them))
+      roots for plugins (their removal is deliberate, with Used by; nothing collects them)) (#49)
 - [ ] 2. First vertical slice: managed CLAP packages, locks, offline export and import, unavailable-node preservation
       (built 2026-11-01: unavailable-node preservation, a stand-in keeping the plugin's place and
       saved state, `control-parts`; the plugin store's lookup by format, ID and version; the
@@ -42,12 +42,12 @@ Checked when built and tested; the sections below say how.
       removing the repository cache without losing pinned installs and of two projects sharing a
       release while another pins an older one; grouped cleanup prompts and per-device retention
       settings; dependency-only repair from a bundle and the missing-content request fulfilled from
-      a computer's repository)
-- [ ] 3. Cross-platform proof
-- [ ] 4. LV2, existing installs, VST3 and AU with their adapters
-- [ ] 5. DAW delivery proof
+      a computer's repository) (#50)
+- [ ] 3. Cross-platform proof (#51)
+- [ ] 4. LV2, existing installs, VST3 and AU with their adapters (#52)
+- [ ] 5. DAW delivery proof (#51)
 - [ ] 6. Catalogs, multi-device preparation and distribution polish (the package repository:
-      [RFC 0031](0031-package-repository-and-distribution.md))
+      [RFC 0031](0031-package-repository-and-distribution.md)) (#53)
 - [ ] Signatures: publisher-signed plugin builds, signed archives, the trust store and install
       policy ([design](#signatures))
       (built 2026-11-01: Ed25519 with Monocypher; archives version 3 with optional item, plugin
@@ -77,9 +77,9 @@ Checked when built and tested; the sections below say how.
       re-judging store builds
       when a key is revoked, revocations through system updates, a product profile refusing
       unsigned code, apps (not packaged yet), trusting a key from the install prompt, repositories
-      requiring signatures, pairing)
+      requiring signatures, pairing) (#54)
 - [ ] Choosing what to import: chosen items with their dependencies, content as a locked
-      library or into user storage ([design](#choosing-what-to-import))
+      library or into user storage ([design](#choosing-what-to-import)) (#55)
 
 ## Outcome
 

@@ -10,12 +10,12 @@ lives and how it reaches each engine.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Performance tunings; Scala and .kbm parsing; built-in scales
-- [ ] 2. Host `clap.tuning` in the engine and workers; the Sampler reads it
-- [ ] 3. MTS-ESP master on the desktop
-- [ ] 4. Oscairn FM and the analog engine read `clap.tuning`
+- [ ] 1. Performance tunings; Scala and .kbm parsing; built-in scales (#112)
+- [ ] 2. Host `clap.tuning` in the engine and workers; the Sampler reads it (#114)
+- [ ] 3. MTS-ESP master on the desktop (#116)
+- [ ] 4. Oscairn FM and the analog engine read `clap.tuning` (#118)
 - [ ] 5. Device libMTS
-- [ ] 6. Opt-in note-expression tuning
+- [ ] 6. Opt-in note-expression tuning (#120)
 
 ## Problem
 

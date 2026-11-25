@@ -29,13 +29,13 @@ Checked when built and tested; the sections below say how.
       (`desktop-apps`; Oscairn's apps still inside the desktop app have no manifests and keep their placeholders; first-party apps are not yet measured per profile before release)
 - [ ] 9. Opportunistic memory and its eviction order: the sample file cache, recently used items,
       entries prepared further ahead; on demand and on pressure (PSI; macOS memory pressure)
-      (built: instances kept warm, a next entry prepared to cut, let go on demand and on Linux PSI, then a committed one under pressure, and macOS's pressure notifications read, not exercised by a test; not: entries further ahead)
+      (built: instances kept warm, a next entry prepared to cut, let go on demand and on Linux PSI, then a committed one under pressure, and macOS's pressure notifications read, not exercised by a test; not: entries further ahead) (#176)
 - [ ] 10. Linux: cgroups for the engine, workers and apps, locked memory, the out-of-memory order
       (built: a cgroup per worker with `memory.max` from its declaration and no swap, the engine in its own, locking and scores
-      for the engine and workers; not: the engine's `memory.min`, apps' cgroups, opportunistic workers first, the image's wiring)
+      for the engine and workers; not: the engine's `memory.min`, apps' cgroups, opportunistic workers first, the image's wiring) (#178)
 - [ ] 11. Tested: memory filled, apps launched up to the floor and a committed Performance
       loaded, with no out-of-memory kill, no running app starved and a launch past the floor
-      refused with the reason (QEMU at 4 GiB, then the target)
+      refused with the reason (QEMU at 4 GiB, then the target) (#180)
 
 ## Problem
 

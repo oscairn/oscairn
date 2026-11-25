@@ -11,8 +11,8 @@ Checked when built and tested; the sections below say how.
 - [x] 3. `oscairn-engine`
 - [x] 4. The desktop app on `Control` only, starting the engine as its helper; `--in-process` and `--connect`
 - [ ] 5. The OS image running engine and UI as separate services, with a UI-kill test (the image
-      boots into Oscairn in QEMU; separate services and the test are not done)
-- [ ] 6. The OSC bridge
+      boots into Oscairn in QEMU; separate services and the test are not done) (#42)
+- [ ] 6. The OSC bridge (#43)
 
 ## Current implementation
 

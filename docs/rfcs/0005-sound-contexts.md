@@ -20,7 +20,7 @@ Checked when built and tested; the sections below say how.
 - [x] Native contexts prepared from the plugin's CLAP presets ([draft 5](#presets)), with the SDK's
       discovery helper, the Basic Synth's factory presets and the presets indexed when plugins are scanned
 - [x] Presets listed in the desktop sound picker for every instrument
-- [ ] Automatic effect-chain transitions (with [RFC 0007](0007-effect-contexts.md))
+- [ ] Automatic effect-chain transitions (with [RFC 0007](0007-effect-contexts.md)) (#48)
 - [x] A snapshot's sounds prepared beside the playing ones (`oscairn.sound-snapshots/draft-1`,
       [below](#preparing-a-snapshot-beside)), by the SDK and the Basic Synth, and used across a
       Performance change ([RFC 0021](0021-sounds-performances-and-library.md#native-sound-contexts-across-a-change))

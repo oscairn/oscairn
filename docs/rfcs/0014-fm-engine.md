@@ -15,11 +15,11 @@ against every Data List parameter, Oscairn integration work and milestones, is
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Operator core, 88 algorithms, native sound contexts
-- [ ] 2. 8 operators, fixed frequency, FM-X EG and scaling
-- [ ] 3. Spectral forms
-- [ ] 4. Shared filter, FEG, PEG, LFOs
-- [ ] 5. Macro controls, mono, portamento; converter coverage
+- [ ] 1. Operator core, 88 algorithms, native sound contexts (#90)
+- [ ] 2. 8 operators, fixed frequency, FM-X EG and scaling (#90)
+- [ ] 3. Spectral forms (#92)
+- [ ] 4. Shared filter, FEG, PEG, LFOs (#94)
+- [ ] 5. Macro controls, mono, portamento; converter coverage (#96)
 
 The engine is developed in its fork (`oscairn-fm`); its own repository tracks work in progress.
 

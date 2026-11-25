@@ -18,10 +18,10 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. Profile and engine decision ([decision](#step-1-decision-baseline-profile-and-engine))
 - [x] 2. Native WAV/SFZ slice: the Oscairn Legacy Sampler ([status](#step-2-status))
-- [ ] 3. Multisample baseline and ordinary-SFZ conversion
-- [ ] 4. Demonstrated Oscairn extensions
-- [ ] 5. MODX M migration
-- [ ] 6. Yamaha write-back
+- [ ] 3. Multisample baseline and ordinary-SFZ conversion (#56)
+- [ ] 4. Demonstrated Oscairn extensions (#57)
+- [ ] 5. MODX M migration (#58)
+- [ ] 6. Yamaha write-back (#59)
 
 ## Outcome and boundary
 

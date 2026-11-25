@@ -1283,8 +1283,9 @@ value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's
 multiplied by `step` (or `encoderStep`). A control may also have a `navigate`: what it does in
 the app's lists, whatever the device ([The panel in lists](#the-panel-in-lists)): an `action`
 (`move`, `confirm` or `cancel`), optionally a `pane` (the list pane from the left, 0 first) and,
-on a switch that moves, `steps` a press moves by. An encoder's `navigate` is a move by its
-steps (a negative `step` turns it round); an analog control cannot navigate (an absolute
+on a switch that moves, `steps` a press moves by. An encoder's `navigate` is a move in its direction by
+1, or by 4 while its turns follow within 50 ms (`kTurnFastGap`, `TurnAcceleration` in the reader; the
+panel's own steps are not used) (a negative `step` turns it round); an analog control cannot navigate (an absolute
 position has no steps; not yet). An analog or switch control may have `"invert": true`, for a
 normally-closed pedal: its position reads 1 minus itself and a press reads as off (the map refuses
 it on an encoder, which has a negative `step`, and with a `navigate`). A device with no entry for a role does not have that control.
@@ -1348,7 +1349,7 @@ the controls' names are as sure as the rest of the map; what each does on the un
 
 | Control | Map entry | In a list |
 |---|---|---|
-| VALUE dial | `data`, encoder 6 | moves the cursor of the pane last touched by the message's steps (up to 6, so a fast turn goes fast) |
+| VALUE dial | `data`, encoder 6 | moves the cursor of the pane last touched 1 a message, 4 while turns follow within 50 ms (the reader's own acceleration, not the panel's steps) |
 | E1, the knob at the left under the screen | `screen:1`, encoder 0 | moves the first (left) pane's cursor |
 | E6, at the right | `screen:6`, encoder 5 | moves the last (right) pane's cursor |
 | E1 and E6 pushed | `pushE1`, `pushE6` | confirm in the first and the last pane |

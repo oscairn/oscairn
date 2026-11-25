@@ -148,9 +148,18 @@ namespace
         {
             auto nav = [&](std::array<uint8_t, 4> m) { return decode(fantom, m).navigation; };
             const auto dial = nav({0x83, 6, 0xF << 3, 0xD});    // the VALUE dial, a step of -3
-            check(dial && dial->action == Navigation::Action::Move && dial->pane == -1 && dial->steps == -3, "the VALUE dial moves the focused list by its steps");
+            check(dial && dial->action == Navigation::Action::Move && dial->pane == -1 && dial->steps == -1, "the VALUE dial moves the focused list one item, whatever its step (a fast turn's -3)");
             const auto left = nav({0x83, 0, 0, 2}), right = nav({0x83, 5, 0, 1});
-            check(left && left->pane == 0 && left->steps == 2 && right && right->pane == 1 && right->steps == 1, "E1 moves pane 0 and E6 pane 1");
+            check(left && left->pane == 0 && left->steps == 1 && right && right->pane == 1 && right->steps == 1, "E1 moves pane 0 and E6 pane 1");
+            check(decode(fantom, {0x83, 0, 0, 4}).navigation->steps == 1 && decode(fantom, {0x83, 0, 0, 4}).input.value == 4 * fantom.encoderStep, "a step of 4 moves a list one item and a value by its accelerated amount");
+            {
+                using namespace std::chrono;
+                TurnAcceleration turn;
+                const auto t = steady_clock::now();
+                check(turn.steps(6, 1, t) == 1 && turn.steps(6, 1, t + 20ms) == kTurnFastSteps && turn.steps(6, 1, t + 40ms) == kTurnFastSteps, "a burst of fast detents steps by the accelerated amount after the first");
+                check(turn.steps(6, 1, t + 40ms + kTurnFastGap) == 1 && turn.steps(6, 1, t + 50ms + kTurnFastGap) == kTurnFastSteps, "a slower detent steps by one at once");
+                check(turn.steps(6, -1, t + 60ms + kTurnFastGap) == -1 && turn.steps(0, 1, t + 61ms + kTurnFastGap) == 1, "a turn the other way, or another knob, starts at one");
+            }
             check(!nav({0x83, 2, 0, 1}) && !nav({0x83, 0, 0, 0}), "E3 has none, and an encoder step of 0 is not a move");
             check(nav({0xA2, 40, 0, 0}) && nav({0xA2, 40, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 40, 0, 0})->pane == 0 && nav({0xA2, 57, 0, 0})->pane == 1, "E1's push confirms pane 0 and E6's pane 1");
             check(nav({0xA2, 62, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 62, 0, 0})->pane == -1 && nav({0xA2, 55, 0, 0})->action == Navigation::Action::Cancel, "ENTER confirms and EXIT cancels");
@@ -175,9 +184,9 @@ namespace
                 {"kind": "switch", "id": 24, "control": "pad:1"},
                 {"kind": "switch", "id": 25, "control": "record"})"));
             auto nav = [&](std::array<uint8_t, 4> m) { return decode(other, m).navigation; };
-            check(nav({0x80, 1, 0x7F, 0}) && nav({0x80, 1, 0x7F, 0})->steps == -1 && nav({0x80, 1, 5, 0})->steps == 5 && nav({0x80, 1, 5, 0})->pane == -1, "a jog dial's turns move the focused list");
+            check(nav({0x80, 1, 0x7F, 0}) && nav({0x80, 1, 0x7F, 0})->steps == -1 && nav({0x80, 1, 5, 0})->steps == 1 && nav({0x80, 1, 5, 0})->pane == -1, "a jog dial's turns move the focused list");
             check(nav({0x80, 13, 2, 0})->pane == 3 && nav({0x80, 12, 2, 0})->pane == 2 && nav({0x80, 10, 1, 0})->pane == 0, "four knobs, four panes");
-            check(nav({0x80, 11, 3, 0})->steps == -3, "a knob that turns the wrong way has a negative step, in the map");
+            check(nav({0x80, 11, 3, 0})->steps == -1, "a knob that turns the wrong way has a negative step, in the map");
             check(nav({0x82, 20, 0, 0})->steps == -1 && nav({0x82, 21, 0, 0})->steps == 4, "buttons that move by the steps the map gives");
             check(nav({0x82, 22, 0, 0})->action == Navigation::Action::Confirm && nav({0x82, 23, 0, 0})->action == Navigation::Action::Cancel && !nav({0x82, 24, 0, 0}), "OK confirms, BACK cancels");
             check(decode(other, {0x82, 25, 0, 0}).control == "record", "any button can be the record button: the map names it");

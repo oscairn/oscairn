@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -85,6 +86,22 @@ namespace oscairn
     };
     PanelEvent decode(const PanelMap&, const std::array<uint8_t, 4>& message);
 
+    // Our own acceleration for an encoder that moves a list (a PanelEvent's `navigation`): decode gives
+    // one step per message in its direction, and a message that follows the last of the same encoder and
+    // direction within kTurnFastGap steps kTurnFastSteps instead of one. A slower one, a first one or a
+    // turn the other way steps by one at once. (The panel's own acceleration lingers about a second;
+    // this does not.) A value knob keeps the panel's delta, which is not touched here.
+    constexpr std::chrono::milliseconds kTurnFastGap{50};
+    constexpr int kTurnFastSteps = 4;
+    class TurnAcceleration
+    {
+    public:
+        int steps(uint32_t id, int direction, std::chrono::steady_clock::time_point now);
+    private:
+        struct Last { std::chrono::steady_clock::time_point at; int direction = 0; };
+        std::unordered_map<uint32_t, Last> last_;
+    };
+
     // The panel's device is held by one long-lived process, oscairn-panel-holder (docs/fantom-0.md,
     // "The panel holder"): Roland's driver registers the panel's address only while the device is
     // open, the panel stops reporting after it has been left unheld for a while, and a second open
@@ -157,6 +174,7 @@ namespace oscairn
         // The reader thread's own.
         std::array<uint8_t, 4> frame_{};
         size_t have_ = 0;
+        TurnAcceleration turns_;
         struct Analog { int64_t value = -1; int direction = 0; }; // the last value passed on, and which way it moved
         std::unordered_map<uint32_t, Analog> analog_;
         int64_t window_ = 0; uint32_t logged_ = 0; uint64_t hidden_ = 0; // the log's rate limit, per second

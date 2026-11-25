@@ -224,6 +224,14 @@ namespace oscairn
         return p;
     }
 
+    int TurnAcceleration::steps(uint32_t id, int direction, std::chrono::steady_clock::time_point now)
+    {
+        auto& l = last_[id];
+        const bool fast = l.direction == direction && now - l.at < kTurnFastGap;
+        l = {now, direction};
+        return direction * (fast ? kTurnFastSteps : 1);
+    }
+
     PanelEvent decode(const PanelMap& map, const std::array<uint8_t, 4>& message)
     {
         using Kind = PanelMap::Kind;
@@ -250,7 +258,7 @@ namespace oscairn
         if(c->navigate)
         {
             auto nav = *c->navigate;
-            if(e.kind == Kind::Encoder) nav.steps = int(e.value) * (c->step < 0 ? -1 : 1);
+            if(e.kind == Kind::Encoder) nav.steps = ((e.value > 0) - (e.value < 0)) * (c->step < 0 ? -1 : 1); // one item per message: the panel's faster turns send more
             if(e.kind == Kind::SwitchOff || (e.kind == Kind::Encoder && nav.steps == 0)) return e;
             e.navigation = nav;
         }
@@ -552,6 +560,8 @@ namespace oscairn
                 }
                 else ++hidden_;
             }
+            if(e.kind == PanelMap::Kind::Encoder && e.navigation && e.navigation->steps != 0)
+                e.navigation->steps = turns_.steps(e.id, e.navigation->steps > 0 ? 1 : -1, std::chrono::steady_clock::now());
             if(sink_) sink_(e);
         }
     }

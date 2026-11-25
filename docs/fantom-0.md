@@ -1435,7 +1435,9 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   **Wheels and lever.** The panel map names WHEEL1 (analog 5, the id the panel's own test tool calls
   WHEEL1; the owner calls it the pitch wheel, all the way to the left, to be confirmed by moving it
   and reading `controllers.get`) `wheel:1` and WHEEL2 (analog 6) `wheel:2`: the logical pitch and
-  modulation controls that Performances, assignments, `passes` and a part's `receive` mean. The lever's
+  modulation controls that Performances, assignments, `passes` and a part's `receive` mean. WHEEL2's raw
+  value falls as it is pushed away from the player, so its entry has `invert`: at the top it is full
+  modulation, at the bottom none (the owner, 2026-11-25: read as it came, the top was off). The lever's
   side-to-side (analog 7) and push (analog 8) are `lever:1` and `lever:2`, extra inputs the profile links
   to them by default (`follows: ["wheel:1", "wheel:2"]`): whatever a Performance sets for the pitch or
   mod wheel (its function, a part's assignment, `passes`, a part's `receive`) applies to the lever too.

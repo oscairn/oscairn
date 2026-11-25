@@ -172,7 +172,7 @@ to the source by the part's own assignment, with one target per box. The box law
 - A control a plugin's lane drives (`source`) may not have a table curve below it: refused at load
   and when edited, as the engine's flattened lane curves carry no points.
 
-The organ case: part 3's mod wheel (`wheel:2`) moving its rotary insertion's Speed (parameter 0 of
+The organ case: part 3's mod wheel (`wheel:2`) moving its rotary insertion's Speed (parameter id 256 (Speed) of
 the effects' tremolo-rotary in mode Rotary A, stored Slow), one unipolar box of ratio +64 through
 the measured curve of type 0, parameter 1 5, parameter 2 0 (`curves.json`, the box law's linear
 curve). Within the Performance's `controls` and `assignments`:
@@ -180,7 +180,7 @@ curve). Within the Performance's `controls` and `assignments`:
 ```json
 "controls": [
   {"id": 7, "part": 3, "name": "Mod Wheel", "value": 0, "targets": [
-    {"kind": "parameter", "node": "part-3-insertion-a", "param": 0,
+    {"kind": "parameter", "node": "part-3-insertion-a", "param": 256,
      "start": 0.5, "end": 1.5, "relative": true, "base": 0, "offIn": [],
      "curve": {"kind": "table", "points": [0,0.0078125,0.015625,0.0234375,0.03125,0.0390625,0.046875,0.0546875,0.0625,0.0703125,0.078125,0.0859375,0.09375,0.1015625,0.109375,0.1171875,0.125,0.1328125,0.140625,0.1484375,0.15625,0.1640625,0.171875,0.1796875,0.1875,0.1953125,0.203125,0.2109375,0.21875,0.2265625,0.234375,0.2421875,0.25,0.2578125,0.265625,0.2734375,0.28125,0.2890625,0.296875,0.3046875,0.3125,0.3203125,0.328125,0.3359375,0.34375,0.3515625,0.359375,0.3671875,0.375,0.3828125,0.390625,0.3984375,0.40625,0.4140625,0.421875,0.4296875,0.4375,0.4453125,0.453125,0.4609375,0.46875,0.4765625,0.484375,0.4921875,0.5,0.5078125,0.515625,0.5234375,0.53125,0.5390625,0.546875,0.5546875,0.5634765625,0.5712890625,0.5791015625,0.5869140625,0.5947265625,0.6025390625,0.6103515625,0.6181640625,0.626953125,0.634765625,0.642578125,0.650390625,0.658203125,0.666015625,0.673828125,0.681640625,0.6904296875,0.6982421875,0.7060546875,0.7138671875,0.7216796875,0.7294921875,0.7373046875,0.7451171875,0.75390625,0.76171875,0.76953125,0.77734375,0.78515625,0.79296875,0.80078125,0.80859375,0.8173828125,0.8251953125,0.8330078125,0.8408203125,0.8486328125,0.8564453125,0.8642578125,0.8720703125,0.880859375,0.888671875,0.896484375,0.904296875,0.912109375,0.919921875,0.927734375,0.935546875,0.9443359375,0.9521484375,0.9599609375,0.9677734375,0.9755859375,0.9833984375,0.9912109375,1]}}
   ]}

@@ -253,3 +253,121 @@ fn chain_at_rest_costs_no_request_and_no_frame() {
     assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
     assert_eq!(f.screen.frame(), None, "nothing is drawn at rest");
 }
+
+// WALK: every action the presets screen offers is reached and activated from Home with panel moves
+// only (move, confirm, no tap): the Performance tile and a part open Play and the Part screen, the
+// dial walks the Part screen to Insert effects and the chain to a plugin's Presets..., and then each
+// preset row is pressed — its real effect being `graph.replace` with that preset's URI (no commit
+// follows), the count taken from the screen's own rows (PartState), never a hard-coded one.
+#[test]
+fn every_preset_is_reached_and_pressed_from_home_by_panel_moves() {
+    let mut f = Fixture::new("chain-presets-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    // The Rhodes with a file and an id, so a reload is `graph.replace` with a real preset.
+    let graph = std::cell::RefCell::new(with_plugin(super::chain::marks_graph()));
+    let presets = std::cell::RefCell::new(json!({"presets": [
+        {"uri": "clap-preset:warm", "name": "Warm"},
+        {"uri": "clap-preset:smooth", "name": "Smooth"},
+        {"uri": "clap-preset:bright", "name": "Bright"},
+        {"uri": "clap-preset:hard", "name": "Hard"},
+    ]}));
+    // The presets the engine received a `graph.replace` for, in order: the walk's real effect.
+    let replaced: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "graph.replace" => {
+                    replaced.borrow_mut().push(r["params"]["preset"].as_str().unwrap_or_default().to_string());
+                    json!({"revision": 4})
+                }
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.borrow().clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => presets.borrow().clone(),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    let mut total = std::collections::BTreeMap::<&'static str, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &'static str, by: i64| {
+        *total.entry(key).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    // Moves the cursor until its row is `label`, then presses it, without touch.
+    let press_row = |f: &mut Fixture, nav: &mut dyn FnMut(&mut Fixture, &'static str, i64), label: &str| {
+        nav(f, "move", 1);
+        settle(f);
+        for _ in 0..30 {
+            let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+            if rows(&ui)[at].label == label {
+                nav(f, "confirm", 1);
+                settle(f);
+                return;
+            }
+            nav(f, "move", 1);
+            settle(f);
+        }
+        panic!("{label} never came under the cursor: {:?}", rows(&ui).iter().map(|r| r.label.clone()).collect::<Vec<_>>());
+    };
+    // Home → the Performance tile (pane 0) → Play.
+    nav(&mut f, "move", 0); // the first read is only a baseline
+    nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play → the first part → the Part screen.
+    nav(&mut f, "move:1", 0); // the parts pane's first read is a baseline
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 4, "a press on a part opens the Part screen");
+    // The Part screen's Insert effects opens the chain.
+    press_row(&mut f, &mut nav, "Insert effects");
+    assert_eq!(ui.get_screen(), 5, "Insert effects opens the chain");
+    // The chain's Rhodes opens its actions, whose Presets... opens the presets list.
+    press_row(&mut f, &mut nav, "2. Rhodes");
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Rhodes", "the press shows the plugin's actions");
+    press_row(&mut f, &mut nav, "Presets...");
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Rhodes: presets", "Presets... opens the presets list");
+    // The number of presets, from the screen's own rows, never a literal.
+    let n = rows(&ui).len();
+    let data = presets.borrow();
+    assert_eq!(n, data["presets"].as_array().unwrap().len(), "the screen shows one preset row per one it was given");
+    assert!(n > 1, "a walk needs more than one preset to prove it repeats");
+    for k in 0..n {
+        // The cursor dropped when the presets opened (or came back through the actions): show it and
+        // walk onto the k-th preset row.
+        for _ in 0..=k {
+            nav(&mut f, "move", 1);
+            settle(&mut f);
+        }
+        let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+        assert_eq!(at, k, "the cursor is on the {k}-th preset row: {:?}", rows(&ui).iter().map(|r| r.label.clone()).collect::<Vec<_>>());
+        nav(&mut f, "confirm", 1);
+        settle(&mut f);
+        let uri = data["presets"][k]["uri"].as_str().unwrap().to_string();
+        assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Rhodes", "pressing preset {k} is back on the plugin's actions");
+        assert_eq!(replaced.borrow().len(), k + 1, "preset {k}: exactly one reload");
+        assert_eq!(replaced.borrow().last(), Some(&uri), "preset {k}: the plugin reloaded with its uri");
+        if k + 1 < n {
+            // The press left the actions: Presets... again for the next one.
+            press_row(&mut f, &mut nav, "Presets...");
+            assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Rhodes: presets", "Presets... reopened for preset {}", k + 1);
+        }
+    }
+    // Every preset was reloaded, in the order the screen listed them, and none twice.
+    let wanted: Vec<String> = data["presets"].as_array().unwrap().iter().map(|p| p["uri"].as_str().unwrap().to_string()).collect();
+    assert_eq!(&*replaced.borrow(), &wanted, "each preset pressed once, in its row order");
+}
+

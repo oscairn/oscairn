@@ -239,13 +239,13 @@ namespace oscairn
     }
 
     // A parameter heard at the next block, its plain value as Session::applyParameter makes it.
-    void ControllerInput::send(const Key& k)
+    void ControllerInput::send(const Key& k, bool rounded)
     {
         const auto range = ranges_.find(k);
         if(range == ranges_.end()) return;
         const auto& r = range->second;
         double v = std::clamp(r.minimum + values_[k] * (r.maximum - r.minimum), r.minimum, r.maximum);
-        if(r.stepped) v = std::trunc(v);
+        if(r.stepped) v = rounded ? std::round(v) : std::trunc(v);
         queue(k, v);
     }
 
@@ -287,7 +287,7 @@ namespace oscairn
         auto apply = [&](const MacroTarget& m, double x) {
             switch(m.kind)
             {
-            case MacroTarget::Kind::Parameter: { const Key k{int(Assignment::Kind::Parameter), m.node, m.param, 0}; if(values_.count(k)) { values_[k] = x; unapplied_.insert(k); send(k); } break; }
+            case MacroTarget::Kind::Parameter: { const Key k{int(Assignment::Kind::Parameter), m.node, m.param, 0}; if(values_.count(k)) { values_[k] = x; unapplied_.insert(k); send(k, true); } break; }
             case MacroTarget::Kind::PartLevel: setFader(m.part, x, {}); break;
             case MacroTarget::Kind::PartMute: setFader(m.part, {}, x >= .5); break;
             case MacroTarget::Kind::SendLevel:

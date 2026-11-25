@@ -25,14 +25,14 @@ Checked when built and tested; the sections below say how.
       `panicOnHardware`). Apps on a panel keep running
       with their state; the switcher brings one forward or closes it. Back goes Home for now.
       Not yet: apps putting their own actions in the bar, the clock, MIDI activity, quick
-      settings, banners)
+      settings, banners) (#68)
 - [ ] 2. The launcher as an app answering `oscairn.home`, with home cards, and a fallback the shell draws itself
       (built: a launcher inside the app, `Launcher.cpp`, with the profile's apps as tiles and a
-      line of state each; not yet an app of its own, no cards)
-- [ ] 3. The flow language's parts: sheets, dialogs, menus, toasts and banners, shared by every app
-- [ ] 4. Physical buttons: each profile's buttons opening actions, and the top bar showing only what they lack
-- [ ] 5. A second launcher installed and chosen; a profile that fixes its launcher
-- [ ] 6. Compact: the same flow on a small screen with encoders
+      line of state each; not yet an app of its own, no cards) (#68)
+- [ ] 3. The flow language's parts: sheets, dialogs, menus, toasts and banners, shared by every app (#70)
+- [ ] 4. Physical buttons: each profile's buttons opening actions, and the top bar showing only what they lack (#70)
+- [ ] 5. A second launcher installed and chosen; a profile that fixes its launcher (#72)
+- [ ] 6. Compact: the same flow on a small screen with encoders (#72)
 
 ## Problem
 

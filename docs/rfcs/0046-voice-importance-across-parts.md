@@ -37,8 +37,8 @@ Checked when built and tested; the sections below say how.
 - [x] 5. Tests: the owner's scenario in every placement mode and in process, through real workers
       (`voice-importance-scenario`); a plugin without the report; no flapping over 2,000 blocks;
       idle cost ([as built](#as-built-steps-3-to-5))
-- [ ] 6. The plugins session: Sampler, VA and FM publish through the helper, a release each
-- [ ] 7. On the keyboard: the scenario played and measured
+- [ ] 6. The plugins session: Sampler, VA and FM publish through the helper, a release each (#206)
+- [ ] 7. On the keyboard: the scenario played and measured (#208)
 
 ## Problem
 

@@ -21,24 +21,24 @@ Checked when built and tested; the sections below say how.
 - [ ] 1. The profile's `sections` and a group's `section`; a part's `section` binding in the
       Performance; `sections.get` and `sections.bind`; the part-property functions (on/off,
       volume, octave, split and layer); a test profile and panel layout standing in for a
-      sectioned board on the desktop, its controls played through `controllers.play`
+      sectioned board on the desktop, its controls played through `controllers.play` (#187)
 - [ ] 2. Declared-role functions with today's roles (cutoff, resonance, attack, release, EQ,
       mix) and guessed ones, dark controls, `takePositions`, shared groups with `select:`
       buttons, and RFC 0042's slider set, direction, pickup and places on a section's own
-      controls
-- [ ] 3. Auto-binding on open, the prompt when it is not obvious, `sections.auto`
+      controls (#187)
+- [ ] 3. Auto-binding on open, the prompt when it is not obvious, `sections.auto` (#187)
 - [ ] 4. Sound select within a section: its category, favorites, the section display, the
-      section's default Sound, an empty section's on/off creating a part, and locked sections
+      section's default Sound, an empty section's on/off creating a part, and locked sections (#189)
 - [ ] 5. `oscairn.ui` draft 8: the organ, piano and effect roles below; a test organ plugin
-      declaring them
+      declaring them (#189)
 - [ ] 6. Effects per section: insertion effects on and off, their amount, and sends to the
-      Performance's reverb and variation buses
+      Performance's reverb and variation buses (#191)
 - [ ] 7. Play for a sectioned device, on the panel and compact surfaces; the profile's lights and
-      section displays driven where the hardware takes them
+      section displays driven where the hardware takes them (#191)
 - [ ] 8. The same Performance on the desktop, on a board with other sections and on a board with
-      none; a controller profile with a section of its own
+      none; a controller profile with a section of its own (#193)
 - [ ] 9. Overriding section controls: a Performance's `assignments` by section identity, the
-      device's remaps in `sections.json`, the Settings page
+      device's remaps in `sections.json`, the Settings page (#193)
 
 ## Problem
 

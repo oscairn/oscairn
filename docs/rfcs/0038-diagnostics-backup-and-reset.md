@@ -20,16 +20,16 @@ to it.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Logs in RAM: every process's output captured by its supervisor, one line format, levels, a cap per source
-- [ ] 2. Bounded persistence: warnings and errors kept across a reboot or a power cut, the last boots kept, flash writes measured
-- [ ] 3. Crash reports: a minidump for any crashing process, symbolized off the device from a symbol store per release
+- [ ] 1. Logs in RAM: every process's output captured by its supervisor, one line format, levels, a cap per source (#143)
+- [ ] 2. Bounded persistence: warnings and errors kept across a reboot or a power cut, the last boots kept, flash writes measured (#143)
+- [ ] 3. Crash reports: a minidump for any crashing process, symbolized off the device from a symbol store per release (#145)
 - [ ] 4. The diagnostics screen: versions, storage, recent problems and the deadline-miss history
   (begun: About in the Settings app shows Oscairn's version, its source commit, the engine's
-  version and the license)
-- [ ] 5. The support file: one action, reviewed before it is written, saved to USB, the computer or the web UI
-- [ ] 6. Backup and restore of the whole device, onto the same device, another model or the desktop
-- [ ] 7. Secrets in a backup: keys, pairings and network credentials, encrypted with a passphrase
-- [ ] 8. Factory reset: settings only, or everything, with an erase as thorough as the hardware allows
+  version and the license) (#147)
+- [ ] 5. The support file: one action, reviewed before it is written, saved to USB, the computer or the web UI (#147)
+- [ ] 6. Backup and restore of the whole device, onto the same device, another model or the desktop (#149)
+- [ ] 7. Secrets in a backup: keys, pairings and network credentials, encrypted with a passphrase (#149)
+- [ ] 8. Factory reset: settings only, or everything, with an erase as thorough as the hardware allows (#205)
 
 ## Problem
 

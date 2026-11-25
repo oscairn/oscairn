@@ -24,16 +24,16 @@ does not have.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Measuring latency: `cyclictest` in a test image, the engine's audio-device underruns in `session.status`
-- [ ] 2. A `PREEMPT_RT` kernel on `instrument` and `pass-through` images, with threaded interrupts
-- [ ] 3. Audio cores: an isolated cpuset partition, `nohz_full`, interrupts kept off them, the engine and workers on them
-- [ ] 4. Frequency and idle states held on the audio cores while anything sounds; the priority table
-- [ ] 5. The supervisor: `oscairn-session` replaced by a small program under BusyBox init, engine and shell as siblings
-- [ ] 6. Time: the time state, its sources, the saved floor, and each feature's behavior without a known time
-- [ ] 7. Security: a CVE report per image, the kernel and Buildroot version policy, security images on a cadence
-- [ ] 8. Licenses: `legal-info` per image release, published with the image; a Licenses screen; the written offer
-- [ ] 9. The SDK: a sysroot and toolchain per image, a CMake toolchain file, a CI template for every platform
-- [ ] 10. Optional hardware built per product: build options, profile consistency, capabilities reported, a test that a feature left out leaves nothing behind
+- [ ] 1. Measuring latency: `cyclictest` in a test image, the engine's audio-device underruns in `session.status` (#109)
+- [ ] 2. A `PREEMPT_RT` kernel on `instrument` and `pass-through` images, with threaded interrupts (#109)
+- [ ] 3. Audio cores: an isolated cpuset partition, `nohz_full`, interrupts kept off them, the engine and workers on them (#111)
+- [ ] 4. Frequency and idle states held on the audio cores while anything sounds; the priority table (#111)
+- [ ] 5. The supervisor: `oscairn-session` replaced by a small program under BusyBox init, engine and shell as siblings (#113)
+- [ ] 6. Time: the time state, its sources, the saved floor, and each feature's behavior without a known time (#115)
+- [ ] 7. Security: a CVE report per image, the kernel and Buildroot version policy, security images on a cadence (#117)
+- [ ] 8. Licenses: `legal-info` per image release, published with the image; a Licenses screen; the written offer (#117)
+- [ ] 9. The SDK: a sysroot and toolchain per image, a CMake toolchain file, a CI template for every platform (#119)
+- [ ] 10. Optional hardware built per product: build options, profile consistency, capabilities reported, a test that a feature left out leaves nothing behind (#121)
 
 Steps 1 and 2, partly built: `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` gives a defconfig the
 `PREEMPT_RT` kernel (`CONFIG_EXPERT` and `CONFIG_PREEMPT_RT`, no patch on 6.18), and the test

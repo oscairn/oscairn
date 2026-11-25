@@ -30,13 +30,13 @@ Checked when built and tested; the sections below say how.
       were refused. Size [below](#the-tls-library). Not yet, so the gate is not met:
       `control-repository-web` run inside the booted image, which has no Python; the
       last-known-time rule ([below](#https-fetching-and-the-clock)); the trusted case on macOS,
-      which needs the test authority in the keychain; Mbed TLS 4.1, an open question)
-- [ ] 2. The firewall: default deny, rules generated from the enabled services
-- [ ] 3. The network gateway: a process apart from the engine, WebSocket over TLS, limits
-- [ ] 4. Pairing, client keys, revocation and sessions
-- [ ] 5. Discovery, and the other listeners (OSC, Link, network MIDI) under the same rules
-- [ ] 6. Robustness measured: a LAN flood and malformed input while playing, no missed deadlines
-- [ ] 7. Keys at rest, and network services patched through system updates
+      which needs the test authority in the keychain; Mbed TLS 4.1, an open question) (#151)
+- [ ] 2. The firewall: default deny, rules generated from the enabled services (#153)
+- [ ] 3. The network gateway: a process apart from the engine, WebSocket over TLS, limits (#155)
+- [ ] 4. Pairing, client keys, revocation and sessions (#155)
+- [ ] 5. Discovery, and the other listeners (OSC, Link, network MIDI) under the same rules (#155)
+- [ ] 6. Robustness measured: a LAN flood and malformed input while playing, no missed deadlines (#157)
+- [ ] 7. Keys at rest, and network services patched through system updates (#157)
 
 ## Problem
 

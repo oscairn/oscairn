@@ -15,14 +15,14 @@ network control ([RFC 0026](0026-network-control-and-web-ui.md)) and the system 
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. Drives read-only: FAT32, exFAT, ext4 and NTFS mounted safely without a desktop; drives as
-      Library sources; samples and `.olib` files imported from them
-- [ ] 2. Writing to drives: exports and recordings, Eject, and a drive pulled midway
-- [ ] 3. The file picker: apps get content from a drive as store identities, never paths
-- [ ] 4. Storage accounting: what fills the data partition, a floor, admission and cleanup
-- [ ] 5. The data partition's mount and wear: write patterns measured and bounded
-- [ ] 6. The USB device: class-compliant audio and MIDI, with a network link, to a computer
-- [ ] 7. Transfer through the web UI: upload packages and samples, download recordings and exports
-- [ ] 8. Desktop and device sync, on RFC 0026's library sync
+      Library sources; samples and `.olib` files imported from them (#133)
+- [ ] 2. Writing to drives: exports and recordings, Eject, and a drive pulled midway (#133)
+- [ ] 3. The file picker: apps get content from a drive as store identities, never paths (#135)
+- [ ] 4. Storage accounting: what fills the data partition, a floor, admission and cleanup (#137)
+- [ ] 5. The data partition's mount and wear: write patterns measured and bounded (#137)
+- [ ] 6. The USB device: class-compliant audio and MIDI, with a network link, to a computer (#139)
+- [ ] 7. Transfer through the web UI: upload packages and samples, download recordings and exports (#141)
+- [ ] 8. Desktop and device sync, on RFC 0026's library sync (#141)
 
 ## Problem
 

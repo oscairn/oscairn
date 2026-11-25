@@ -29,32 +29,32 @@ Checked when built and tested; the sections below say how.
       handed; the events of a block not handed carried to the next; a short fade instead of a
       cut ([miss policy](#the-miss-policy), [status](#step-4-status))
 - [ ] 5. "Too slow" no longer restarts a worker that is making progress
-      ([when a restart is right](#when-a-restart-is-right))
+      ([when a restart is right](#when-a-restart-is-right)) (#195)
 - [x] 6. The allowance from the block's deadline and the graph's waves, behind its setting
       (`compute.workerDeadline`); no wait on a worker past the callback's deadline, always
       ([status](#the-allowance-from-the-deadline-step-6-status))
 - [ ] 7. One profile field for the audio cores; the display and the app off them
       ([core placement](#core-placement))
 - [ ] 8. The extra block entered and left under measured load, with hysteresis, per instance
-      ([entering and leaving](#entering-and-leaving))
+      ([entering and leaving](#entering-and-leaving)) (#197)
 - [ ] 9a. Fair voices between the parts of a shared instance: a share per context even without a
-      CPU budget ([fair voices](#fair-voices-between-the-parts-of-one-instance))
-- [ ] 9. Share by default, split under load ([sharing](#share-by-default-split-under-load))
+      CPU budget ([fair voices](#fair-voices-between-the-parts-of-one-instance)) (#199)
+- [ ] 9. Share by default, split under load ([sharing](#share-by-default-split-under-load)) (#199)
 - [x] 9b. The same layout on every load: which parts share an instance is the Performance's
       alone, whatever played before or is loaded already
       ([status](#the-same-layout-on-every-load-2026-11-13))
 - [ ] 10. Readiness: a Sound not playable until prepared and warmed up, shown as loading
-      ([first-use stalls](#start-up-and-first-use-stalls))
+      ([first-use stalls](#start-up-and-first-use-stalls)) (#201)
 - [ ] 11. The timing report: each part's latency state, misses by cause, panics caused by misses
-      ([what the tools report](#what-the-timing-tools-must-report))
+      ([what the tools report](#what-the-timing-tools-must-report)) (#202)
 - [ ] 12. The no-glitch guard, in the engine core in Rust ([the guard](#the-no-glitch-guard-2026-11-14)):
   - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
   - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
   - [x] 12c. An instrument's lane limit leaves room for the chain after it
   - [x] 12d. The callback reaching its deadline a trigger, across every lane (a margin by profile)
   - [x] 12e. Effects at their cost awake, and a part's buses on its chain at admission
-  - [ ] 12f. Bursts at note-on: a note's start cost counted when it starts (not done)
-  - [ ] 12g. Step 5 above: "too slow" never restarts a worker making progress (not done)
+  - [ ] 12f. Bursts at note-on: a note's start cost counted when it starts (not done) (#204)
+  - [ ] 12g. Step 5 above: "too slow" never restarts a worker making progress (not done) (#195)
   - [x] 12h. A chord from silence sounds whole: a voice-budget limit never below the voices admitted on the estimate alone
   - [x] 12i. Limit first: lost blocks and the deadline lower a voice-budget plugin's limit, a fade only as the backstop
   - [x] 12j. Each sound context of a shared instance its own limit
@@ -63,7 +63,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12m. A plugin without the voice budget held under what lost, across keys struck again
   - [x] 12n. A voice comes back only where the measurements say it fits; a probe that loses doubles its wait until release
   - [x] 12o. The soft limit's fades leave each connection its last note, so every plugin of a Performance in one worker never leaves a part silent
-- [ ] 13. Plugin groups: a worker carries one or more plugins, the profile decides how many processes ([plugin groups](#plugin-groups-2026-11-15))
+- [x] 13. Plugin groups: a worker carries one or more plugins, the profile decides how many processes ([plugin groups](#plugin-groups-2026-11-15)) (built 2026-11-15 to 2026-11-16: e30752fb, 46abf2e2, 7a8943f8; sub-steps 13a to 13f)
   - [x] 13a. Nodes of one worker process whose audio flows between them rendered there in one round trip, any routing, sample for sample as apart
   - [x] 13b. A publisher on the own-host list (`com.example.*`): its plugins always in workers of their own
   - [x] 13c. `compute.workers` `chain`: a part's chain placed in one process as it loads

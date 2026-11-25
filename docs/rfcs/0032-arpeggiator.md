@@ -17,12 +17,12 @@ measurement approach and IP rules of [RFC 0013](0013-awm2-class-sample-engine.md
 Checked when built and tested; the sections below say how.
 
 - [x] 1. SysEx between plugins: the graph and workers carry `CLAP_EVENT_MIDI_SYSEX`
-- [ ] 2. The plugin in a part: phrase playback, state and push, hosted and tested in Oscairn
+- [x] 2. The plugin in a part: phrase playback, state and push, hosted and tested in Oscairn (built: `oscairn/arpeggiator` 0424d492, v0.1.8, hosted in Oscairn by its `tests/oscairn/`)
 - [x] 3. A shared beat grid while the transport is stopped, so parts start together
-- [ ] 4. Conversion: each Part's arpeggio settings and phrases placed by the converter
-- [ ] 5. Measured against the reference: the most used settings, then every playback rule
-- [ ] 6. User phrases: files, MIDI import and recorded notes, as library items
-- [ ] 7. The phrase editor: a grid widget, operations that return data, and undo
+- [ ] 4. Conversion: each Part's arpeggio settings and phrases placed by the converter (#95)
+- [ ] 5. Measured against the reference: the most used settings, then every playback rule (#97)
+- [ ] 6. User phrases: files, MIDI import and recorded notes, as library items (#99)
+- [ ] 7. The phrase editor: a grid widget, operations that return data, and undo (#99)
 - [ ] 8. Motion-sequencer lanes on the same engine (a later RFC)
 
 ## Problem

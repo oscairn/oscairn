@@ -13,13 +13,13 @@ reliability levels ([RFC 0027](0027-reliability-levels.md)), internationalizatio
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Bluetooth as an optional part of the build and the image, reported as capabilities, absent where it is not built or has no radio
-- [ ] 2. Bluetooth MIDI on the desktop: Bluetooth endpoints, selectors and profiles, reconnection
-- [ ] 3. Bluetooth MIDI on the device: BlueZ, pairing through the engine, the Settings page
-- [ ] 4. Bluetooth audio out, as a mirror of Main, with drift correction and the latency shown
-- [ ] 5. Bluetooth audio in from a phone, as an input like any other
-- [ ] 6. Pairing on products with a small screen or none
-- [ ] 7. LE Audio (LC3), where the radio and the stack support it
+- [ ] 1. Bluetooth as an optional part of the build and the image, reported as capabilities, absent where it is not built or has no radio (#123)
+- [ ] 2. Bluetooth MIDI on the desktop: Bluetooth endpoints, selectors and profiles, reconnection (#125)
+- [ ] 3. Bluetooth MIDI on the device: BlueZ, pairing through the engine, the Settings page (#127)
+- [ ] 4. Bluetooth audio out, as a mirror of Main, with drift correction and the latency shown (#129)
+- [ ] 5. Bluetooth audio in from a phone, as an input like any other (#129)
+- [ ] 6. Pairing on products with a small screen or none (#131)
+- [ ] 7. LE Audio (LC3), where the radio and the stack support it (#131)
 
 ## Problem
 

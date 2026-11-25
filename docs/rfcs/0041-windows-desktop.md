@@ -12,15 +12,15 @@ in progress on macOS), reliability levels ([RFC 0027](0027-reliability-levels.md
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. The core libraries built with MSVC, and the core and control tests passing in one
-  process: the engine in the app, plugins in-process, no workers
-- [ ] 2. The desktop app on Windows: play and edit a Performance with bundled plugins
+  process: the engine in the app, plugins in-process, no workers (#165)
+- [ ] 2. The desktop app on Windows: play and edit a Performance with bundled plugins (#165)
 - [ ] 3. The cross-platform process, shared-memory, wake and local-IPC layer; the engine and
   plugin workers as separate processes again, the control socket over a named pipe with
-  per-user access
-- [ ] 4. Real-time audio on Windows: MMCSS thread priority, timer resolution, page locking
-- [ ] 5. Plugin windows embedded by HWND, and the scanner's isolated helper processes
+  per-user access (#167)
+- [ ] 4. Real-time audio on Windows: MMCSS thread priority, timer resolution, page locking (#167)
+- [ ] 5. Plugin windows embedded by HWND, and the scanner's isolated helper processes (#169)
 - [ ] 6. `windows-x86_64` builds in packages and plugin CI; the Windows CI job green, including
-  the Dexed, Surge XT and sfizz forks building CLAP for Windows
+  the Dexed, Surge XT and sfizz forks building CLAP for Windows (#169)
 
 ## Problem
 

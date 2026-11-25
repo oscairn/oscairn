@@ -94,7 +94,7 @@ Checked when built and tested; the sections below say how.
       packages on a device (a sample piece is downloaded per package that has it), a piece kept
       whole when an install fails after it (only a piece cut short is resumed); the free-space
       refusal is tested by a claim, not a full disk, and a drive pulled midway by a piece missing,
-      not a drive removed)
+      not a drive removed) (#74)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
       (built 2026-11-06: fetching through the host's transport, JUCE's URL streams: the system's
       HTTPS on macOS, libcurl with Mbed TLS on Linux since RFC 0039's step 1 (2026-11-07, which
@@ -112,8 +112,8 @@ Checked when built and tested; the sections below say how.
       2026-11-12: per-platform fetches, each piece from the mirrors, the blob base and the
       address in turn and resumed by a range request (step 1's pieces).
       Not yet: fetching the root from a mirror when the repository's own address
-      is down)
-- [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
+      is down) (#74)
+- [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking (#76)
 - [ ] 4. Revocation lists and the takedown process
       (built 2026-11-11: the list's format specified ([the revocation list](#the-revocation-list));
       read with the root, by its hash, a missing or malformed one refusing the repository; kept per
@@ -130,7 +130,7 @@ Checked when built and tested; the sections below say how.
       `control-repository`. Not yet: the takedown policy, the
       official list in system images, revoked builds in what is installed, remembering revoked
       index keys; the official list applying to another repository is not tested, nor the publish
-      job removing a ready-made archive already uploaded (no test runs the workflow))
+      job removing a ready-made archive already uploaded (no test runs the workflow)) (#77)
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
       (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
       Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
@@ -144,7 +144,7 @@ Checked when built and tested; the sections below say how.
       its actions, `packages.search` and `packages.get`, the index in the library's database,
       estimates and surfaces as filters, Show all, the Panel's own Catalog screen (the desktop
       dialog is drawn at touch sizes there); the gate's search on an instrument with no network
-      is not tested: listing still fetches the root)
+      is not tested: listing still fetches the root) (#79)
 - [ ] 6. Updates: packages, Performances' locks moved on explicitly, apps
       (built 2026-11-11 on the desktop: the Catalog's Update to the newest stable version this
       device can install, newer than the one installed; `desktop-gaps`, `control-repository`.
@@ -155,23 +155,23 @@ Checked when built and tested; the sections below say how.
       different build), with an explicit Install the repository's build after a confirmation
       naming both (`packages.install`'s `replace`); nothing updates on its own;
       `control-repository`, `desktop-gaps`. Not
-      yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps)
-- [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
-- [ ] 8. The official repository goes public: hosting, mirrors, policy
+      yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps) (#81)
+- [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source (#83)
+- [ ] 8. The official repository goes public: hosting, mirrors, policy (#85)
 - [ ] 9. Each version's plugins in the index; repositories' kept state keyed by their root key
       ([finding missing plugins](#finding-missing-plugins))
       (built 2026-11-11: serials seen and kept indexes keyed by root key and repository ID,
       version 1's moved once; `control-repository`. Not yet: each version's plugins, the index
-      builder's checks, an address-to-ID map for lookups)
+      builder's checks, an address-to-ID map for lookups) (#87)
 - [ ] 10. The repository hint, `pluginRepositories`, read, checked and kept in archives,
-      Performances and Sounds
-- [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins
-- [ ] 12. Offering the install: the Library, the Parts view, a hinted repository, the Setlist
+      Performances and Sounds (#87)
+- [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins (#89)
+- [ ] 12. Offering the install: the Library, the Parts view, a hinted repository, the Setlist (#89)
 - [ ] 13. Newer versions whose publisher says they open the saved state (`opensStateFrom`,
       [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)); decided
       2026-11-12 that a newer version is offered only with the claim, never by guessing
       ([decided](#decided-by-the-owner-2026-11-12-on-finding-missing-plugins); the claim itself is
-      RFC 0043's)
+      RFC 0043's) (#91)
 - [ ] 14. [Preinstalled packages](#preinstalled-packages): a release ships a repository snapshot
       and the engine installs from it at its first start
       (built 2026-11-11: the snapshot in `Contents/Resources/Preinstalled` (macOS) or
@@ -193,7 +193,7 @@ Checked when built and tested; the sections below say how.
       makes its snapshot with that script from a local repository). The dmg was not rebuilt.
       Not yet: Linux builds of the packages and a Linux release ([known
       gaps](#what-ships)); the device image; the starter library of Performances and
-      [its dependencies](../library-archive.md#package-dependencies), specified, not built)
+      [its dependencies](../library-archive.md#package-dependencies), specified, not built) (#93)
 
 ## Problem
 

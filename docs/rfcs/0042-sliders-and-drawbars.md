@@ -16,23 +16,23 @@ Checked when built and tested; the sections below say how.
 
 - [ ] 1. The engine reports each physical control's last reported position, raw, beside the
       value it plays (`controllers.get` and the `controllers` topic); Play shows both for a
-      control under pickup
+      control under pickup (#171)
 - [ ] 2. The `element` fader mode follows its own part (`controllers.view`'s `faderPart`), a
       Play button switches the sliders between the mixer and it, part selection keeps up, and
-      the default stays part levels
+      the default stays part levels (#171)
 - [ ] 3. The slider set: `oscairn.ui` draft 7 (`OSCAIRN_ROLE_LEVEL_9` and `reversed`), a part's
       `roles` and `slidersReversed` in the next format versions, `parts.roles`, the part
       editor's **Sliders** step; Play draws the slider row for the followed part, value and
-      physical position each
+      physical position each (#173)
 - [ ] 4. The sliders and the first free assignable knob take the set in overflow order;
       following a part with a reversed set reverses the sliders, and following another part
-      puts them back
+      puts them back (#173)
 - [ ] 5. A Performance and a scene can pin the sliders to one part; a nine-fader controller
-      profile maps all nine; the slider row meets the design language's keyboard and touch rules
+      profile maps all nine; the slider row meets the design language's keyboard and touch rules (#173)
 - [ ] 6. `oscairn.ui` draft 6, a plugin's own pages and tabs and its values' icons: the header,
       both CLAP hosts asking for draft 6 first and reading its table through the draft 5
       members, and the vendored copies are in; the host does not yet call `tab_count`, `tab`,
-      `param_tab` or `value_icon`, nor draw declared tabs or icons
+      `param_tab` or `value_icon`, nor draw declared tabs or icons (#175)
 
 ## Problem
 

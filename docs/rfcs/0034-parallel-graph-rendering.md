@@ -10,7 +10,7 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. Waves: independent nodes start together; plugins in workers render at the same time ([status](#step-1-status))
 - [x] 2. Audio helpers: plugins in the engine's process render at the same time, on real-time helper threads ([status](#step-2-status))
-- [ ] 3. Measured on the target (a four-core KICK-class board): block time and idle CPU
+- [ ] 3. Measured on the target (a four-core KICK-class board): block time and idle CPU (#107)
 
 ## Problem
 

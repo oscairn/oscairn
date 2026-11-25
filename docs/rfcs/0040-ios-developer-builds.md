@@ -11,11 +11,11 @@ and the responsive layout of the device profiles ([RFC 0024](0024-device-profile
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. The engine, the in-process host and the core tests built for iOS, run in the Simulator
-- [ ] 2. The app on an iPad: one process, bundled plugins, the audio session, CoreMIDI
-- [ ] 3. Packages on iOS: data packages installed, plugin packages added before signing
-- [ ] 4. iPhone: its profile and layout
-- [ ] 5. Build and signing instructions for a free and a paid Apple account
+- [ ] 1. The engine, the in-process host and the core tests built for iOS, run in the Simulator (#159)
+- [ ] 2. The app on an iPad: one process, bundled plugins, the audio session, CoreMIDI (#159)
+- [ ] 3. Packages on iOS: data packages installed, plugin packages added before signing (#161)
+- [ ] 4. iPhone: its profile and layout (#161)
+- [ ] 5. Build and signing instructions for a free and a paid Apple account (#163)
 
 ## Problem
 

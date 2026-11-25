@@ -14,14 +14,14 @@ arpeggiator ([RFC 0032](0032-arpeggiator.md)).
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. The runtime: Lua in a fixed arena, host-driven GC, an instruction budget, a cut-down library
-- [ ] 2. The plugin: notes in and out, sample-accurate scheduling, transport and clock ticks
-- [ ] 3. Errors shown to the user, and recycling a script that keeps failing
-- [ ] 4. Parameter lanes and script knobs
-- [ ] 5. The part's scale and chord
-- [ ] 6. The phrase message to the arpeggiator
-- [ ] 7. Scripts as library items and package assets
-- [ ] 8. Budgets and reliability: declared memory, a capped CPU cost, measured on the target
+- [ ] 1. The runtime: Lua in a fixed arena, host-driven GC, an instruction budget, a cut-down library (#101)
+- [ ] 2. The plugin: notes in and out, sample-accurate scheduling, transport and clock ticks (#101)
+- [ ] 3. Errors shown to the user, and recycling a script that keeps failing (#101)
+- [ ] 4. Parameter lanes and script knobs (#103)
+- [ ] 5. The part's scale and chord (#103)
+- [ ] 6. The phrase message to the arpeggiator (#103)
+- [ ] 7. Scripts as library items and package assets (#105)
+- [ ] 8. Budgets and reliability: declared memory, a capped CPU cost, measured on the target (#105)
 
 ## Problem
 

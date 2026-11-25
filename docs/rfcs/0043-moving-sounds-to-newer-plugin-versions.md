@@ -21,16 +21,16 @@ index, the offer at a stand-in) and points here.
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. The publisher's claim, `opensStateFrom` and `soundChanges`: written by `oscairn-sign`,
-      read from archives, carried into the index, kept in the plugin store, shown by `plugins.list`
+      read from archives, carried into the index, kept in the plugin store, shown by `plugins.list` (#177)
 - [ ] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
-      `stateSavedBy`
-- [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line
-- [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`)
+      `stateSavedBy` (#179)
+- [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line (#179)
+- [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`) (#181)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import
-      workflow's state check in oscairn/packages, then the repository's Loading check
+      workflow's state check in oscairn/packages, then the repository's Loading check (#183)
 - [ ] 6. Removing unused versions: retention roots for plugins, `plugins.list`'s `keptBy`,
-      `plugins.removeUnused`, Settings' Installed content page
-- [ ] 7. The offers: the Library, the Catalog's **Update sounds using this**, the Setlist's scope
+      `plugins.removeUnused`, Settings' Installed content page (#185)
+- [ ] 7. The offers: the Library, the Catalog's **Update sounds using this**, the Setlist's scope (#185)
 
 ## Problem
 

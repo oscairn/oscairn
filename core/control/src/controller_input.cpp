@@ -287,7 +287,7 @@ namespace oscairn
         auto apply = [&](const MacroTarget& m, double x) {
             switch(m.kind)
             {
-            case MacroTarget::Kind::Parameter: { const Key k{int(Assignment::Kind::Parameter), m.node, m.param, 0}; if(values_.count(k)) { values_[k] = x; unapplied_.insert(k); send(k, true); } break; }
+            case MacroTarget::Kind::Parameter: { const Key k{int(Assignment::Kind::Parameter), m.node, m.param, 0}; if(values_.count(k)) { values_[k] = x; unapplied_.insert(k); send(k, true); driven_.insert(k); } break; }
             case MacroTarget::Kind::PartLevel: setFader(m.part, x, {}); break;
             case MacroTarget::Kind::PartMute: setFader(m.part, {}, x >= .5); break;
             case MacroTarget::Kind::SendLevel:
@@ -423,7 +423,22 @@ namespace oscairn
     {
         std::vector<Played> played;
         uint64_t moves = 0;
-        { std::lock_guard lock(lock_); played.swap(played_); moves = moves_; unapplied_.clear(); sent_.clear(); gains_.clear(); }
+        std::map<Key, double> sent;
+        std::set<Key> driven;
+        { std::lock_guard lock(lock_); played.swap(played_); moves = moves_; unapplied_.clear(); sent.swap(sent_); driven.swap(driven_); gains_.clear(); }
+        // A parameter a control's target set here plays at that value once a block has run: the
+        // controls set it, not something else, so the Session's drive does not rebase on it.
+        for(const auto& k : driven)
+        {
+            const auto plain = sent.find(k);
+            const Session::Destination at{int(MacroTarget::Kind::Parameter), std::get<1>(k), std::get<2>(k), 0, 0};
+            const auto w = session_.written_.find(at);
+            if(plain == sent.end() || w == session_.written_.end() || !session_.hasParameter(std::get<1>(k), std::get<2>(k))) continue;
+            const auto info = session_.parameterInfo(std::get<1>(k), std::get<2>(k));
+            if(info.maximum <= info.minimum) continue;
+            const double now = (session_.parameter(std::get<1>(k), std::get<2>(k)) - info.minimum) / (info.maximum - info.minimum);
+            if(std::abs(now - (plain->second - info.minimum) / (info.maximum - info.minimum)) < 1e-9) w->second = now;
+        }
         if(!played.empty())
         {
             // The latest value per continuous target, mutes and scenes each in order.

@@ -111,6 +111,7 @@ namespace oscairn
         std::map<Key, Range> ranges_;           // each writable parameter's, for its plain value
         std::vector<Played> played_;            // for the control thread, in order
         std::map<Key, double> sent_;            // each parameter's plain value queued since the control thread took the moves
+        std::set<Key> driven_;                  // those of them a control's target set (not an assignment's)
         std::map<uint8_t, float> gains_;        // each live gain written since then
         uint64_t moves_ = 0;                    // counted, so the control thread knows whether more came
         std::string touched_;

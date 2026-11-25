@@ -1093,6 +1093,9 @@ pub(crate) fn default_zone() -> Value {
 
 /// A level stepped `by` fader steps, as the Play strip's fader moves.
 fn stepped_level(was: f64, by: i64) -> f64 {
+    if by == 0 {
+        return was;
+    }
     let mut f = (fraction(was, 1.) + 0.02 * by as f32).clamp(0., 1.);
     let mut level = level_at(f, 1.);
     // Near silence a step is less than a thousandth: go on until it is heard.
@@ -1101,4 +1104,131 @@ fn stepped_level(was: f64, by: i64) -> f64 {
         level = level_at(f, 1.);
     }
     level
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn key_text_names_root_and_scale() {
+        assert_eq!(key_text(&json!({"root": 2, "name": "Minor"})), "D Minor");
+        assert_eq!(key_text(&json!({"root": 0, "name": "Major"})), "C Major");
+        assert_eq!(key_text(&json!({"root": 11, "name": "Phrygian"})), "B Phrygian");
+    }
+
+    #[test]
+    fn key_text_without_a_scale_is_custom() {
+        assert_eq!(key_text(&json!({"root": 7})), "G, custom");
+        assert_eq!(key_text(&json!({"root": 3, "name": null})), "D♯, custom");
+        // A name that is not a string is no scale's name.
+        assert_eq!(key_text(&json!({"root": 4, "name": 6})), "E, custom");
+    }
+
+    #[test]
+    fn key_text_wraps_odd_roots_for_the_pad() {
+        // The twelve roots repeat; an editor that sends no root or one off the pad is C.
+        assert_eq!(key_text(&json!({"root": 25, "name": "Minor"})), "C♯ Minor");
+        assert_eq!(key_text(&json!({"name": "Minor"})), "C Minor");
+        assert_eq!(key_text(&json!({"root": -1})), "C, custom");
+    }
+
+    #[test]
+    fn db_shows_decibels_or_silence() {
+        assert_eq!(db(1.), "0.0 dB");
+        assert_eq!(db(0.5), "−6.0 dB");
+        assert_eq!(db(2.), "6.0 dB");
+        assert_eq!(db(0.001), "−60.0 dB");
+        // 0 dB is unity: louder and quieter are the two signs of the same size.
+        assert_eq!(db(0.5).replace('−', "-"), "-6.0 dB");
+        // Not a level: silence's own label.
+        assert_eq!(db(0.), "−∞ dB");
+        assert_eq!(db(-3.), "−∞ dB");
+        assert_eq!(db(f64::NAN), "−∞ dB");
+    }
+
+    #[test]
+    fn pan_text_steps_hundredths_one_side_or_center() {
+        assert_eq!(pan_text(0.), "Center");
+        assert_eq!(pan_text(0.5), "R 50");
+        assert_eq!(pan_text(-0.5), "L 50");
+        assert_eq!(pan_text(-1.), "L 100");
+        // Rounding, never a sign on silence.
+        assert_eq!(pan_text(0.004), "Center");
+        assert_eq!(pan_text(f64::NAN), "Center");
+    }
+
+    #[test]
+    fn signed_is_zero_or_unbroken_above() {
+        assert_eq!(signed(0), "0");
+        assert_eq!(signed(5), "+5");
+        assert_eq!(signed(-5), "−5");
+        assert_eq!(signed(24), "+24");
+        assert_eq!(signed(-24), "−24");
+    }
+
+    #[test]
+    fn fit_clamps_cursor_to_one_item_or_an_empty_list() {
+        let empty = fit(Cursor::new(0, 1), 0, 1);
+        assert_eq!(empty, Cursor { at: None, count: 0, per_page: 1, first: 0 });
+        let one = fit(Cursor { at: Some(5), count: 5, per_page: 1, first: 5 }, 1, 1);
+        assert_eq!(one, Cursor { at: Some(0), count: 1, per_page: 1, first: 0 });
+        // With one item the page is its only one, wherever the cursor came from.
+        assert_eq!(one.first, 0);
+    }
+
+    #[test]
+    fn fit_drops_a_cursor_past_the_end_to_a_page_inside() {
+        // No cursor: the view starts at the first page-aligned item, or 0 once the old page is past the list.
+        let within = fit(Cursor { at: None, count: 10, per_page: 3, first: 5 }, 10, 3);
+        assert_eq!(within.first, 3);
+        let past = fit(Cursor { at: None, count: 5, per_page: 3, first: 12 }, 5, 3);
+        assert_eq!(past, Cursor { at: None, count: 5, per_page: 3, first: 0 });
+        // A cursor beyond the list's end lands on the last item, on its own page.
+        let beyond = fit(Cursor { at: Some(9), count: 10, per_page: 2, first: 8 }, 5, 2);
+        assert_eq!(beyond, Cursor { at: Some(4), count: 5, per_page: 2, first: 4 });
+    }
+
+    #[test]
+    fn default_zone_passes_every_note() {
+        assert_eq!(default_zone(), json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0}));
+    }
+
+    #[test]
+    fn edit_zones_keeps_one_zone_passing_everything_out() {
+        let changed = |z: &mut Value| { z["transpose"] = json!(3); };
+        // None yet: a change adds the zone, a zone that passes everything stays none.
+        assert_eq!(edit_zones(vec![], changed), vec![default_zone_ref(3)]);
+        assert_eq!(edit_zones(vec![], |z| { z["transpose"] = json!(0); }), Vec::<Value>::new());
+        // The only zone now all-passing: clearing it leaves none.
+        assert_eq!(edit_zones(vec![default_zone()], |z| { z["transpose"] = json!(0); }), Vec::<Value>::new());
+        // With more than one, the first takes the change and the rest keep theirs.
+        let list = vec![default_zone(), default_zone()];
+        let out = edit_zones(list, changed);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], default_zone_ref(3));
+        assert_eq!(out[1], default_zone());
+        // A single zone in use: it is changed, never dropped.
+        assert_eq!(edit_zones(vec![default_zone_ref(3)], changed), vec![default_zone_ref(3)]);
+    }
+
+    fn default_zone_ref(transpose: i64) -> Value {
+        let mut z = default_zone();
+        z["transpose"] = json!(transpose);
+        z
+    }
+
+    #[test]
+    fn stepped_level_steps_fader_pretty_round() {
+        // One step down from unity, and one up from silence: the first step past the quiet.
+        assert_eq!(stepped_level(1., -1), 0.96);
+        assert_eq!(stepped_level(1., 1), 1.);
+        assert_eq!(stepped_level(0., 1), 0.002);
+        assert_eq!(stepped_level(0., -1), 0.);
+        // A step of zero changes nothing (and never spins trying to be heard).
+        assert_eq!(stepped_level(1., 0), 1.);
+        assert_eq!(stepped_level(0.5, 0), 0.5);
+        assert_eq!(stepped_level(0., 0), 0.);
+    }
 }

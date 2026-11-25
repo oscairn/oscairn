@@ -1,6 +1,6 @@
 # RFC 0002: Parameter changes between plugins (oscairn.param-target)
 
-**Status:** draft, implemented
+**Status:** done, frozen (2026-11-25); was draft, implemented
 
 ## Progress
 

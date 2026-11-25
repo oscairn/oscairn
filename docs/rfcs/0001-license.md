@@ -1,6 +1,6 @@
 # RFC 0001: License
 
-**Status:** accepted
+**Status:** accepted; done, frozen (2026-11-25)
 
 ## Progress
 

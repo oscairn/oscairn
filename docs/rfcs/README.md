@@ -9,15 +9,15 @@ tests it, with a note on what remains of a step that is partly done. The
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| [0001](0001-license.md) | License | accepted |
-| [0002](0002-param-target.md) | Parameter changes between plugins (oscairn.param-target) | draft, implemented |
+| [0001](0001-license.md) | License | accepted; done, frozen |
+| [0002](0002-param-target.md) | Parameter changes between plugins (oscairn.param-target) | done, frozen |
 | [0003](0003-control-api.md) | Control API | partially implemented; local JSON-RPC transport and explicit engine/UI separation |
 | [0004](0004-hardware-services.md) | Hardware services, event timing and engine backends | proposed; step 1 built |
 | [0005](0005-sound-contexts.md) | Native prepared sound contexts | instrument contexts and full snapshots implemented; SFZ patches via the Legacy Sampler; effects covered by 0007 |
 | [0006](0006-packages-and-portability.md) | Packages and cross-device portability | in progress: archives carry signed plugin builds into a plugin store; the rest proposed |
 | [0007](0007-effect-contexts.md) | Independent effects on shared native engines | implemented Delay/bus foundation; automatic chain management planned |
 | [0008](0008-sfz-native-samples-and-conversion.md) | SFZ-based native samples and Yamaha conversion | in progress: the one-region Legacy Sampler built; extension syntax and converters not defined |
-| [0009](0009-sound-assets-and-dependencies.md) | Sound assets and dependencies | steps 1–4 implemented |
+| [0009](0009-sound-assets-and-dependencies.md) | Sound assets and dependencies | done, frozen; steps 1–4 implemented |
 | [0010](0010-plugin-worker-isolation.md) | Plugin worker isolation | in progress: steps 1–5 implemented on macOS |
 | [0011](0011-performance-ui-and-editors.md) | Performance UI, routing views and plugin editors | in progress: steps 1–4, undo and Play implemented |
 | [0012](0012-sync-external-midi-and-multi-device.md) | Sync, external MIDI devices and multi-device setlists | in progress: input device selectors, MIDI out and clock out implemented |

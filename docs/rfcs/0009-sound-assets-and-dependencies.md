@@ -1,6 +1,6 @@
 # RFC 0009: Sound assets and dependencies
 
-Status: steps 1–2 implemented 2026-10-30, steps 3–4 2026-11-09 (see [Implementation status](#implementation-status)). This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
+Status: done, frozen (2026-11-25). Steps 1–2 implemented 2026-10-30, steps 3–4 2026-11-09 (see [Implementation status](#implementation-status)). This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
 leaves as "the planned host asset API" and "assets must be declared by the plugin".
 
 ## Progress

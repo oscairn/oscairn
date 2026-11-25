@@ -3,8 +3,10 @@
 # their --dry-run, in a stand-in bundle with a temporary file as the panel's device, prints the
 # steps with the profile's engine options and refuses while another process has the device open;
 # boot, with stand-ins for oscairn-key-held's three answers and the one-shot file, picks Roland's
-# application or Oscairn, and, on a stand-in /proc, stays while the engine runs, falls back to
-# Roland's application when it ends unasked, and after oscairn-fantom-stop waits on the holder.
+# application alone or schedules the takeover (a stand-in systemd-run), and its --takeover, on a
+# stand-in /proc, waits for mi078 and its hold on the panel, starts warm, stays while the engine
+# runs, stops what it started when it ends unasked (never starting mi078), and after
+# oscairn-fantom-stop waits on the holder.
 #   fantom_start.sh SCRIPTS_DIR
 set -u
 scripts=$1
@@ -219,7 +221,7 @@ check "boot, TEMPO held: Roland's app starts once it is let go" "[ $status = 3 ]
 boot 2
 check "boot, TEMPO unreadable: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO cannot be read' && echo \"\$out\" | grep -q '$roland'"
 boot 1
-check "boot, TEMPO up: Oscairn, cold (dry: Roland's application after)" "[ $status = 3 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && echo \"\$out\" | grep -q 'a dry run'"
+check "boot, TEMPO up: the takeover scheduled through systemd-run (dry: printed), Roland's application first" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would write $OSCAIRN_BOOT_DIR/attempt and run: systemd-run --unit=oscairn-takeover --collect --no-block .* $bundle/oscairn-fantom-boot --takeover' && echo \"\$out\" | grep -q 'a dry run' && [ ! -e '$OSCAIRN_BOOT_DIR/attempt' ]"
 : > "$OSCAIRN_BOOT_DIR/stock-next-boot"
 boot 1
 check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$OSCAIRN_BOOT_DIR/stock-next-boot' ]"
@@ -237,45 +239,80 @@ sleep 0.3
 boot 0
 check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 3 ] && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'still holds'"
 
-# The decision for real (not --dry-run) in a stand-in bundle whose start and stop only log, and
-# go.sh's line around it.
+# The decision for real (not --dry-run) in a stand-in bundle whose systemd-run, start and stop
+# only log (the start plays Roland's application stopped and the engine started), and go.sh's
+# line around it.
 fb=$bundle/fakeboot
 mkdir -p "$fb/b" "$fb/run" "$fb/dir" "$fb/proc"
 cp "$scripts/oscairn-fantom-boot" "$fb/b/"
-printf '#!/bin/sh\necho start "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/hang" ] || exec sleep 30\n[ ! -e "$(dirname "$0")/fails" ] || exit 1\n' > "$fb/b/oscairn-fantom-start"
+printf '#!/bin/sh\necho systemd-run "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/sysrun-fails" ]\n' > "$fb/b/systemd-run"
+cat > "$fb/b/oscairn-fantom-start" <<'EOF'
+#!/bin/sh
+d=$(dirname "$0")
+echo start "$@" >> "$d/ran"
+[ ! -e "$d/fails-early" ] || exit 1
+rm -rf "$OSCAIRN_PROC/500"
+[ ! -e "$d/hang" ] || exec sleep 30
+[ ! -e "$d/fails" ] || exit 1
+mkdir -p "$OSCAIRN_PROC/4242" && echo oscairn-engine > "$OSCAIRN_PROC/4242/comm"
+EOF
 printf '#!/bin/sh\necho stop "$@" >> "$(dirname "$0")/ran"\n' > "$fb/b/oscairn-fantom-stop"
 chmod +x "$fb/b"/*
-real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
-fresh() { rm -f "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/hang"; }
-fresh; : > "$fb/b/fails"; real
-check "real: a failed start falls back (stop --panel) to Roland's application, attempt cleared" "[ $status = 3 ] && grep -q 'stop --panel' '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ]"
+real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_SYSTEMD_RUN="$fb/b/systemd-run" "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
+fresh() { rm -rf "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/fails-early" "$fb/b/hang" "$fb/b/sysrun-fails" "$fb/proc"/*; }
+fresh; real
+check "real: the takeover scheduled in a unit of its own, attempt left, then Roland's application without the started marker" "[ $status = 3 ] && grep -q 'systemd-run --unit=oscairn-takeover --collect --no-block --description=Oscairn takes over from Roland.s application $fb/b/oscairn-fantom-boot --takeover' '$fb/b/ran' && [ -e '$fb/dir/attempt' ] && [ ! -e '$fb/run/oscairn-boot-started' ] && echo \"\$out\" | grep -q 'Oscairn takes over once it has set up the sound' && ! grep -q '^start' '$fb/b/ran'"
 real
-check "real: a second run in the same boot is Roland's application, nothing started" "[ $status = 3 ] && echo \"\$out\" | grep -q 'already ran this boot' && [ ! -e '$fb/b/ran' ]"
-fresh; : > "$fb/b/hang"; real
-check "real: a start that hangs is ended after its time, then the fallback" "[ $status = 3 ] && echo \"\$out\" | grep -q 'ran out of its 1 seconds' && grep -q 'stop --panel' '$fb/b/ran'"
+check "real: a second run in the same boot is Roland's application, nothing scheduled" "[ $status = 3 ] && echo \"\$out\" | grep -q 'already ran this boot' && [ ! -e '$fb/b/ran' ]"
+fresh; : > "$fb/b/sysrun-fails"; real
+check "real: systemd-run failing: Roland's application, attempt removed" "[ $status = 3 ] && echo \"\$out\" | grep -q 'systemd-run failed; no takeover this boot' && [ ! -e '$fb/dir/attempt' ]"
 fresh; : > "$fb/dir/attempt"; real
 check "real: an attempt left by the last power-on gives this one to Roland's application and is removed" "[ $status = 3 ] && echo \"\$out\" | grep -q 'did not finish' && [ ! -e '$fb/dir/attempt' ] && [ ! -e '$fb/b/ran' ]"
 fresh; : > "$fb/dir/dry-run"; real
-check "real: the dry-run file logs the decision and starts nothing" "[ $status = 3 ] && grep -q 'a dry run' '$fb/dir/boot.log' && ! grep -q 'start --cold\$' '$fb/b/ran' && [ ! -e '$fb/run/oscairn-boot-started' ]"
+check "real: the dry-run file logs the decision and schedules nothing" "[ $status = 3 ] && grep -q 'a dry run' '$fb/dir/boot.log' && [ ! -e '$fb/b/ran' ] && [ ! -e '$fb/dir/attempt' ]"
 rm -f "$fb/dir/dry-run"
 fresh; real 0
-check "real: TEMPO held, nothing started" "[ $status = 3 ] && [ ! -e '$fb/b/ran' ]"
+check "real: TEMPO held, nothing scheduled" "[ $status = 3 ] && [ ! -e '$fb/b/ran' ]"
 gosh() { sh -c '[ -x "$1" ] && "$1" && [ -e "$2/oscairn-boot-started" ] && exit 0; echo mi078' sh "$1" "$fb/run" 2>/dev/null; }
-fresh; : > "$fb/b/fails"
-check "go.sh: a failed start runs mi078" "[ \"\$(OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$fb/proc' OSCAIRN_BOOT_DIR='$fb/dir' OSCAIRN_BOOT_RUN='$fb/run' gosh '$fb/b/oscairn-fantom-boot' | tail -n 1)\" = mi078 ]"
+fresh
+check "go.sh: the takeover scheduled, mi078 runs" "[ \"\$(OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$fb/proc' OSCAIRN_BOOT_DIR='$fb/dir' OSCAIRN_BOOT_RUN='$fb/run' OSCAIRN_SYSTEMD_RUN='$fb/b/systemd-run' gosh '$fb/b/oscairn-fantom-boot' | tail -n 1)\" = mi078 ]"
 check "go.sh: no bundle runs mi078" "[ \"\$(gosh '$fb/none/oscairn-fantom-boot')\" = mi078 ]"
 printf '#!/bin/sh\nexit 0\n' > "$fb/zero"; chmod +x "$fb/zero"; fresh
 check "go.sh: exit 0 without having started Oscairn runs mi078" "[ \"\$(gosh '$fb/zero')\" = mi078 ]"
 : > "$fb/run/oscairn-boot-started"
 check "go.sh: exit 0 once Oscairn ran starts nothing" "[ -z \"\$(gosh '$fb/zero')\" ]"
 
+# --takeover for real on the stand-in /proc: mi078 as pid 500, its hold on the panel a link.
+mi078() { mkdir -p "$fb/proc/500/fd" && echo mi078 > "$fb/proc/500/comm"; [ -z "${1:-}" ] || ln -sf "$OSCAIRN_PANEL_DEVICE" "$fb/proc/500/fd/3"; }
+tk() { rm -f "$fb/b/ran"; : > "$fb/dir/attempt"; OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 OSCAIRN_TAKEOVER_SETTLE=0 OSCAIRN_TAKEOVER_WAIT=${2:-5} "$fb/b/oscairn-fantom-boot" --takeover > "$fb/tk.out" 2>&1; }
+until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
+fresh; tk & watcher=$!
+sleep 0.5; mi078; sleep 1.5
+check "takeover: waits while mi078 does not hold the panel" "kill -0 $watcher && [ ! -e '$fb/b/ran' ]"
+mi078 fd
+i=0; until grep -q 'Oscairn runs' "$fb/tk.out" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+check "takeover: once mi078 holds the panel, the warm start (no --cold), attempt removed, the marker left, staying while the engine runs" "kill -0 $watcher && [ \"\$(cat '$fb/b/ran')\" = start ] && [ ! -e '$fb/dir/attempt' ] && [ -e '$fb/run/oscairn-boot-started' ]"
+rm -rf "$fb/proc/4242"
+check "takeover: the engine ended unasked: the stop, never mi078" "until_done $watcher && grep -q 'stop --panel' '$fb/b/ran' && grep -q 'cannot be started again this boot' '$fb/tk.out' && ! grep -q 'go.sh runs' '$fb/tk.out'"
+fresh; mi078 fd; : > "$fb/b/fails"; tk; status=$?
+check "takeover: a failed warm start runs the stop and does not start mi078" "[ $status = 0 ] && grep -q 'stop --panel' '$fb/b/ran' && grep -q 'cannot be started again this boot' '$fb/tk.out' && ! grep -q 'go.sh runs' '$fb/tk.out' && [ ! -e '$fb/dir/attempt' ]"
+fresh; mi078 fd; : > "$fb/b/hang"; tk; status=$?
+check "takeover: a warm start that hangs is ended after its time, then the stop" "[ $status = 0 ] && grep -q 'ran out of its 1 seconds' '$fb/tk.out' && grep -q 'stop --panel' '$fb/b/ran'"
+fresh; mi078 fd; : > "$fb/b/fails-early"; tk; status=$?
+check "takeover: a start failing before Roland's application stopped leaves it, no stop" "[ $status = 0 ] && grep -q 'was not stopped; Roland.s application stays' '$fb/tk.out' && ! grep -q stop '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ]"
+fresh; mi078 fd; tk 0; status=$?
+check "takeover: TEMPO held at takeover time leaves Roland's application" "[ $status = 0 ] && grep -q 'TEMPO held or unreadable at takeover' '$fb/tk.out' && [ ! -e '$fb/b/ran' ] && [ ! -e '$fb/dir/attempt' ]"
+fresh; tk 1 1; status=$?
+check "takeover: mi078 never starting: gives up, attempt removed" "[ $status = 0 ] && grep -q 'mi078 did not start within 1 seconds' '$fb/tk.out' && [ ! -e '$fb/b/ran' ] && [ ! -e '$fb/dir/attempt' ]"
+fresh; out=$(OSCAIRN_KEY_HELD="sh -c 'exit 1'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" "$bundle/oscairn-fantom-boot" --takeover --dry-run 2>&1); status=$?
+check "takeover --dry-run: the waits and the warm start's dry run, nothing changed" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would wait (at most 60 s) for mi078 to run' && echo \"\$out\" | grep -q 'oscairn-fantom-start: would run' && ! echo \"\$out\" | grep -q -e '--cold' && [ ! -e '$fb/run/oscairn-boot-started' ]"
+
 # Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
 fake=$bundle/fakeproc
 running() { mkdir -p "$fake/$2" && echo "$1" > "$fake/$2/comm"; }
 gone() { rm -rf "$fake/$1"; }
-until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
 supervise() { OSCAIRN_PROC=$fake OSCAIRN_BOOT_POLL=0.1 "$bundle/oscairn-fantom-boot" --dry-run --supervise > "$bundle/watch.out" 2>&1 & watcher=$!; }
-check "boot's dry run says it would stay in the foreground" "OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$bundle/proc' '$bundle/oscairn-fantom-boot' --dry-run 2>&1 | grep -q 'would stay in the foreground while the engine runs'"
+check "the takeover's dry run says it would stay in the foreground" "OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$bundle/proc' '$bundle/oscairn-fantom-boot' --takeover --dry-run 2>&1 | grep -q 'stay in the foreground while Oscairn runs'"
 running oscairn-engine 4242
 supervise
 sleep 0.5

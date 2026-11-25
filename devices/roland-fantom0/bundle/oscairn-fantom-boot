@@ -1,65 +1,72 @@
 #!/bin/sh
-# What Roland's start script (/home/root/go.sh) runs in place of its application, once the owner
+# What Roland's start script (/home/root/go.sh) runs before its application, once the owner
 # changes it (docs/fantom-0.md, "Starting at power-on"), through the stable link
 # /home/root/oscairn-current to the bundle in use:
 #
 #   [ -x /home/root/oscairn-current/oscairn-fantom-boot ] && /home/root/oscairn-current/oscairn-fantom-boot && [ -e /run/oscairn-boot-started ] && exit 0
 #   /home/root/mi078
 #
-# So Roland's application runs unless this script exits 0 after having started Oscairn this boot
-# (it leaves /run/oscairn-boot-started then): any other exit, a missing or broken bundle, a bug
-# that ends it early, is Roland's application. By then go.sh has turned swap on, read the
-# factory-test GPIO, set the date, written its register and loaded libcomposite, g_serial and
-# tickgen.
+# Roland's application always starts first: on a cold start (Oscairn in its place, before it ever
+# ran) the outputs stayed silent though the engine's ALSA output ran, and the screen twice stayed
+# blank, while every start after Roland's application had run sounded and drew. Its start
+# evidently sets up the audio path. So this script never starts Oscairn itself; it exits 3 (go.sh
+# runs mi078) and, unless Roland's application was asked for, first leaves a takeover running in a
+# unit of its own that starts Oscairn through the warm path a little later. By then go.sh has
+# turned swap on, read the factory-test GPIO, set the date, written its register and loaded
+# libcomposite, g_serial and tickgen.
 #
-#   1. Roland's application (exit 3) when: this script already ran this boot
+#   1. Roland's application alone when: this script already ran this boot
 #      (/run/oscairn-boot-tried); TEMPO is held (gpio-keys, key 152; WRITE held at power-on is the
-#      bootloader's update mode) or cannot be read within 10 seconds; the file stock-next-boot in
-#      the boot folder exists (removed as it is honored); the last power-on's start did not finish
-#      (the file attempt is left while Oscairn starts and removed once it runs: a start that
-#      crashes or hangs the unit gives the next power-on to Roland's application, and the one
-#      after it to Oscairn again); the file dry-run in the boot folder exists (the decision is
-#      logged, Oscairn is not started); or a file there cannot be written (a full disk).
-#   2. Otherwise oscairn-fantom-start --cold, given 120 seconds: Roland's application never ran
-#      this boot. It starts the app on the display, which starts its engine.
-#   3. If that fails or runs out of time (the engine not answering session.status in time among
-#      it), what it started is stopped, the panel holder too, and Roland's application follows.
-#   4. Once Oscairn runs, it stays: go.sh is the main process of weston-term.service, so when this
-#      returns go.sh ends, and systemd, with a unit's default settings, stops the unit and kills
-#      what is left in its control group, the panel holder, the app and the engine with it (setsid
-#      leaves a session, not a control group), which would silence the panel until the next
-#      power-on. So it waits, checking each second, for as long as the app or the engine runs. If
-#      both have ended without oscairn-fantom-stop (which leaves var/oscairn/run/stopped to say it
-#      was on purpose), Oscairn is taken to have failed: step 3's fallback. Stopped on purpose, it
-#      goes on waiting while the panel holder runs (Oscairn started again by hand, which clears
-#      the file, is watched the same way), and returns 0 once none of them runs: nothing is left
-#      for systemd to stop, and go.sh starts nothing.
-#      A small loop in the unit's own process, rather than systemd-run --scope, which would need
-#      systemd's bus and more of it on the unit than go.sh relies on.
-#
-# The fallback is best effort: started again after it had run earlier in the same boot, Roland's
-# application showed "program version error"; whether it starts cleanly after Oscairn has used
-# the link first is not tried. It is never left to start while another process holds the panel's
-# device (a second open can crash the kernel): then this exits 0 and the screen stays as it is.
-# The sure way back is holding TEMPO at the next power-on; Roland's update procedure reinstalls
-# go.sh.
+#      bootloader's update mode; Roland's application waits for its release, held into its start
+#      it opens its expansion screen) or cannot be read within 10 seconds; the file stock-next-boot
+#      in the boot folder exists (removed as it is honored); the last power-on's takeover did not
+#      finish (the file attempt is left while Oscairn takes over and removed once it runs or gives
+#      up: a takeover that crashes or hangs the unit gives the next power-on to Roland's
+#      application alone, and the one after it to the takeover again); the file dry-run in the boot
+#      folder exists (the decision is logged, nothing is started); a file there cannot be written
+#      (a full disk); or systemd-run fails.
+#   2. Otherwise: systemd-run --unit=oscairn-takeover starts "oscairn-fantom-boot --takeover" as a
+#      transient service, out of weston-term.service's control group (go.sh is that unit's main
+#      process, and systemd kills the whole group when the unit ends or is stopped, which
+#      oscairn-fantom-start does to stop Roland's application). Then exit 3 without
+#      /run/oscairn-boot-started: go.sh runs mi078 as on a stock boot.
+#   3. --takeover: waits for mi078 to run (60 s at most), then for it to hold the panel's device
+#      /dev/i2c-slave-2 (60 s at most), the sign it has started its hardware, then
+#      OSCAIRN_TAKEOVER_SETTLE seconds (10; a first guess, to be measured); TEMPO held (or
+#      unreadable) now leaves Roland's application. Then oscairn-fantom-start, the warm path every
+#      start by hand has used (it stops weston-term and mi078 and takes the panel within about a
+#      second), given 120 seconds. Once Oscairn runs, attempt is removed,
+#      /run/oscairn-boot-started left (for information) and step 4 follows.
+#   4. It stays in the foreground while Oscairn runs, checking each second: what
+#      oscairn-fantom-start started lives in this unit's control group, killed if the unit's main
+#      process ended. Stopped on purpose (oscairn-fantom-stop leaves var/oscairn/run/stopped), it
+#      stays while the panel holder runs (Oscairn started again by hand is watched the same way),
+#      and ends once nothing of it runs.
+#   5. The fallback, when the warm start fails or runs out of time, or the app and engine end
+#      without oscairn-fantom-stop: oscairn-fantom-stop --panel. Roland's application is not
+#      started again: started again after it had run earlier in the same boot it showed "program
+#      version error". A power cycle, TEMPO held if Oscairn would take over again, gives Roland's
+#      system. A start that failed before Roland's application was stopped leaves it running.
 #
 # Logged to stdout and boot.log in the boot folder, /home/root/oscairn-boot (outside the bundle,
-# so it outlives a bundle's replacement).
+# so it outlives a bundle's replacement), each line synced (a power cut seconds later lost the
+# last lines of a boot).
 #
-#   ./oscairn-fantom-boot [--dry-run] [--supervise]
+#   ./oscairn-fantom-boot [--dry-run] [--takeover] [--supervise]
 #
 # --dry-run reads TEMPO (mounting the chroot to run oscairn-key-held) and the files, and prints
-# what it would do, changing nothing but the log. --supervise is step 4 alone, for an Oscairn
-# already started (and for tests: with --dry-run, the fallback is printed and not taken).
+# what it would do, changing nothing but the log; with --takeover, the waits it would make and the
+# warm start's --dry-run. --supervise is step 4 alone, for an Oscairn already started (and for
+# tests: with --dry-run, the fallback is printed and not taken).
 set -u
 root=$(cd -P "$(dirname "$0")" && pwd -P) # the real folder: /proc/mounts names it so, never the oscairn-current link
-dry="" supervise=""
+dry="" supervise="" takeover=""
 for a in "$@"; do
 	case "$a" in
 	--dry-run) dry=1 ;;
 	--supervise) supervise=1 ;;
-	*) echo "usage: $0 [--dry-run] [--supervise]" >&2; exit 2 ;;
+	--takeover) takeover=1 ;;
+	*) echo "usage: $0 [--dry-run] [--takeover] [--supervise]" >&2; exit 2 ;;
 	esac
 done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
@@ -70,6 +77,9 @@ poll=${OSCAIRN_BOOT_POLL:-1}
 boot=${OSCAIRN_BOOT_DIR:-/home/root/oscairn-boot}
 run=${OSCAIRN_BOOT_RUN:-/run}
 limit=${OSCAIRN_BOOT_LIMIT:-120}
+systemd_run=${OSCAIRN_SYSTEMD_RUN:-systemd-run}
+settle=${OSCAIRN_TAKEOVER_SETTLE:-10}
+wait_limit=${OSCAIRN_TAKEOVER_WAIT:-60}
 state=$root/var/oscairn
 log=$boot/boot.log
 mkdir -p "$boot" 2>/dev/null
@@ -77,6 +87,7 @@ mkdir -p "$boot" 2>/dev/null
 say() {
 	echo "oscairn-fantom-boot: $*"
 	echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$log" 2>/dev/null
+	sync
 }
 named() { for c in "$proc"/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = "$1" ] && { p=${c#"$proc"/}; echo "${p%%/*}"; }; done; }
 holding() {
@@ -84,6 +95,7 @@ holding() {
 		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#"$proc"/}; echo "${p%%/*}" ;; esac
 	done | sort -u
 }
+mi078_holds() { h=" $(echo $(holding "$panel")) "; for p in $(named mi078); do case $h in *" $p "*) return 0 ;; esac; done; return 1; }
 # A command given $1 seconds, then ended (status 143).
 bounded() {
 	lim=$1; shift
@@ -105,11 +117,18 @@ roland() {
 	say "go.sh runs /home/root/mi078"
 	exit 3
 }
+# The takeover ending without Oscairn: Roland's application left as it is, attempt removed.
+leave() { say "$1; Roland's application stays"; [ -n "$dry" ] || rm -f "$boot/attempt"; exit 0; }
 
-# 3. The fallback: what Oscairn started stopped, the panel holder too, then Roland's application.
+# 5. The fallback: what Oscairn started stopped, the panel holder too.
 fallback() {
 	say "$1; stopping what it started"
+	if [ -n "$takeover" ] && [ -n "$(named mi078)" ]; then leave "Roland's application (mi078) was not stopped"; fi
 	if [ -n "$dry" ]; then say "would run: $root/oscairn-fantom-stop --panel"; else bounded 60 "$root/oscairn-fantom-stop" --panel; rm -f "$boot/attempt"; fi
+	if [ -n "$takeover" ]; then
+		say "Roland's application cannot be started again this boot (it shows \"program version error\" after a restart); a power cycle, holding TEMPO if needed, gives Roland's system"
+		exit 0
+	fi
 	roland "Oscairn did not start or did not keep running"
 }
 # 4. In the foreground for as long as Oscairn runs (above).
@@ -131,7 +150,39 @@ watch() {
 }
 [ -z "$supervise" ] || watch
 
-# 1. Roland's application when asked for, or when anything is not as expected.
+# 3. The takeover, in its own unit, once Roland's application has set up the hardware.
+if [ -n "$takeover" ]; then
+	say "takeover: waiting for Roland's application"
+	if [ -n "$dry" ]; then
+		say "would wait (at most $wait_limit s) for mi078 to run, then (at most $wait_limit s) for it to hold $panel, then $settle s"
+	else
+		i=0
+		until [ -n "$(named mi078)" ]; do
+			i=$((i + 1)); [ $i -le "$wait_limit" ] || leave "mi078 did not start within $wait_limit seconds"; sleep 1
+		done
+		i=0
+		until mi078_holds; do
+			i=$((i + 1)); [ $i -le "$wait_limit" ] || leave "mi078 did not open $panel within $wait_limit seconds"; sleep 1
+		done
+		say "mi078 holds $panel; waiting $settle seconds for it to settle"
+		sleep "$settle"
+	fi
+	bounded 10 eval "$key_held"
+	held=$?
+	[ $held -eq 1 ] || leave "TEMPO held or unreadable at takeover (oscairn-key-held exited $held)"
+	if [ -n "$dry" ]; then
+		bounded "$limit" "$root/oscairn-fantom-start" --dry-run || fallback "oscairn-fantom-start --dry-run failed"
+		say "would remove $boot/attempt, write $run/oscairn-boot-started and stay in the foreground while Oscairn runs"
+		exit 0
+	fi
+	say "starting Oscairn (oscairn-fantom-start)"
+	bounded "$limit" "$root/oscairn-fantom-start" || fallback "oscairn-fantom-start failed or ran out of its $limit seconds"
+	rm -f "$boot/attempt"
+	: > "$run/oscairn-boot-started"
+	watch
+fi
+
+# 1. Roland's application alone when asked for, or when anything is not as expected.
 say "power-on, bundle $root"
 if [ -z "$dry" ]; then
 	[ ! -e "$run/oscairn-boot-tried" ] || roland "this script already ran this boot"
@@ -153,19 +204,20 @@ if [ -e "$boot/stock-next-boot" ]; then
 fi
 if [ -e "$boot/attempt" ]; then
 	if [ -n "$dry" ]; then say "would remove $boot/attempt"; else rm -f "$boot/attempt"; fi
-	roland "the last power-on's start of Oscairn did not finish ($boot/attempt was left)"
+	roland "the last power-on's takeover by Oscairn did not finish ($boot/attempt was left)"
 fi
 [ ! -e "$boot/dry-run" ] || dry=1
 
-# 2. Oscairn.
-say "starting Oscairn"
+# 2. The takeover scheduled, then Roland's application.
+set -- --unit=oscairn-takeover --collect --no-block --description="Oscairn takes over from Roland's application" "$root/oscairn-fantom-boot" --takeover
 if [ -n "$dry" ]; then
-	bounded "$limit" "$root/oscairn-fantom-start" --dry-run --cold || roland "oscairn-fantom-start --dry-run --cold failed"
-	say "would stay in the foreground while the engine runs, and fall back to Roland's application if it ends without oscairn-fantom-stop"
+	say "would write $boot/attempt and run: $systemd_run $*"
 	roland "a dry run"
 fi
 : > "$boot/attempt" || roland "cannot write $boot/attempt"
-: > "$run/oscairn-boot-started" || roland "cannot write $run/oscairn-boot-started"
-bounded "$limit" "$root/oscairn-fantom-start" --cold || fallback "oscairn-fantom-start failed or ran out of its $limit seconds"
-rm -f "$boot/attempt"
-watch
+if ! "$systemd_run" "$@"; then
+	rm -f "$boot/attempt"
+	roland "$systemd_run failed; no takeover this boot"
+fi
+say "Roland's application first; Oscairn takes over once it has set up the sound (oscairn-takeover.service)"
+roland "first, as on a stock boot"

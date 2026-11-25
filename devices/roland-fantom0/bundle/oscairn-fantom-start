@@ -57,8 +57,9 @@
 #
 # --dry-run checks what it can without changing anything (another start, Roland's application,
 # who holds the panel) and prints the steps it would take instead of taking them. --cold is for
-# a boot on which Roland's application never ran (oscairn-fantom-boot): there is nothing to stop,
-# and Roland's application running is a failure. --engine-only starts the engine without the
+# a start by hand on a boot on which Roland's application never ran (the boot no longer uses it:
+# such starts gave no sound): there is nothing to stop, and Roland's application running is a
+# failure. --engine-only starts the engine without the
 # app, for measuring the engine alone and for tests.
 set -u
 # Roland's tickgen module keeps sending signal 42 every millisecond to a stale pid (its application's, never cleared); a process that gets that pid number is killed unless it ignores it. An ignored signal stays ignored across fork and exec, so everything started below is protected.
@@ -84,7 +85,7 @@ log=$state/log/oscairn-fantom.log
 
 say() {
 	echo "oscairn-fantom-start: $*"
-	[ -n "$dry" ] || echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$log"
+	[ -n "$dry" ] || { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$log"; sync; } # synced: a power cut seconds later lost a boot's last lines
 }
 fail() { say "$*"; exit 1; }
 # Runs a step, or under --dry-run prints it.
@@ -141,8 +142,8 @@ run "$root/start-chroot.sh" true || fail "start-chroot.sh failed"
 # 3. Roland's application.
 if [ -n "$cold" ]; then
 	[ -z "$(named mi078)" ] || fail "--cold, but Roland's application (mi078) runs"
-# Only with mi078 running: after a power-on into Oscairn, weston-term is oscairn-fantom-boot,
-# and stopping it would kill the panel holder in its control group.
+# Only with mi078 running: weston-term is then go.sh waiting on it, with nothing of Oscairn's in
+# its control group for the stop to kill.
 elif [ -n "$(named mi078)" ] && command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
 	say "stopping Roland's application (systemctl stop weston-term)"
 	run systemctl stop weston-term || fail "systemctl stop weston-term failed"

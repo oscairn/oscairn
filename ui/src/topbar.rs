@@ -293,4 +293,50 @@ mod tests {
         assert_eq!(all, [Some(Show::None), Some(Show::Bar), Some(Show::Percent), Some(Show::Both), None]);
         assert!(Show::Both.bar() && Show::Both.percent() && !Show::Bar.percent() && !Show::Percent.bar() && !Show::None.bar());
     }
+
+    #[test]
+    fn a_wrong_typed_or_missing_figure_is_unknown() {
+        assert_eq!(cpu(&json!({"cpuLoad": "90%"})), Meter(None), "a string is not the load");
+        assert_eq!(tempo(&json!({"tempo": "120"})), "", "a non-number tempo is not shown");
+        assert_eq!(tempo(&json!({"tempo": null})), "");
+        assert_eq!((performance(&json!({})), performance(&json!({"name": 5}))), (String::new(), String::new()), "no name, or one not a string");
+        assert_eq!((scene(&json!({"scene": 1})), scene(&json!({"scenes": []}))), (String::new(), String::new()), "no scenes list");
+        assert_eq!(scene(&json!({"scene": 1, "scenes": [{"id": 1}]})), "", "a scene without a name");
+    }
+
+    #[test]
+    fn then_lists_the_screens_own_actions() {
+        use Do::*;
+        let play = |on| vec![(Scene, "Scene".to_string()), (Learn, (if on { "Learning" } else { "Learn" }).to_string()), (Edit, "Edit".to_string())];
+        assert_eq!(then(true, false, Some(true)), play(true));
+        assert_eq!(then(true, false, Some(false)), play(false));
+        assert_eq!(then(true, false, None), vec![(Scene, "Scene".to_string()), (Edit, "Edit".to_string())], "no knobs: no Learn");
+        assert_eq!(then(false, true, None), vec![(Play, "Play".to_string())], "the Parts list goes back to Play");
+        assert_eq!(then(true, true, Some(true)), play(true), "on Play Scene, whatever Parts says");
+        assert_eq!(then(false, false, Some(true)), vec![]);
+    }
+
+    #[test]
+    fn undo_redo_save_come_before_the_screens_own_actions() {
+        use Do::*;
+        let cut = actions(&History::default(), vec![]);
+        assert_eq!(cut, vec![(Undo, "Undo".into(), false), (Redo, "Redo".into(), false), (Save, "Save".into(), true)], "nothing to undo or redo is named plain and dead");
+        let history = History { undo: "Volume of Keys".into(), redo: "Mute".into() };
+        assert_eq!(actions(&history, vec![]), vec![(Undo, "Undo Volume of Keys".into(), true), (Redo, "Redo Mute".into(), true), (Save, "Save".into(), true)]);
+        assert_eq!(actions(&History::default(), then(true, false, None)), vec![(Undo, "Undo".into(), false), (Redo, "Redo".into(), false), (Save, "Save".into(), true), (Scene, "Scene".into(), true), (Edit, "Edit".into(), true)], "Scene and Edit follow Save");
+    }
+
+    #[test]
+    fn history_reads_the_names_or_nothing() {
+        assert_eq!(History::read(&json!({"undo": "Delete", "redo": ""})), History { undo: "Delete".into(), redo: String::new() });
+        assert_eq!(History::read(&json!({})), History::default());
+        assert_eq!(History::read(&json!({"undo": 7, "redo": ["x"]})), History::default(), "wrong-typed names are nothing");
+    }
+
+    #[test]
+    fn a_wrong_typed_take_is_still_shown() {
+        assert_eq!(recording(&json!({"takes": "none"})), None, "no list is no take");
+        assert_eq!(recording(&json!({"takes": [{"state": "recording", "frames": 5, "sampleRate": 0}]})), Some(Recording { take: 0, time: "0:00".into(), behind: false }), "no rate is 0:00");
+        assert_eq!(recording(&json!({"takes": [{"state": "recording", "frames": -5, "sampleRate": 48000, "behind": "yes"}]})), Some(Recording { take: 0, time: "0:00".into(), behind: false }), "negative frames are 0:00, a non-bool behind is false");
+    }
 }

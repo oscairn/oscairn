@@ -196,4 +196,81 @@ mod tests {
         e.performance = false;
         assert_eq!(e.request(&e.file), json!({"id": "p1", "file": "/x/a.olib", "editedSounds": false, "sign": {"key": "mine", "items": true, "archive": true}}));
     }
+
+    #[test]
+    fn a_keys_reply_missing_the_name_or_the_id() {
+        assert_eq!(Key::from_json(&json!({"name": "mine", "id": "abc"})), Some(Key { name: "mine".into(), id: "abc".into() }));
+        assert_eq!(Key::from_json(&json!({"name": "mine"})), Some(Key { name: "mine".into(), id: String::new() }), "no id: the key still lists, unsigned");
+        assert_eq!(Key::from_json(&json!({})), None, "no name: it is not a key");
+        assert_eq!(Key::from_json(&json!({"name": 3, "id": "abc"})), None, "a name that is not text: not a key");
+    }
+
+    #[test]
+    fn edited_sounds_follow_the_performance_and_its_edits() {
+        let e = Export { id: "p1".into(), name: "A".into(), performance: true, file: PathBuf::from("/x/a.olib"), edited: false, key: None, keys: vec![] };
+        assert_eq!(e.request(&e.file), json!({"id": "p1", "file": "/x/a.olib", "editedSounds": false}), "nothing edited: no edited sounds");
+        let mut e = e;
+        e.key = Some("mine".into());
+        assert_eq!(e.request(&e.file), json!({"id": "p1", "file": "/x/a.olib", "editedSounds": false, "sign": {"key": "mine", "items": true, "archive": true}}), "a signature with the sounds still off");
+    }
+
+    #[test]
+    fn an_items_rows_say_signed_or_not_and_offer_the_sounds_only_for_a_performance() {
+        let mut e = Export { id: "p1".into(), name: "A".into(), performance: true, file: PathBuf::from("/x/a.olib"), edited: true, key: None, keys: vec![] };
+        let rows = e.rows();
+        assert_eq!(rows[0].label.to_string(), "With edited parts' Sounds");
+        assert!(rows[0].switch, "the edited sounds choice is a switch");
+        assert_eq!(rows[1].label.to_string(), "Signature");
+        assert_eq!(rows[1].value.to_string(), "Not signed ›");
+        assert_eq!(rows.last().unwrap().label.to_string(), "Cancel");
+        e.performance = false;
+        let rows = e.rows();
+        assert_eq!(rows.iter().filter(|r| r.label == "With edited parts' Sounds").count(), 0, "no sounds row for a Sound");
+        e.key = Some("mine".into());
+        assert_eq!(e.rows()[0].label.to_string(), "Signature");
+        assert_eq!(e.rows()[0].value.to_string(), "Sign with mine ›");
+    }
+
+    #[test]
+    fn an_untitled_export_and_a_performances_info() {
+        let e = Export { id: "p1".into(), name: String::new(), performance: true, file: PathBuf::from("/x/a.olib"), edited: true, key: None, keys: vec![] };
+        assert_eq!(e.info()[0].text.to_string(), "Export Untitled");
+        let said = |lines: &[InfoLine]| lines.iter().filter(|l| !l.head).map(|l| l.text.to_string()).collect::<Vec<_>>().join(" ");
+        assert_eq!(said(&e.info()), "/x/a.olib Samples and the Sounds of unedited parts always go. Signing shows others the export came from you; it is off unless you choose a key", "a Performance: the samples note before the signature's");
+        let e = Export { id: "p1".into(), name: "A".into(), performance: false, file: PathBuf::from("/x/a.olib"), edited: true, key: None, keys: vec![] };
+        assert_eq!(said(&e.info()), "/x/a.olib Signing shows others the export came from you; it is off unless you choose a key", "a Sound: no samples note");
+    }
+
+    #[test]
+    fn a_wholes_request_keeps_the_setlists_chosen_in_order() {
+        let w = Whole { name: "My library".into(), setlists: vec![("s1".into(), "One".into(), true), ("s2".into(), "Two".into(), false), ("s3".into(), "Three".into(), true)] };
+        assert_eq!(w.request(Path::new("/x/all.olib")), json!({"file": "/x/all.olib", "name": "My library", "setlists": ["s1", "s3"]}));
+        let w = Whole { name: "My library".into(), setlists: vec![] };
+        assert_eq!(w.request(Path::new("/x/all.olib")), json!({"file": "/x/all.olib", "name": "My library", "setlists": []}));
+    }
+
+    #[test]
+    fn a_wholes_rows_show_its_name_and_nothing_when_there_are_no_setlists() {
+        let w = Whole { name: "My library".into(), setlists: vec![("s1".into(), String::new(), true), ("s2".into(), "Two".into(), false)] };
+        let rows = w.rows();
+        assert_eq!((rows[0].label.to_string(), rows[0].value.to_string()), ("Name".to_string(), "My library ›".to_string()));
+        assert_eq!(rows[1].label.to_string(), "Untitled", "a setlist with no name");
+        assert!(rows[1].on);
+        assert_eq!(rows[2].label.to_string(), "Two");
+        assert!(!rows[2].on);
+        assert_eq!(rows.last().unwrap().label.to_string(), "Cancel");
+        let w = Whole { name: String::new(), setlists: vec![] };
+        let rows = w.rows();
+        assert_eq!(rows.iter().map(|r| r.label.to_string()).collect::<Vec<_>>(), ["Name", "Export...", "Cancel"], "no setlist rows when none are chosen");
+    }
+
+    #[test]
+    fn a_wholes_info_says_the_setlists_when_any_are_chosen() {
+        let w = Whole { name: "My library".into(), setlists: vec![] };
+        assert_eq!(w.info()[0].text.to_string(), "Export library");
+        let said = |lines: &[InfoLine]| lines.iter().filter(|l| !l.head).map(|l| l.text.to_string()).collect::<Vec<_>>().join(" ");
+        assert_eq!(said(&w.info()), "Your own Performances and Sounds, with every sample and plugin they use.", "with no setlists: the plain note");
+        let w = Whole { name: "My library".into(), setlists: vec![("s1".into(), "One".into(), true)] };
+        assert!(said(&w.info()).contains("and the setlists chosen here with the Performances they name:"), "the phrase once a setlist is chosen");
+    }
 }

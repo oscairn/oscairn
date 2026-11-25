@@ -737,6 +737,7 @@ namespace oscairn
         // The Performance last opened or saved, remembered in last_ once reopenPerformance has set it,
         // so tests and tools that never ask never write the user's data folder. Control thread.
         std::filesystem::path last_;
+        std::string remembered_; // what last_ holds, as read or last written
         std::filesystem::path bundledPlugins_; // setBundledPlugins
         bool opened_ = false; // a Performance opened or saved in this engine
         void remember(const std::filesystem::path& folder);

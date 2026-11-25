@@ -343,7 +343,8 @@ never replace existing endpoints. SIGINT/SIGTERM stops the helper and removes it
 After an engine crash, verify it has stopped before removing its stale endpoint and
 starting a new helper. Reconnecting a UI preserves a running engine's state; restarting
 an engine starts the demo graph afresh; use Performance → Open Performance to restore a
-[saved folder](../docs/performance-format.md). Automatic startup restore remains future work. A silent live-device
+[saved folder](../docs/performance-format.md). An engine not started by the desktop
+app (`--managed`) opens the Performance last open as it starts, unless `--startup-performance`. A silent live-device
 smoke test on macOS now verifies the actual KICK UI can be killed and reopened while
 the same engine keeps processing; an audible listening check remains separate.
 

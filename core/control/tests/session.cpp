@@ -443,6 +443,26 @@ namespace
             session.loadPerformance( missing.string() );
             check( nodes( session ).size() == 1, "while opening it by hand still gives its stand-in (RFC 0006)" );
         }
+        {
+            oscairn::Session session( rate, block );
+            session.reopenPerformance();
+            session.loadPerformance( saved.string() );
+            check( remembers( saved ) && read( last ).find( "\"id\":\"" + session.performanceInfo().id + "\"" ) != std::string::npos, "with its ID" );
+            const auto before = fs::file_time_type::clock::now() - std::chrono::hours( 1 );
+            fs::last_write_time( last, before );
+            session.loadPerformance( saved.string() );
+            check( fs::last_write_time( last ) == before, "the same one opened again is not written again" );
+            const auto id = session.savePerformanceToLibrary( "Moved", true );
+            oscairn::Control::LibraryQuery q; q.id = id;
+            const fs::path item = session.libraryQuery( q ).items.at( 0 ).path;
+            check( remembers( item ), "one saved to the library is remembered" );
+            fs::rename( item, item.parent_path() / ( "Moved Away" + item.extension().string() ) );
+        }
+        {
+            oscairn::Session session( rate, block );
+            const auto notice = session.reopenPerformance();
+            check( notice.empty() && nodes( session ).size() == 1 && session.performanceInfo().name == "Moved", "a library one moved is found again by its ID" );
+        }
         setenv( "OSCAIRN_DATA_HOME", was_.c_str(), 1 );
         fs::remove_all( home );
     }

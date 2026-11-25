@@ -854,8 +854,11 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
    `oscairn-engine-run` with the profile's options from the same file (`hw:1,0`, six channels,
    48 kHz, main on 0 and 1, 128 frames, the keys on `/dev/ttyGS0`, the panel and its map, the
    profile's id for its control groups, WRITE, MENU and TEMPO on `gpio-keys`), its output in
-   `var/oscairn/log/oscairn-engine.log`: the startup Performance with nothing on the screen,
-   played by the keys and the panel, for measuring the engine alone and for tests. Either way it
+   `var/oscairn/log/oscairn-engine.log`: the startup Performance (`--startup-performance`) with
+   nothing on the screen, played by the keys and the panel, for measuring the engine alone and for
+   tests. Started for the Rust UI, the engine opens the Performance last open itself as it starts
+   (`performance.reopen`, [control protocol](control-protocol.md)), its startup Performance playing
+   until then and staying when that one does not open. Either way it
    clears `var/oscairn/run/stopped` first (below).
 7. It waits for the engine's control socket (the app's engine's is `engine-*.sock` in the
    bundle's `/tmp/oscairn-0`; the engine alone's `run/oscairn/engine.sock`) and asks it for

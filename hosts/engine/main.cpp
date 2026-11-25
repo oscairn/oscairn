@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace
 {
@@ -18,7 +20,7 @@ int main(int argc,char** argv)
 {
     oscairn::ignoreTickSignal();
     std::string plugins=OSCAIRN_PLUGIN_DIR,socket;
-    bool managed=false;
+    bool managed=false,startup=false;
     oscairn::host::AudioConfiguration audioConfig;
     try { for(int i=1;i<argc;++i)
     {
@@ -28,7 +30,8 @@ int main(int argc,char** argv)
             audioConfig.setOption(arg,argv[++i]);continue;
         }
         if(arg=="--managed"){managed=true;continue;}
-        if(arg=="--help"){std::cout<<"oscairn-engine --socket /private/directory/control.sock [--plugins DIR]\n  [--input-device NAME] [--output-device NAME]\n  [--audio-inputs none|0,1,...] [--audio-outputs 0,1,...]\n  [--device-channels N] [--sample-rate HZ] [--buffer-frames N]\n  [--panel-device /dev/NAME --panel-map FILE] [--keyboard-device /dev/NAME [--keyboard-local off]] (built with OSCAIRN_ROLAND_FANTOM0)\n  [--input-keys NAME --input-key-map CODE=FUNCTION,...] (an input device's keys, by name; built with OSCAIRN_ROLAND_FANTOM0, Linux)\n  [--device-profile ID|FILE] (the device's control groups, which its panel plays by, until an app sends its own)\n  [--controller FILE]... (a controller's profile, beside the built-in ones)\n  [--audio null] (a device that writes nowhere, at real-time pace, and no MIDI device: for tests)\nChannel indices are zero-based; list order defines logical graph channels.\n";return 0;}
+        if(arg=="--startup-performance"){startup=true;continue;}
+        if(arg=="--help"){std::cout<<"oscairn-engine --socket /private/directory/control.sock [--plugins DIR]\n  [--input-device NAME] [--output-device NAME]\n  [--audio-inputs none|0,1,...] [--audio-outputs 0,1,...]\n  [--device-channels N] [--sample-rate HZ] [--buffer-frames N]\n  [--panel-device /dev/NAME --panel-map FILE] [--keyboard-device /dev/NAME [--keyboard-local off]] (built with OSCAIRN_ROLAND_FANTOM0)\n  [--input-keys NAME --input-key-map CODE=FUNCTION,...] (an input device's keys, by name; built with OSCAIRN_ROLAND_FANTOM0, Linux)\n  [--device-profile ID|FILE] (the device's control groups, which its panel plays by, until an app sends its own)\n  [--controller FILE]... (a controller's profile, beside the built-in ones)\n  [--audio null] (a device that writes nowhere, at real-time pace, and no MIDI device: for tests)\n  [--startup-performance] (the startup Performance, not the one last open)\nChannel indices are zero-based; list order defines logical graph channels.\n";return 0;}
         if((arg=="--socket" || arg=="--plugins") && i+1<argc){(arg=="--socket"?socket:plugins)=argv[++i];continue;}
         std::cerr<<"Unknown or incomplete argument: "<<arg<<'\n';return 2;
     }
@@ -69,6 +72,20 @@ int main(int argc,char** argv)
         oscairn::host::Pump pump(server,managed,stopping);
         audio.setServiced([&pump]{pump.poll();}); // what changed goes out after each service tick
         std::cout<<"oscairn-engine: listening on "<<socket<<std::endl;
+        // The Performance last open (performance.reopen), asked as a client would, so the server answers the others while it
+        // loads (Long requests in docs/control-protocol.md). A desktop app that started this engine asks it itself.
+        if(!managed && !startup)
+        {
+            int ends[2];
+            if(::socketpair(AF_UNIX,SOCK_STREAM,0,ends)!=0)std::cerr<<"oscairn-engine: the last Performance is not reopened: no socket pair\n";
+            else if(server.adopt(ends[0]))
+            {
+                static constexpr char request[]="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"performance.reopen\",\"params\":{}}\n";
+                if(::write(ends[1],request,sizeof request-1)!=ssize_t(sizeof request-1))std::cerr<<"oscairn-engine: the last Performance is not reopened: the request was not sent\n";
+                ::shutdown(ends[1],SHUT_WR); // a half-close: the server answers, then lets the connection go; the reply is not read (the engine logs why one did not open)
+            }
+            else ::close(ends[1]);
+        }
 #if JUCE_LINUX
         // The message loop sleeps until a message comes (a timer's, a device's), where runDispatchLoopUntil
         // would wake every millisecond to look (about 1,000 wake-ups a second of the main thread at rest);

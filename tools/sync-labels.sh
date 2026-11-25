@@ -8,6 +8,8 @@ repos="$*"
 for repo in $repos; do
   sed -n 's/^- name: "\(.*\)"$/\1/p;s/^  color: "\(.*\)"$/\1/p;s/^  description: "\(.*\)"$/\1/p' .github/labels.yml |
   while read -r name && read -r color && read -r desc; do
-    gh label create "$name" --repo "$repo" --color "$color" --description "$desc" --force
+    # GitHub answers an occasional 502: try again once before failing.
+    gh label create "$name" --repo "$repo" --color "$color" --description "$desc" --force ||
+      { sleep 10; gh label create "$name" --repo "$repo" --color "$color" --description "$desc" --force; }
   done
 done

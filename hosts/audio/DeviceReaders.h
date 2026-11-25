@@ -42,6 +42,13 @@ namespace oscairn::host
     using PlayMidi = std::function<void( size_t input, const uint8_t* bytes, size_t size )>;
     std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff );
 
+    /// The panel's button lamps, set through `keyboard` (openKeyboard's: the lamps go over the same
+    /// link), each by its control's name in the panel map file `map` (its `lamp`) or by number;
+    /// Control::setLamps's rules. Called on the control thread only: it writes to the device.
+    /// Empty: this build has no panel lamps.
+    using SetLamps = std::function<Control::Lamps( const std::vector<Control::Lamp>& )>;
+    SetLamps panelLamps( const std::string& map, DeviceReader& keyboard );
+
     /// Keys of the Linux input device named `name` (a profile's `inputKeys`: on the FANTOM-0,
     /// gpio-keys' WRITE, MENU and TEMPO), read-only, each code in `keys` played by its function
     /// name as a switch (1 pressed, 0 released) on the reader's thread, as the panel's switches

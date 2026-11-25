@@ -182,7 +182,7 @@ namespace oscairn
         if(const auto* d = member(layout, "analogDeadband")) p.analogDeadband = whole(d, "layout.analogDeadband", 0, 4095);
         std::set<std::pair<int, uint32_t>> seen;
         each(member(root, "controls"), "controls", 1024, [&](const json_value_s* v) {
-            fields(v, {"kind", "id", "control", "max", "step", "invert", "navigate"}, "a control");
+            fields(v, {"kind", "id", "control", "max", "step", "invert", "navigate", "lamp"}, "a control");
             Control c;
             const auto kind = text(member(v, "kind"), "a control's kind");
             c.kind = kind == "encoder" ? Kind::Encoder : kind == "analog" ? Kind::Analog : kind == "switch" ? Kind::SwitchOn : Kind::Unknown;
@@ -215,6 +215,7 @@ namespace oscairn
                 }
                 c.navigate = nav;
             }
+            if(const auto* l = member(v, "lamp")) { require(c.kind == Kind::SwitchOn, "only a switch has a lamp"); c.lamp = uint16_t(whole(l, "a control's lamp", 0, 1023)); }
             const auto* id = member(v, "id");
             if(!id) return; // not mapped yet
             c.id = uint32_t(whole(id, "a control's id", 0, 4294967295.0));

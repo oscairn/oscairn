@@ -19,6 +19,7 @@ use crate::nav::{self, Action};
 use crate::chain;
 use crate::controls;
 use crate::keyboard;
+use crate::lamps;
 use crate::library;
 use crate::settings_app;
 use crate::menu;
@@ -78,6 +79,8 @@ pub enum Request {
     Keys,
     /// notes.send from the playing keyboard: nothing to read in the answer.
     Notes,
+    /// panel.lamps, from `light`.
+    Lamps,
     Setlist(setlist::Request),
     Play(play::Request),
     Part(part::Request),
@@ -202,6 +205,8 @@ pub struct App {
     leave: slint::Timer,
     /// The panel's navigation totals as last read.
     totals: nav::Totals,
+    /// The panel's button lamps the screen shown keeps lit (`light`).
+    lamps: lamps::Lamps,
     setlist: setlist::Screen,
     play: play::Screen,
     part: part::Screen,
@@ -495,6 +500,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             hands_over,
             leave: slint::Timer::default(),
             totals: nav::Totals::default(),
+            lamps: lamps::Lamps::default(),
             setlist: setlist::Screen::new(ui, state),
             play: play::Screen::new(ui),
             part: part::Screen::new(ui),
@@ -886,6 +892,7 @@ impl App {
             self.meters_answered(signal);
         }
         let request = match request {
+            Request::Lamps => return self.lamps.answered(result.as_ref().map_err(|_| ())),
             Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
             Request::Play(r) => {
                 let mut again = false;
@@ -1062,7 +1069,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) | Request::LibraryApp(_) | Request::SettingsApp(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Lamps | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) | Request::LibraryApp(_) | Request::SettingsApp(_) => {}
         }
     }
 
@@ -1615,6 +1622,17 @@ impl App {
     /// and a JUCE screen opening says its own once it runs.
     fn shows_lists(&self, screen: Screen) -> bool {
         screen != Screen::Opening && screen != Screen::Params && !(screen == Screen::Play && self.play.plays_row())
+    }
+
+    /// The panel's button lamps `screen` wants lit or off, by the panel map's control names ("dec", "inc"), while it
+    /// shows: only changes are asked for, and leaving a screen turns off what it lit.
+    pub(crate) fn light(&mut self, screen: Screen, want: &[(&'static str, bool)]) {
+        if screen != self.screen {
+            return;
+        }
+        if let Some(params) = self.lamps.want(want) {
+            self.send(Request::Lamps, "panel.lamps", params);
+        }
     }
 
     /// Tells the engine whether the screen shows lists.
@@ -2335,6 +2353,9 @@ impl App {
         }
         let was = self.screen;
         self.screen = screen;
+        if was != screen {
+            self.light(screen, &[]); // the lamps the screen left lit go off
+        }
         self.bar_at = None;
         if self.shows_lists(was) != self.shows_lists(screen) {
             self.send_view();

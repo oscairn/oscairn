@@ -16,6 +16,7 @@ mod home;
 mod keyboard;
 mod keystrip;
 mod knobs;
+mod lamps;
 mod library;
 mod menu;
 mod mixer;

@@ -19,6 +19,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace oscairn::host
 {
@@ -182,7 +183,7 @@ namespace oscairn::host
         Stats stats_;
     };
 
-    /// The one thing Oscairn writes to the link: Local Switch off, so Roland's own sound engine does
+    /// What Oscairn writes to the link at its start: Local Switch off, so Roland's own sound engine does
     /// not sound the keys under Oscairn. Two frames, traced from Roland's stock app on 2026-11-12 as
     /// it turned Local Switch off in its menu, with the stock BMC firmware (roland-bmc-stock):
     /// system parameter 0xCF, value 0 (1 would be on), to address 0xEF, then its fixed companion
@@ -211,6 +212,35 @@ namespace oscairn::host
     }
     inline constexpr std::array<uint8_t, 12> bmcSelector3{ 0x12, 0x00, 0xe1, 0x03, 0xff, 0xff, 0x00, 0x00, 0xe8, 0x3c, 0xe9, 0x00 };
 
+    /// One panel lamp lit or off (docs/fantom-0.md, "Lamps"), as Roland's app sends it: a panel
+    /// word of kind 5 in a short frame of kind 6 from 0x00 to 0x75. Byte 1 the lamp's number's low
+    /// seven bits; byte 2 its top three bits, the mode from bit 3 (1 lit, 0 off) and the level's bit
+    /// 7 in bit 6; byte 3 the level's low seven bits. Lit is level 150, the app's for a button.
+    inline std::array<uint8_t, 12> bmcLamp( uint16_t lamp, bool on )
+    {
+        const uint8_t level = on ? 150 : 0;
+        return { 0x0c, 0x00, 0x75, 0x00, 0x85, uint8_t( lamp & 0x7F ), uint8_t( ( lamp >> 7 & 7 ) | ( on ? 1 << 3 : 0 ) | ( level >> 7 ) << 6 ), uint8_t( level & 0x7F ), 0, 0, 0, 4 };
+    }
+
+    /// The panel's lamps as last sent, each set by one whole-frame write through `send`: a lamp set
+    /// to what it already is sends nothing. At most `perSecond` frames a second (a bucket as deep):
+    /// a call that would need more is refused whole. A frame `send` did not write leaves its lamp
+    /// unknown, so the next call sends it again. One thread (the engine's control thread).
+    class BmcLamps
+    {
+    public:
+        using Send = std::function<bool( const uint8_t*, size_t )>;
+        explicit BmcLamps( Send send, double perSecond = 200 ) : send_( std::move( send ) ), perSecond_( perSecond ), tokens_( perSecond ) { lit_.fill( -1 ); }
+        /// Frames written; -1: refused, nothing sent.
+        int set( const std::vector<std::pair<uint16_t, bool>>& lamps );
+
+    private:
+        Send send_;
+        double perSecond_, tokens_;
+        std::chrono::steady_clock::time_point last_ = std::chrono::steady_clock::now();
+        std::array<int8_t, 1024> lit_; // -1 unknown
+    };
+
     /// The link's MIDI sources, by sender address, in the order their inputs are listed: the keys
     /// (0x02), then the addresses Roland's app takes MIDI from its MIDI ports on (docs/fantom-0.md;
     /// which is DIN and which USB is not known, so each is named by its address).
@@ -222,8 +252,8 @@ namespace oscairn::host
     /// from their MIDI words (bmcMidi). Before reading it makes the device raw with echo and flow
     /// control off, checked by reading the settings back; where they do not hold it neither reads
     /// nor writes. It writes nothing but, with `localOff`, bmcLocalOff once, the first time the
-    /// device is open and raw (read-only otherwise), and with `cold` (a cold start, its value
-    /// selector 2's) bmcPanelStart before it and bmcLinuxUp then bmcSelector3 right after; a failed write is logged and reading goes on. It polls with a timeout (so stopping waits at
+    /// device is open and raw, and with `cold` (a cold start, its value
+    /// selector 2's) bmcPanelStart before it and bmcLinuxUp then bmcSelector3 right after; what send() is given; a failed write is logged and reading goes on. It polls with a timeout (so stopping waits at
     /// most that), and reads without pause while open: the sound chips queue what is not read, and
     /// Roland's engine then holds its notes. A device that fails or ends is opened again a second
     /// later.
@@ -250,6 +280,9 @@ namespace oscairn::host
 
         struct Stats { uint64_t opened = 0, frames = 0, messages = 0, stale = 0, unknown = 0, skipped = 0, lost = 0; };
         Stats stats() const;
+        /// One whole frame written to the device, from any thread but the audio thread (a lock and a
+        /// system call). False: the device is not open, or not all of it was written.
+        bool send( const uint8_t* frame, size_t size );
 
     private:
         void run();
@@ -269,7 +302,8 @@ namespace oscairn::host
         std::condition_variable stopped_;
         std::atomic<bool> stop_{ false };
         std::atomic<uint64_t> opened_{ 0 }, frames_{ 0 }, messages_{ 0 }, stale_{ 0 }, unknown_{ 0 }, skipped_{ 0 }, lost_{ 0 };
-        // The reader thread's own.
+        std::mutex write_; // held by send() and by the reader thread while it changes fd_
+        // The reader thread's own; others read it only under write_.
         int fd_ = -1;
         BmcLinkParser parser_;
         bool settling_ = false, drained_ = false; // dropping what was queued; the last read left nothing waiting

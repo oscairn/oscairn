@@ -39,6 +39,33 @@ namespace oscairn::host
         return { opened_.load(), frames_.load(), messages_.load(), stale_.load(), unknown_.load(), skipped_.load(), lost_.load() };
     }
 
+    bool BmcLinkReader::send( const uint8_t* frame, size_t size )
+    {
+        std::lock_guard lock( write_ );
+        return fd_ >= 0 && ::write( fd_, frame, size ) == ssize_t( size );
+    }
+
+    int BmcLamps::set( const std::vector<std::pair<uint16_t, bool>>& lamps )
+    {
+        std::vector<std::pair<uint16_t, bool>> changed;
+        for( const auto& [lamp, on] : lamps )
+            if( lamp < lit_.size() && lit_[lamp] != int8_t( on ) && std::find( changed.begin(), changed.end(), std::pair{ lamp, on } ) == changed.end() ) changed.emplace_back( lamp, on );
+        const auto now = std::chrono::steady_clock::now();
+        tokens_ = std::min( perSecond_, tokens_ + std::chrono::duration<double>( now - last_ ).count() * perSecond_ );
+        last_ = now;
+        if( double( changed.size() ) > tokens_ ) return -1;
+        tokens_ -= double( changed.size() );
+        int sent = 0;
+        for( const auto& [lamp, on] : changed )
+        {
+            const auto frame = bmcLamp( lamp, on );
+            const bool ok = send_( frame.data(), frame.size() );
+            lit_[lamp] = ok ? int8_t( on ) : int8_t( -1 );
+            sent += ok;
+        }
+        return sent;
+    }
+
     bool BmcLinkReader::pause()
     {
         std::unique_lock lock( lock_ );
@@ -47,7 +74,7 @@ namespace oscairn::host
 
     bool BmcLinkReader::open( bool report )
     {
-        const int fd = ::open( path_.c_str(), ( localOff_ || cold_ ? O_RDWR : O_RDONLY ) | O_NOCTTY | O_NONBLOCK | O_CLOEXEC );
+        const int fd = ::open( path_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC ); // writable for Local Switch and the lamps
         if( fd < 0 ) { if( report && log_ ) log_( "cannot open " + path_ + ": " + std::strerror( errno ) ); return false; }
         // Echo off before any read: with it on, the tty layer would send each byte received back to the sound chips.
         termios t{};
@@ -88,7 +115,7 @@ namespace oscairn::host
             if( log_ ) log_( m == ssize_t( bmcSelector3.size() ) ? "cold start: the sound engine told the Linux side is up (selector 2, value " + value + ", then selector 3)"
                                                                  : "cold start: the Linux side's start not sent: " + std::string( n < 0 || m < 0 ? std::strerror( errno ) : "a short write" ) );
         }
-        fd_ = fd;
+        { std::lock_guard lock( write_ ); fd_ = fd; }
         parser_.reset();
         settling_ = true;
         drained_ = false;
@@ -136,7 +163,7 @@ namespace oscairn::host
             }
             if( n < 0 && ( errno == EAGAIN || errno == EINTR ) ) continue;
             if( log_ ) log_( path_ + ( n == 0 ? " ended" : std::string( ": " ) + std::strerror( errno ) ) + "; opening it again" );
-            ::close( fd_ ); fd_ = -1;
+            { std::lock_guard lock( write_ ); ::close( fd_ ); fd_ = -1; }
             release();
             if( !pause() ) return;
         }

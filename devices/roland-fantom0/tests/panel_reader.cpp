@@ -122,6 +122,10 @@ namespace
         check(refused(mapJson(R"({"kind": "lever", "id": 1, "control": "wheel:1"})")), "an unknown kind");
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "max": 3})")), "a max on a switch");
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "colour": 3})")), "an unknown field");
+        auto lamp = [&](const char* name) { for(const auto& c : fantom.controls) if(c.control == name) return c.lamp; return std::optional<uint16_t>{}; };
+        check(lamp("play") == 19 && lamp("panLevel") == 53 && lamp("tone16") == 18 && !lamp("dec") && !lamp("stop"), "the FANTOM's lamps by the test tool's numbers, DEC and STOP without one");
+        check(PanelMap::parse(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "lamp": 1023})")).controls[0].lamp == 1023, "a switch's lamp");
+        check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "lamp": 1024})")) && refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "lamp": 3})")), "a lamp past 1023, or on an encoder");
         {
             // A normally-closed pedal: `invert` reads an analog position or a switch's press the other way round.
             const auto inv = PanelMap::parse(mapJson(R"({"kind": "analog", "id": 3, "control": "footswitch:1", "invert": true}, {"kind": "switch", "id": 5, "control": "footswitch:2", "invert": true},

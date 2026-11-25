@@ -113,6 +113,24 @@ namespace
         if( !held().empty() || std::abs(f.left[511]) > 1e-6f ) throw std::runtime_error("A release for an input gone did not let go: " + held());
         std::cout << "ok: notes sent as a MIDI input play its zones, and each source's held keys are listed\n";
     }
+    // panel.lamps: not supported quietly without a panel; with one, names and numbers reach the host.
+    void lamps( const char* path )
+    {
+        Fixture f(path);
+        auto ask = [&]( const std::string& params ) { return f.rpc.dispatch(R"({"jsonrpc":"2.0","id":1,"method":"panel.lamps","params":)" + params + '}').value_or(""); };
+        if( ask(R"({"set":[{"control":"dec","on":true}]})").find(R"("result":{"supported":false,"sent":0,"unknown":[]})") == std::string::npos )
+            throw std::runtime_error("panel.lamps without a panel is not a quiet not-supported");
+        std::vector<oscairn::Control::Lamp> seen;
+        f.session.setLampHost([&]( const std::vector<oscairn::Control::Lamp>& l ) { seen = l; return oscairn::Control::Lamps{true, 1, {"dec"}}; });
+        if( ask(R"({"set":[{"control":"dec","on":true},{"lamp":55,"on":false}]})").find(R"("result":{"supported":true,"sent":1,"unknown":["dec"]})") == std::string::npos ||
+            seen.size() != 2 || seen[0].control != "dec" || !seen[0].on || seen[0].number || seen[1].number != 55 || seen[1].on )
+            throw std::runtime_error("panel.lamps did not pass the lamps to the host");
+        for( const char* bad : {R"({"set":[{"lamp":1024,"on":true}]})", R"({"set":[{"control":"dec","lamp":5,"on":true}]})", R"({"set":[{"control":"dec"}]})", R"({"set":[]})"} )
+            if( ask(bad).find("-32602") == std::string::npos ) throw std::runtime_error(std::string("panel.lamps took ") + bad);
+        f.session.setLampHost([]( const std::vector<oscairn::Control::Lamp>& ) -> oscairn::Control::Lamps { throw std::runtime_error("Too many lamp changes"); });
+        if( ask(R"({"set":[{"lamp":1,"on":true}]})").find("-32005") == std::string::npos ) throw std::runtime_error("a refusal is not -32005");
+        std::cout << "ok: panel.lamps\n";
+    }
     // Byte counts past 32 bits: a desktop with 8 GiB sets its budget over the wire.
     void bigBudget( const char* path )
     {
@@ -125,7 +143,7 @@ int main( int argc, char** argv )
     if( argc < 2 ) return 2;
     try
     {
-        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); bigBudget(argv[1]); return 0; }
+        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); bigBudget(argv[1]); lamps(argv[1]); return 0; }
         // Test-only line driver. Blank output represents no JSON-RPC response. After --stdio, a
         // repository snapshot preinstalled from as the engine does at start (preinstall.py), and
         // the address and root key of the repository the device ships it from, set first as an

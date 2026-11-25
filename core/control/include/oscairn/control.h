@@ -180,6 +180,13 @@ namespace oscairn
         // std::runtime_error says why. A new rate activates every plugin again at it.
         struct AudioSetting { std::optional<std::string> output, input; std::optional<double> sampleRate; std::optional<uint32_t> bufferSize; };
         virtual AudioDevices setAudio(const AudioSetting& setting) = 0;
+        // The device panel's button lamps (panel.lamps): each by its control's name in the panel map
+        // (its `lamp`) or by its lamp number, lit or off; only changes are sent. supported false: this
+        // engine has no panel lamps, nothing done; unknown: names the map gives no lamp, left alone.
+        // std::runtime_error when the lamps change too often, nothing set.
+        struct Lamp { std::string control; std::optional<uint16_t> number; bool on = false; };
+        struct Lamps { bool supported = false; uint32_t sent = 0; std::vector<std::string> unknown; };
+        virtual Lamps setLamps(const std::vector<Lamp>&) { return {}; }
         struct GraphState
         {
             Graph::Description topology;

@@ -175,6 +175,69 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_kind_and_its_keys() {
+        assert_eq!(Kind::from_key("performance"), Some(Kind::Performance));
+        assert_eq!(Kind::from_key("sound"), Some(Kind::Sound));
+        assert_eq!(Kind::from_key("setlist"), Some(Kind::Setlist));
+        assert_eq!(Kind::from_key(""), None);
+        assert_eq!(Kind::from_key("Performance"), None, "the keys are lower-case");
+        assert_eq!(Kind::from_key("sounds"), None);
+        for kind in Kind::ALL {
+            assert_eq!(Kind::from_key(kind.key()), Some(kind));
+            assert_eq!(kind.noun(0), kind.plural());
+            assert_eq!(kind.noun(1), kind.singular());
+            assert_eq!(kind.noun(2), kind.plural());
+        }
+    }
+
+    #[test]
+    fn an_item_needs_an_id() {
+        assert_eq!(Item::from_json(&json!({})), None);
+        assert_eq!(Item::from_json(&json!({"name": "x"})), None, "no id means no item");
+        assert_eq!(Item::from_json(&json!({"id": 3})), None, "a non-string id is not one");
+    }
+
+    #[test]
+    fn json_of_another_shape_defaults() {
+        let item = Item::from_json(&json!({"id": "x", "tags": "not a list", "favorite": "yes", "readOnly": 1})).unwrap();
+        assert!(item.tags.is_empty(), "a non-list of tags is empty");
+        assert!(!item.favorite, "a non-true favorite is not set");
+        assert!(!item.read_only, "a non-boolean readOnly is not set");
+    }
+
+    #[test]
+    fn tags_keep_only_strings() {
+        let item = Item::from_json(&json!({"id": "x", "tags": ["pad", 3, true, null], "favorite": true, "readOnly": true})).unwrap();
+        assert_eq!(item.tags, ["pad".to_string()]);
+        assert!(item.favorite);
+        assert!(item.read_only);
+    }
+
+    #[test]
+    fn untitled_and_owned() {
+        let unnamed = Item::from_json(&json!({"id": "x"})).unwrap();
+        assert_eq!(unnamed.title(), "Untitled");
+        assert!(unnamed.own(), "no library means the user's own");
+        assert!(unnamed.writable(), "its own and not read-only");
+    }
+
+    #[test]
+    fn a_library_item_is_not_owned_or_writable() {
+        let item = Item::from_json(&json!({"id": "x", "name": "Velvet", "library": "analog dreams", "readOnly": true})).unwrap();
+        assert_eq!(item.title(), "Velvet");
+        assert!(!item.own());
+        assert!(!item.writable());
+    }
+
+    #[test]
+    fn a_read_only_own_item_is_not_writable() {
+        let item = Item::from_json(&json!({"id": "x", "library": "", "readOnly": true})).unwrap();
+        assert!(item.own());
+        assert!(!item.writable());
+    }
 
     #[test]
     fn the_reference_words() {
@@ -193,5 +256,47 @@ mod tests {
         assert_eq!(wrap("one two three", 7), ["one two", "three"]);
         assert_eq!(wrap("extraordinarily long", 5), ["extraordinarily", "long"]);
         assert!(wrap("", 5).is_empty());
+    }
+
+    #[test]
+    fn a_count_is_plural_unless_one() {
+        assert_eq!(count(0, Kind::Performance), "0 Performances");
+        assert_eq!(count(7, Kind::Performance), "7 Performances");
+        assert_eq!(count(1, Kind::Sound), "1 Sound");
+        assert_eq!(count(2, Kind::Setlist), "2 Setlists");
+        assert_eq!(instruments_and_effects(0), "0 instruments and effects");
+        assert_eq!(instruments_and_effects(2), "2 instruments and effects");
+    }
+
+    #[test]
+    fn the_library_line_shows_only_what_exists() {
+        assert_eq!(library_line(0, 0, 0), "0 Performances");
+        assert_eq!(library_line(0, 3, 0), "3 Performances");
+        assert_eq!(library_line(0, 0, 2), "0 Performances · 2 Sounds");
+        assert_eq!(library_line(2, 0, 0), "2 instruments and effects · 0 Performances");
+    }
+
+    #[test]
+    fn empty_saying_treats_one_plugin_as_singular() {
+        assert_eq!(
+            empty_saying(Kind::Sound, 1),
+            "No Sounds yet. The presets of the 1 instrument or effect installed are in the sound picker, not here."
+        );
+        assert_eq!(
+            empty_saying(Kind::Performance, 0),
+            "No Performances yet."
+        );
+        assert_eq!(
+            empty_saying(Kind::Sound, 0),
+            "No Sounds yet. An instrument's own presets are in the sound picker, not here."
+        );
+    }
+
+    #[test]
+    fn wrapping_unicode_and_a_very_long_word() {
+        assert_eq!(wrap("café au lait", 5), ["café", "au", "lait"], "broken on character, not byte");
+        assert_eq!(wrap("héllo wörld wíde wëb", 8), ["héllo", "wörld", "wíde wëb"]);
+        assert_eq!(wrap(&"x".repeat(200), 20), ["x".repeat(200)], "a word longer than a line is kept whole");
+        assert_eq!(wrap("one two", 0), ["one", "two"], "a zero width still keeps each word whole");
     }
 }

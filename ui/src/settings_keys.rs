@@ -2,7 +2,8 @@
 //! The Settings app's Signing keys and About pages (ui/SETTINGS-APP.md K and B; SigningKeysPage.cpp, SigningKeys.h and
 //! AboutPage.cpp are the reference). Signing keys lists the keys exports are signed with, by name and fingerprint, and
 //! makes one (its name typed on the keyboard; the private half never leaves the device). About says which Oscairn this
-//! is, which engine it is connected to and under what license.
+//! is, which engine it is connected to and under what license; on a device whose engine offers it
+//! (`system.rolandNextBoot`, the FANTOM's), its last row starts Roland's own system at the next power-on, asked first.
 
 use crate::client::Error;
 use crate::library::fingerprint;
@@ -127,6 +128,10 @@ impl Page for Keys {
 pub enum AboutStep {
     /// packages.preinstalled, for the release the engine is.
     Engine,
+    /// system.rolandNextBoot read: whether the engine offers it and whether it is set.
+    Roland,
+    /// system.rolandNextBoot set or taken back.
+    SetRoland(bool),
 }
 
 pub struct About {
@@ -134,7 +139,18 @@ pub struct About {
     commit: String,
     /// The engine's release; none until it is read.
     engine: Option<Result<String, String>>,
+    /// The profile is a device's: only there is the engine asked whether Roland's system can start next time.
+    on_device: bool,
+    /// Roland's system at the next power-on: none where the engine does not offer it, else whether it is set.
+    roland: Option<bool>,
+    /// Its question is open.
+    roland_asking: bool,
+    /// A change of it is out.
+    roland_busy: bool,
+    roland_error: String,
 }
+
+const ROLAND_ROW: usize = 4;
 
 impl About {
     pub fn new() -> About {
@@ -143,11 +159,35 @@ impl About {
     }
 
     pub fn with(release: &str, commit: &str) -> About {
-        About { release: release.into(), commit: commit.into(), engine: None }
+        About { release: release.into(), commit: commit.into(), engine: None, on_device: false, roland: None, roland_asking: false, roland_busy: false, roland_error: String::new() }
     }
 
-    pub fn reply(&mut self, _step: AboutStep, result: Result<Value, Error>, _c: &mut Ctx) {
-        self.engine = Some(result.map(|r| r["release"].as_str().unwrap_or_default().to_string()).map_err(|e| e.message));
+    /// On a device's profile, the engine is asked about Roland's system.
+    pub fn on_device(mut self, yes: bool) -> About {
+        self.on_device = yes;
+        self
+    }
+
+    pub fn reply(&mut self, step: AboutStep, result: Result<Value, Error>, _c: &mut Ctx) {
+        match step {
+            AboutStep::Engine => self.engine = Some(result.map(|r| r["release"].as_str().unwrap_or_default().to_string()).map_err(|e| e.message)),
+            AboutStep::Roland => self.roland = result.ok().filter(|r| r["supported"] == true).map(|r| r["set"] == true),
+            AboutStep::SetRoland(_) => {
+                self.roland_busy = false;
+                match result {
+                    Ok(r) => {
+                        self.roland_error.clear();
+                        self.roland = Some(r["set"] == true);
+                    }
+                    Err(e) => self.roland_error = e.message,
+                }
+            }
+        }
+    }
+
+    fn set_roland(&mut self, set: bool, c: &mut Ctx) {
+        self.roland_busy = true;
+        c.ask(Any::About(AboutStep::SetRoland(set)), "system.rolandNextBoot", json!({"set": set}));
     }
 
     fn source(&self) -> String {
@@ -168,7 +208,11 @@ impl Default for About {
 impl Page for About {
     fn open(&mut self, c: &mut Ctx) {
         self.engine = None;
+        self.roland_asking = false;
         c.ask(Any::About(AboutStep::Engine), "packages.preinstalled", json!({}));
+        if self.on_device {
+            c.ask(Any::About(AboutStep::Roland), "system.rolandNextBoot", json!({}));
+        }
     }
 
     fn rows(&self) -> Vec<SettingData> {
@@ -177,7 +221,12 @@ impl Page for About {
             Some(Ok(release)) => release.clone(),
             Some(Err(_)) => "Unknown".into(),
         };
-        vec![row("Oscairn", self.release.as_str()), row("Source", self.source()), row("Engine", engine), row("License", "AGPL-3.0-or-later")]
+        let mut rows = vec![row("Oscairn", self.release.as_str()), row("Source", self.source()), row("Engine", engine), row("License", "AGPL-3.0-or-later")];
+        if let Some(set) = self.roland {
+            let r = choice("Roland's system", if set { "Next power-on" } else { "Off" });
+            rows.push(if self.roland_busy { crate::settings_app::faint(r) } else { r });
+        }
+        rows
     }
 
     fn info(&self, at: Option<usize>) -> Vec<InfoLine> {
@@ -208,8 +257,37 @@ impl Page for About {
                 &mut lines,
             );
         }
+        if let Some(set) = self.roland.filter(|_| all || at == Some(ROLAND_ROW)) {
+            let text = match set {
+                true => "Roland's own system starts at the next power-on, once; Oscairn again at the one after. Press to take it back.",
+                false => "Start Roland's own system at the next power-on, once, instead of Oscairn. Asked first.",
+            };
+            section("Roland's system", text.into(), &mut lines);
+            if !self.roland_error.is_empty() {
+                lines.extend(failed(&format!("Not changed: {}", self.roland_error)));
+            }
+        }
         lines
     }
 
-    fn press(&mut self, _at: usize, _c: &mut Ctx) {}
+    fn press(&mut self, at: usize, c: &mut Ctx) {
+        if at != ROLAND_ROW || self.roland_busy {
+            return;
+        }
+        match self.roland {
+            Some(false) => {
+                // Asked first: nothing is written until it is confirmed. No restart is offered (docs/fantom-0.md).
+                self.roland_asking = true;
+                c.notice = Some(("Start Roland's system next time?".into(), "Roland's system will start at the next power-on. Turn the power off and on to start it.".into(), vec!["Start Roland next time".into(), "Cancel".into()]));
+            }
+            Some(true) => self.set_roland(false, c),
+            None => {}
+        }
+    }
+
+    fn noticed(&mut self, choice: Option<usize>, c: &mut Ctx) {
+        if std::mem::take(&mut self.roland_asking) && choice == Some(0) {
+            self.set_roland(true, c);
+        }
+    }
 }

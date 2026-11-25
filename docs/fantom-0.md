@@ -1078,7 +1078,11 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
    when it starts with TEMPO down. Also when TEMPO cannot be read within 10 seconds (or the wait
    for a press does not end within 5 seconds past its window), or: the script already ran this
    boot (`/run/oscairn-boot-tried`); the file `stock-next-boot` in the boot folder
-   `/home/root/oscairn-boot` (removed as it is honored: one boot of Roland's app); the file
+   `/home/root/oscairn-boot`, or in the bundle's `var/oscairn` where the engine's
+   `system.rolandNextBoot` writes it (Settings › About › "Roland's system", below; the engine's
+   chroot cannot see the boot folder, and sees `var/oscairn` as `/var/oscairn`, which
+   `oscairn-fantom-start` passes it as `OSCAIRN_ROLAND_NEXT_BOOT`), removed as it is honored:
+   one boot of Roland's app; the file
    `attempt` there, left by a takeover that never finished (one that crashed or hung the unit:
    the next power-on is Roland's alone, the one after it the takeover's again); the file
    `dry-run` there (the decision is logged to `boot.log` there, nothing is started); a file that
@@ -1106,6 +1110,15 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
    app cannot be started again this boot: started again after it had run earlier in the same
    boot it showed "program version error". A power cycle, pressing TEMPO at the FANTOM picture if needed, gives
    Roland's system. A start that fails before it stopped Roland's app leaves the app running.
+
+**Roland's system from Settings:** About's row "Roland's system" (the device profile only, and
+only when the engine answers `system.rolandNextBoot` as supported) asks first, "Roland's system
+will start at the next power-on. Turn the power off and on to start it.", and only on "Start
+Roland next time" writes `stock-next-boot`; pressed again it takes it back. There is no restart
+from the screen: the engine's chroot has a `/run` of its own, so it cannot reach systemd, nothing
+outside the chroot takes a request to reboot, and whether a Linux restart without a power cycle
+leaves Roland's sound engine as Roland's app expects (started again in one boot it shows
+"program version error") is not known.
 
 Every line the boot script and `oscairn-fantom-start` log is synced: a power cut seconds after a
 boot once lost the last lines of `boot.log` and every bundle log. `oscairn-fantom-start --cold`

@@ -255,7 +255,7 @@ impl Screen {
             installed: Installed::default(),
             available: Available::default(),
             keys: Keys::default(),
-            about: About::new(),
+            about: About::new().on_device(profile.on_device),
             ctx: Ctx::default(),
             active: false,
             tabs_shown: None,

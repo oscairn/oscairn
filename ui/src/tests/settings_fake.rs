@@ -130,6 +130,8 @@ pub struct Settings {
     /// The trust store's keys beside the root keys (`trust.list`'s `{id,key,name,scope,revoked}`).
     pub trust: Vec<Value>,
     pub release: String,
+    /// `system.rolandNextBoot`: none, the engine does not offer it (a desktop's); else whether the file is there.
+    pub roland: Option<bool>,
     /// The next this many requests that are not session ones are refused as busy.
     pub busy: u32,
     pub calls: Vec<(String, Value)>,
@@ -178,6 +180,7 @@ impl Settings {
             install_code: vec![],
             trust: vec![],
             release: "0.1.0-alpha.1".into(),
+            roland: None,
             busy: 0,
             calls: vec![],
             notifications: vec![],
@@ -599,6 +602,15 @@ impl Settings {
                 self.trust.retain(|t| t["key"] != key.as_str());
                 self.trust.push(json!({"id": key_id(&key), "key": key, "name": p["name"], "scope": p["scope"], "revoked": p["revoked"] == true}));
                 Ok(json!({"accepted": true}))
+            }
+            // json_rpc.cpp `system.rolandNextBoot`: a quiet not-supported without its file's path.
+            "system.rolandNextBoot" => {
+                self.fields(p, &["set"])?;
+                let Some(set) = &mut self.roland else { return Ok(json!({"supported": false, "set": false})) };
+                if let Some(to) = p.get("set") {
+                    *set = to.as_bool().ok_or_else(|| refused(-32602, "Expected a boolean"))?;
+                }
+                Ok(json!({"supported": true, "set": *set}))
             }
             "library.libraries" => {
                 self.fields(p, &[])?;

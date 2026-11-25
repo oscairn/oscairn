@@ -182,6 +182,7 @@ whole app). A refusal or a lost connection is the app's usual failed row.
 | B2 | 2 | U | Source: the first 12 characters of the commit, with the address of the tree at it, or "Development build" with "Built from a working copy, not a release's commit." | `AboutPage.cpp:10`, `:16` | build constant | - | [x] tests/settings_second.rs `about_says_what_this_is` |
 | B3 | 2 | U | The engine's version ("Reading..." then the release; "Unknown" and why in the danger color when it cannot be read) | `AboutPage.cpp:11`, `:18-27` | `packages.preinstalled {}` `release` | - | [x] tests/settings_second.rs `about_says_what_this_is` |
 | B4 | 2 | U | The license, AGPL-3.0-or-later, in its words, and where the texts are | `AboutPage.cpp:12`, `:19-21` | none | the right knob scrolls the panel | [x] tests/settings_second.rs `about_says_what_this_is` |
+| B5 | 2 | H | Roland's system: on a device's profile whose engine answers `system.rolandNextBoot {}` as supported (the FANTOM's: its start names the file its boot script honors), the last row "Roland's system", Off or Next power-on. Off: asked first, "Start Roland's system next time?" "Roland's system will start at the next power-on. Turn the power off and on to start it." (Start Roland next time, Cancel), and only then `{set:true}`; Next power-on: a press takes it back (`{set:false}`). No restart is offered: no request reaches a reboot from the engine's chroot (docs/fantom-0.md, "Starting at power-on"). A refusal: "Not changed: why" | none (owner, 2026-11-26) | `system.rolandNextBoot {set?}` -> `{supported,set}` | press, then the question's choices | [x] src/settings_keys.rs `About`; tests/settings_second.rs `rolands_system_next_time_is_asked_first` |
 
 ## N. Not in the Settings app
 
@@ -283,7 +284,7 @@ What the real engine did that the doc or the handler's reading does not say, or 
 ## Where it stands
 
 54 rows: S 7, A 7, T 4, D 11, C 8, R 9, K 4, B 4, plus the new page P's 5 rows (P1 to P5); first cut 36 (S, A except A6, T, D, C), second cut 18 (A6, R, K, B);
-by kind 43 universal, 11 desktop-OS (the Audio page) and none hardware-specific; plus 8 rows of N, all n/a.
+by kind 43 universal, 11 desktop-OS (the Audio page) and none hardware-specific; plus 8 rows of N, all n/a. Later: B5 (2026-11-26), hardware-specific (the FANTOM's Roland's system next time).
 
 2026-11-16: all 54 are built and ticked, against a fake engine that answers as the real handlers do, and the real-engine harness
 (`real_engine/settings.rs`, ignored by default, run only against an engine built in the worktree with its own folders and

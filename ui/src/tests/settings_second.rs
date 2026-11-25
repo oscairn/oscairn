@@ -596,6 +596,59 @@ fn about_says_what_this_is() {
     assert!(!rows(r.ui()).is_empty());
 }
 
+// On a device whose engine offers it, About's last row starts Roland's system at the next power-on: the cursor moves
+// the panel only, the question comes first and nothing is written until it is confirmed (no restart is offered), a
+// press takes it back, and nothing is asked at rest. A desktop never asks; an engine that does not offer it has no row.
+#[test]
+fn rolands_system_next_time_is_asked_first() {
+    let mut r = Rig::new("roland-desktop", None, Fake::new());
+    r.e.roland = Some(false);
+    r.page(Id::About);
+    assert!(!r.e.methods().contains(&"system.rolandNextBoot".to_string()) && labels(r.ui()).len() == 4, "a desktop does not ask");
+    let mut r = Rig::new("roland-unoffered", Some("fantom-07"), Fake::new());
+    r.page(Id::About);
+    assert_eq!(r.e.called("system.rolandNextBoot"), [json!({})]);
+    assert_eq!(labels(r.ui()), ["Oscairn", "Source", "Engine", "License"], "an engine that does not offer it: no row");
+
+    let mut r = Rig::new("roland", Some("fantom-07"), Fake::new());
+    r.e.roland = Some(false);
+    r.page(Id::About);
+    assert_eq!(labels(r.ui()).last().map(String::as_str), Some("Roland's system"));
+    assert_eq!(value_of(r.ui(), "Roland's system"), "Off ›");
+    r.e.calls.clear();
+    for _ in 0..5 {
+        r.act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(info(r.ui()).join(" ").contains("Start Roland's own system at the next power-on, once"), "{:?}", info(r.ui()));
+    assert!(r.e.calls.is_empty() && r.notice.is_none(), "the cursor moves the panel only: {:?}", r.e.methods());
+    r.press_row("Roland's system");
+    let (title, message, choices) = r.notice.clone().expect("asked first");
+    assert_eq!((title.as_str(), message.as_str()), ("Start Roland's system next time?", "Roland's system will start at the next power-on. Turn the power off and on to start it."));
+    assert_eq!(choices, ["Start Roland next time", "Cancel"]);
+    assert!(r.e.calls.is_empty() && r.e.roland == Some(false), "nothing until it is confirmed");
+    r.answer_notice("Cancel");
+    assert!(r.e.calls.is_empty() && r.e.roland == Some(false), "Cancel writes nothing");
+    r.press_row("Roland's system");
+    r.answer_notice("Start Roland next time");
+    assert_eq!(r.e.called("system.rolandNextBoot"), [json!({"set": true})]);
+    assert_eq!((r.e.roland, value_of(r.ui(), "Roland's system").as_str()), (Some(true), "Next power-on ›"));
+    assert!(r.notice.is_none(), "no restart is offered");
+    r.press_row("Roland's system");
+    assert!(r.notice.is_none(), "taking it back asks nothing");
+    assert_eq!(r.e.called("system.rolandNextBoot"), [json!({"set": true}), json!({"set": false})]);
+    assert_eq!(value_of(r.ui(), "Roland's system"), "Off ›");
+    // At rest: nothing asked, nothing waiting.
+    let before = r.e.calls.len();
+    r.settle();
+    assert!(r.e.calls.len() == before && r.delayed.is_empty(), "{:?} {:?}", r.e.methods(), r.delayed);
+    // A refusal is said, the row as it was.
+    r.e.fail = vec![("system.rolandNextBoot".into(), "cannot write /var/oscairn/stock-next-boot".into())];
+    r.press_row("Roland's system");
+    r.answer_notice("Start Roland next time");
+    assert!(r.danger_lines().join(" ").contains("Not changed: cannot write"), "{:?}", r.danger_lines());
+    assert_eq!(value_of(r.ui(), "Roland's system"), "Off ›");
+}
+
 // ---- A6: installing a theme ----
 
 fn source_of(name: &str, id: &str, change: impl FnOnce(&mut Value)) -> std::path::PathBuf {

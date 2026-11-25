@@ -15,6 +15,8 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <locale>
@@ -569,7 +571,7 @@ namespace oscairn
                 {"packages.removeRepository",System},{"packages.enableRepository",System},{"packages.setDeviceRepositories",System},
                 {"trust.list",System},{"trust.set",System},{"trust.remove",System},{"keys.list",System},{"keys.make",System},
                 {"plugins.list",System},{"plugins.remove",System},{"plugins.addBuild",System},
-                {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"panel.lamps",System},{"midi.ignore",System},
+                {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"panel.lamps",System},{"system.rolandNextBoot",System},{"midi.ignore",System},
                 {"controllers.inputs",System},{"controllers.choose",System},{"controllers.ignore",System},
                 {"engine.attach",System},{"engine.release",System},{"budget.set",System},{"budget.forget",System},{"performance.reopen",System},{"audio.set",System},
                 {"memory.alwaysAvailable",System},{"memory.launch",System},{"memory.closed",System},{"memory.shell",System},{"memory.state",System},{"memory.release",System},{"engine.timing",System}};
@@ -619,7 +621,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","assignments.link","assignments.latch","input.get","input.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.removal","packages.uninstall","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set","panel.lamps"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.forget","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.controller","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","assignments.link","assignments.latch","input.get","input.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.removal","packages.uninstall","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","memory.release","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set","panel.lamps","system.rolandNextBoot"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -1326,6 +1328,22 @@ namespace oscairn
                 return R"({"accepted":true})";
             }
             if( method == "session.status" ) { fields(p,{}); return status(c); }
+            // Roland's own system at the next power-on, on a device whose start names the file its boot script
+            // honors (OSCAIRN_ROLAND_NEXT_BOOT, docs/fantom-0.md); elsewhere a quiet not-supported.
+            if( method == "system.rolandNextBoot" )
+            {
+                fields(p,{"set"});
+                const char* file = std::getenv("OSCAIRN_ROLAND_NEXT_BOOT");
+                if( !file || !*file ) return R"({"supported":false,"set":false})";
+                const std::filesystem::path path(file);
+                std::error_code e;
+                if( member(p,"set") )
+                {
+                    if( boolean(member(p,"set")) ) { std::ofstream out(path); if( !out ) throw Failure{-32005,"cannot write " + path.string()}; }
+                    else if( std::filesystem::remove(path,e); e ) throw Failure{-32005,"cannot remove " + path.string() + ": " + e.message()};
+                }
+                return std::string(R"({"supported":true,"set":)") + (std::filesystem::exists(path,e) ? "true" : "false") + '}';
+            }
             // The device panel's button lamps: by control name (the panel map's `lamp`) or lamp number.
             if( method == "panel.lamps" )
             {

@@ -623,8 +623,10 @@ fi
 rm -f "$root/run/oscairn/engine.sock"
 eval "set -- $OSCAIRN_ENGINE_ARGS"
 # setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
-# then does not take the engine with it.
-"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} ${tuning}${plug}oscairn-engine-run "$@" \
+# then does not take the engine with it. OSCAIRN_ROLAND_NEXT_BOOT: where system.rolandNextBoot asks
+# for Roland's system at the next power-on, the bundle's var/oscairn as the chroot sees it (it cannot
+# see the boot folder), which oscairn-fantom-boot reads.
+"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" OSCAIRN_ROLAND_NEXT_BOOT=/var/oscairn/stock-next-boot ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} ${tuning}${plug}oscairn-engine-run "$@" \
 	>> "$state/log/oscairn-engine.log" 2>&1 &
 echo $! > "$state/run/engine.pid"
 

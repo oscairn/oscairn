@@ -266,6 +266,11 @@ check "boot, TEMPO up: the takeover scheduled through systemd-run (dry: printed)
 boot 1
 check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 3 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$OSCAIRN_BOOT_DIR/stock-next-boot' ]"
 rm -f "$OSCAIRN_BOOT_DIR/stock-next-boot"
+mkdir -p "$bundle/var/oscairn" && : > "$bundle/var/oscairn/stock-next-boot"
+boot 1
+check "boot, stock-next-boot in the bundle's var/oscairn (where the engine's chroot writes it): Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'stock-next-boot was set ($bundle/var/oscairn/stock-next-boot)' && echo \"\$out\" | grep -q '$roland'"
+rm -f "$bundle/var/oscairn/stock-next-boot"
+check "the engine alone is told where stock-next-boot goes, as its chroot sees var/oscairn" "grep -q 'setsid env .*OSCAIRN_ROLAND_NEXT_BOOT=/var/oscairn/stock-next-boot .*oscairn-engine-run' '$scripts/oscairn-fantom-start'"
 # TEMPO counts only when pressed after the script starts. The stand-in answers a plain read (its $0 "sh") up, and
 # the wait for a press (its $0 the milliseconds) as $1 says, writing the milliseconds it was given.
 asked="$bundle/key-asked"

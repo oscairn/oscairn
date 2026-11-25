@@ -22,7 +22,8 @@
 #      Roland's side has seen it already and opens its expansion screen, so Roland's application
 #      runs as it would; either way it waits for the release, held into its start Roland's
 #      application opens its expansion screen) or cannot be read within 10 seconds; the file
-#      stock-next-boot in the boot folder exists (removed as it is honored); the last power-on's takeover did not
+#      stock-next-boot in the boot folder or in the bundle's var/oscairn (where the engine's
+#      system.rolandNextBoot puts it) exists (removed as it is honored); the last power-on's takeover did not
 #      finish (the file attempt is left while Oscairn takes over and removed once it runs or gives
 #      up: a takeover that crashes or hangs the unit gives the next power-on to Roland's
 #      application alone, and the one after it to the takeover again); the file dry-run in the boot
@@ -218,10 +219,15 @@ if [ $held -eq 0 ]; then
 	roland "TEMPO was pressed within $tap seconds of the start"
 fi
 [ $held -eq 1 ] || roland "TEMPO cannot be read (oscairn-key-held exited $held while watching for a press)"
-if [ -e "$boot/stock-next-boot" ]; then
-	if [ -n "$dry" ]; then say "would remove $boot/stock-next-boot"; else rm -f "$boot/stock-next-boot"; fi
-	roland "stock-next-boot was set"
-fi
+# stock-next-boot: put in the boot folder by hand, or in the bundle's var/oscairn by the engine
+# (system.rolandNextBoot: its chroot sees that folder as /var/oscairn, not the boot folder).
+set_by=""
+for f in "$boot/stock-next-boot" "$state/stock-next-boot"; do
+	[ -e "$f" ] || continue
+	set_by="$set_by $f"
+	if [ -n "$dry" ]; then say "would remove $f"; else rm -f "$f"; fi
+done
+[ -z "$set_by" ] || roland "stock-next-boot was set ($(echo $set_by))"
 if [ -e "$boot/attempt" ]; then
 	if [ -n "$dry" ]; then say "would remove $boot/attempt"; else rm -f "$boot/attempt"; fi
 	roland "the last power-on's takeover by Oscairn did not finish ($boot/attempt was left)"

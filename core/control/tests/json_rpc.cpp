@@ -6,8 +6,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace
 {
@@ -131,6 +134,30 @@ namespace
         if( ask(R"({"set":[{"lamp":1,"on":true}]})").find("-32005") == std::string::npos ) throw std::runtime_error("a refusal is not -32005");
         std::cout << "ok: panel.lamps\n";
     }
+    // system.rolandNextBoot: not supported without OSCAIRN_ROLAND_NEXT_BOOT; with it, the file written and removed.
+    void rolandNextBoot( const char* path )
+    {
+        Fixture f(path);
+        auto ask = [&]( const std::string& params ) { return f.rpc.dispatch(R"({"jsonrpc":"2.0","id":1,"method":"system.rolandNextBoot","params":)" + params + '}').value_or(""); };
+        ::unsetenv("OSCAIRN_ROLAND_NEXT_BOOT");
+        if( ask(R"({"set":true})").find(R"("result":{"supported":false,"set":false})") == std::string::npos ) throw std::runtime_error("system.rolandNextBoot on a desktop is not a quiet not-supported");
+        const auto dir = std::filesystem::temp_directory_path() / ("oscairn-roland-" + std::to_string(::getpid()));
+        std::filesystem::create_directories(dir);
+        const auto file = dir / "stock-next-boot";
+        ::setenv("OSCAIRN_ROLAND_NEXT_BOOT", file.c_str(), 1);
+        const bool ok = ask("{}").find(R"("result":{"supported":true,"set":false})") != std::string::npos &&
+                        ask(R"({"set":true})").find(R"("result":{"supported":true,"set":true})") != std::string::npos && std::filesystem::exists(file) &&
+                        ask("{}").find(R"("set":true)") != std::string::npos &&
+                        ask(R"({"set":false})").find(R"("result":{"supported":true,"set":false})") != std::string::npos && !std::filesystem::exists(file) &&
+                        ask(R"({"set":false})").find(R"("set":false)") != std::string::npos && ask(R"({"set":1})").find("-32602") != std::string::npos;
+        ::setenv("OSCAIRN_ROLAND_NEXT_BOOT", (dir / "absent" / "stock-next-boot").c_str(), 1);
+        const bool refused = ask(R"({"set":true})").find("-32005") != std::string::npos;
+        ::unsetenv("OSCAIRN_ROLAND_NEXT_BOOT");
+        std::filesystem::remove_all(dir);
+        if( !ok ) throw std::runtime_error("system.rolandNextBoot did not write and remove its file");
+        if( !refused ) throw std::runtime_error("system.rolandNextBoot into a folder not there was not refused");
+        std::cout << "ok: system.rolandNextBoot\n";
+    }
     // Byte counts past 32 bits: a desktop with 8 GiB sets its budget over the wire.
     void bigBudget( const char* path )
     {
@@ -143,7 +170,7 @@ int main( int argc, char** argv )
     if( argc < 2 ) return 2;
     try
     {
-        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); bigBudget(argv[1]); lamps(argv[1]); return 0; }
+        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); bigBudget(argv[1]); lamps(argv[1]); rolandNextBoot(argv[1]); return 0; }
         // Test-only line driver. Blank output represents no JSON-RPC response. After --stdio, a
         // repository snapshot preinstalled from as the engine does at start (preinstall.py), and
         // the address and root key of the repository the device ships it from, set first as an

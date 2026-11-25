@@ -302,3 +302,34 @@ impl Screen {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn open_named(name: &str, since: Instant) -> Open {
+        Open { id: "id".into(), name: name.into(), path: "p".into(), step: Step::Info, open_name: String::new(), open_saved: false, save_as: None, seamless: true, since }
+    }
+
+    // The line under the list while it opens: what, and the whole seconds once it has been a second (docs/rust-ui.md
+    // "the line under the list says 'Opening X... N s'"). Before a second it says the name without the time.
+    #[test]
+    fn saying_waits_a_second_before_the_time() {
+        assert_eq!(open_named("X", Instant::now()).saying(), "Opening X...");
+    }
+
+    #[test]
+    fn saying_counts_the_whole_seconds_after_one() {
+        let past = Instant::now() - Duration::from_millis(3500);
+        assert_eq!(open_named("X", past).saying(), "Opening X... 3 s");
+    }
+
+    // A name keeps its words and characters whole (nothing is cut or wrapped while it opens).
+    #[test]
+    fn saying_keeps_a_long_and_unicode_name_whole() {
+        let past = Instant::now() - Duration::from_millis(2500);
+        let name = "Shards, no longer yours — 𝔫𝔦𝔠𝔢";
+        assert_eq!(open_named(name, past).saying(), format!("Opening {name}... 2 s"));
+    }
+}

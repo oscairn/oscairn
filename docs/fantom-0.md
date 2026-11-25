@@ -870,13 +870,12 @@ told Local Switch off by the engine as it opens the keys' link (the profile's
 not done yet: USB MIDI (`modprobe snd-usb-audio`, outside the chroot; on November 12 the kernel
 loaded it by itself when a keyboard was plugged in). `--dry-run` checks what it can without
 changing anything (another start, Roland's app, who holds the panel) and prints the rest.
-`--cold` is for a start by hand on a boot on which Roland's app never ran (the boot no longer uses
-it: such starts gave no sound, [Starting at power-on](#starting-at-power-on-not-done)): nothing to stop, Roland's app running is a failure, and the panel is taken at once. It has a
-marked, disabled place for Roland's start word: when Roland's app starts it sends the panel
-`0c 00 75 00 80 30 00 00 .. 04` (to 0x75 over the link). A takeover after Roland's app had run
-needed none, and the word did not revive a panel that had gone silent; whether a panel that
-Roland's app never woke waits for it is not known, and is to be tried on the unit before the
-step is enabled.
+`--cold` is for a start on a boot on which Roland's app never ran (the power-on's own, or by hand;
+[The cold start's audio](#the-cold-starts-audio)): nothing to stop, Roland's app running is a
+failure, the panel is taken at once, the audio port's receive side is set up, and the engine is
+told to send Roland's start words: the panel's, then the sound engine's two. A takeover after
+Roland's app had run needs none, and the panel's start word did not revive a panel that had gone
+silent.
 
 `oscairn-fantom-stop` stops the app (which stops its engine) and any engine left, puts the
 governors back, stops the bundle's X server, starts Roland's Weston again (`systemctl start
@@ -1051,11 +1050,11 @@ power-on, with a way back to Roland's app at each one. `go.sh` does, in order: `
 `oscairn-fantom-boot` ([source](../devices/roland-fantom0/bundle/oscairn-fantom-boot)) runs just
 before that last line.
 
-**Roland's app always starts first.** Oscairn started cold in its place (November 24 and 25)
-gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran, and twice left the
-screen blank; every start after Roland's app had run sounded and drew. Roland's app evidently sets
-up the audio path (the DSP chips between the SoC and the DACs) as it starts. So the owner sees
-Roland's screen, then Oscairn's, roughly the settle time (below) plus Oscairn's own start later.
+**Oscairn starts at once** (`oscairn-fantom-start --cold`), in Roland's app's place: a cold
+start now has sound ([The cold start's audio](#the-cold-starts-audio)). The file `roland-first`
+in the boot folder keeps the takeover instead (items 2 and 3): Roland's app first, then Oscairn,
+roughly the settle time (below) plus Oscairn's own start later. Before November 25 a cold start
+gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
 
 1. **Roland's app alone when asked for:** TEMPO held at power-on (read with `oscairn-key-held`,
    which asks `gpio-keys` for key 152's state once, read-only; WRITE held at power-on is the
@@ -1068,7 +1067,8 @@ Roland's screen, then Oscairn's, roughly the settle time (below) plus Oscairn's 
    the next power-on is Roland's alone, the one after it the takeover's again); the file
    `dry-run` there (the decision is logged to `boot.log` there, nothing is started); a file that
    cannot be written; `systemd-run` failing. It exits 3 and `go.sh` runs Roland's app.
-2. **Otherwise the takeover is scheduled:** it writes `attempt` and runs `systemd-run
+2. **Otherwise, with `roland-first`, the takeover is scheduled** (without it, Oscairn at once,
+   watched as in item 3, with the same fallback): it writes `attempt` and runs `systemd-run
    --unit=oscairn-takeover --collect --no-block oscairn-fantom-boot --takeover`, then exits 3
    without `/run/oscairn-boot-started`, so `go.sh` runs Roland's app as on a stock boot. The
    takeover gets a transient unit of its own because `go.sh` is the main process of
@@ -1093,7 +1093,39 @@ Roland's screen, then Oscairn's, roughly the settle time (below) plus Oscairn's 
 
 Every line the boot script and `oscairn-fantom-start` log is synced: a power cut seconds after a
 boot once lost the last lines of `boot.log` and every bundle log. `oscairn-fantom-start --cold`
-(Roland's app never ran) stays for starts by hand; the boot does not use it.
+(Roland's app never ran) is the power-on's start, and serves starts by hand too.
+
+### The cold start's audio
+
+Roland's app does three things at its start without which a cold start's panel stays dead or
+its outputs silent; a cold start does them itself (found November 25, the owner at the
+instrument; notes/w27/unit-changes.md):
+
+1. **The panel's start word**, Roland's app's first write at its start: `0c 00 75 00 80 30 00
+   00 01 00 00 04` (kind 6 to the panel, 0x75), one 12-byte write, sent by the engine first as
+   it opens the link, before Local Switch off. Without it the knobs, buttons, dial and sustain
+   pedal stay dead; after it they work (proven on the unit the same day). What byte 8 means is
+   not known.
+2. **The audio port's receive side.** The SoC's SAI sends in step with its receiver, whose frame
+   the driver sets up only when capture opens (the BMCs are the clock master); left at reset
+   values, nothing reaches the DACs. `oscairn-fantom-start` (step 5b) runs one short `arecord`
+   in Roland's format (`hw:1,0`, 6 channels, S32_LE, 48 kHz) before the engine.
+3. **Two messages on the link**, sent by the engine after Local Switch off ([The key
+   reader](#the-key-reader)), each one 12-byte write, kind 9 to 0xE1 (the BMC's control task), as
+   Roland's app sends them: selector 2, `12 00 e1 02 vv vv vv vv 6c 00 c1 04`, "the Linux side
+   is up" (the BMC's status frames, 112 bytes 10 a second, start after it), then selector 3, `12
+   00 e1 03 ff ff 00 00 e8 3c e9 00`. Selector 3 alone stayed silent; selector 2 then selector
+   3 sounded. Selector 2's `vv` is what Roland's app reads: the little-endian 32-bit word at
+   offset 16 of `/home/ROLAND/FANTOM/ADJUST/KY019.ADJ` (256 bytes, per unit: it carries a serial),
+   2 without the file; the owner's unit has 1. `oscairn-fantom-start --cold` reads it and hands it
+   to the engine as `OSCAIRN_BMC_COLD`. Bytes past each frame's count (byte 11) are stale bytes of
+   Roland's app's memory, kept as traced.
+
+Not known: which of the two does what for the audio (the BMC's selector-2 handler, read
+statically, sets the status gate and reads no payload; no handler for selector 3 was found),
+whether the value matters, whether selector 2 alone would do, and what resending them after
+Roland's app has run would do: a warm start (after Roland's app) sends none of the three
+frames.
 
 The units' settings, read on November 23 and 24: `weston-term.service` has `User=root`,
 `Type=simple`, `KillMode=control-group`, `RemainAfterExit=no` and `Restart=no`: `go.sh` runs
@@ -1457,10 +1489,13 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
 with `OSCAIRN_ROLAND_FANTOM0`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
 timeout. Before reading or writing anything it makes the device raw with echo and flow control
 off, and reads the settings back; where they do not hold it neither reads nor writes (with echo
-on, the tty layer would send each byte received back to the BMC side). **It writes one thing
+on, the tty layer would send each byte received back to the BMC side). **It writes these
 only:** with the profile's `keyboard.localOff` (`--keyboard-local off`), the two Local Switch off
 frames ([The message link](#the-message-link)), once, the first time the device is open and raw;
-it then opens the device for reading and writing, and otherwise read-only. A failed write is
+and on a cold start (`OSCAIRN_BMC_COLD` set) the panel's start word before them and the sound
+engine's two start messages after them ([The cold start's audio](#the-cold-starts-audio)), each
+logged (`cold start: ...`). It then opens the device
+for reading and writing, and otherwise read-only. A failed write is
 logged (`Local Switch off not sent: ...`, or `Local Switch off sent` when it went) and reading
 goes on. The frames are the stock BMC firmware's, as Roland's app sends them; the setting holds
 until a power cycle, and nothing turns it back on. Once
@@ -1774,11 +1809,9 @@ Each of these needs someone at the panel, Roland's app stopped, or both. Run on 
 done: Oscairn's start ([The first run on the unit](#the-first-run-on-the-unit)), Local Switch
 off from the engine, the app on the display, and a USB MIDI keyboard.
 
-1. **The start word on a cold start.** Whether the panel reports to a holder after a power-on
-   in which Roland's app never ran, so never sent its start words (kind 0 to 0x75 on the message
-   link). Trying it needs Roland's app kept from starting (for example `go.sh` changed for one
-   boot); if the panel stays silent, the start words are what wakes it, which would need a
-   write. All the takeovers so far followed Roland's app.
+1. **The start word on a cold start.** Answered November 25: without it the panel stays dead
+   after a power-on in which Roland's app never ran; the engine now sends it ([The cold start's
+   audio](#the-cold-starts-audio)).
 2. **The buttons not yet pressed:** E1 to E6 pushed, and the pedal jacks; each should show in
    the dump.
 3. **Levels and outputs:** which channel pair feeds which jack (MAIN OUT is not measured; SUB

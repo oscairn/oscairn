@@ -63,7 +63,10 @@ namespace oscairn::host
 
     std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff )
     {
-        return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ), BmcLinkReader::standardError, std::chrono::milliseconds( 500 ), localOff );
+        // A cold start: oscairn-fantom-start --cold sets it to selector 2's value (BmcLink.h's bmcLinuxUp).
+        std::optional<uint32_t> cold;
+        if( const char* v = std::getenv( "OSCAIRN_BMC_COLD" ); v && *v ) cold = uint32_t( std::strtoul( v, nullptr, 10 ) );
+        return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ), BmcLinkReader::standardError, std::chrono::milliseconds( 500 ), localOff, cold );
     }
 
     std::unique_ptr<DeviceReader> openInputKeys( const std::string& name, const std::map<uint16_t, std::string>& keys, PlayControl play )

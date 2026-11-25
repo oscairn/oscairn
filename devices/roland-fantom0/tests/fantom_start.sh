@@ -187,6 +187,13 @@ check "and changes nothing" "[ ! -e '$bundle/ran' ]"
 check "a wrong option is refused" "! '$bundle/oscairn-fantom-start' --now > /dev/null 2>&1"
 out=$("$bundle/oscairn-fantom-start" --dry-run --cold 2>&1); status=$?
 check "--cold: nothing to stop, the rest as usual" "[ $status = 0 ] && ! echo \"\$out\" | grep -q weston-term && echo \"\$out\" | grep -q 'oscairn-panel-holder'"
+# Selector 2's value: the word at offset 16 of a 256-byte KY019.ADJ, 2 without one; none on a warm start.
+adj=$bundle/KY019.ADJ
+{ printf 'KY019 ADJ   0000\001\000\000\000\347\001\000\000'; head -c 232 /dev/zero; } > "$adj"
+check "--cold: the engine told selector 2's value from KY019.ADJ" "OSCAIRN_KY019='$adj' '$bundle/oscairn-fantom-start' --dry-run --cold 2>&1 | grep -q 'OSCAIRN_BMC_COLD=1 '"
+check "--cold without KY019.ADJ: 2, as Roland's application" "OSCAIRN_KY019='$bundle/none' '$bundle/oscairn-fantom-start' --dry-run --cold 2>&1 | grep -q 'OSCAIRN_BMC_COLD=2 '"
+check "a warm start: no cold start's frames" "! OSCAIRN_KY019='$adj' '$bundle/oscairn-fantom-start' --dry-run 2>&1 | grep -q OSCAIRN_BMC_COLD"
+rm -f "$adj"
 
 # SysV shared memory left by ended processes, on a stand-in /proc: only 101 qualifies (key 0, no
 # attachment, this user's, its creator gone); 102 is attached, 103 has a key, 104's creator runs,

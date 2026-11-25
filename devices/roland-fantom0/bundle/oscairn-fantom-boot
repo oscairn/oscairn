@@ -209,7 +209,8 @@ fi
 [ ! -e "$boot/dry-run" ] || dry=1
 
 # 2. Oscairn at once: oscairn-fantom-start --cold sets up the audio port's receive side itself
-# (its step 5b), which is all a cold start lacked for sound. The file roland-first in the boot
+# (its step 5b) and has the engine tell the sound engine the Linux side is up (OSCAIRN_BMC_COLD),
+# what a cold start lacked for sound (2026-11-25). The file roland-first in the boot
 # folder keeps the takeover below instead (Roland's application first, Oscairn after it).
 if [ ! -e "$boot/roland-first" ]; then
 	say "starting Oscairn (oscairn-fantom-start --cold)"

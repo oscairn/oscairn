@@ -183,6 +183,8 @@ namespace oscairn::standalone
         // Why a load, save or export asked now would be refused (the engine busy or gone), or empty.
         std::string refusal() const { return !connected() ? "The engine is not running." : soundBusy() ? "The engine is busy; try again in a moment." : std::string(); }
         bool canPrepareSounds() const { return !socketPath_.empty() || app_; }
+        // The engine's control socket: --connect's, or the managed engine's; empty in process.
+        const std::string& socketPath() const { return socketPath_; }
         // This app started the engine, which stops once no window keeps it (quitting lets it go).
         bool managed() const { return process_ != nullptr; }
         // The open Performance's info asked now, not polled (the last read while a job runs);

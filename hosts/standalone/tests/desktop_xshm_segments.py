@@ -135,7 +135,7 @@ def run(app, out, display, x, name, end):
     uid, before = os.getuid(), set(segments())
     child = subprocess.Popen([app, '--audio', 'null'], cwd=folder,
                              stdout=open(os.path.join(folder, 'stdout'), 'w'), stderr=open(os.path.join(folder, 'stderr'), 'w'),
-                             env={**os.environ, 'DISPLAY': display, 'OSCAIRN_DATA_HOME': os.path.join(folder, 'data'),
+                             env={**os.environ, 'OSCAIRN_UI': 'juce', 'DISPLAY': display, 'OSCAIRN_DATA_HOME': os.path.join(folder, 'data'),
                                   'OSCAIRN_CONFIG_HOME': os.path.join(folder, 'config'), 'OSCAIRN_RUNTIME_DIR': runtime})
     try:
         def ours():

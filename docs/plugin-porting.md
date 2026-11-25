@@ -807,7 +807,11 @@ stepped, hidden and read-only flags. How the editors use them:
   the plugin's order within a page;
 - a stepped parameter with 2 to 4 values is a row of buttons (Off and On, or 0 and 1: a
   switch), with up to 64 a list of their value texts, otherwise a slider; a buttons hint asks
-  for buttons up to 8 values. A symmetric range with a default of 0 fills from the center;
+  for buttons up to 8 values. A symmetric range with a default of 0 fills from the center.
+  The host only ever sends it whole values and never glides it: a control's target (a converted
+  controller box on the mod wheel, say) and a scene's glide switch it halfway between two steps,
+  a knob assigned straight to it truncates. Unless it takes CLAP modulation: then a relative
+  control target is a modulation amount, which the plugin quantizes itself;
 - a mode or algorithm (a reverb's Hall, Room and Plate) is best a stepped parameter with its
   names as value texts, first by priority. When a mode changes which controls matter, hide
   the others (`CLAP_PARAM_IS_HIDDEN`) or change names or modules, and call

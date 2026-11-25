@@ -787,6 +787,16 @@ S-shaped `x²(3 − 2x)`; and, for levels (2026-11-01):
 - **power**, `{"kind": "power", "exponent": E}` with 0.1 ≤ E ≤ 10: `x^E`. A level that follows
   a power law (E = 2: a square-law taper, −12 dB at half way).
 
+And, for any destination, a **measured curve** (2026-11-25), `{"kind": "table", "points": [...]}`
+with 2 to 128 points within −1..1: the points spread evenly over `x`'s 0 to 1 (with 128, point v
+at a 7-bit controller value v, `x` = v / 127), linear between, so a 14-bit or continuous source
+falls between two points. A point below 0 takes the target below its start: a converted MODX
+controller box's falling curve. Such a box's ratio and polarity are the target's start and end,
+its summing the summing rule below ([the Performance format's controller
+boxes](../performance-format.md#controller-boxes)); a relative target's start and end may lie
+within −2..3 for a ratio past +64. A lane-driven control (`source`) may not have one below it: the
+flattened lane curves carry no points.
+
 **The summing rule** (decided 2026-11-01). A parameter, a part's level and a part's mute each
 have a **base**: their value with no control moving them, one per destination, kept on each
 of its targets (`base`). Each target on it contributes an **offset**, at its control's value

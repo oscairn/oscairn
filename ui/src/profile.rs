@@ -101,6 +101,7 @@ impl Profile {
 mod tests {
     use super::*;
     use crate::topbar::Show;
+    use serde_json::json;
 
     #[test]
     fn built_in_profiles_read() {
@@ -129,5 +130,92 @@ mod tests {
         assert!(Profile::parse("[]").is_err() && Profile::parse("{").is_err());
         let p = Profile::parse(r#"{"format":"oscairn.profile","screens":[{"topBar":{"cpu":"bar","ram":"none"}}]}"#).unwrap();
         assert_eq!(p.top_bar, MeterSettings { cpu: Show::Bar, ram: Show::None });
+    }
+
+    #[test]
+    fn scale_never_below_one() {
+        // A screen whose pixels are already at least 6.5 mm across scales by 1, however many pixels it has.
+        assert_eq!(screen_scale(&json![{"width":1280, "height":720, "diagonal":144000}]), 1.0);
+        // The pixel size unknown still forces the same minimum once the diagonal is.
+        assert_eq!(screen_scale(&json![{"diagonal":140}]), 1.0);
+        // No or an odd diagonal: unknown, 0.
+        assert_eq!(screen_scale(&json![{"width":1280, "height":720, "diagonal":0}]), 0.);
+        assert_eq!(screen_scale(&json![{"width":1280, "height":720, "diagonal":-140}]), 0.);
+        assert_eq!(screen_scale(&json![{"width":1280, "height":720}]), 0.);
+        assert_eq!(screen_scale(&Value::Null), 0.);
+    }
+
+    #[test]
+    fn parse_defaults_when_fields_missing() {
+        // A profile with only the format reads as an empty this-computer profile.
+        let p = Profile::parse(r#"{"format":"oscairn.profile"}"#).unwrap();
+        assert_eq!((p.id.as_str(), p.theme.as_str(), p.panel_map.as_str()), ("", "", ""));
+        assert!(!p.on_device && !p.text_on_screen && !p.audio_fixed);
+        assert!(p.on_screen_keyboard, "no keys or notes group: the on-screen keyboard is offered");
+        assert_eq!((p.memory, p.frame_rate()), (0, 0));
+        assert!(p.apps.is_empty() && p.controls.is_empty());
+    }
+
+    #[test]
+    fn parse_reads_string_fields() {
+        let p = Profile::parse(r#"{"format":"oscairn.profile","id":"mine","platform":{"runtime":"linux-arch"},"screens":[{"theme":"light"}],"panel":{"map":"pan.json"}}"#).unwrap();
+        assert_eq!((p.id.as_str(), p.theme.as_str(), p.panel_map.as_str()), ("mine", "light", "pan.json"));
+        assert!(p.on_device, "a platform.runtime makes it a device's own profile");
+    }
+
+    #[test]
+    fn memory_in_megabytes_to_bytes() {
+        let p = Profile::parse(r#"{"format":"oscairn.profile","compute":{"memory":1048576},"screens":[{}]}"#).unwrap();
+        assert_eq!(p.memory, 1048576 << 20); // 1 TiB
+        // Anything over the cap reads as 2^44 bytes (16 TiB).
+        let p = Profile::parse(r#"{"format":"oscairn.profile","compute":{"memory":100000000000},"screens":[{}]}"#).unwrap();
+        assert_eq!(p.memory, 1u64 << 44);
+    }
+
+    #[test]
+    fn apps_keeps_only_strings() {
+        let p = Profile::parse(r#"{"format":"oscairn.profile","apps":["a","b",42,null,true],"screens":[{}]}"#).unwrap();
+        assert_eq!(p.apps, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn text_entry_on_screen_only() {
+        assert!(Profile::parse(r#"{"format":"oscairn.profile","screens":[{"textEntry":"onScreen"}]}"#).unwrap().text_on_screen);
+        assert!(!Profile::parse(r#"{"format":"oscairn.profile","screens":[{"textEntry":"external"}]}"#).unwrap().text_on_screen);
+        assert!(!Profile::parse(r#"{"format":"oscairn.profile","screens":[{"textEntry":1}]}"#).unwrap().text_on_screen);
+    }
+
+    #[test]
+    fn on_screen_keyboard_off_for_a_device_with_keys() {
+        // A group of the device's own playing keys replaces the on-screen keyboard.
+        assert!(!Profile::parse(r#"{"format":"oscairn.profile","controls":[{"kind":"keys","role":"notes","count":6}]}"#).unwrap().on_screen_keyboard);
+        // A knob group does not.
+        assert!(Profile::parse(r#"{"format":"oscairn.profile","controls":[{"kind":"knobs","role":"assign","count":4}]}"#).unwrap().on_screen_keyboard);
+        // And an explicit choice wins over the controls.
+        assert!(Profile::parse(r#"{"format":"oscairn.profile","onScreenKeyboard":true,"controls":[{"kind":"keys","role":"notes"}]}"#).unwrap().on_screen_keyboard);
+    }
+
+    #[test]
+    fn audio_fixed_from_audio_device() {
+        assert!(Profile::parse(r#"{"format":"oscairn.profile","audio":{"device":{"name":"hw:0"}}}"#).unwrap().audio_fixed);
+        assert!(!Profile::parse(r#"{"format":"oscairn.profile","audio":{"device":"none"}}"#).unwrap().audio_fixed);
+        assert!(!Profile::parse(r#"{"format":"oscairn.profile"}"#).unwrap().audio_fixed);
+    }
+
+    #[test]
+    fn controls_read_from_the_profile() {
+        let p = Profile::parse(r#"{"format":"oscairn.profile","controls":[{"kind":"knobs","role":"screen","count":4},{"kind":"encoders","paging":"button","count":3}]}"#).unwrap();
+        assert_eq!(p.controls.len(), 2);
+        assert_eq!((p.controls[0].count, p.controls[0].paged), (4, false));
+        assert_eq!((p.controls[1].count, p.controls[1].paged), (3, true));
+    }
+
+    #[test]
+    fn device_rate_and_cap() {
+        // A device with no rate gets the 30-frame default, and a screen's rate is capped at 1000.
+        let p = Profile::parse(r#"{"format":"oscairn.profile","platform":{"runtime":"x"},"screens":[{}]}"#).unwrap();
+        assert_eq!(p.frame_rate(), 30);
+        let p = Profile::parse(r#"{"format":"oscairn.profile","platform":{"runtime":"x"},"screens":[{"frameRate":5000}]}"#).unwrap();
+        assert_eq!(p.frame_rate(), 1000);
     }
 }

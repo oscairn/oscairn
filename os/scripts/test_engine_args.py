@@ -35,8 +35,10 @@ assert engine.settings(placed)["OSCAIRN_AUDIO_THREAD_CORES"] == "1,2,3", "the au
 allowed = {**fantom, "compute": {**fantom["compute"], "workerAllowance": 2000}}
 assert engine.settings(allowed)["OSCAIRN_WORKER_BUDGET_US"] == "2000", "the workers' allowance in microseconds"
 assert engine.settings(fantom)["OSCAIRN_WORKER_BUDGET_US"] == "", "none named: derived from the block"
-assert engine.settings(fantom)["OSCAIRN_WORKER_SPIN_US"] == "200", "the FANTOM-07's spin before sleeping on a worker"
+assert engine.settings(fantom)["OSCAIRN_WORKER_SPIN_US"] == "", "the FANTOM-07 sleeps on a worker at once (spin 0, issue 8)"
 assert engine.settings(load("kick"))["OSCAIRN_WORKER_SPIN_US"] == "", "none named: none"
+assert engine.settings(fantom)["OSCAIRN_WORKER_EXTRA_BLOCK"] == "org.oscairn.analog,org.oscairn.sampler", "the FANTOM-07's Analog and Sampler in RFC 0045's extra block (issue 8)"
+assert engine.settings(load("kick"))["OSCAIRN_WORKER_EXTRA_BLOCK"] == "", "none named: none"
 assert engine.settings(fantom)["OSCAIRN_PLUGIN_HOSTS"] == "", "the FANTOM-07: a worker per instance (three hosts measured worse on the unit)"
 assert engine.settings(load("kick"))["OSCAIRN_PLUGIN_HOSTS"] == "" and engine.settings(load("kick"))["OSCAIRN_OWN_HOST"] == "", "none named: a worker per instance"
 assert engine.settings(fantom)["OSCAIRN_WORKER_DEADLINE"] == "", "the allowance until the deadline is measured on the unit"

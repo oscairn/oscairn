@@ -1,4 +1,0 @@
-# The FANTOM-0's device defaults, appended to /etc/default/oscairn-engine by post-build.sh
-# (oscairn-fantom-start hands them to the engine and its workers).
-# Analog: arpeggiated patches overlap about 8 voices at about 2 ms per block until its faster oscillator ships.
-OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog

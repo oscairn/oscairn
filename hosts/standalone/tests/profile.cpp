@@ -119,6 +119,11 @@ int main()
               "an allowance that is not a whole number of microseconds");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerSpin\": 200")).compute.workerSpin == 200 && Profile::parse(json).compute.workerSpin == 0 &&
               refused(replaced(json, cores, cores + ", \"workerSpin\": -1")), "the spin before sleeping on a worker, in microseconds; none named, none");
+        // Issue 8: the FANTOM-07's worker settings come from the profile now, not a hand-set etc/default.
+        check(Profile::parse(replaced(json, cores, cores + ", \"workerExtraBlock\": \"org.oscairn.analog,org.oscairn.sampler\"")).compute.workerExtraBlock == "org.oscairn.analog,org.oscairn.sampler" &&
+              Profile::parse(json).compute.workerExtraBlock.empty(), "the plugins given RFC 0045's extra block, by their IDs; none named, none");
+        check(loadProfile("fantom-07").compute.workerSpin == 0, "the FANTOM-07 sleeps on a worker at once (issue 8)");
+        check(loadProfile("fantom-07").compute.workerExtraBlock == "org.oscairn.analog,org.oscairn.sampler", "the FANTOM-07's default: Analog and the Sampler in the extra block (issue 8)");
         // RFC 0045: the memory kept available, below which instances kept warm are let go.
         check(Profile::parse(replaced(json, cores, cores + ", \"availableMemory\": 200")).compute.availableMemory == 200 && Profile::parse(json).compute.availableMemory == 0 &&
               loadProfile("fantom-07").compute.availableMemory == 200 && refused(replaced(json, cores, cores + ", \"availableMemory\": 1000000")),

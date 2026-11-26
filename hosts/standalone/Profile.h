@@ -31,13 +31,15 @@ namespace oscairn::standalone
         // pluginHosts (optional): the plugin hosts the plugins in workers share (OSCAIRN_PLUGIN_HOSTS, RFC 0045); 0: a
         // worker per plugin instance. ownHost (optional): plugin IDs given a worker of their own all the same (OSCAIRN_OWN_HOST).
         // workers (optional): plugin, chain or pool, how plugins share worker processes (OSCAIRN_WORKERS, RFC 0045's plugin
-        // groups); absent: as pluginHosts says. engineAudioCores, workerAudioCores (optional): each side's own core list in
+        // groups); absent: as pluginHosts says. workerExtraBlock (optional): plugin IDs, separated by commas, whose real-time
+        // instances render each block a block late (OSCAIRN_WORKER_EXTRA_BLOCK, RFC 0045's extra block); absent: none.
+        // engineAudioCores, workerAudioCores (optional): each side's own core list in
         // place of audioThreadCores (OSCAIRN_ENGINE_AUDIO_CORES, OSCAIRN_WORKER_AUDIO_CORES).
         // captureSeconds (optional, 0 to 3600): the retroactive buffer's length until one is chosen (RFC 0020), held in
         // memory, locked at instrument level; -1, none named: 2 minutes with 2 GB or less, 10 minutes above.
         // availableMemory (optional, MiB): what the system must keep available (MemAvailable); below it plugin
         // instances kept warm are let go (RFC 0045, the budget's `available`); 0: not watched.
-        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; int deadlineSlack = 0; int pluginHosts = 0; std::vector<std::string> ownHost; int captureSeconds = -1; int availableMemory = 0; std::string workers; std::vector<int> engineAudioCores, workerAudioCores; } compute;
+        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; int deadlineSlack = 0; int pluginHosts = 0; std::vector<std::string> ownHost; int captureSeconds = -1; int availableMemory = 0; std::string workers, workerExtraBlock; std::vector<int> engineAudioCores, workerAudioCores; } compute;
         // `device` (optional): the audio device the engine opens instead of the default: its name (an
         // ALSA address such as hw:1,0 or PCM name on Linux, a device's name on macOS), its channel
         // count (all opened in each direction used; 0: those mapped), the rate it must run at (0:

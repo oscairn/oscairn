@@ -24,6 +24,8 @@
                          commas, given workers of their own
     OSCAIRN_WORKERS      compute.workers: plugin, chain or pool (RFC 0045's plugin groups); empty: as
                          compute.pluginHosts says
+    OSCAIRN_WORKER_EXTRA_BLOCK  compute.workerExtraBlock, plugin IDs given RFC 0045's extra block
+                         (their real-time instances render each block a block late); empty: none
     OSCAIRN_ENGINE_AUDIO_CORES  compute.engineAudioCores as a CPU list, the cores the engine's audio
                          thread and helpers keep to in place of audioThreadCores; empty: those
     OSCAIRN_WORKER_AUDIO_CORES  compute.workerAudioCores likewise for workers' audio threads; with
@@ -91,6 +93,7 @@ def settings(profile):
         "OSCAIRN_PLUGIN_HOSTS": str((profile.get("compute") or {}).get("pluginHosts") or ""),
         "OSCAIRN_OWN_HOST": ",".join((profile.get("compute") or {}).get("ownHost", [])),
         "OSCAIRN_WORKERS": (profile.get("compute") or {}).get("workers", ""),
+        "OSCAIRN_WORKER_EXTRA_BLOCK": (profile.get("compute") or {}).get("workerExtraBlock", ""),
         "OSCAIRN_ENGINE_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("engineAudioCores", [])),
         "OSCAIRN_WORKER_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("workerAudioCores", [])),
         "OSCAIRN_UI": ((profile.get("screens") or [{}])[0]).get("ui", "rust"),

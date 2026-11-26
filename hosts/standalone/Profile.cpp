@@ -123,13 +123,14 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("compute"); !v.isVoid())
         {
-            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "deadlineSlack", "pluginHosts", "ownHost", "captureSeconds", "availableMemory", "workers", "engineAudioCores", "workerAudioCores"}, "compute");
+            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "deadlineSlack", "pluginHosts", "ownHost", "captureSeconds", "availableMemory", "workers", "workerExtraBlock", "engineAudioCores", "workerAudioCores"}, "compute");
             p.compute = {count(o, "cores", 1024), count(o, "realtimeCores", 1024), count(o, "memory", 1 << 24), count(o, "storage", 1 << 30),
                          count(o, "osMemory", 1 << 24), count(o, "performanceMemory", 1 << 24), numbers(o, "audioThreadCores", 63),
                          count(o, "workerAllowance", 1'000'000), count(o, "workerSpin", 1'000'000), flag(o, "workerDeadline"), count(o, "deadlineSlack", 1'000'000), count(o, "pluginHosts", 64), names(o, "ownHost"),
                          o.hasProperty("captureSeconds") ? count(o, "captureSeconds", 3600) : -1, count(o, "availableMemory", 1 << 24)};
             p.compute.workers = text(o, "workers", false);
             require(p.compute.workers.empty() || p.compute.workers == "plugin" || p.compute.workers == "chain" || p.compute.workers == "pool", "workers is plugin, chain or pool");
+            p.compute.workerExtraBlock = text(o, "workerExtraBlock", false);
             p.compute.engineAudioCores = numbers(o, "engineAudioCores", 63); p.compute.workerAudioCores = numbers(o, "workerAudioCores", 63);
             for(const auto* list : {&p.compute.engineAudioCores, &p.compute.workerAudioCores}) for(const auto c : *list) require(c < p.compute.cores, "an audio core list names a core past cores");
             require(!p.compute.memory || p.compute.availableMemory < p.compute.memory, "availableMemory is less than memory");

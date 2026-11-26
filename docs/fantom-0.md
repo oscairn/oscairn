@@ -1757,16 +1757,18 @@ on the display; `--engine-only` the engine alone.
    whole samples in RAM). The FANTOM sets none of them; the host's voice budget sheds by measured
    load.
 
-   The bundle's `etc/default/oscairn-engine` also holds the FANTOM's device defaults, from
-   `os/buildroot/board/fantom-bundle/overlay/etc/default/oscairn-engine-device` (which
-   `post-build.sh` appends after the profile's):
-   `OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog` (arpeggiated Analog patches overlap about 8
-   voices at about 2 ms per block, until its faster oscillator ships). To switch that extra block
-   off, start with `OSCAIRN_WORKER_EXTRA_BLOCK=none ./oscairn-fantom-start` (any value naming no
-   plugin works; an empty one does not, since an empty value counts as unset and the file's is
-   used). Seen on the unit (bundle 90c5d6b5, engine only, 2026-11-13): the engine's environment
-   then held `OSCAIRN_WORKER_EXTRA_BLOCK=none`, and ST Final's arpeggiated Analog part, with no
-   extra block, silenced 1,705 of 15,376 blocks in 41 s and was silent in the recorded take.
+   The FANTOM's device defaults live in the profile now (`fantom-07.json`'s `compute`, issue 8),
+   so a fresh bundle has them with no hand-set `etc/default`: `compute.workerExtraBlock` puts the
+   Analog and the Sampler in RFC 0045's extra block (`org.oscairn.analog,org.oscairn.sampler`;
+   arpeggiated Analog patches overlap about 8 voices at about 2 ms per block, until its faster
+   oscillator ships), and `compute.workerSpin` 0 sleeps on workers at once.
+   `engine-args.py` writes them to the bundle's `etc/default/oscairn-engine` from the profile.
+   To switch the extra block off, start with `OSCAIRN_WORKER_EXTRA_BLOCK=none ./oscairn-fantom-start`
+   (any value naming no plugin works; an empty one does not, since an empty value counts as
+   unset and the file's is used). Seen on the unit (bundle 90c5d6b5, engine only, 2026-11-13):
+   the engine's environment then held `OSCAIRN_WORKER_EXTRA_BLOCK=none`, and ST Final's
+   arpeggiated Analog part, with no extra block, silenced 1,705 of 15,376 blocks in 41 s and
+   was silent in the recorded take.
 
    Oscairn's engine and workers turn transparent huge pages off for themselves at their start
    (`prctl(PR_SET_THP_DISABLE)`; khugepaged's scan, every 10.24 s, stalled a worker's audio thread
@@ -1781,11 +1783,10 @@ on the display; `--engine-only` the engine alone.
    `OSCAIRN_CPU_LATENCY=keep ./oscairn-fantom-start` hands the variable on the same way and asks for
    nothing, for comparing.
 
-   The profile sets `compute.workerSpin` to 200: while every worker's audio thread has a core of
-   its own (three workers or fewer beside the engine), the engine's thread spins up to 200 us for
-   each worker's result before it sleeps, and each worker spins from 200 us before its next block
-   is due ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#spinning-before-sleeping)).
-   `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start` turns it off for comparing.
+   The profile sets `compute.workerSpin` to 0 (issue 8): the engine's thread sleeps on a worker
+   at once rather than spin up to 200 us for its result ([RFC 0045](
+   rfcs/0045-audio-scheduling-on-small-devices.md#spinning-before-sleeping)).
+   `OSCAIRN_WORKER_SPIN_US=200 ./oscairn-fantom-start` turns the spin back on for comparing.
 
    No wait on a worker goes past the audio callback's deadline (its start plus the period less
    15 %); with the extra block a worker's block is taken at the next callback's start when it is

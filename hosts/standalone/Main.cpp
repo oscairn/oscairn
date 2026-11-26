@@ -1038,6 +1038,8 @@ namespace oscairn::standalone
                     { for( const auto& id : profile.compute.ownHost ) own += ( own.empty() ? "" : "," ) + id; setenv( "OSCAIRN_OWN_HOST", own.c_str(), 0 ); }
                 // How plugins share worker processes (RFC 0045's plugin groups), and each side's audio cores; likewise.
                 if( !profile.compute.workers.empty() ) setenv( "OSCAIRN_WORKERS", profile.compute.workers.c_str(), 0 );
+                // The plugins whose real-time instances render a block late (RFC 0045's extra block); likewise.
+                if( !profile.compute.workerExtraBlock.empty() ) setenv( "OSCAIRN_WORKER_EXTRA_BLOCK", profile.compute.workerExtraBlock.c_str(), 0 );
                 for( const auto& [list, name] : { std::pair{ &profile.compute.engineAudioCores, "OSCAIRN_ENGINE_AUDIO_CORES" }, std::pair{ &profile.compute.workerAudioCores, "OSCAIRN_WORKER_AUDIO_CORES" } } )
                     if( std::string cores; !list->empty() ) { for( auto c : *list ) cores += ( cores.empty() ? "" : "," ) + std::to_string( c ); setenv( name, cores.c_str(), 0 ); }
                 if( socket.isEmpty() && helper.empty() )

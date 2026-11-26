@@ -1105,6 +1105,12 @@ impl Screen {
             self.show();
             return Outcome::Stay;
         }
+        // The right knob under the screen is the list's, as the dial is (the left knob the sidebar's): pane 1 moves
+        // the list cursor and the view follows, like the jog wheel. With the detail panel shown it scrolls the panel (A14).
+        let action = match action {
+            Action::Move { pane: Some(1), by } if !self.info_on => Action::Move { pane: None, by },
+            other => other,
+        };
         let nav = self.b.nav(action);
         self.handle(nav)
     }

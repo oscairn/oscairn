@@ -310,9 +310,10 @@ impl Screen {
     pub(super) fn act_side(&mut self, action: Action) -> Outcome {
         let per = self.side_cursor.per_page as i64;
         match action {
-            Action::Move { pane: Some(1), .. } => {
+            Action::Move { pane: Some(1), by } => {
                 self.leave_side();
-                let nav = self.b.nav(action);
+                // The right knob is the list's: it leaves the sidebar and moves the list (pane 1 folded into the list's pane).
+                let nav = self.b.nav(Action::Move { pane: None, by });
                 return self.handle(nav);
             }
             Action::Move { by, .. } => self.side_move(i64::from(by)),

@@ -235,3 +235,29 @@ fn a_press_and_release_without_movement_taps_the_row() {
     assert_eq!(ui.global::<PartState>().get_first(), 0, "a tap does not scroll");
     assert!(s.e.called("performance.info").len() > info_before, "the row's tap opened it: {:?}", s.e.methods());
 }
+
+// The right knob under the screen (pane 1) moves the list cursor and keeps it in view, like the jog wheel
+// (the dial, pane None): turning it past the last visible row scrolls the list so the cursor's row is always
+// among the rows shown. Before the fix, pane 1 scrolled the read-only panel and left the list cursor on no row
+// at all; the view never followed.
+#[test]
+fn the_right_knob_keeps_the_cursor_in_view_in_every_list() {
+    let mut r = Rig::new((0..40).map(|i| stored("performance", &format!("p{i}"), &format!("Warm Bass {i}"))).collect());
+    r.ui().global::<crate::PartState>().set_rows_per_view(5);
+    let per = r.ui().global::<crate::PartState>().get_rows_per_view().max(1) as usize;
+    assert_eq!(per, 5, "a short view: five rows");
+    // The first turn shows the cursor on the first row (as the dial's first move shows it).
+    r.act(Action::Move { pane: Some(1), by: 1 });
+    assert_eq!(rows(r.ui()).iter().position(|x| x.cursor), Some(0), "the first turn shows the cursor");
+    // To the last row and back: the list scrolls by whole views, the cursor's row always shown.
+    for _ in 0..(40 + 5) {
+        r.act(Action::Move { pane: Some(1), by: 1 });
+        assert!(rows(r.ui()).iter().any(|x| x.cursor), "the right knob keeps the cursor in the view");
+    }
+    let first = r.ui().global::<crate::PartState>().get_first() as usize;
+    assert_eq!(first + per, 40, "at the end the list shows the last view");
+    for _ in 0..(40 + 5) {
+        r.act(Action::Move { pane: Some(1), by: -1 });
+        assert!(rows(r.ui()).iter().any(|x| x.cursor), "turned back the cursor stays in the view");
+    }
+}

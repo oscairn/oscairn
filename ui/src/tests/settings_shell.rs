@@ -3,7 +3,7 @@
 //! on-screen keyboard and the questions over the screen, the status that makes a page list again, and that nothing at rest
 //! costs a request or a frame.
 
-use super::library::{labels, rows, value_of};
+use super::library::{info, labels, rows, value_of};
 use super::settings::{folder, installed_theme, tabs};
 use super::settings_fake::Settings as Fake;
 use super::*;
@@ -384,15 +384,17 @@ fn midi_controllers_reachable_from_home_by_panel_moves() {
     assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
     nav(&mut s, "move", -1); // the list's cursor
     nav(&mut s, "move", -1); // the page rail, not the top bar
+    let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+    let tab = pages.iter().position(|p| p == "MIDI controllers").expect("a MIDI controllers tab") as i32;
     let mut tries = 0;
-    while ui.global::<crate::SettingsState>().get_page_cursor() != 2 {
+    while ui.global::<crate::SettingsState>().get_page_cursor() != tab {
         nav(&mut s, "move", 1); // along the rail to the MIDI controllers tab
         tries += 1;
-        assert!(tries <= 9, "the rail reaches the MIDI controllers tab");
+        assert!(tries <= pages.len(), "the rail reaches the MIDI controllers tab");
     }
     nav(&mut s, "confirm", 1);
     s.serve();
-    assert_eq!(ui.global::<crate::SettingsState>().get_page(), 2, "a press shows the MIDI controllers page");
+    assert_eq!(ui.global::<crate::SettingsState>().get_page(), tab, "a press shows the MIDI controllers page");
     assert_eq!(title(&ui), "Settings › MIDI controllers");
     // Down past the rail's last tab to the list: the cursor on the first row.
     while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
@@ -425,4 +427,93 @@ fn midi_controllers_reachable_from_home_by_panel_moves() {
             s.serve();
         }
     }
+}
+
+// A no-touch walk of the Signing keys page: from Home by the panel's moves alone, then every action the page
+// offers is walked by the dial and pressed, the count taken from the page's own rows (never a hard-coded one); a
+// press on a key asks nothing but the panel follows the cursor with that key's fingerprint, and the Make row's
+// press opens the keyboard, asks keys.make with the name typed, and lists the new key.
+#[test]
+fn signing_keys_page_is_a_no_touch_walk() {
+    let mut e = Fake::new();
+    e.keys.push(("Stage".into(), "11".repeat(32)));
+    e.keys.push(("Pad".into(), "22".repeat(32)));
+    let mut s = Shelf::with("settings-keys-walk", e);
+    shell::set_text_on_screen(false); // the name is typed on the on-screen keyboard's field
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    // From Home the dial alone: five moves out of the first read's baseline put the cursor on the Settings
+    // tile, a press opens the Rust app.
+    nav(&mut s, "move", 0); // the first read: a baseline
+    for _ in 0..5 {
+        nav(&mut s, "move", 1);
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().get_screen(), 14, "the Settings tile opens the Rust app");
+    // The pages the screen shows provide the walk's count: where the Signing keys tab sits, the last tab.
+    let (keys_tab, last) = {
+        let ui = s.ui();
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        (pages.iter().position(|p| p == "Signing keys").unwrap() as i32, pages.len() as i32 - 1)
+    };
+    // Up to the page rail (not the top bar), along to the Signing keys tab, a press shows it.
+    nav(&mut s, "move", -1);
+    nav(&mut s, "move", -1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+    let mut tries = 0;
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() != keys_tab {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries <= keys_tab as usize + 1, "the rail reaches the Signing keys tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().global::<crate::SettingsState>().get_page(), keys_tab, "a press shows the Signing keys page");
+    assert_eq!(title(&s.ui()), "Settings › Signing keys");
+    // Down past the last tab leaves the rail for the list, the cursor on its first row.
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() < last {
+        nav(&mut s, "move", 1);
+    }
+    nav(&mut s, "move", 1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() < 0, "down past the last tab leaves for the list");
+    // The page's own rows, the walk counted from them: each key's row (the panel follows with its fingerprint,
+    // a press asks nothing) and the Make row's press.
+    let make = { let ui = s.ui(); rows(&ui).iter().position(|r| r.label == "Make a signing key").expect("a Make row") };
+    assert!(make >= 2, "the two keys sit above the Make row: {make} rows");
+    assert!(rows(&s.ui())[0].cursor, "the list's first row has the cursor");
+    for i in 0..=make {
+        if i > 0 {
+            nav(&mut s, "move", 1);
+        }
+        let ui = s.ui();
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(i), "the walk sits on row {i}");
+        let name = rows(&ui)[i].label.to_string();
+        assert!(info(&ui).iter().any(|l| l == name.as_str()), "the panel follows the cursor with {name}: {:?}", info(&ui));
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        if name == "Make a signing key" {
+            assert!(s.ui().global::<crate::KeyboardState>().get_open(), "the Make row's press opens the keyboard");
+            break;
+        }
+        assert!(!s.ui().global::<crate::KeyboardState>().get_open(), "a key's press opens no keyboard");
+        assert!(s.e.called("keys.make").is_empty(), "a key's press asks nothing");
+    }
+    // The name is typed on the keyboard; Return asks keys.make with it, and the new key is listed.
+    let before = rows(&s.ui()).len();
+    for ch in "stage".chars() {
+        assert!(shell::key(&ch.to_string()));
+    }
+    assert!(shell::key(&slint::SharedString::from(slint::platform::Key::Return)));
+    s.serve();
+    assert_eq!(s.e.called("keys.make"), [json!({"name": "stage"})]);
+    let ui = s.ui();
+    assert!(rows(&ui).iter().any(|r| r.label == "stage"), "the new key is listed: {:?}", labels(&ui));
+    assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one key made");
 }

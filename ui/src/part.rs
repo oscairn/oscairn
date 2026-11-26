@@ -647,7 +647,10 @@ impl Screen {
             Some((Menu::MidiOut, _)) => "Outputs",
             None => "Settings",
         };
-        state.set_total(0); // this list has no scroll bar
+        // The list's size and the first row shown, for its scroll bar: a drag or a tap on the bar
+        // (part.slint) asks for a view, and a finger drag on a row scrolls it, as the lists do.
+        state.set_total(cursor.count as i32);
+        state.set_first(cursor.first as i32);
         state.set_view(if cursor.count == 0 { String::new() } else { format!("{what} {}–{} of {}", cursor.first + 1, end, cursor.count) }.into());
     }
 
@@ -1027,6 +1030,20 @@ impl Screen {
         let outcome = self.confirm();
         self.show();
         outcome
+    }
+
+    /// The scroll bar's or a finger drag's view starts at row `first` (a touch only: it selects
+    /// nothing, so the cursor drops), as the lists that already scroll keep the exact row asked.
+    pub fn scroll_to(&mut self, first: i32) {
+        match &mut self.menu {
+            Some((_, c)) => *c = Cursor { at: None, first: (first.max(0) as usize).min(c.count.saturating_sub(1)), ..*c },
+            None => {
+                let count = self.cursor.count;
+                self.cursor = Cursor { at: None, first: (first.max(0) as usize).min(count.saturating_sub(1)), ..self.cursor };
+                self.removing = false;
+            }
+        }
+        self.show();
     }
 
     /// The panel's up or down button: a view.

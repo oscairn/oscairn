@@ -182,3 +182,26 @@ fn list_screens_lay_out_again_when_the_theme_changes() {
     assert!(tight.0 > before.0 && before.0 > roomy.0, "the list holds more rows in a tight theme and fewer in a roomy one: {tight:?} {before:?} {roomy:?}");
     assert!(seen.iter().all(|s| s.2 != s.3), "{seen:?}");
 }
+
+// The Part screen's scroll bar and a finger drag reach its list through the shell (issue #269): the bar's request moves
+// the view to the row asked, the cursor dropped, and the size and first row are the bar's to read.
+#[test]
+fn the_part_lists_scroll_request_turns_its_view() {
+    let mut f = play_on_the_shell("part-scroll", json!({"id": "p1", "name": "Grand", "unsaved": false}), big_graph());
+    let ui = f.screen.ui.clone_strong();
+    f.screen.frame();
+    ui.global::<PlayState>().invoke_part_tapped(0);
+    assert_eq!(ui.get_screen(), 4);
+    f.screen.frame();
+    let p = ui.global::<PartState>();
+    let (total, per_view) = (p.get_total(), p.get_rows_per_view());
+    assert!(total > per_view, "the settings are longer than a view, so the bar shows: {total} rows, {per_view} in view");
+    shell::act(Action::End(1));
+    shell::act(Action::End(1));
+    assert!(p.get_first() > 0, "the cursor at the end scrolled the view: first {}", p.get_first());
+    p.invoke_scrolled(0);
+    f.screen.frame();
+    assert_eq!(p.get_first(), 0, "the bar's request turned the view to the top");
+    let cursor = ui.global::<PartState>().get_rows().iter().any(|r| r.cursor);
+    assert!(!cursor, "a scroll selects nothing: the cursor dropped");
+}

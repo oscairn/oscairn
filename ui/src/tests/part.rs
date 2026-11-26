@@ -548,6 +548,75 @@ fn part_info_scrolls_by_the_right_knob() {
     assert_eq!(info_lines(ui).last().unwrap(), "Fx 9", "the end of the list");
 }
 
+// The Part screen's list scrolls the way the shared lists do (issue #269): when the settings hold
+// more rows than a view, moving the knob past the last visible row keeps the cursor row in view
+// and a scroll bar shows (PartState.total > the view, and its first follows the cursor's page); a
+// finger drag or the bar turns the view without moving the cursor.
+#[test]
+fn the_part_list_keeps_the_cursor_in_view_and_shows_a_scroll_bar() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut part = part_screen(&s, &part_graph(), 10); // a notes part: its settings fill two pages
+    ui.global::<crate::PartState>().set_rows_per_view(4);
+    part.shown(); // fit to the small view
+    let p = ui.global::<crate::PartState>();
+    let count = p.get_total();
+    assert!(count > p.get_rows_per_view(), "the settings hold more than a view: {count}");
+    // The knob or the dial moves the cursor past the last visible row; it stays in view.
+    mv(&mut part, 1); // the first move shows the cursor on the first row
+    part.act(Action::End(1));
+    let shown = rows(ui);
+    let at = shown.iter().position(|r| r.2).expect("the cursor is on a shown row") as i32;
+    assert_eq!(shown[at as usize].0, "Remove part", "the last setting is in view");
+    // A scroll bar shows and follows the cursor's view.
+    assert!(p.get_total() > p.get_rows_per_view(), "a scroll bar shows when the list is longer than the view");
+    assert_eq!(p.get_first() + at, count - 1, "the bar's thumb sits at the cursor's page");
+    // A finger drag turns the view: the first page, the cursor dropped (a scroll selects nothing).
+    part.scroll_to(0);
+    assert_eq!(p.get_first(), 0);
+    assert_eq!(cursor_at(ui), None);
+    // A knob move after the scroll shows the cursor again, on the first row shown of the new page.
+    mv(&mut part, 1);
+    assert_eq!(p.get_first(), 0, "the view does not jump on a move from the top page");
+    assert!(cursor_at(ui).is_some(), "the cursor is on a shown row");
+}
+
+// The Devices list over the settings is a dialog with rows: when more inputs than a view holds,
+// moving the knob to one off the visible rows keeps it on a shown row and a scroll bar shows; a
+// finger drag turns the dialog. Issue #269's "a dialog with more rows than fit".
+#[test]
+fn the_devices_dialog_keeps_the_cursor_in_view_and_shows_a_scroll_bar() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut part = part_screen(&s, &part_graph(), 10);
+    let inputs: Vec<serde_json::Value> = (0..20).map(|i| json!({"source": i, "name": format!("Input {i}"), "kind": "usb", "port": i})).collect();
+    part.endpoints(&json!({"midiInputs": inputs}));
+    ui.global::<crate::PartState>().set_rows_per_view(4);
+    part.shown();
+    // Open the devices dialog.
+    mv(&mut part, 5);
+    mv(&mut part, 4); // "Plays from"
+    press(&mut part);
+    assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Plays from");
+    let p = ui.global::<crate::PartState>();
+    let count = p.get_total();
+    assert!(count > p.get_rows_per_view(), "the devices dialog holds more than a view: {count}");
+    // The knob to an input off the visible rows keeps it on a shown row.
+    mv(&mut part, 1); // the first move shows the cursor
+    part.act(Action::End(1));
+    let shown = rows(ui);
+    let at = shown.iter().position(|r| r.2).expect("the cursor is on a shown row") as i32;
+    assert_eq!(shown[at as usize].0, "Input 19", "the last connected input is in view");
+    assert_eq!(p.get_first() + at, count - 1, "the scroll bar follows the cursor's view");
+    // A finger drag turns the dialog, the cursor dropped.
+    part.scroll_to(0);
+    assert_eq!(p.get_first(), 0);
+    assert_eq!(cursor_at(ui), None);
+    // Cancel still closes the dialog.
+    assert_eq!(part.act(Action::Cancel(None)), Stay);
+    assert!(rows(ui).iter().any(|r| r.0 == "Plays from"));
+}
+
 // The Key and Scale rows drawn, the Key being changed: a long value ("Performance's (D Minor)") fits or elides.
 #[test]
 fn part_key_rows_are_drawn() {

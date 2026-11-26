@@ -2109,6 +2109,7 @@ impl App {
     /// The scroll bar's request: the list's view starts at row `first`.
     fn list_scroll_to(&mut self, first: i32) {
         match self.screen {
+            Screen::Part => self.on_part(|p| p.scroll_to(first)),
             Screen::Chain => self.on_chain(|c| c.scroll_to(first)),
             Screen::Sounds => self.on_sounds(|c| c.scroll_to(first)),
             Screen::Scene => self.on_scene(|c| c.scroll_to(first)),

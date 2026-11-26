@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -49,30 +50,48 @@ namespace
         }
     }
     // At rest long enough for the cost at rest to be known (a second of quiet blocks, 100 samples of them), then
-    // eight notes held in each of the parts for `blocks` blocks, a service tick each.
-    void play(Session& s, uint32_t n, int blocks)
+    // eight notes held in each of the parts for `blocks` blocks, a service tick each. Every session plays each block
+    // in turn, so the figures compared are taken on the same machine at the same moments, not seconds apart.
+    void play(const std::vector<std::pair<Session*, uint32_t>>& sessions, int blocks)
     {
         std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()};
-        auto block = [&](std::span<const kick::clap::Event> e = {}) { s.service(); s.process(out, frames, e); };
-        for(int i = 0; i < 1200; ++i) block();
-        std::vector<kick::clap::Event> notes;
-        for(uint32_t p = 0; p < n; ++p) for(int k = 0; k < 8; ++k) notes.push_back(kick::clap::Event::note(true, (n == 1 ? 60 : 43 * int(p) + 17) + k, .8));
-        block(notes);
-        for(int i = 0; i < blocks; ++i) block();
+        auto block = [&](bool keys) {
+            for(const auto& [s, n] : sessions)
+            {
+                std::vector<kick::clap::Event> notes;
+                if(keys) for(uint32_t p = 0; p < n; ++p) for(int k = 0; k < 8; ++k) notes.push_back(kick::clap::Event::note(true, (n == 1 ? 60 : 43 * int(p) + 17) + k, .8));
+                s->service(); s->process(out, frames, notes);
+            }
+        };
+        for(int i = 0; i < 1200; ++i) block(false);
+        block(true);
+        for(int i = 0; i < blocks; ++i) block(false);
     }
-    // The Basic Synth's figures after playing `n` parts in a data folder of its own.
+    // The Basic Synth's figures after playing one part alone and three parts sharing, each in a data folder of its own.
     struct Figures { double rest, voice, cpu; };
-    Figures measured(const fs::path& home, uint32_t n)
+    std::pair<Figures, Figures> measuredTogether(const fs::path& aloneHome, const fs::path& sharedHome)
     {
-        ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
-        fs::create_directories(home);
-        Session s(48000, frames);
-        s.setBudget({.9, 0});
-        parts(s, n);
-        check(s.graphState().shared.size() == (n > 1 ? n : 0), std::to_string(n) + " parts share one instance as they should");
-        play(s, n, 3000);
-        s.saveMeasurementsNow();
-        return {figure(home, "rest"), figure(home, "voice"), figure(home, "cpu")};
+        std::vector<std::unique_ptr<Session>> sessions;
+        const fs::path homes[]{aloneHome, sharedHome};
+        const uint32_t counts[]{1, 3};
+        for(int i = 0; i < 2; ++i)
+        {
+            ::setenv("OSCAIRN_DATA_HOME", homes[i].c_str(), 1);
+            fs::create_directories(homes[i]);
+            sessions.push_back(std::make_unique<Session>(48000, frames));
+            sessions[i]->setBudget({.9, 0});
+            parts(*sessions[i], counts[i]);
+            check(sessions[i]->graphState().shared.size() == (counts[i] > 1 ? counts[i] : 0), std::to_string(counts[i]) + " parts share one instance as they should");
+        }
+        play({{sessions[0].get(), 1}, {sessions[1].get(), 3}}, 3000);
+        for(int i = 0; i < 2; ++i)
+        {
+            ::setenv("OSCAIRN_DATA_HOME", homes[i].c_str(), 1);
+            sessions[i]->saveMeasurementsNow();
+        }
+        for(int i = 0; i < 2; ++i) { ::setenv("OSCAIRN_DATA_HOME", homes[i].c_str(), 1); sessions[i].reset(); }
+        return {{figure(aloneHome, "rest"), figure(aloneHome, "voice"), figure(aloneHome, "cpu")},
+                {figure(sharedHome, "rest"), figure(sharedHome, "voice"), figure(sharedHome, "cpu")}};
     }
 }
 
@@ -94,7 +113,7 @@ int main(int argc, char** argv)
         ::setenv("OSCAIRN_SHARING", "memory", 1);
     }
 
-    const auto one = measured(alone, 1), three = measured(shared, 3);
+    const auto [one, three] = measuredTogether(alone, shared);
     std::printf("one part alone: rest %.3g, per voice %.3g, busiest %.3g; three sharing, per sound: rest %.3g, per voice %.3g, busiest %.3g\n",
                 one.rest, one.voice, one.cpu, three.rest, three.voice, three.cpu);
     check(one.voice > 0 && three.voice > 0, "a cost per voice measured both ways");

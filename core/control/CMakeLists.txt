@@ -499,3 +499,8 @@ target_link_libraries(oscairn-recording-test PRIVATE oscairn_control_json)
 target_compile_options(oscairn-recording-test PRIVATE -Wall -Wextra)
 add_test(NAME control-recording COMMAND oscairn-recording-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-recording PROPERTIES TIMEOUT 60)
+# Issue 9: an open starts the worker processes its loads need together, and leaves none spare.
+add_executable(oscairn-worker-prestart-test tests/worker_prestart.cpp)
+target_link_libraries(oscairn-worker-prestart-test PRIVATE oscairn_control)
+add_test(NAME control-worker-prestart COMMAND oscairn-worker-prestart-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay>)
+set_tests_properties(control-worker-prestart PROPERTIES TIMEOUT 120)

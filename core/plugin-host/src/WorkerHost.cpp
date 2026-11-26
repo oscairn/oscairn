@@ -278,7 +278,10 @@ namespace oscairn
             }
 
             // Starts a worker process with no plugin in it, its audio thread waiting at the doorbell. Under control.
-            void start()
+            void start() { spawn(); started(); }
+            // start's two halves: the process spawned and told to initialize, then its answer awaited, so several can
+            // start at once (prestartWorkers). Under control.
+            void spawn()
             {
                 int pair[2];
                 int spawned = 0;
@@ -317,6 +320,9 @@ namespace oscairn
                 bell->sleeping.store(0); bell->rendering.store(UINT32_MAX); bell->serving.store(UINT32_MAX); bell->faulted.store(UINT32_MAX);
                 send(socket, Writer().u8(uint8_t(Op::Init)).f64(rate).u32(frames).u8(uint8_t(mode)).data);
                 sendDescriptor(socket, bellFd);
+            }
+            void started()
+            {
                 try { expect(receive(socket)); } catch(const WorkerTimeout& e) { lost(e); }
 #ifdef __linux__
                 startFile.store(residentFileBytes(procText(pid, "status"))); // initialized, its memory locked, no plugin yet
@@ -2375,6 +2381,23 @@ namespace oscairn
             std::mutex listed;
             std::vector<std::weak_ptr<Process>> all;
             std::set<std::string> crashed;
+            // Started ahead of an open's loads (prestartWorkers), their answer to Init not yet read; under mutex.
+            std::vector<std::shared_ptr<Process>> spares;
+            // A spare for a new process of this kind (chained: a group's, else a worker of its own), its start finished;
+            // null when there is none, or the one there was did not start (gone, failed, so killed at once). Under mutex.
+            std::shared_ptr<Process> spare(const std::string& program, double rate, uint32_t frames, uint64_t limit, ProcessingMode mode, bool chained)
+            {
+                for(auto it = spares.begin(); it != spares.end(); ++it)
+                {
+                    auto& p = **it;
+                    if(p.program != program || p.frames != frames || p.policyLimit != limit || p.currentRate.load() != rate || p.mode != mode || p.pooled != chained) continue;
+                    auto taken = *it; spares.erase(it);
+                    std::lock_guard control(taken->control);
+                    try { taken->started(); return taken; }
+                    catch(...) { taken->failed.store(true); return nullptr; }
+                }
+                return nullptr;
+            }
             static constexpr double unmeasured = .1; // a plugin not measured yet, a tenth of the block
 
             void track(const std::shared_ptr<Process>& p)
@@ -2415,6 +2438,14 @@ namespace oscairn
             {
                 std::unique_lock lock(mutex);
                 if(auto p = grouped(group, program, rate, frames, limit)) return p;
+                if(auto p = spare(program, rate, frames, limit, ProcessingMode::Realtime, true))
+                {
+                    groups[group.key] = p;
+                    lock.unlock();
+                    p->supervisor = ServiceThread([q = p.get()] { q->supervise(); });
+                    track(p);
+                    return p;
+                }
                 auto p = std::make_shared<Process>(program, rate, frames, ProcessingMode::Realtime, limit);
                 p->pooled = true; p->slot = Process::slots.fetch_add(1);
                 std::unique_lock control(p->control);
@@ -2544,14 +2575,15 @@ namespace oscairn
                     : placementGroup().key.empty() ? nullptr : pool().chain(placementGroup(), program, sampleRate, maxFrames, memoryLimit);
         if(process && [&] { std::lock_guard lock(process->control); return process->failed.load(); }())
             process = nullptr; // a host that failed since it was picked: a worker of its own instead
-        bool pooled = process != nullptr;
-        if(!pooled) process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit); // a worker of its own
+        bool pooled = process != nullptr, ahead = false; // ahead: a spare, started already
+        if(!pooled) { std::lock_guard lock(pool().mutex); process = pool().spare(program, sampleRate, maxFrames, memoryLimit, mode, false); ahead = process != nullptr; }
+        if(!pooled && !ahead) process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit); // a worker of its own
         std::shared_ptr<PluginHost> host;
         auto attempt = [&]
         {
             std::lock_guard lock(process->control);
             if(process->failed.load()) throw std::runtime_error(process->failure()); // failed in the moment since
-            if(!pooled) process->start();
+            if(!pooled && !ahead) process->start();
             Reader r = process->load(path, id, memoryRoom);
             auto engine = std::make_shared<const Engine>(Engine{path, id, r.data.substr(r.at + 4)});
             host = std::make_shared<WorkerHost>(process, r, std::move(engine), true);
@@ -2570,7 +2602,7 @@ namespace oscairn
             // one that met a dead host loads. Before, it stood in (a Performance opened with a silent plugin keeping no
             // values: the stress test's "no parameter"). One that hung the host (no reply) is not loaded again.
             process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit);
-            pooled = false;
+            pooled = false; ahead = false;
             attempt();
         }
         if(!pooled)
@@ -2598,6 +2630,32 @@ namespace oscairn
         size_t exited = 0;
         for(const auto& p : all) if(p->exitedNow()) ++exited;
         return exited;
+    }
+
+    void prestartWorkers(double sampleRate, uint32_t maxFrames, size_t count)
+    {
+        const auto& policy = placementPolicy();
+        if(policy.worker.empty() || policy.hosts) return; // no workers, or the pool's resident hosts
+        std::vector<std::shared_ptr<Process>> started;
+        for(size_t i = 0; i < count; ++i)
+            try
+            {
+                auto p = std::make_shared<Process>(policy.worker, sampleRate, maxFrames, ProcessingMode::Realtime, policy.memoryLimit);
+                if(policy.chain) { p->pooled = true; p->slot = Process::slots.fetch_add(1); } // as chain makes a group's
+                std::lock_guard control(p->control);
+                p->spawn();
+                started.push_back(std::move(p));
+            }
+            catch(const std::exception&) { break; } // the loads start theirs as before
+        std::lock_guard lock(pool().mutex);
+        for(auto& p : started) pool().spares.push_back(std::move(p));
+    }
+
+    void dropSpareWorkers()
+    {
+        std::vector<std::shared_ptr<Process>> spares;
+        { std::lock_guard lock(pool().mutex); spares.swap(pool().spares); }
+        for(auto& p : spares) p->failed.store(true); // killed and reaped, not asked to shut down: none has a plugin
     }
 
     std::vector<PluginHostInfo> pluginHosts()

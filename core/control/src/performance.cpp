@@ -1151,6 +1151,14 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if(!definitions.contains(from))continue;
         for(auto p:array(field(definitions.at(from),"outputs"),Graph::maxAudioChannels))if(integer(field(p,"id"))==port && !(integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN))offMain.insert(from);}
     auto placed=documentPlacement(nodes,array(field(d,"wires"),Graph::maxAudioConnections)); // the groups the plugins load in (compute.workers)
+    // The worker processes its loads may start, started together now instead of each at its load; as many fewer as there
+    // are instances to take over. Those no load takes are ended with the read.
+    struct Spares{~Spares(){dropSpareWorkers();}} spares;
+    {const auto& policy=placementPolicy();size_t starts=0;std::set<std::string> chains;
+        for(auto node:nodes){const auto plugin=field(node,"plugin");const auto id=text(field(plugin,"id"));const auto p=policy.plugins.find(id);
+            if(text(field(plugin,"format"))!="clap" || (p==policy.plugins.end()?policy.standard:p->second)!=Placement::Worker)continue;
+            const auto& g=placed[text(field(node,"key"))].key;if(!policy.chain || g.empty() || chains.insert(g).second)++starts;}
+        prestartWorkers(sampleRate_,maxFrames_,starts>free.size()?starts-free.size():0);}
     auto kind=[&](V plugin){return text(field(plugin,"id"))+'\n'+text(field(plugin,"version"))+'\n'+text(field(plugin,"pathHint"));};
     auto formable=[&](V node,const std::string& key){return sharing.share && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
     std::map<std::string,size_t> kinds;for(auto node:nodes)if(formable(node,text(field(node,"key"))))++kinds[kind(field(node,"plugin"))];

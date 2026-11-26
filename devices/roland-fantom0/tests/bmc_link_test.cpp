@@ -321,7 +321,14 @@ namespace
             for( int i = 0; i < 20; ++i ) // two seconds' status frames, then a key
             {
                 const auto s = longFrame( 112 );
-                check( ::write( master, s.data(), s.size() ) == ssize_t( s.size() ), "a status frame" );
+                // a pty holds about a kilobyte on macOS: wait for the reader, as the unit's slower frames would
+                size_t at = 0;
+                for( auto until = std::chrono::steady_clock::now() + 3s; at < s.size() && std::chrono::steady_clock::now() < until; )
+                {
+                    const auto n = ::write( master, s.data() + at, s.size() - at );
+                    if( n > 0 ) at += size_t( n ); else std::this_thread::sleep_for( 2ms );
+                }
+                check( at == s.size(), "a status frame" );
             }
             const auto k = key( true, 60, 100 );
             check( ::write( master, k.data(), k.size() ) == ssize_t( k.size() ), "a key" );

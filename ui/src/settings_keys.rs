@@ -2,8 +2,9 @@
 //! The Settings app's Signing keys and About pages (ui/SETTINGS-APP.md K and B; SigningKeysPage.cpp, SigningKeys.h and
 //! AboutPage.cpp are the reference). Signing keys lists the keys exports are signed with, by name and fingerprint, and
 //! makes one (its name typed on the keyboard; the private half never leaves the device). About says which Oscairn this
-//! is, which engine it is connected to and under what license; on a device whose engine offers it
-//! (`system.rolandNextBoot`, the FANTOM's), its last row starts Roland's own system at the next power-on, asked first.
+//! is, which engine it is connected to and under what license; on a device whose profile says it can
+//! (`rolandNextBoot`, the FANTOM-07's; the engine answers `system.rolandNextBoot`), its last row starts Roland's own
+//! system at the next power-on, asked first.
 
 use crate::client::Error;
 use crate::library::fingerprint;
@@ -139,8 +140,9 @@ pub struct About {
     commit: String,
     /// The engine's release; none until it is read.
     engine: Option<Result<String, String>>,
-    /// The profile is a device's: only there is the engine asked whether Roland's system can start next time.
-    on_device: bool,
+    /// The profile says the device can start Roland's system (rolandNextBoot, the FANTOM's): only there is the
+    /// engine asked whether it can start next time.
+    rolands_system: bool,
     /// Roland's system at the next power-on: none where the engine does not offer it, else whether it is set.
     roland: Option<bool>,
     /// Its question is open.
@@ -159,12 +161,12 @@ impl About {
     }
 
     pub fn with(release: &str, commit: &str) -> About {
-        About { release: release.into(), commit: commit.into(), engine: None, on_device: false, roland: None, roland_asking: false, roland_busy: false, roland_error: String::new() }
+        About { release: release.into(), commit: commit.into(), engine: None, rolands_system: false, roland: None, roland_asking: false, roland_busy: false, roland_error: String::new() }
     }
 
-    /// On a device's profile, the engine is asked about Roland's system.
-    pub fn on_device(mut self, yes: bool) -> About {
-        self.on_device = yes;
+    /// The profile says the device can start Roland's system (its rolandNextBoot): the engine is asked about it.
+    pub fn rolands_system(mut self, yes: bool) -> About {
+        self.rolands_system = yes;
         self
     }
 
@@ -210,7 +212,7 @@ impl Page for About {
         self.engine = None;
         self.roland_asking = false;
         c.ask(Any::About(AboutStep::Engine), "packages.preinstalled", json!({}));
-        if self.on_device {
+        if self.rolands_system {
             c.ask(Any::About(AboutStep::Roland), "system.rolandNextBoot", json!({}));
         }
     }

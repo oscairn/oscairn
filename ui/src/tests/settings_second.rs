@@ -649,6 +649,17 @@ fn rolands_system_next_time_is_asked_first() {
     assert_eq!(value_of(r.ui(), "Roland's system"), "Off ›");
 }
 
+// Only the profile that says it offers Roland's system (the FANTOM-07's rolandNextBoot) is asked about it: another
+// device's profile (the KICK) is not even asked, so it has no row however the engine would answer (B5).
+#[test]
+fn rolands_system_comes_from_the_profile() {
+    let mut r = Rig::new("roland-other-device", Some("kick"), Fake::new());
+    r.e.roland = Some(false); // even where the engine would answer, it is not asked
+    r.page(Id::About);
+    assert!(!r.e.methods().contains(&"system.rolandNextBoot".to_string()) && labels(r.ui()).len() == 4,
+        "another device's profile does not ask: {:?}", r.e.methods());
+}
+
 // ---- A6: installing a theme ----
 
 fn source_of(name: &str, id: &str, change: impl FnOnce(&mut Value)) -> std::path::PathBuf {

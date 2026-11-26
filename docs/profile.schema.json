@@ -972,6 +972,10 @@
       "type": "boolean",
       "description": "Whether the on-screen keyboard is offered: a keyboard per MIDI input and the built-in one, in a window on the desktop or a sheet over a device's screen, never shown by itself. Absent: offered unless the product has keys of its own (a controls group of kind keys with role notes)"
     },
+    "rolandNextBoot": {
+      "type": "boolean",
+      "description": "Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn (docs/fantom-0.md): Settings' About row asks the engine about it. Absent: no (the FANTOM-07's says yes)"
+    },
     "estimated": {
       "type": "array",
       "items": {

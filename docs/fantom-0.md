@@ -1111,11 +1111,11 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
    boot it showed "program version error". A power cycle, pressing TEMPO at the FANTOM picture if needed, gives
    Roland's system. A start that fails before it stopped Roland's app leaves the app running.
 
-**Roland's system from Settings:** About's row "Roland's system" (the device profile only, and
-only when the engine answers `system.rolandNextBoot` as supported) asks first, "Roland's system
-will start at the next power-on. Turn the power off and on to start it.", and only on "Start
-Roland next time" writes `stock-next-boot`; pressed again it takes it back. There is no restart
-from the screen: the engine's chroot has a `/run` of its own, so it cannot reach systemd, nothing
+**Roland's system from Settings:** About's row "Roland's system" (only on a profile with
+`rolandNextBoot`, the FANTOM-07's alone, and only when the engine answers `system.rolandNextBoot`
+as supported) asks first, "Roland's system will start at the next power-on. Turn the power off
+and on to start it.", and only on "Start Roland next time" writes `stock-next-boot`; pressed again
+it takes it back. There is no restart from the screen: the engine's chroot has a `/run` of its own, so it cannot reach systemd, nothing
 outside the chroot takes a request to reboot, and whether a Linux restart without a power cycle
 leaves Roland's sound engine as Roland's app expects (started again in one boot it shows
 "program version error") is not known.

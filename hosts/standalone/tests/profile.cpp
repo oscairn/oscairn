@@ -42,6 +42,10 @@ int main()
             check(p.offers("oscairn.library") && p.offers("oscairn.settings") && !p.offers("oscairn.nothing"), id + " offers its apps");
         }
         const auto kick = loadProfile("kick"), ignite = loadProfile("ignite"), qemu = loadProfile("qemu-aarch64"), modx = loadProfile("modx-m");
+        // Issue 272: only the FANTOM-07's profile says it can start Roland's system at the next power-on; the
+        // desktop and every other device read no, so Settings shows no "Start Roland next time" row on them.
+        check(loadProfile("fantom-07").rolandNextBoot && !kick.rolandNextBoot && !modx.rolandNextBoot && !loadProfile("").rolandNextBoot,
+              "rolandNextBoot: only the FANTOM-07's profile says yes");
         check(kick.name == "Behringer KICK" && kick.screen()->layout == "kick-screen" && kick.screen()->touch, "the KICK shows its screen layout, by touch");
         check(ignite.screen()->layout == "kick-screen" && ignite.cv.outputs > 0, "the Ignite shows its screen layout (its panel has the controls) and has CV");
         check(!kick.estimated.empty() && qemu.estimated.empty(), "the KICK's values are estimates; QEMU's are its test setup");
@@ -76,6 +80,7 @@ int main()
         check(refused(replaced(fantomJson, "\"/dev/ttyGS0\"", "\"ttyGS0\"")), "a keyboard device outside /dev");
         check(refused(replaced(fantomJson, "\"device\": \"/dev/ttyGS0\"", "\"device\": \"/dev/ttyGS0\", \"map\": \"x\"")), "a keyboard takes no map");
         check(refused(replaced(fantomJson, "\"localOff\": true", "\"localOff\": 1")), "localOff is true or false");
+        check(loadProfile("fantom-07").rolandNextBoot && refused(replaced(fantomJson, "\"rolandNextBoot\": true", "\"rolandNextBoot\": 1")), "a rolandNextBoot that is not true or false is refused");
         using Key = std::pair<std::string, int>;
         check(fantom.inputKeys.protocol == "linux-input" && fantom.inputKeys.name == "gpio-keys" && kick.inputKeys.name.empty() &&
               fantom.inputKeys.keys == std::vector<Key>{{"write", 157}, {"menu", 139}, {"tempo", 152}}, "the FANTOM-07's WRITE, MENU and TEMPO: gpio-keys 157, 139 and 152");

@@ -40,6 +40,9 @@ pub struct Profile {
     pub controls: Vec<crate::knobs::Group>,
     /// `audio.device`: the profile fixes the audio device and its channels, so Settings has no Audio page to offer.
     pub audio_fixed: bool,
+    /// `rolandNextBoot`: the device can start Roland's own system at the next power-on (the FANTOM's), so About asks
+    /// the engine about it. False elsewhere (every other profile, the desktop).
+    pub roland_next_boot: bool,
 }
 
 /// Profile.h's Screen::scale(): a touch target of 44 units at least 6.5 mm across, never below 1.
@@ -83,6 +86,7 @@ impl Profile {
             panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
             controls: doc["controls"].as_array().into_iter().flatten().map(crate::knobs::Group::from_profile).collect(),
             audio_fixed: doc["audio"]["device"].is_object(),
+            roland_next_boot: doc["rolandNextBoot"].as_bool().unwrap_or(false),
         })
     }
 
@@ -103,6 +107,7 @@ mod tests {
         let p = Profile::load(Some("fantom-07")).unwrap();
         assert_eq!((p.id.as_str(), p.on_device, p.theme.as_str(), p.frame_rate()), ("fantom-07", true, "oscairn-block", 30));
         assert_eq!((p.memory, p.top_bar), (992 << 20, MeterSettings { cpu: Show::Both, ram: Show::Both }));
+        assert_eq!((p.roland_next_boot, Profile::load(None).unwrap().roland_next_boot), (true, false), "only the FANTOM-07's profile offers Roland's system at the next boot");
         assert_eq!((p.apps.len(), p.apps[3].as_str(), p.panel_map.as_str()), (5, "oscairn.setlist", "fantom-07.json"));
         assert_eq!(Profile::load(None).unwrap().frame_rate(), 0); // a computer: no cap
         assert!(Profile::load(Some("no-such-profile")).is_err());

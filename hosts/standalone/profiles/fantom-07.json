@@ -44,5 +44,6 @@
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,
+  "rolandNextBoot": true,
   "estimated": ["audio", "controls", "midi"]
 }

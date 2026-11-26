@@ -130,6 +130,9 @@ namespace oscairn::standalone
         // one): a window on the desktop, a sheet over a device's screen. Absent from the file: not
         // where the product has keys of its own (a notes group of keys), offered everywhere else.
         bool onScreenKeyboard = true;
+        // Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn
+        // (docs/fantom-0.md): Settings' About row asks the engine about it. Absent from the file: no (the FANTOM-07's says yes).
+        bool rolandNextBoot = false;
         std::string reliability = "desktop"; // desktop, instrument or pass-through (RFC 0027)
         std::vector<std::string> apps;       // RFC 0022's apps installed with it
         // RFC 0025: the apps reserved whether they run or not, each in apps; absent from the file,

@@ -105,7 +105,7 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated", "rolandNextBoot"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
@@ -396,6 +396,7 @@ namespace oscairn::standalone
         p.apps = names(root, "apps");
         if(root.hasProperty("onScreenKeyboard")) p.onScreenKeyboard = flag(root, "onScreenKeyboard");
         else p.onScreenKeyboard = std::none_of(p.controls.begin(), p.controls.end(), [](const Control& c) { return c.kind == "keys" && c.role == "notes"; });
+        p.rolandNextBoot = flag(root, "rolandNextBoot");
         if(root.hasProperty("alwaysAvailable"))
         {
             p.alwaysAvailable = names(root, "alwaysAvailable");

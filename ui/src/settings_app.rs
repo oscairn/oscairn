@@ -255,7 +255,7 @@ impl Screen {
             installed: Installed::default(),
             available: Available::default(),
             keys: Keys::default(),
-            about: About::new().on_device(profile.on_device),
+            about: About::new().rolands_system(profile.roland_next_boot),
             ctx: Ctx::default(),
             active: false,
             tabs_shown: None,

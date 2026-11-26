@@ -1,0 +1,26 @@
+# Hands an issue back from the owner: a comment by the owner starting with /decided (or /answered)
+# swaps the needs-owner label for owner-answered and unassigns the owner. Other comments do nothing,
+# so a discussion can run as long as it needs before the hand-back.
+name: Owner answered
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  hand-back:
+    if: >-
+      github.event.comment.user.login == 'jbschooley' &&
+      (startsWith(github.event.comment.body, '/decided') || startsWith(github.event.comment.body, '/answered'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue edit "$ISSUE" -R "$REPO" --add-label owner-answered --remove-label needs-owner --remove-assignee jbschooley

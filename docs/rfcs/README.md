@@ -55,3 +55,4 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |
 | [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | accepted 2026-11-13 but for decision 6, held; steps 1 to 4 and 6 built |
 | [0046](0046-voice-importance-across-parts.md) | Voice importance across parts | proposed |
+| [0047](0047-daw-plugin.md) | The DAW plugin, one Performance in a wrapper | accepted 2026-11-26; not built |

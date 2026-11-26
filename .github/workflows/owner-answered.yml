@@ -1,11 +1,15 @@
 # Hands an issue back from the owner: a comment by the owner starting with /decided (or /answered)
 # swaps the needs-owner label for owner-answered and unassigns the owner. Other comments do nothing,
-# so a discussion can run as long as it needs before the hand-back.
+# so a discussion can run as long as it needs before the hand-back. A comment here acts at once;
+# every other repository of the org is swept every 15 minutes with LABELS_TOKEN (Issues write on all).
 name: Owner answered
 
 on:
   issue_comment:
     types: [created]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
 
 permissions:
   issues: write
@@ -13,14 +17,30 @@ permissions:
 jobs:
   hand-back:
     if: >-
+      github.event_name != 'issue_comment' || (
       github.event.comment.user.login == 'jbschooley' &&
-      (startsWith(github.event.comment.body, '/decided') || startsWith(github.event.comment.body, '/answered'))
+      (startsWith(github.event.comment.body, '/decided') || startsWith(github.event.comment.body, '/answered')))
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - env:
+      - name: This comment
+        if: github.event_name == 'issue_comment'
+        env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
+        run: gh issue edit "${{ github.event.issue.number }}" -R "$GITHUB_REPOSITORY" --add-label owner-answered --remove-label needs-owner --remove-assignee jbschooley
+      - name: Sweep the org
+        if: github.event_name != 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.LABELS_TOKEN }}
         run: |
-          gh issue edit "$ISSUE" -R "$REPO" --add-label owner-answered --remove-label needs-owner --remove-assignee jbschooley
+          gh search issues --owner oscairn --state open --label needs-owner --limit 200 --json repository,number \
+            --jq '.[] | "\(.repository.nameWithOwner) \(.number)"' |
+          while read -r repo n; do
+            last=$(gh api "repos/$repo/issues/$n/comments" --paginate \
+              --jq '[.[] | select(.user.login == "jbschooley")] | last | .body // ""')
+            case "$last" in
+              /decided*|/answered*)
+                gh issue edit "$n" -R "$repo" --add-label owner-answered --remove-label needs-owner --remove-assignee jbschooley
+                echo "$repo#$n handed back" ;;
+            esac
+          done

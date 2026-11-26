@@ -600,6 +600,11 @@ namespace oscairn
         std::vector<std::tuple<fs::path, ItemType, std::string>> folders;
         for(const auto& t : types) folders.push_back({home_ / t.folder, t, ""});
         installed_.clear();
+        // The installed libraries, the newest first: an item whose ID two installed libraries
+        // hold (a Performance's, shared by a newer conversion of a library) is listed once, its
+        // first copy before the folders in the scan, so this order's first is the newest
+        // installed, and it wins. A user's own item was listed above and keeps its place.
+        std::vector<std::tuple<fs::path, std::string, std::string>> installedListed; // folder, its ID, its name
         if(fs::is_directory(libraries_, error))
             for(const auto& entry : fs::directory_iterator(libraries_, error))
             {
@@ -607,13 +612,20 @@ namespace oscairn
                 try
                 {
                     const auto doc = parse(slurp(entry.path() / "library.json", maxManifestBytes));
-                    Control::InstalledLibrary l{str(detail::member(doc.get(), "id")), str(detail::member(doc.get(), "name")), 0};
-                    if(l.id != entry.path().filename().string()) continue; // not where it was installed
-                    installed_.push_back(l);
-                    for(const auto& t : types) folders.push_back({entry.path() / t.folder, t, l.id});
+                    const auto id = str(detail::member(doc.get(), "id")), name = str(detail::member(doc.get(), "name"));
+                    if(id != entry.path().filename().string()) continue; // not where it was installed
+                    installedListed.emplace_back(entry.path(), id, name);
                 }
                 catch(const std::exception&) {} // a damaged library: install it again
             }
+        std::sort(installedListed.begin(), installedListed.end(), [](const auto& a, const auto& b) {
+            std::error_code ea, eb;
+            return fs::last_write_time(std::get<0>(a), ea) > fs::last_write_time(std::get<0>(b), eb); });
+        for(const auto& [folder, id, name] : installedListed)
+        {
+            installed_.push_back({id, name, 0});
+            for(const auto& t : types) folders.push_back({folder / t.folder, t, id});
+        }
         for(const auto& [folder, type, library] : folders)
         if(fs::is_directory(folder, error))
             for(const auto& entry : fs::directory_iterator(folder, error))

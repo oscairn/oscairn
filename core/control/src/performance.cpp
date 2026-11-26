@@ -2537,6 +2537,19 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             }
             // Listed only once its items are all there.
             writeAtomically(root/"library.json",manifestJson(p));
+            // Two installed libraries may hold items with one ID (a newer conversion of a library
+            // installed under the same Performance IDs as an older one): the newest wins on a
+            // rescan, and this install says which it shadows, naming both libraries.
+            std::unordered_map<std::string, std::string> libraryNames;
+            for(const auto& k : l.installed()) libraryNames[k.id] = k.name;
+            for(const auto& i : items)
+                for(const auto& x : l.items())
+                    if(x.id == i.id && !x.library.empty() && x.library != p.id)
+                    {
+                        const auto other = libraryNames.count(x.library) && !libraryNames[x.library].empty() && libraryNames[x.library] != x.library ? libraryNames[x.library] + " (" + x.library + ")" : x.library;
+                        out.notes.push_back(i.name + " (ID " + i.id + ") is also in the library " + other + "; the newest, " + p.name + " (" + p.id + "), is the one used");
+                        break;
+                    }
         }else if(!pluginPackage){
             // The user's own, under new IDs: Sounds first, so the Performances that came with them point at their copies,
             // and setlists after the Performances, so their slots do.

@@ -1274,6 +1274,58 @@ int main(int argc, char** argv)
             check(same.notes.empty() && fs::exists(store / other) && signing::readSignatures(store / other / "Synth.clap.sig").at(0).key == authorKey,
                   "the same key's build for the other platform is added: " + (same.notes.empty() ? std::string() : same.notes[0]));
         }
+        // Q13: two libraries whose Performances share one ID (a newer conversion installed later
+        // under the same Performance IDs): the newest installed copy wins for library.load,
+        // library.query and a setlist entry, and the newer install says so, naming both libraries.
+        {
+            const auto oldArchive = temp.path / "ShadowOld.olib", newArchive = temp.path / "ShadowNew.olib", conv = temp.path / "ShadowConv.olib";
+            device(temp.path / "shadow-source");
+            Session a(48000, 64);
+            const auto synth = a.add("synth", fixture, "org.kick.test.synth");
+            const auto part = a.addPart("Bass"); a.insertIntoPart(part, 0, synth); a.commit();
+            const auto shared = a.savePerformanceToLibrary("Old");
+            a.exportLibraryItem(shared, oldArchive.string());
+            a.savePerformanceToLibrary("New"); // the same Performance ID kept, with a newer name and revision
+            check(a.performanceInfo().id == shared, "the newer save keeps the Performance's ID");
+            a.exportLibraryItem(shared, newArchive.string());
+            // A library of its own (a different ID) whose Performance keeps the shared ID: the newer
+            // conversion, installed under the same Performance IDs as the first library.
+            rewriteArchive(newArchive, conv, [&](std::string m) {
+                const auto id = m.find("\"id\":\""); // the top-level package ID, before the items'
+                const auto end = m.find('"', id + 6);
+                m.replace(id + 6, end - (id + 6), "shadownew");
+                return m;
+            });
+            device(temp.path / "shadow-host");
+            Session b(48000, 64);
+            check(b.installArchive(oldArchive.string(), true, {}, true).added == 1, "the first library installs");
+            const auto second = b.installArchive(conv.string(), true, {}, true); // the newer conversion, over the shared ID
+            check(std::any_of(second.notes.begin(), second.notes.end(), [&](const std::string& n) { return n.find("shadownew") != std::string::npos && n.find(shared) != std::string::npos && n.find("newest") != std::string::npos; }),
+                  "the newer install says its Performance shadows one in the first library, naming both: " + (second.notes.empty() ? std::string() : "\n  " + second.notes[0]));
+            b.loadPerformanceFromLibrary(shared);
+            check(b.performanceInfo().name == "New", "library.load opens the newest copy of the shared Performance");
+            Control::LibraryQuery q; q.id = shared;
+            const auto hits = b.libraryQuery(q).items;
+            check(hits.size() == 1 && hits[0].name == "New", "library.query lists the newest copy, not the first installed");
+            Control::Setlist setlist; setlist.info.name = "Shared"; setlist.pages = {{"Page", {{shared, "New", "", "", false}}}};
+            const auto setlistId = b.saveSetlist(setlist);
+            const auto back = b.setlist(setlistId);
+            check(back.pages[0].slots[0].id == shared, "a setlist slot names the shared Performance");
+            b.loadPerformanceFromLibrary(back.pages[0].slots[0].id);
+            check(b.performanceInfo().name == "New", "a setlist entry opens the newest copy too");
+            // Which copy wins goes by install time (the library folder's), not the order the folder lists them in:
+            // the first library made the newer, a fresh start opens its copy.
+            for(const auto& e : fs::directory_iterator(temp.path / "shadow-host" / "Libraries"))
+                if(e.path().filename() != "shadownew") fs::last_write_time(e.path(), fs::file_time_type::clock::now() + std::chrono::hours(1));
+            {
+                Session c(48000, 64);
+                c.loadPerformanceFromLibrary(shared);
+                check(c.performanceInfo().name == "Old", "the library installed last by its folder's time wins, whatever the folder's order");
+            }
+            b.uninstallLibrary("shadownew");
+            b.loadPerformanceFromLibrary(shared);
+            check(b.performanceInfo().name == "Old", "with the newer library gone, the first copy is the one used");
+        }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); ++failures; }
     if(!failures) std::puts("ok: export, install as the user's own and as a library, reinstall, uninstall, chosen items and plugins from the store");

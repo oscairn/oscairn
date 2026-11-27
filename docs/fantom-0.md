@@ -1064,6 +1064,54 @@ JUCE app, for a fault) makes
 
 `oscairn-fantom-stop` ends the Rust UI and its keeper with the rest.
 
+## Installing and updating Oscairn
+
+Oscairn installs on the FANTOM as an app and a boot hook (RFC 0028's install method
+`app-and-boot-hook`; the profile says so). The app is a bundle ([Running in a
+chroot](#running-in-a-chroot-on-rolands-linux)): a folder tree in Roland's file system, started
+with `oscairn-fantom-start` and entered with `start-chroot.sh`. The hook is the one line the
+owner adds to Roland's start script, ahead of Roland's own ([Starting at
+power-on](#starting-at-power-on-not-done)); it runs `oscairn-fantom-boot` through the link
+`/home/root/oscairn-current`, which names the bundle in use. Nothing of Roland's is replaced,
+flashed or removed, and the hook is the only change to a Roland file. There is no installer
+yet: every step below is done by hand, as root, with scripts that are not in this repository.
+How an update becomes an official, signed process is open ([#219](https://github.com/oscairn/oscairn/issues/219)).
+
+**An update is a bundle swap, as it is done today:**
+
+1. The new bundle's tarball (`os/fantom-bundle.sh` builds it) is copied to the unit and its
+   SHA-256 compared with the build's.
+2. It is unpacked in a folder beside the running bundle, `/home/root/oscairn-<build>`. The
+   running one is not touched, so the unit holds two bundles for a while: about 170 MB each,
+   without the data folder.
+3. The data folder is copied from the running bundle into the new one (`cp -a`, then `diff -rq`
+   to see the two identical). It is inside the bundle: `root/.local/share/oscairn`, because the
+   engine runs with `HOME=/root` in the chroot. The copy is the biggest part: 2.6 GB on the
+   unit used for tests. The new bundle's
+   `etc/default` is not copied from the old one; it is written from the profile when the
+   bundle is built.
+4. The running Oscairn is stopped (`oscairn-fantom-stop`) and the new bundle's
+   `oscairn-fantom-start` started, under a timer that goes back to the old bundle unless the
+   swap is confirmed. The engine opens the Performance last open, and the Performances in
+   the library are checked by loading them.
+5. Once it is confirmed, `oscairn-current` is pointed at the new bundle (a new link made
+   beside it and renamed over it, then `sync`, so the power-on after never sees a missing
+   link), and the old bundle is deleted. Until then the old one stays, and with it a way back.
+
+What an update must not touch is the user's content, which is this bundle's data folder today:
+the copy in step 3 carries it. What is outside every bundle already, and so survives any swap:
+the boot folder `/home/root/oscairn-boot` (the boot log, and the files `roland-first`, `dry-run`
+and `stock-next-boot` that choose how the next power-on starts) and Roland's own files. What is
+inside the bundle and not content, so replaced with it: the programs, the plugins and the
+profile built into them, `etc/default`, and `var/oscairn` (the logs and the running state).
+Removing the old bundle removes the data folder in it: the delete comes only after the copy was
+compared and the new bundle ran. The folder `/home/root/oscairn-data` on the unit is empty and
+no script or program of Oscairn uses it. The design of one data folder outside every bundle, and
+the step that makes the scripts honor it, is in [RFC 0028](rfcs/0028-system-image-updates-boot-and-power.md#install-methods-and-user-content).
+`devices/roland-fantom0/tests/fantom_start.sh` checks that the start, stop and restart scripts
+leave the data folder as it was, and that the copy of step 3 gives a new bundle's start the same
+content as the old one's.
+
 ## Starting at power-on (not done)
 
 Roland's start script (`/home/root/go.sh`) gives Oscairn the instrument a little after every

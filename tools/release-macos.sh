@@ -26,7 +26,13 @@ commit=$(git rev-parse HEAD)
 dmg=$build/Oscairn-$version-macos-arm64.dmg
 echo "Oscairn $version ($commit)"
 
-rm -rf "$build"
+# OSCAIRN_KEEP_CARGO=1 (the release workflow's cache) keeps the cargo target folders (ui-cargo and the like) of the
+# last build; cargo itself decides what in them is stale. Without it everything is deleted.
+if [ -n "${OSCAIRN_KEEP_CARGO:-}" ] && [ -d "$build" ]; then
+	find "$build" -mindepth 1 -maxdepth 1 ! -name '*-cargo' -exec rm -rf {} +
+else
+	rm -rf "$build"
+fi
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON \
 	-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DOSCAIRN_SOURCE_COMMIT="$commit"
 cmake --build "$build" --target oscairn_standalone oscairn-sign

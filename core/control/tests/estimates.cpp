@@ -121,7 +121,8 @@ int main(int argc, char** argv)
     if(moved < 4 * noise) std::printf("too noisy here to tell the stalls apart (noise %.3g, the spinning stall moved it %.3g): not judged\n", noise, moved);
     else
     {
-        check(moved > 2.5e-4 && moved < .01, "a stall that computes moves the rest by about one sample's share: " + std::to_string(moved));
+        // The share is one sample's, which varies run to run: 7.3e-5 seen on CI and 1.3e-4 in the CI image, in one run of 20; the floor only says it moved, past 4 times the noise.
+        check(moved > 2.5e-5 && moved < .01, "a stall that computes moves the rest by about one sample's share: " + std::to_string(moved));
         // Counted, a stall could only raise the rest; the rest's own drift down over these blocks (its first samples' startup
         // costs wearing off, seen in the Linux container as one run in ten) is not the stall.
         // A stall that was counted would raise the rest by about `moved` every time; the rest's other drift, on a shared runner, is one measurement's: the least of up to three.

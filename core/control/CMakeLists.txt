@@ -463,6 +463,19 @@ if(UNIX)
         "control-native-sounds|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--sounds"
         "control-native-effects|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--effects|$<TARGET_FILE:oscairn_delay>")
 endif()
+# Issue 330's steps of a Performance switch, on their own (OSCAIRN_SWITCH_STEPS): in the engine, in workers and in plugin hosts.
+foreach(variant IN ITEMS "" "-workers" "-hosts")
+    add_test(NAME control-performance-switch-steps${variant} COMMAND oscairn-performance-switch-test
+        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
+    set(steps_env "OSCAIRN_SWITCH_STEPS=1")
+    if(variant)
+        string(APPEND steps_env ";OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+    endif()
+    if(variant STREQUAL "-hosts")
+        string(APPEND steps_env ";OSCAIRN_PLUGIN_HOSTS=3")
+    endif()
+    set_tests_properties(control-performance-switch-steps${variant} PROPERTIES TIMEOUT ${switch_timeout} ENVIRONMENT "${steps_env}")
+endforeach()
 add_test(NAME control-residents-workers COMMAND oscairn-performance-switch-test
     $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(control-residents-workers PROPERTIES TIMEOUT ${switch_timeout}

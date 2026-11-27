@@ -531,7 +531,8 @@ namespace oscairn
         // instance one of its nodes keeps as it is (holding); released, nodes let go before it loads so that it fits beside the
         // rest, the silent first, then the least missed of those sounding; cut: none fits beside it, all of them go. Only for
         // openPerformance; an estimate alone counts every node but the kept.
-        struct Steps { std::set<NodeId> kept, released; bool cut = false; };
+        // fits: it rings out beside what is left (released may be empty: short of CPU alone, the silent stay); memory: short of memory.
+        struct Steps { std::set<NodeId> kept, released; bool cut = false, fits = false, memory = false; };
         struct Sharing { Estimate estimate; bool share = false; std::string notice; Steps steps; };
         Sharing sharing(const std::string& directory, bool steps = false);
         Estimate estimate(const std::string& directory, bool share, Steps* steps = nullptr);
@@ -872,7 +873,7 @@ namespace oscairn
         // The outgoing nodes sounding in the last three seconds, but those in `except`, and every one they reach by audio or notes.
         std::set<NodeId> busyNodes(const std::set<NodeId>& except = {}) const;
         // released: the open Performance's nodes let go for it (Steps), taken over where they can be and none kept warm.
-        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming, const Sharing& sharing, const std::set<NodeId>& released = {}); // read with what it may take over; incoming: its memory estimate
+        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming, const Sharing& sharing, const std::set<NodeId>& released = {}, bool forMemory = false); // read with what it may take over; incoming: its memory estimate; forMemory: released for want of memory
         void keepWarm(NodeId node);                       // ringOut: a node rung out kept loaded, or removed
         uint64_t warmMemory() const;
         // RFC 0045: instances kept warm let go, those `which` picks: one in a worker is destroyed on a

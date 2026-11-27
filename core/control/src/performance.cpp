@@ -790,10 +790,10 @@ void Session::openPerformance(const std::string& directory) {
         // The owner's rule (2026-11-27): the new Performance loads; the last one's held notes ring on only as far as they let it.
         // So when the two together do not fit, the last is given up in steps (Steps): the instances it keeps as they are cost
         // nothing more, then the silent ones go, then the least missed of those sounding, faded; all of it only when none fits.
-        seamless=e.seamless || e.fades || (!steps.cut && !steps.released.empty());released=steps.released;
+        seamless=e.seamless || e.fades || steps.fits;released=steps.released;
         // One change fading already: this one's tail rings out whole beside it (the load guard sheds voices if it must), as a
         // second fade on the one gain would step the newer tail down to where the older has faded.
-        fades=!e.seamless && released.empty() && e.fades && !fading_;
+        fades=!e.seamless && !steps.fits && e.fades && !fading_;
         if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure, not yet measured, or above what its plugins cost at rest; notes give way under load";
         if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");
         std::set<NodeId> outgoing(leaving_);for(const auto& [n,name]:nodes_)outgoing.insert(n);
@@ -836,7 +836,7 @@ void Session::openPerformance(const std::string& directory) {
     struct Unfade{Session& s;bool on;~Unfade(){if(on)try{s.unfade();}catch(...){}}} unfading{*this,!faded.empty()};
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them;
     // those let go for it, whether they sounded or not.
-    if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming,shares,released);
+    if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming,shares,released,shares.steps.memory);
     auto stats=prepared->stats;
     size_t keptSounding=0; // instances kept as they are while they sound, budget or not
     for(const auto& [was,now]:prepared->held)keptSounding+=graph_.contains(was) && !graph_.silent(was,uint64_t(sampleRate_/10));
@@ -849,13 +849,13 @@ void Session::openPerformance(const std::string& directory) {
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
     for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();
-    if(!seamless || !released.empty())letGo([](const Free&){return true;}); // it cut, or let go, for want of room: none kept warm (RFC 0025)
+    if(!seamless || (shares.steps.memory && !released.empty()))letGo([](const Free&){return true;}); // it cut, or let go, for want of memory: none kept warm (RFC 0025)
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept
     lastOpen_=stats;lastOpen_.total=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
 }
 
-std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming,const Sharing& sharing,const std::set<NodeId>& released) {
+std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming,const Sharing& sharing,const std::set<NodeId>& released,bool forMemory) {
     // A worker that died a moment ago, not yet seen by its supervisor, reads as failed now: no instance of it is taken over
     // (it is loaded afresh, as for one known to have failed), and its supervisor restarts it.
     checkWorkers();
@@ -866,8 +866,8 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
         // The middle rule (RFC 0021): unless it cuts, a playing instance is kept warm instead of taken
         // over while keeping it fits the warm limit and, with memory classes, what admission leaves
         // opportunistic data once this one plays (at its estimate) beside what still rings out. Older
-        // instances kept warm are let go first, as least recently used. None where some were let go for want of room.
-        if(!all && released.empty()){
+        // instances kept warm are let go first, as least recently used. Those let go for want of memory are kept by none.
+        if(!all && !(forMemory && !released.empty())){
             uint64_t room=UINT64_MAX;
             if(memoryClasses()){
                 std::set<NodeId> outgoing(leaving_),offered;for(const auto& [n,name]:nodes_)outgoing.insert(n);for(const auto& f:more)offered.insert(f.node);
@@ -876,7 +876,7 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
                 room=used<budget_.device?budget_.device-used:0;}
             size_t count=0;uint64_t bytes=0;
             for(auto& f:more){const auto b=f.host->residentBytes(); // as warmMemory counts it
-                if((memoryClasses() || count<warmLimit) && b<=room-bytes){f.keep=true;++count;bytes+=b;}}}
+                if(!released.count(f.node) && (memoryClasses() || count<warmLimit) && b<=room-bytes){f.keep=true;++count;bytes+=b;}}}
         free.insert(free.end(),more.begin(),more.end());}
     // A worker still dying when the check ran (not yet exited), or dying or hanging during the read, fails the request into
     // an instance of it ("connection lost", or no reply in its timeout). The check then fails it as its supervisor would,

@@ -1306,8 +1306,10 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   or adding a plugin that would take the open one over it, fails saying what does not fit. One that
   fits alone but not beside the whole of the last (issue 330, the owner's rule: the new Performance
   loads; held notes ring on only as far as that allows) gives the last up in steps until it fits beside
-  what is left: the instances it keeps as they are count once; then the plugins the last plays nothing
-  through go (silent three seconds or asleep, and nothing sounding feeds them); then those sounding, the
+  what is left: the instances it keeps as they are count once; then, short of memory, the plugins the last
+  plays nothing through go, the largest first and only as many as it needs (silent three seconds or asleep,
+  and nothing sounding feeds them; short of CPU alone they stay, carried over and kept warm as before, since
+  they cost only their rest); then those sounding, the
   least missed first (an earlier change's tail, then the fewest notes held or pedaled, the most memory
   among equals) with what they alone keep busy, each faded out in 150 ms before the new one loads (the
   control thread holds the load that long) and said in a notice; only when none fits beside it does the

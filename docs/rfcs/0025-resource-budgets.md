@@ -328,8 +328,10 @@ never write the user's data folder.
   keeps that instance, sounding or not, so it counts once: the same Performance loaded again with a pedaled
   chord needs one copy in memory, not two (TSO Carol Bells at about 230 MB, twice past the FANTOM's 420 MB).
   When the two still do not fit together, the load (`Session::estimate` with `Steps`) lets go of the outgoing
-  plugins in order until the incoming one fits beside what is left: first those making no sound (silent three
-  seconds or asleep, nothing sounding feeding them); then those sounding, least missed first (an earlier
+  plugins in order until the incoming one fits beside what is left: first, short of memory, those making no
+  sound (silent three seconds or asleep, nothing sounding feeding them), the largest first and only as many as
+  it needs, so the rest are kept warm for a return (short of CPU alone none of them goes); then those sounding,
+  least missed first (an earlier
   change's tail, then the fewest notes held or pedaled through them, then the most memory), with what they
   alone keep busy; each faded out over 150 ms on a live gain of its own, from the control thread, before the
   incoming plugins load, so their instances are taken over as a cut's are and need no more memory than a cut

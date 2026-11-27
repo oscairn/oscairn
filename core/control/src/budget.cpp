@@ -1098,15 +1098,34 @@ namespace oscairn
             order.push_back(n);
         }
         std::sort(order.begin(), order.end(), [&](NodeId a, NodeId b) { return loss[a] < loss[b]; });
+        // The silent ones, the largest first. Short of memory, they go only as many as it needs (FANTOM k6: letting every one go
+        // left nothing warm for a return). Short of CPU alone (fades), none goes: they cost their rest, carried over as the fade
+        // carried them, and stay to be kept warm; only what sounds is given up.
+        const auto free = busyNodes(others);
+        std::vector<NodeId> silent;
+        for(const auto n : outgoing) if(!free.count(n)) silent.push_back(n);
+        std::stable_sort(silent.begin(), silent.end(), [&](NodeId a, NodeId b) { return nodeCost(graph_, a).memory > nodeCost(graph_, b).memory; });
+        steps->memory = !e.fades;
         std::set<NodeId> given; // those of `order` given up so far
         for(size_t i = 0;; ++i)
         {
             std::set<NodeId> except(others); except.insert(given.begin(), given.end());
             const auto busy = busyNodes(except);
-            std::set<NodeId> gone(kept);
-            for(const auto n : outgoing) if(!busy.count(n)) gone.insert(n);
-            if(gone.size() == kept.size() + outgoing.size()) break; // nothing left to ring out: a cut
-            if(beside(gone).seamless) { for(const auto n : gone) if(!kept.count(n)) steps->released.insert(n); return e; }
+            std::set<NodeId> lost; // sounding, given up with `given`
+            size_t idle = 0;
+            for(const auto n : outgoing) if(!busy.count(n)) { ++idle; if(std::find(silent.begin(), silent.end(), n) == silent.end()) lost.insert(n); }
+            if(idle == outgoing.size()) break; // nothing left to ring out: a cut
+            std::set<NodeId> gone(kept); gone.insert(lost.begin(), lost.end());
+            if(!steps->memory)
+            {
+                gone.insert(silent.begin(), silent.end());
+                if(beside(gone).seamless) { steps->released = lost; steps->fits = true; return e; }
+            }
+            else for(size_t k = 0; k <= silent.size(); ++k)
+            {
+                if(k) gone.insert(silent[k - 1]);
+                if(beside(gone).seamless) { steps->released = lost; steps->released.insert(silent.begin(), silent.begin() + std::ptrdiff_t(k)); steps->fits = true; return e; }
+            }
             if(i == order.size()) break;
             given.insert(order[i]);
         }

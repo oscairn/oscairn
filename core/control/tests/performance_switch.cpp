@@ -263,6 +263,14 @@ namespace
         blocks(s, 2);
         s.savePerformance(file.string());
     }
+    // A CPU budget no change reaches and a memory budget whose ceiling is `bytes`: the ceiling is the budget less the worker
+    // program's code where plugins run in workers (memoryCeiling; Linux counts it, macOS does not), read from the estimate.
+    void allow(Session& s, uint64_t bytes)
+    {
+        const uint64_t big = uint64_t(1) << 40;
+        s.setBudget({64, big});
+        s.setBudget({64, bytes + (big - s.estimate("").budget.memory)});
+    }
     struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
     {
@@ -527,7 +535,7 @@ int main(int argc, char** argv)
         // nothing over (voices, held notes, state), so B then sounds as B opened fresh. Then back to A.
         // B fits alone and beside nothing of A (issue 330: what does fit beside it rings on, below).
         s.note(true, 40, 1); blocks(s, 10);
-        s.setBudget({64, s.estimate(b.string()).memory});
+        s.setBudget({64, 0}); allow(s, s.estimate(b.string()).memory);
         check(!s.estimate(b.string()).seamless, "A -> B cuts");
         w = load(s, b); report("A -> B, a cut, a note held", w);
         check(w.reused == 8 && w.loaded == 0 && s.leaving() == 0, "a cut takes over the sounding instance too, nothing rings out");
@@ -1351,7 +1359,7 @@ int main(int argc, char** argv)
                 load(l.s, same); l.serve(20);
                 l.s.note(true, 60, .8); l.serve(20);
                 l.s.setBudget({64}); l.s.forgetMeasurements();
-                l.s.setBudget({64, l.s.estimate("").memory + l.s.estimate(same.string()).memory - 1}); l.s.forgetMeasurements();
+                allow(l.s, l.s.estimate("").memory + l.s.estimate(same.string()).memory - 1); l.s.forgetMeasurements();
                 const auto e = l.s.estimate(same.string());
                 check(e.fits && e.seamless, "steps, the same Performance again: one copy fits, the instance it keeps counted once: seamless " + std::to_string(e.seamless));
                 const auto from = l.block.load();
@@ -1375,7 +1383,7 @@ int main(int argc, char** argv)
                 l.s.note(true, 1, .8); l.serve(20);
                 l.s.setBudget({64}); l.s.forgetMeasurements();
                 const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
-                l.s.setBudget({64, next + one + one / 2}); l.s.forgetMeasurements();
+                allow(l.s, next + one + one / 2); l.s.forgetMeasurements();
                 check(!l.s.estimate(incoming.string()).seamless, "steps, silent ones: beside all four it does not fit");
                 const auto from = l.block.load();
                 load(l.s, incoming); l.serve(40);
@@ -1397,7 +1405,7 @@ int main(int argc, char** argv)
                 l.s.note(true, 4, .8); l.serve(20);
                 l.s.setBudget({64}); l.s.forgetMeasurements();
                 const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
-                l.s.setBudget({64, next + one + one / 2}); l.s.forgetMeasurements();
+                allow(l.s, next + one + one / 2); l.s.forgetMeasurements();
                 const auto from = l.block.load();
                 const float both = l.at(from - 1);
                 load(l.s, incoming); l.serve(60);
@@ -1421,7 +1429,7 @@ int main(int argc, char** argv)
                 l.s.note(true, 1, .8); l.serve(20);
                 l.s.setBudget({64}); l.s.forgetMeasurements();
                 const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
-                l.s.setBudget({64, next + one / 2}); l.s.forgetMeasurements();
+                allow(l.s, next + one / 2); l.s.forgetMeasurements();
                 const auto from = l.block.load();
                 load(l.s, incoming); l.serve(60);
                 check(l.has("synth"), "steps, a cut: the new Performance loaded");

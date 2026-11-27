@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Installs from the live package repository and plays what it installed, as a user would.
+"""Installs from the live package repository, as a user would.
 
 usage: live-check.py BUILD-DIR [SOURCE]
 
@@ -11,12 +11,8 @@ is opened.
 Through the control API (oscairn-web-rpc-test): the official repository is known and its root key
 trusted from the start, for repositories only, and its publisher's key for plugins, apps and
 content (another source is refused until its root key is trusted, naming the key); it lists its
-packages. VA, FM and the effects install with no yes, their signer shown as trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
-here again and checked by its hash) holds it. Then each instrument, in the engine's process and in
-a worker, lists its factory presets, plays one for a held note offline (oscairn-installed-play),
-and must sound and stay finite.
+packages. VA, FM and the effects install with no yes, their signer shown as trusted. FM lists no factory presets, which oscairn-installed-play needs to play one, so nothing is played here.
 """
-import gzip
 import hashlib
 import json
 import os
@@ -24,23 +20,20 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 # What the official repository publishes (github.com/oscairn/packages: repository-config.json and
 # publishers/org.oscairn.json), as a user would be given them.
 ROOT_KEY = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'
 PUBLISHER_KEY = 'db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69'
-# Each instrument, its asset library and how many presets it lists, every one from that library.
-INSTRUMENTS = {'org.oscairn.fm': ('org.oscairn.fm-cartridges', 1056)}
-# The VA ships no asset library: it is installed and checked in the store, not played here.
+# FM ships no asset library and lists no factory presets (an init patch only), so it is installed and checked in the store, not played here.
+INSTRUMENTS = ['org.oscairn.fm']
 VA = 'org.oscairn.va'
 EFFECTS = 'org.oscairn.effects'
 
 build = Path(sys.argv[1]).resolve()
 source = sys.argv[2] if len(sys.argv) > 2 else 'https://packages.oscairn.org'
 web = next(build.glob('hosts/audio/oscairn_web_rpc_test_artefacts/*/oscairn_web_rpc_test'))
-play, worker, scan = build / 'core/control/oscairn-installed-play', build / 'core/oscairn-plugin-worker', build / 'core/oscairn-plugin-scan'
 failures = 0
 
 
@@ -53,11 +46,6 @@ def check(ok, what):
 
 def key_id(key):
     return hashlib.sha256(bytes.fromhex(key)).hexdigest()[:16]
-
-
-def fetch(url):
-    with urllib.request.urlopen(url, timeout=60) as r:
-        return r.read()
 
 
 with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
@@ -104,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
         listing = job('packages.list', {'source': source})
         offered = {x['id']: x for x in listing['packages']}
         check(listing['state'] == 'done' and listing['repository'] == 'org.oscairn.main', f"once trusted, it lists {len(offered)} packages at serial {listing['serial']}: {listing['error']}")
-        for wanted in [VA, *INSTRUMENTS, *(a for a, _ in INSTRUMENTS.values()), EFFECTS]:
+        for wanted in [VA, *INSTRUMENTS, EFFECTS]:
             x = offered.get(wanted)
             check(x is not None and x['license'] and x['publisherKey'] == key_id(PUBLISHER_KEY) and any(not v['incompatible'] for v in x['versions']),
                   f"{wanted} {x['versions'][0]['version'] if x else ''} is offered, installable here, by {key_id(PUBLISHER_KEY)}, under {x['license'] if x else '?'}")
@@ -124,32 +112,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             check(builds and all(b.stat().st_size > 0 for b in builds) and any((folder / 'Licenses').iterdir()),
                   f"{x['name']} {x['version']} is in the store ({x['bytes']} bytes, {', '.join(x['platforms'])}) with {len(list((folder / 'Licenses').iterdir()))} license files")
         check(all(i in plugins for i in (VA, *INSTRUMENTS)) and any(i.startswith(EFFECTS + '.') for i in plugins), 'plugins.list has VA, FM and the effects')
-        root = json.loads(fetch(source + '/repository.json'))
-        index = json.loads(gzip.decompress(fetch(source + '/' + root['index']['path'])))
-        for library, _ in INSTRUMENTS.values():
-            release = next(v for x in index['packages'] if x['id'] == library for v in x['versions'])
-            # Its manifest, a piece named by its hash (RFC 0031), lists each file of the library.
-            data = fetch(f"{root['blobBase']}{release['manifest']['sha256'][:2]}/{release['manifest']['sha256']}")
-            folder = home / 'AssetLibraries' / library / release['version']
-            check(hashlib.sha256(data).hexdigest() == release['manifest']['sha256'], f'{library} {release["version"]}: its manifest fetched here again matches the index')
-            want = {a['path']: a['sha256'] for a in json.loads(data)['assets']['files']}
-            have = {str(f.relative_to(folder)): hashlib.sha256(f.read_bytes()).hexdigest() for f in folder.rglob('*') if f.is_file()} if folder.is_dir() else {}
-            check(want and have == want, f'{folder.relative_to(home)} holds each of the {len(want)} files its manifest lists and nothing else ({len(have)} there, {sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())} bytes)')
     finally:
         p.stdin.close()
         p.wait(timeout=30)
-
-    # 4. Played offline, in the engine's process and in a worker; presets listed through the scan
-    # helper, as the engine does.
-    for placement, worker_path in (('in the engine', ''), ('in a worker', str(worker))):
-        for plugin, (library, presets) in INSTRUMENTS.items():
-            build_path = next((home / 'Plugins' / 'clap').glob(f'{plugin}@*/*/*.clap'))
-            out = subprocess.run([play, build_path, plugin, '', '3'], capture_output=True, text=True, timeout=600,
-                                 env={**env, 'OSCAIRN_PLUGIN_WORKER': worker_path, 'OSCAIRN_PLUGIN_SCAN': str(scan)})
-            result = json.loads(out.stdout) if out.stdout.strip() else {}
-            check(out.returncode == 0 and result.get('presets') == result.get('fromLibraries') == presets and result.get('workers') == (1 if worker_path else 0),
-                  f"{plugin} {placement}: {result.get('presets')} presets, {result.get('fromLibraries')} of them from {library} (want {presets}); "
-                  f"'{result.get('preset')}' held for 3 s, RMS {result.get('rms')}, peak {result.get('peak')}, finite {result.get('finite')} {out.stderr.strip()[-300:]}")
 
 print('PASS' if not failures else f'{failures} FAILED')
 sys.exit(1 if failures else 0)

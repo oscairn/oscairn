@@ -116,15 +116,16 @@ int main(int argc, char** argv)
         Session s(rate, frames);
         s.loadPerformance(perf.string());
         check(failureOf(s).empty(), "opened with no refusal");
-        std::ofstream(refuse) << "x";
+        // Two refusals, then the plugin takes the state: a worker is restarted at most three times in a minute, and the
+        // supervisor retries at once, so a test removing the file on seeing the first refusal races the third try.
+        std::ofstream(refuse) << "2";
         killChildren();
         std::string why;
         float l[frames]{}, r[frames]{}; float* out[]{l, r};
-        for(int i = 0; i < 1000 && why.find("Plugin rejected state") == std::string::npos; ++i) { s.service(); s.process(out, frames); why = failureOf(s); std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+        for(int i = 0; i < 10000 && why.find("Plugin rejected state") == std::string::npos; ++i) { s.service(); s.process(out, frames); why = failureOf(s); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
         check(why.find("synth") != std::string::npos && why.find("Plugin rejected state") != std::string::npos, "a restarted worker whose plugin refuses its state stays failed, saying why: " + why);
-        std::filesystem::remove(refuse);
         for(int i = 0; i < 1500 && !failureOf(s).empty(); ++i) { s.service(); s.process(out, frames); std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
-        check(failureOf(s).empty(), "and plays again once it takes the state: " + failureOf(s));
+        check(failureOf(s).empty() && !std::filesystem::exists(refuse), "and plays again once it takes the state: " + failureOf(s));
     }
     return failures ? 1 : 0;
 }

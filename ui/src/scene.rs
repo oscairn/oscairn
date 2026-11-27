@@ -48,7 +48,14 @@ pub fn glide_text(ms: u64) -> String {
     match ms {
         0 => "At once".into(),
         ms if ms < 1000 => format!("{ms} ms"),
-        ms => format!("{} s", ms / 1000),
+        ms => {
+            let tenths = (ms % 1000) / 100;
+            if tenths == 0 {
+                format!("{} s", ms / 1000)
+            } else {
+                format!("{}.{tenths} s", ms / 1000)
+            }
+        }
     }
 }
 
@@ -348,5 +355,36 @@ mod tests {
         let s = read(&json!({"id": 3, "name": "Chorus", "scope": ["mutes", "mix"], "glide": 500, "curve": "ease", "launch": "bar", "parts": [{}, {}], "values": [{}]}));
         assert_eq!((s.id, s.name.as_str(), s.scope.len(), s.glide, s.curve, s.launch, s.parts, s.values), (3, "Chorus", 2, 500, 1, 2, 2, 1));
         assert_eq!(read(&json!({"id": 1})), Scene { id: 1, ..Default::default() }, "words the engine leaves out are the first choices");
+    }
+
+    #[test]
+    fn glide_text_boundaries_and_long_times() {
+        assert_eq!(glide_text(999), "999 ms");
+        assert_eq!(glide_text(1000), "1 s", "a whole second; the engine's largest glide is 60000 ms");
+        assert_eq!(glide_text(1500), "1.5 s", "a stored glide off the menu (the step edging) is shown to a tenth of a second");
+    }
+
+    #[test]
+    fn a_scene_reads_wrong_typed_fields_as_the_defaults() {
+        let s = read(&json!({"id": 3.5, "name": 12, "scope": "mutes", "glide": "500", "curve": 5, "launch": 3, "parts": 8, "values": {}}));
+        assert_eq!((s.id, s.name.as_str(), s.scope.len(), s.glide, s.curve, s.launch, s.parts, s.values), (0, "", 0, 0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn a_word_outside_the_menu_is_the_first_choice() {
+        assert_eq!(index(&CURVES, Some("warp")), 0);
+        assert_eq!(index(&CURVES, Some("")), 0);
+        assert_eq!(index(&CURVES, None), 0);
+        assert_eq!(index(&[], Some("linear")), 0);
+        let s = read(&json!({"id": 2, "curve": "warp", "launch": "sometime"}));
+        assert_eq!((s.curve, s.launch), (0, 0));
+    }
+
+    #[test]
+    fn a_scene_keeps_long_and_unicode_text() {
+        let name = "åß∂ƒ".repeat(50);
+        let s = read(&json!({"id": 9, "name": name, "scope": ["mutes", "zonês"]}));
+        assert_eq!(s.name, "åß∂ƒ".repeat(50));
+        assert_eq!(s.scope, ["mutes", "zonês"]);
     }
 }

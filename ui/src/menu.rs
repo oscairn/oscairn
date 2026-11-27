@@ -139,6 +139,9 @@ impl Menu {
         state.set_title(path.into());
         state.set_up(self.levels.len() > 1);
         let level = self.levels.last().unwrap();
+        // The list's size and the view's first row, for its scroll bar: a drag or a tap on the bar asks for a view.
+        state.set_total(level.items.len() as i32);
+        state.set_first(level.first as i32);
         state.set_more(level.items.len() > per);
         state.set_view(if level.items.is_empty() { "Nothing here".to_string() } else { format!("{}–{} of {}", level.first + 1, end, level.items.len()) }.into());
     }
@@ -195,6 +198,20 @@ impl Menu {
             let views = level.items.len().div_ceil(per).max(1);
             let to = ((level.first / per) as i64 + i64::from(by)).clamp(0, views as i64 - 1) as usize;
             level.at = (to * per..level.items.len().min((to + 1) * per)).find(|i| level.items[*i].selectable()).unwrap_or(to * per);
+        }
+        self.show();
+    }
+
+    /// The scroll bar's or a finger drag's view starts at row `first` (a touch only): the view turns to that page
+    /// and the cursor sits on a row of it that can be chosen (a scroll is not a choice). A whole view at a time.
+    pub fn scroll_to(&mut self, first: i32) {
+        let per = self.per_view();
+        if let Some(level) = self.levels.last_mut() {
+            let page = (first.max(0) as usize / per) * per;
+            let last = level.items.len().saturating_sub(1);
+            level.first = page.min(last);
+            let want = (page..level.items.len().min(page + per)).find(|i| level.items[*i].selectable());
+            level.at = want.unwrap_or(level.first);
         }
         self.show();
     }

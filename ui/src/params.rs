@@ -26,7 +26,7 @@ use crate::tabs::{self, Entry, Model};
 use crate::views;
 use crate::{GridBox, GridCard, GridHeading, GridLabel, GridPanel, GridPoint, GridShape, GridState, GridTile, Shell};
 use serde_json::{json, Value};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model as _, ModelRc, VecModel};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -1606,6 +1606,19 @@ impl Screen {
         self.scroll += by;
         let view = self.ui.upgrade().map_or(400., |ui| ui.global::<GridState>().get_view_height());
         self.scroll = self.scroll.clamp(0., (self.laid.height - view).max(0.));
+        self.show();
+    }
+
+    /// The dropdown's scroll bar or a finger drag: the view starts at value `first` (a touch only, it
+    /// selects nothing yet, so the cursor drops to the new view's first row to stay on a shown one).
+    pub fn list_scroll_to(&mut self, first: i32) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let g = ui.global::<GridState>();
+        let per = (g.get_list_per_view().max(1)) as usize;
+        let total = g.get_list().row_count();
+        let page = (first.max(0) as usize / per.max(1)) * per.max(1);
+        self.list_first = page.min(total.saturating_sub(1));
+        self.list_cursor = self.list_first.min(total.saturating_sub(1));
         self.show();
     }
 

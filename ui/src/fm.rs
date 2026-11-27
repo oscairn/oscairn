@@ -1364,3 +1364,267 @@ pub fn drag_stages(s: &StagesShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec
     let Some(line) = lines[selected].as_ref() else { return vec![] };
     node_drag(line, &f.operators[selected], c, *k, at, true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grid::Param;
+
+    /// A view parameter: operator `index` (0: the view's own), field `field`, in `view`.
+    fn param(id: u32, view: u64, index: u64, field: &str) -> Param {
+        Param { id, name: field.into(), min: 0., max: 1., field: field.into(), view, index, ..Default::default() }
+    }
+
+    /// A Ctx over `params` and empty solo and positions, the callbacks reading the live values.
+    fn ctx<'a>(params: &'a [Param], norm: &'a dyn Fn(usize) -> f64, text: &'a dyn Fn(usize) -> String) -> Ctx<'a> {
+        Ctx { params, members: &[], norm, text, focus: None, w: 1200., h: 800., top: 0., scale: 1., spacing: 1., selected: 0, cell: None, editing: false, soloed: &[], positions: &[] }
+    }
+
+    #[test]
+    fn distance_to_line_is_the_nearest_patch() {
+        assert_eq!(distance_to_line(&[(0., 0.), (10., 0.)], (5., 0.)), 0., "a point on the line");
+        assert_eq!(distance_to_line(&[(0., 0.), (10., 0.)], (5., 3.)), 3., "perpendicular");
+        assert_eq!(distance_to_line(&[(0., 0.), (10., 0.)], (12., 0.)), 2., "past the end clamps to it");
+        assert_eq!(distance_to_line(&[(0., 0.), (10., 0.)], (-3., 0.)), 3.);
+        // A single point has no segment: no distance (the grab ignores it).
+        assert_eq!(distance_to_line(&[(3., 4.)], (3., 4.)), f32::MAX);
+    }
+
+    #[test]
+    fn point_along_a_segment_interpolates_and_clamps() {
+        let pts = [(0., 0.), (10., 0.), (10., 10.)];
+        assert_eq!(point_along(&pts, Along::Segment(0, 0.5)), Some((5., 0.)));
+        assert_eq!(point_along(&pts, Along::Segment(0, 0.)), Some((0., 0.)));
+        assert_eq!(point_along(&pts, Along::Segment(0, 1.)), Some((10., 0.)));
+        // A fraction outside clamps to the segment.
+        assert_eq!(point_along(&pts, Along::Segment(0, 2.)), Some((10., 0.)));
+        // A segment number at or past the end clamps to the last segment.
+        assert_eq!(point_along(&pts, Along::Segment(9, 0.5)), Some((10., 5.)));
+        // Along the whole path: the ends and the middle.
+        assert_eq!(point_along(&pts, Along::Path(0.)), Some((0., 0.)));
+        assert_eq!(point_along(&pts, Along::Path(1.)), Some((10., 10.)));
+        // Half the path's length is its corner, not the midpoint across the first segment.
+        assert_eq!(point_along(&pts, Along::Path(0.5)), Some((10., 0.)));
+        // A path fraction beyond the end clamps to the last point.
+        assert_eq!(point_along(&pts, Along::Path(2.)), Some((10., 10.)));
+    }
+
+    #[test]
+    fn point_along_needs_two_points() {
+        assert_eq!(point_along(&[], Along::Path(0.5)), None);
+        assert_eq!(point_along(&[(3., 4.)], Along::Path(0.5)), None);
+        assert_eq!(point_along(&[], Along::Segment(0, 0.5)), None);
+        assert_eq!(point_along(&[(3., 4.)], Along::Segment(0, 0.5)), None);
+    }
+
+    #[test]
+    fn point_along_a_flat_segment_stays_put() {
+        // A leading flat segment holds no length: the point lands past it, on the real segment.
+        let pts = [(2., 2.), (2., 2.), (5., 5.)];
+        assert_eq!(point_along(&pts, Along::Path(0.)), Some((2., 2.)));
+        assert_eq!(point_along(&pts, Along::Path(0.5)), Some((3.5, 3.5)));
+    }
+
+    #[test]
+    fn algorithm_layout_of_no_operators_is_empty() {
+        let f = algorithm_layout(&[0; 11], 0);
+        assert_eq!(f.columns, 0);
+        assert!(f.nodes.is_empty());
+        assert!(f.chains.is_empty());
+        assert!(f.loops.is_empty());
+    }
+
+    #[test]
+    fn algorithm_layout_caps_at_eight_operators() {
+        let mut r = [0u8; 11];
+        r[8] = 0xFF; // every operator is a carrier
+        let f = algorithm_layout(&r, 20);
+        assert_eq!(f.nodes.len(), 8);
+        assert!(f.nodes.iter().all(|n| n.op.is_some()));
+    }
+
+    #[test]
+    fn algorithm_layout_of_a_plain_carrier_is_one_box_to_the_output() {
+        let mut r = [0u8; 11];
+        r[8] = 0b1;
+        let f = algorithm_layout(&r, 1);
+        assert_eq!(f.columns, 1);
+        assert_eq!(f.nodes.len(), 1, "one operator, one box");
+        assert_eq!(f.chains.len(), 1, "the carrier's wire to the output");
+        assert!(f.chains[0].target.is_none());
+        assert!(f.loops.is_empty());
+    }
+
+    #[test]
+    fn algorithm_layout_with_no_carrier_and_no_feedback_leaves_the_operators_alone() {
+        let f = algorithm_layout(&[0; 11], 8);
+        assert_eq!(f.columns, 1);
+        assert_eq!(f.nodes.len(), 8, "every operator still has a box");
+        assert!(f.nodes.iter().all(|n| n.op.is_some() && n.column == 0));
+        assert!(f.chains.is_empty(), "nobody reaches the output");
+        assert!(f.loops.is_empty(), "no feedback in the data");
+    }
+
+    #[test]
+    fn a_feedback_out_of_the_view_is_ignored() {
+        let mut r = [0u8; 11];
+        r[8] = 0b1;
+        r[9] = 0; // from operator 0: outside 1..=count
+        r[10] = 1;
+        let f = algorithm_layout(&r, 4);
+        assert!(f.loops.is_empty());
+        let mut r = [0u8; 11];
+        r[8] = 0b1;
+        r[9] = 9; // from operator 9: past the eighth
+        r[10] = 1;
+        let f = algorithm_layout(&r, 8);
+        assert!(f.loops.is_empty());
+    }
+
+    #[test]
+    fn a_wire_that_skips_a_column_passes_through_a_point_in_it() {
+        // 3 into 1 and 3 into 2, 2 into 1: the 3->1 wire leaves 3's column and skips 2's.
+        let mut r = [0u8; 11];
+        r[0] = 0b110; // ops 1 and 2 into op 0
+        r[1] = 0b100; // op 2 into op 1
+        r[2] = 0b1_1000; // ops 3 and 4 into op 2
+        r[8] = 0b10_0001; // ops 0 and 5 are the carriers
+        r[9] = 2;
+        r[10] = 2;
+        let f = algorithm_layout(&r, 8);
+        let wire_2_to_0 = f.chains.iter().find(|c| c.source == 2 && c.target == Some(0)).unwrap();
+        assert!(wire_2_to_0.nodes.iter().any(|&n| f.nodes[n].op.is_none()), "the skipped column has a pass-through point");
+        assert!(f.nodes.iter().any(|n| n.op.is_none()));
+        assert_eq!(f.crossings(), 0, "the sweeps keep the wires from crossing");
+    }
+
+    #[test]
+    fn fm_of_parses_the_views_own_parameters_and_operators_up_to_eight() {
+        let params = vec![
+            param(0, 1, 0, "algorithm"),
+            param(1, 1, 1, "operatorLevel"),
+            param(2, 1, 2, "ratio"),
+            param(3, 1, 3, "operatorMute"),
+            param(4, 1, 2, "attack"),
+            param(5, 1, 9, "detune"),
+            param(6, 1, 0, "feedback"),
+            param(7, 2, 1, "operatorLevel"),
+        ];
+        let f = fm_of(&params, 1);
+        assert_eq!(f.algorithm, Some(0));
+        assert_eq!(f.feedback, Some(6));
+        assert_eq!(f.own, vec![0, 6], "the view's own parameters, index 0, front to back");
+        assert_eq!(f.operators.len(), 3, "operators 1 to 3");
+        assert_eq!(f.operators[0].level, Some(1));
+        assert!(f.operators[0].mute.is_none(), "the mute is operator 3's, not operator 1's");
+        assert_eq!(f.operators[1].ratio, Some(2));
+        assert_eq!(f.operators[1].envelope, vec![4], "the envelope field goes to its operator");
+        assert_eq!(f.operators[2].mute, Some(3));
+        assert!(f.operators[2].detune.is_none(), "operator 9 (index 5) is beyond the view's eight");
+        assert!(f.operators.iter().all(|o| o.detune.is_none()));
+        // A different view leaves it alone.
+        assert!(fm_of(&params, 0).operators.is_empty(), "view 0 has no operators");
+        assert_eq!(fm_of(&params, 2).operators.len(), 1, "only the second view's operator");
+    }
+
+    #[test]
+    fn fm_of_resizes_operators_up_to_the_deepest_index() {
+        let params = vec![param(0, 1, 5, "operatorLevel")];
+        let f = fm_of(&params, 1);
+        assert_eq!(f.operators.len(), 5, "operator 5 alone fills operators 1 to 5");
+        assert_eq!(f.operators[4].level, Some(0));
+        assert!(f.operators[0].level.is_none());
+    }
+
+    #[test]
+    fn fm_of_ignores_an_unknown_field_and_a_field_without_an_operator() {
+        let params = vec![
+            param(0, 1, 1, "bogus"),
+            param(1, 1, 0, "ratio"),
+        ];
+        let f = fm_of(&params, 1);
+        assert!(f.operators[0].level.is_none());
+        assert!(f.operators[0].ratio.is_none(), "index 0 is the view's own, not an operator");
+        assert_eq!(f.own, vec![1]);
+    }
+
+    #[test]
+    fn solo_from_tells_where_a_solo_comes_from() {
+        let params = vec![param(0, 1, 1, "operatorSolo")];
+        let f = fm_of(&params, 1);
+        assert_eq!(f.solo_from(&params), SoloFrom::Field, "a solo field in the data");
+        let mut params = vec![param(0, 1, 1, "operatorMute")];
+        params[0].transient = true;
+        let f = fm_of(&params, 1);
+        assert_eq!(f.solo_from(&params), SoloFrom::Others, "a transient mute lets the host derive a solo");
+        // A mute that is not transient: the host cannot derive a solo from it.
+        let params = vec![param(0, 1, 1, "operatorMute")];
+        let f = fm_of(&params, 1);
+        assert_eq!(f.solo_from(&params), SoloFrom::None);
+        assert_eq!(FmShape::default().solo_from(&[]), SoloFrom::None, "no mute and no solo");
+    }
+
+    #[test]
+    fn a_cells_disabled_reason_names_what_is_missing() {
+        let params = vec![param(0, 1, 1, "operatorMute")];
+        let f = fm_of(&params, 1);
+        let no_solo = FmShape { operators: vec![Operator::default()], ..Default::default() };
+        assert_eq!(f.disabled(0, Column::Mute, &params), None, "the mute cell is there");
+        assert_eq!(f.disabled(0, Column::Solo, &params), Some("No solo: this plugin's mute is saved with the sound, so the host does not mute others"));
+        assert_eq!(no_solo.disabled(0, Column::Mute, &params), Some("This plugin has no mute for its operators"));
+        assert_eq!(no_solo.disabled(0, Column::Level, &params), Some("This operator has no such field"));
+        let none: Vec<Param> = vec![];
+        assert_eq!(no_solo.disabled(0, Column::Solo, &none), Some("This plugin has no solo for its operators"));
+        assert_eq!(no_solo.disabled(3, Column::Level, &none), None, "an operator past the table has no cell");
+    }
+
+    #[test]
+    fn soloed_is_the_field_or_a_host_solo() {
+        // Two operators, each with a solo field of its own.
+        let params = vec![param(0, 1, 1, "operatorSolo"), param(1, 1, 2, "operatorSolo")];
+        let f = fm_of(&params, 1);
+        let values = [1., 0.];
+        let norm = |i: usize| params[i].norm(values[i]);
+        let text = |i: usize| format!("{:.2}", params[i].denorm(values[i]));
+        let c = ctx(&params, &norm, &text);
+        assert!(soloed(&f, &c, 0), "its own field is on");
+        assert!(!soloed(&f, &c, 1));
+        // The host soloed operator 2 with no field of its own: it still reads soloed.
+        let soloed_host = [false, true];
+        let c = Ctx { params: &params, members: &[], norm: &norm, text: &text, focus: None, w: 1200., h: 800., top: 0., scale: 1., spacing: 1., selected: 0, cell: None, editing: false, soloed: &soloed_host, positions: &[] };
+        assert!(soloed(&f, &c, 1), "a host solo holds it alone");
+        assert!(soloed(&f, &c, 0), "the field also stays");
+    }
+
+    #[test]
+    fn dimmed_takes_a_quiet_a_muted_or_a_nonsoloed_operator_away() {
+        // Two operators, each with a level (index odd) and a solo (index even).
+        let params = vec![
+            param(0, 1, 1, "operatorSolo"),
+            param(1, 1, 1, "operatorLevel"),
+            param(2, 1, 2, "operatorSolo"),
+            param(3, 1, 2, "operatorLevel"),
+        ];
+        let f = fm_of(&params, 1);
+        // Everything bright and no solo: nothing is dimmed.
+        let values = [0., 1., 0., 1.];
+        let norm = |i: usize| params[i].norm(values[i]);
+        let text = |i: usize| format!("{:.2}", params[i].denorm(values[i]));
+        let c = ctx(&params, &norm, &text);
+        assert!(!dimmed(&f, &c, 0) && !dimmed(&f, &c, 1));
+        // op 0 soloed: it stays bright, op 1 (not soloed) is dimmed.
+        let values = [1., 1., 0., 1.];
+        let norm = |i: usize| params[i].norm(values[i]);
+        let text = |i: usize| format!("{:.2}", params[i].denorm(values[i]));
+        let c = ctx(&params, &norm, &text);
+        assert!(!dimmed(&f, &c, 0), "the soloed operator stays bright");
+        assert!(dimmed(&f, &c, 1), "left out of a solo that is on");
+        // A quiet operator is dimmed even without a solo.
+        let values = [0., 0., 0., 1.];
+        let norm = |i: usize| params[i].norm(values[i]);
+        let text = |i: usize| format!("{:.2}", params[i].denorm(values[i]));
+        let c = ctx(&params, &norm, &text);
+        assert!(dimmed(&f, &c, 0), "level 0 is silent");
+    }
+
+}

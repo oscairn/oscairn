@@ -123,6 +123,8 @@ pub enum Stop {
     Canvas(usize),
     /// A cell of a row of the whole panel.
     Panel(usize, usize),
+    /// A zoom button: 0 Zoom in, 1 Zoom out, 2 Fit.
+    Zoom(usize),
 }
 
 /// What a choice of the menu that is open means.
@@ -406,6 +408,8 @@ pub struct Screen {
     layout: Layout,
     /// The layout as it was drawn: its scale and where it starts in the canvas (centered when it is smaller).
     scale: f64,
+    /// The user's zoom over the theme's scale: Fit sets it to 1, Zoom in and out step it by a fifth.
+    zoom: f64,
     origin: (f64, f64),
     /// The place of the order the view last followed: the view moves to a place the cursor reaches, once.
     followed: Option<usize>,
@@ -467,6 +471,7 @@ impl Screen {
             routed_part: 0,
             layout: Layout::default(),
             scale: 1.,
+            zoom: 1.,
             origin: (0., 0.),
             followed: None,
             order: vec![],
@@ -744,7 +749,8 @@ impl Screen {
         // down with no floor, to a few pixels). What does not fit the canvas is scrolled: a drag, or the cursor
         // reaching a place that is out of view.
         let (lw, lh) = (f64::from(self.layout.width.max(1)), f64::from(self.layout.height.max(1)));
-        self.scale = f64::from(ui.global::<Theme>().get_font_scale()).max(1.);
+        // The theme's type scale, at the least 1, and the user's zoom over it (Fit brings it back to 1).
+        self.scale = f64::from(ui.global::<Theme>().get_font_scale()).max(1.) * self.zoom;
         self.origin = (((cw - lw * self.scale) / 2.).max(0.), ((ch - lh * self.scale) / 2.).max(0.));
         let (content_w, content_h) = (cw.max(lw * self.scale), ch.max(lh * self.scale));
         self.order = self.make_order();
@@ -938,6 +944,10 @@ impl Screen {
         }
         let state = ui.global::<RoutingState>();
         state.set_scale(self.scale as f32);
+        state.set_zoom_cursor(match self.stop {
+            Some(Stop::Zoom(i)) => i as i32 + 1,
+            _ => 0,
+        });
         state.set_panel_need(rows.len() as i32);
         state.set_more_panel(rows.len() > per);
         state.set_message(self.said.as_str().into());
@@ -1451,8 +1461,55 @@ impl Screen {
                     return self.press_cell(cell.act);
                 }
             }
+            Stop::Zoom(i) => self.zoom_action(i),
         }
         Outcome::Stay
+    }
+
+    /// Zoom in (0), Zoom out (1) or Fit (2): the drawing's scale steps by a fifth over the theme's, or fits the
+    /// whole graph to the canvas (Fit). Zoom in and out hold the graph place under the view's center so the view
+    /// does not jump from a panned position; Fit shows all of it. The cursor stays on the button.
+    fn zoom_action(&mut self, which: usize) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let fs = f64::from(ui.global::<Theme>().get_font_scale()).max(1.);
+        let (cw, ch) = self.canvas();
+        let (lw, lh) = (f64::from(self.layout.width.max(1)), f64::from(self.layout.height.max(1)));
+        let old_scale = self.scale;
+        let origin = (((cw - lw * old_scale) / 2.).max(0.), ((ch - lh * old_scale) / 2.).max(0.));
+        let view = ui.global::<RoutingState>();
+        // The graph place under the view's center, held as the scale changes.
+        let center = (
+            (f64::from(view.get_pan_x()) + cw / 2. - origin.0) / old_scale,
+            (f64::from(view.get_pan_y()) + ch / 2. - origin.1) / old_scale,
+        );
+        match which {
+            0 => self.zoom = (self.zoom * 1.25).min(4.),
+            1 => self.zoom = (self.zoom / 1.25).max(0.25),
+            // Fit: a graph larger than the canvas shrinks down to it; a smaller one returns to the designed size.
+            _ => {
+                let fit = (cw / lw).min(ch / lh);
+                self.zoom = if fit >= fs { 1. } else { (fit / fs).max(0.05) };
+                view.set_pan_x(0.);
+                view.set_pan_y(0.);
+            }
+        }
+        let new_scale = fs * self.zoom;
+        if which <= 1 {
+            let origin = (((cw - lw * new_scale) / 2.).max(0.), ((ch - lh * new_scale) / 2.).max(0.));
+            let (content_w, content_h) = (cw.max(lw * new_scale), ch.max(lh * new_scale));
+            let pan = ((center.0 * new_scale + origin.0 - cw / 2.).clamp(0., content_w - cw),
+                       (center.1 * new_scale + origin.1 - ch / 2.).clamp(0., content_h - ch));
+            view.set_pan_x(pan.0 as f32);
+            view.set_pan_y(pan.1 as f32);
+        }
+        self.followed = None; // the view follows the cursor again under the new scale
+        self.show();
+    }
+
+    /// A press on a zoom button by touch.
+    pub fn zoom_press(&mut self, which: i32) {
+        self.touched();
+        self.zoom_action(which.max(0) as usize);
     }
 
     // The cursor.
@@ -1460,6 +1517,8 @@ impl Screen {
     fn stops(&self) -> Vec<Stop> {
         let mut v: Vec<Stop> = (0..self.order.len()).map(Stop::Canvas).collect();
         v.extend(self.panel_stops().into_iter().map(|(r, c)| Stop::Panel(r, c)));
+        // The zoom buttons, after the panel: the dial goes on from the last cell to them.
+        v.extend((0..3).map(Stop::Zoom));
         v
     }
 

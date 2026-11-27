@@ -423,6 +423,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     rt.on_panel_moved(|row, cell, f| with_app(|a| a.on_routing(|r| r.level(row, cell, f))));
     rt.on_panel_held(|row, cell, down| with_app(|a| a.on_routing(|r| r.hold(row, cell, down))));
     rt.on_turn_panel(|by| with_app(|a| a.on_routing(|r| r.turn_panel(by))));
+    rt.on_zoom_press(|i| with_app(|a| a.on_routing(|r| r.zoom_press(i))));
     rt.on_resized(|| with_app(|a| a.on_routing(routing::Screen::shown)));
     let menu = ui.global::<MenuState>();
     menu.on_tapped(|i| with_app(|a| a.menu_tap(i)));

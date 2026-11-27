@@ -222,7 +222,7 @@ folder, hidden ones aside:
 
 ```sh
 oscairn-sign asset-package --key author.key --license GPL-3.0-or-later --license-file NOTICE \
-    --license-file AUTHORS Factory.olib org.oscairn.fm-cartridges 1.9.0 "Factory content" factory/
+    --license-file AUTHORS Factory.olib org.oscairn.sampler.init 1.9.0 "Factory content" factory/
 ```
 
 Installing one keeps each file once, by its SHA-256, in the asset store (`assets/store/<sha256>`
@@ -416,7 +416,7 @@ and types packages alike, each by package ID and the least version:
   "assets": [],
   "packages": [
     {"id": "org.oscairn.fm", "version": "0.4.8"},
-    {"id": "org.oscairn.fm-cartridges", "version": "1.0.0",
+    {"id": "org.oscairn.sampler.init", "version": "1.0.0",
      "repository": {"address": "https://packages.oscairn.org", "key": "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841"}}
   ]
 }

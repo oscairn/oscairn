@@ -13,7 +13,7 @@ of u-he and Bitwig. Oscairn is not affiliated with or endorsed by any of them.
 Checked when built and tested; the sections below say how.
 
 - [x] 1. Wrapper core around one Performance (#293)
-- [ ] 2. CLAP format (#294)
+- [ ] 2. CLAP format (#294): built and tested in the build tree (Oscairn.clap: notes and MIDI, main stereo out, state, no parameters); automation waits for step 6, the editor for step 12, the Linux and macOS installs for step 14
 - [ ] 3. VST3 format (#295)
 - [ ] 4. AU format (#296)
 - [ ] 5. AAX format, after the first public release if need be (#297)

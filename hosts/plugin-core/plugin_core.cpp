@@ -260,13 +260,21 @@ namespace oscairn::plugin
 
     void Instance::activate(double sampleRate)
     {
-        impl_->call([this, sampleRate] {
+        auto apply = [this, sampleRate] {
             if(sampleRate != impl_->session->sampleRate()) impl_->session->setSampleRate(sampleRate);
-        });
-        impl_->active = true;
+            impl_->active = true;
+        };
+        // Behind a load in progress the control thread is busy: do not make the caller (a host's main thread)
+        // wait for it. The rate is applied and process() starts playing when the load is done.
+        if(impl_->status().load == Load::Loading) impl_->post(apply);
+        else impl_->call(apply);
     }
 
-    void Instance::deactivate() { impl_->active = false; }
+    void Instance::deactivate()
+    {
+        impl_->active = false;
+        impl_->post([this] { impl_->active = false; }); // after an activation still waiting behind a load
+    }
 
     bool Instance::process(const Block& block) noexcept
     {

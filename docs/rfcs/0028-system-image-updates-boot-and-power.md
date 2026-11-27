@@ -146,6 +146,64 @@ whether `systems` should say how much room (a size) rather than how many, once a
 little for a whole second copy; and whether a client shows the block (Settings' About page could;
 not now).
 
+### What is user content
+
+User content is everything the user made, bought or chose, which an update must keep. All of it
+is in the data folder (`OSCAIRN_DATA_HOME`; [RFC 0037](0037-storage-and-file-transfer.md) has
+the layout): Performances and Sounds (`Performances/`, `Sounds/`), Setlists (`Setlists/`), the
+library, its index and user file (`Libraries/`, `library/`), imported samples (`assets/`),
+settings (`audio.json`, `controllers.json`, and the files beside them), recordings
+(`recordings/`), installed packages and their stores (`Plugins/`, `packages.json`,
+`preinstalled.json`), what was learned (`measurements.json`), and trust and repository settings
+(`Keys/`, `trust.json`, `Repositories/`, `repositories.json`). On the FANTOM two files choosing
+how the next power-on starts (`roland-first` and the others in `/home/root/oscairn-boot`) are
+the owner's choices too, and already outside every bundle.
+
+Not user content: the programs, plugins that came with the system, the profile built into the
+programs, the files in `etc/default` (written from the profile at build time), logs and running
+state (`var/oscairn`, on the FANTOM). An update replaces these.
+
+### The rule
+
+**An update replaces the system only.** Nothing in an install or update path deletes, rewrites
+or moves a file of user content; what must change in it (a format step) is done by the engine
+after the update, on its own copy-then-rename, as a save is. A device whose data is not apart
+from the system (`userData` `with-system`) carries the folder across by copying it before the
+old system goes, and may delete the old system only after the copy was compared and the new
+system ran.
+
+### Where the FANTOM's data folder should live
+
+Today it is inside the bundle (`root/.local/share/oscairn`: the engine runs with `HOME=/root` in
+the chroot) and each install copies it, 2.6 GB on the test unit. That is why a second bundle
+costs a copy, why a bundle's deletion deletes the data in it, and why two bundles
+that both ran diverge.
+
+**It should live in one folder outside every bundle that every bundle uses**, and the name for
+it is the existing `/home/root/oscairn-data`: it is empty on the unit today and no script or
+program of Oscairn reads or writes it, so it can be taken for this without moving anything.
+With that, an update is a new bundle and a switch of the link, and the profile says `separate`.
+
+How is open, and not built, because the chroot sees only the bundle: a link to
+`/home/root/oscairn-data` would point at nothing inside the chroot, and the engine's
+`OSCAIRN_DATA_HOME` is read there. The way that works is a bind mount of the outside folder on
+the bundle's `root/.local/share/oscairn`, made by `start-chroot.sh` (as it mounts `/proc` and
+the rest) when it is asked to, and unmounted first by `stop-chroot.sh`. It is not built in this
+step because a mistake in it loses content, and it cannot be tried on the unit without the
+owner: a bundle's deletion with the mount still up would delete the data folder through it, the
+mount would hide the bundle's own copy (an empty library on the next start if it were made
+before the copy was moved), and the move of 2.6 GB is once, by hand, with room for it. The next
+step, in this order: `start-chroot.sh` and `stop-chroot.sh` handle the mount, only when an
+outside folder is named (unset, today's layout is unchanged), refusing when both the outside
+and the bundle's folder hold content; a test of the pair with a stand-in `mount`; the one move
+of a unit's data to the outside folder, by hand, checked with `diff -rq`; the profile's
+`userData` becomes `separate`; the install steps in docs/fantom-0.md lose the copy.
+
+What is built for #220 is the test (`devices/roland-fantom0/tests/fantom_start.sh`) that the
+start, stop and restart scripts leave the data folder as it was (names, contents, inodes and
+modification times), and that the copy-based install gives a new bundle's start the same content
+as the old one's, with the old bundle's data deleted afterward.
+
 ## Open questions
 
 - The update package format and signing keys: who signs a third party's product's images.

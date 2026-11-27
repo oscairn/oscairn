@@ -172,7 +172,16 @@ jobs:
         run: ctest --test-dir build-standalone -R "^(desktop-launch|plugin-clap)$" --output-on-failure  # plugin-clap: the DAW plugin's bundle opened as a host does; the others click a real window or time real audio, which a shared runner cannot do
 
   thread-sanitizer:
+    # The tests are nearly all of the job's time, so they run in parallel shards (tools/ci-ctest-shard.sh: ctest's
+    # stride over the test numbers, and a check that the shards are exactly the whole list); each shard builds
+    # with the cache and runs its slice alone on its own runner.
+    name: thread-sanitizer (shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
@@ -208,7 +217,8 @@ jobs:
         run: cmake --build build
 
       - name: Save the build caches
-        if: ${{ !cancelled() }}
+        # one shard saves: the four build the same objects
+        if: ${{ !cancelled() && matrix.shard == 0 }}
         uses: ./.github/actions/cache-build
         with:
           phase: save
@@ -218,7 +228,7 @@ jobs:
 
       - name: Test
         # The scanner tests deliberately crash and hang plugins in child processes.
-        run: ctest --test-dir build --output-on-failure -E "scanner|benchmark-cli"
+        run: tools/ci-ctest-shard.sh build 4 ${{ matrix.shard }} "scanner|benchmark-cli"
 
   cpp-reference-host:
     # The Rust CLAP host is the default and the jobs above build it; this builds the C++ reference host

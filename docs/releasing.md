@@ -147,6 +147,12 @@ min is mostly `oscairn-ui` itself (3.6 min, fat LTO, rebuilt every time). The co
 object is compiled by several targets (JUCE's modules once per executable), which ccache serves from its own entries
 within the run.
 
+The thread-sanitizer job runs as four parallel shards (`thread-sanitizer (shard N of 4)`), each on its own runner
+with the same cached build. `tools/ci-ctest-shard.sh BUILD_DIR 4 N REGEX` runs ctest's stride (`-I N+1,,4`) over the
+test numbers and first checks, from `ctest -N`, that the four shards' own tests are exactly the full list (a test in
+no shard or in two fails the job); ctest also adds the fixture setup tests a slice needs, so a few cheap ones run in
+every shard. Shard 0 saves the cache. To change the count, change the matrix and the `4` in the same job.
+
 ## The FANTOM-0 bundle
 
 The `fantom-0` job runs `os/fantom-bundle.sh` ([the bundle](fantom-0.md#running-in-a-chroot-on-rolands-linux)):

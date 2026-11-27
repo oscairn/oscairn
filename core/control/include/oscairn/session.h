@@ -545,6 +545,10 @@ namespace oscairn
         std::set<NodeId> unfed(std::set<NodeId> kept) const;
         std::set<NodeId> edited_; // open nodes edited in their plugin's own editor (a gesture) since the Performance opened (holding)
         bool memoryFits(const Estimate& e) const;
+        // Whether a saved item names a plugin build this device does not have, so it opens with a
+        // stand-in: true when any node's plugin (id and exact version) is neither in the store for
+        // this platform nor bundled with the app (library.query's `missing`).
+        bool missingPlugins(const std::string& directory) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
 

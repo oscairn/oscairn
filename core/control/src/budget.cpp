@@ -887,6 +887,7 @@ namespace oscairn
             for(auto& item : result.items)
                 try { if(const auto e = estimate(item.path); !e.fits) item.unfit = tooMuch(e); }
                 catch(const std::exception&) {} // unreadable: opening it says why
+        for(auto& item : result.items) item.missing = missingPlugins(item.path); // a needed plugin build not installed: an item that opens with a stand-in (N35b)
         return result;
     }
 

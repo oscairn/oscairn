@@ -403,7 +403,10 @@ namespace oscairn
         // place; inPlace: a file in a folder the user chose, listed where it is, never changed.
         // fields (step 4): its type's fields that its extractor read, by field ID, numbers as their text.
         struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {};
-                             bool readOnly = false, inPlace = false; std::vector<std::pair<std::string, std::string>> fields = {}; };
+                             bool readOnly = false, inPlace = false; bool missing = false;
+                             // missing: a plugin (or package) a version it needs is not installed,
+                             // so the item opens with a stand-in; absent (false) when all are here.
+                             std::vector<std::pair<std::string, std::string>> fields = {}; };
         // kind: one item type's kind ("performance", "sound"...); empty for every type. types: item
         // types by ID or kind (RFC 0023), any of them; empty for every type. source: "mine" for the
         // user's own items, an installed library's ID for its items, empty for all. id: that item

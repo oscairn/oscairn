@@ -409,6 +409,30 @@ std::vector<std::string> Session::exportPerformance(const std::string& file,bool
     },editedSounds,sign);
 }
 
+// A saved item's plugins, as resolvePlugin reads them: a node's plugin by its saved identity, and
+// whether a build of that exact version for this platform is installed (the store's, or bundled with
+// the app); where one is not, the item opens with a stand-in, and library.query lists it `missing`.
+bool Session::missingPlugins(const std::string& directory) const
+{
+    try
+    {
+        const auto file = fs::path(directory) / (fs::exists(fs::path(directory) / "sound.json") ? "sound.json" : "performance.json");
+        const auto bytes = state_files::read(file, 4 * 1024 * 1024);
+        const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
+        if(!doc) return false;
+        for(auto node : nodeList(doc.get()))
+        {
+            const V plugin = member(node, "plugin");
+            if(!plugin) continue;
+            const auto format = text(member(plugin, "format")), id = text(member(plugin, "id")), version = text(member(plugin, "version"));
+            if(id.empty()) continue;
+            if(storedPlugin(format, id, version).empty() && bundledPlugin(bundledPlugins_, format, id).empty()) return true;
+        }
+    }
+    catch(const std::exception&) {} // unreadable: opening it says why
+    return false;
+}
+
 std::vector<std::string> Session::exportLibraryItem(const std::string& id,const std::string& file,bool editedSounds,const ExportSigning& sign) {
     const auto* found=library().find(id);
     if(!found)bad("no such library item");

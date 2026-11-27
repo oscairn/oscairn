@@ -1722,6 +1722,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
   for the user's own, and, with a budget set, `unfit` when it does not fit this device: why, from
   its plugins' estimates ([RFC 0025](rfcs/0025-resource-budgets.md#status)); absent when it fits.
+  An item also carries `missing: true` when it names a plugin build (or a package a version it
+  needs) that is not installed, so it would open with a stand-in; absent when every one is here.
   An install's `notes` say each item that does not fit. Saving over a locked item, a Performance by `library.save` or a part's
   Sound by `parts.saveSound`, makes a new one.
 - `parts.fromSound` takes `{id}` and returns `{part}`: a new part listening to every key,

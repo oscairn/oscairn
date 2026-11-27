@@ -604,6 +604,30 @@ int main(int argc, char** argv)
             e.setBudget({2, 512 * MiB});
             const auto roomy = e.libraryQuery(installedItems);
             check(std::all_of(roomy.items.begin(), roomy.items.end(), [](const auto& i) { return i.unfit.empty(); }), "on a device it fits, nothing is shown");
+            // N35b: an item that names a plugin build this device does not have is listed `missing`;
+            // one whose plugin is installed is not.
+            {
+                const auto synth = e.add("synth", fixture, "org.kick.test.synth");
+                const auto part = e.addPart("Gone"); e.insertIntoPart(part, 0, synth); e.commit();
+                const auto version = e.graphState().topology.nodes.at(0).plugin.version;
+                const auto goneId = e.savePerformanceToLibrary("Gone");
+                auto all = e.libraryQuery({});
+                const auto here = std::find_if(all.items.begin(), all.items.end(), [&](const auto& i) { return i.id == goneId; });
+                check(here != all.items.end() && !here->missing, "a Performance whose plugin is installed is not missing");
+                const auto doc = fs::path(here->path) / "performance.json";
+                std::ifstream in(doc, std::ios::binary); std::ostringstream out; out << in.rdbuf(); // `read` is the Device E `Package` here
+                auto text = out.str();
+                const auto verAt = text.find("\"version\":\"" + version + "\"");
+                check(verAt != std::string::npos, "the saved Performance names its plugin version");
+                text.replace(verAt, version.size() + 12, "\"version\":\"" + version + "-missing\"");
+                std::ofstream(doc, std::ios::binary | std::ios::trunc) << text;
+                e.libraryRescan();
+                all = e.libraryQuery({});
+                const auto gone = std::find_if(all.items.begin(), all.items.end(), [&](const auto& i) { return i.id == goneId; });
+                check(gone != all.items.end() && gone->missing, "a plugin build not installed (renamed to one absent here) lists it missing");
+                check(std::all_of(all.items.begin(), all.items.end(), [&](const auto& i) { return i.id == goneId || !i.missing; }),
+                      "the installed library's items, whose plugin is here, are not missing");
+            }
         }
         // Device S: one bundle holding two plugins, Oscairn's Splitters (Split and Join): packed once,
         // each plugin signed, both installed into the store and listed, and both play from it.

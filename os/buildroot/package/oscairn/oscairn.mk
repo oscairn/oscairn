@@ -16,8 +16,7 @@ OSCAIRN_LICENSE_FILES = LICENSE core/clap-host/third_party/clap/LICENSE core/cla
 	core/control/third_party/miniz/LICENSE core/control/third_party/monocypher/LICENCE.md \
 	core/control/third_party/sheredom/json.h
 OSCAIRN_DEPENDENCIES = host-pkgconf oscairn-samplepack
-# Nothing is downloaded while building; without tests (Buildroot passes BUILD_TESTING=OFF) the
-# Legacy Sampler is not fetched.
+# Nothing is downloaded while building.
 OSCAIRN_CONF_OPTS += -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 # samplepack comes from its own package and is built with the Rust release the build container
 # installs (os/docker/Dockerfile: rustup in /opt/rust, RUSTUP_HOME and CARGO_HOME set there),

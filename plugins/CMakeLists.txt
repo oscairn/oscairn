@@ -25,20 +25,12 @@ oscairn_add_plugin(oscairn_transpose oscairn-transpose midi-effects/midi_effect.
 oscairn_add_plugin(oscairn_midi_delay oscairn-midi-delay midi-effects/midi_effect.cpp)
 target_compile_definitions(oscairn_midi_delay PRIVATE OSCAIRN_MIDI_DELAY=1)
 
-# The Oscairn Legacy Sampler (org.oscairn.legacy-sampler, oscairn-legacy-sampler.clap; deprecated
-# in favor of the sfizz-based Oscairn Sampler) lives in its own repository
-# (github.com/oscairn/legacy-sampler); it decodes WAV assets with a vendored dr_wav (public domain). It is
-# no longer shipped: only the tests use it, so it is fetched at a pinned commit when they are built,
-# and not installed. To build a local checkout instead, set FETCHCONTENT_SOURCE_DIR_OSCAIRN_SAMPLER.
-if(BUILD_TESTING)
-    set(OSCAIRN_SAMPLER_COMMIT 814fd5462678efd335e26eb88dbc5c5f97a5c903)
-    include(FetchContent)
-    FetchContent_Declare(oscairn_sampler GIT_REPOSITORY https://github.com/oscairn/legacy-sampler.git GIT_TAG ${OSCAIRN_SAMPLER_COMMIT} EXCLUDE_FROM_ALL)
-    FetchContent_MakeAvailable(oscairn_sampler)
-    # EXCLUDE_FROM_ALL drops its install rule; the target still builds with the rest.
-    set_target_properties(oscairn_sampler PROPERTIES EXCLUDE_FROM_ALL OFF
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}) # beside the other plugins
-endif()
+# The sampler the host's tests use (a stand-in for org.oscairn.sampler, which has its own repository): a sound's SFZ-shaped
+# patch names a WAV resolved through the asset store, held in memory and played by a note. Beside the other plugins so the
+# app's plugin list finds it; not installed.
+add_library(oscairn-test-sampler MODULE ../core/engine/tests/test_sampler.cpp)
+target_link_libraries(oscairn-test-sampler PRIVATE oscairn_clap_headers)
+set_target_properties(oscairn-test-sampler PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 # Modular instrument (plugins/modular): downloads JUCE.
 if(OSCAIRN_MODULAR OR OSCAIRN_STANDALONE)

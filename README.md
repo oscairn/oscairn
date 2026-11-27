@@ -29,7 +29,7 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   Sound contexts are a CLAP extension (`oscairn.sound-contexts`, a draft whose
   [header](core/clap-ext/include/oscairn-clap/sound-contexts.h) any plugin can implement), so
   third-party instruments can be built to do it too. Oscairn's own Basic Synth and Delay do, and
-  so do Oscairn FM, Analog and the Sampler from [the package repository](#the-package-repository)
+  so do Oscairn FM, VA and the Sampler from [the package repository](#the-package-repository)
   (the deprecated Legacy Sampler does too, but is no longer bundled: build it from
   [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) to install it by hand). A third-party plugin without it still switches instantly, through a
   spare instance per prepared sound, each with its own memory.
@@ -86,8 +86,7 @@ are used here only to describe compatibility or what the documents compare with.
 > - a graph of CLAP plugins, with optional LV2, played sample-accurately live or rendered
 >   offline, following its own tempo or an external MIDI clock, with CLAP plugins isolated
 >   in worker processes in the desktop app;
-> - **instruments and effects** to install from the Library's Catalog: Oscairn FM (based on
->   Dexed), Analog (based on Surge XT), the Sampler (based on sfizz), effects and an
+> - **instruments and effects** to install from the Library's Catalog: Oscairn FM, VA, the Sampler, effects and an
 >   arpeggiator, besides those that come with the app (the Basic Synth, Modular, Delay, an
 >   LFO, a step sequencer, and MIDI transpose, delay and splitters);
 > - **Performances** of parts and buses (splits, layers, sends, scenes with transitions,
@@ -216,8 +215,8 @@ never offered or installed (the official repository's revoked keys count for eve
 What you installed before is kept and never disabled; the Catalog says who withdrew it and why,
 and offers an update when there is one. Installing from a local file goes through the Library's **Install… > File**.
 
-A release comes with Oscairn's own instruments and effects already in it: FM, Analog, the
-Sampler, Effects and the Arpeggiator, with the FM cartridges and Analog's factory patches, as
+A release comes with Oscairn's own instruments and effects already in it: FM, VA, the
+Sampler, Effects and the Arpeggiator, with the FM cartridges, as
 the official repository published them ([preinstalled packages](docs/rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
 The engine installs them once, at its first start, from the app itself and without the network,
 checking every signature and hash as for any install; the Library says "Setting up the

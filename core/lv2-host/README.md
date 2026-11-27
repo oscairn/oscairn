@@ -196,7 +196,7 @@ into the user library), the state stores the abstract path
 `oscairn-assets/<first 16 hex digits of its SHA-256>/<file name>`, and `assets.tsv` beside
 `state.ttl` lists each name's library, SHA-256 and path. A restore resolves those names
 through the store, and the node lists them as its asset dependencies, so a Performance
-records and checks them like the Legacy Sampler's. Without a store, such files are copied
+records and checks them like a sampler's. Without a store, such files are copied
 into the snapshot, including materializing Lilv's external-file links. `makePath` provides
 instance-local scratch storage; directory assets are currently rejected. Snapshot
 relocation depends on plugins using the LV2 path contract correctly; arbitrary strings

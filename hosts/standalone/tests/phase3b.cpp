@@ -15,7 +15,7 @@
 //
 // Plugins: the in-repo ones (the views test plugin, made audible, as "FM"; the Basic Synth as
 // "Analog" and the upper part; Delay on the bus), or with --engines the real engines from the
-// folder OSCAIRN_PHASE3B_ENGINES names (oscairn-fm.clap, oscairn-analog.clap and
+// folder OSCAIRN_PHASE3B_ENGINES names (oscairn-fm.clap, oscairn-va.clap and
 // oscairn-effects.clap: FX Reverb and FX Delay on the bus), skipped (77) when it is unset.
 // With SNAPSHOTS, each screen is written to SNAPSHOTS-<name>.png.
 //   oscairn_phase3b_test PLUGIN_DIR SCANNER THEMES [SNAPSHOTS] [--engines]
@@ -172,12 +172,12 @@ int main(int argc, char** argv)
     std::filesystem::create_directories(pluginDir);
     const std::filesystem::path in(argv[1]);
     const std::vector<std::filesystem::path> files = engines
-        ? std::vector<std::filesystem::path>{std::filesystem::path(engineDir) / "oscairn-fm.clap", std::filesystem::path(engineDir) / "oscairn-analog.clap", std::filesystem::path(engineDir) / "oscairn-effects.clap"}
+        ? std::vector<std::filesystem::path>{std::filesystem::path(engineDir) / "oscairn-fm.clap", std::filesystem::path(engineDir) / "oscairn-va.clap", std::filesystem::path(engineDir) / "oscairn-effects.clap"}
         : std::vector<std::filesystem::path>{views, in / "oscairn-basic-synth.clap", in / "oscairn-delay.clap"};
     for(const auto& f : files) std::filesystem::create_symlink(std::filesystem::absolute(f), pluginDir / f.filename());
     std::filesystem::create_symlink(std::filesystem::absolute(in / "oscairn-lfo.clap"), pluginDir / "oscairn-lfo.clap"); // a modulator, for the control lines
     // What each role plays, by plugin ID, and the file a crash kills.
-    const std::string fmId = engines ? "org.oscairn.fm" : "org.oscairn.test.views", analogId = engines ? "org.oscairn.analog" : "org.oscairn.basic-synth";
+    const std::string fmId = engines ? "org.oscairn.fm" : "org.oscairn.test.views", analogId = engines ? "org.oscairn.va" : "org.oscairn.basic-synth";
     const std::vector<std::string> effectIds = engines ? std::vector<std::string>{"org.oscairn.effects.reverb", "org.oscairn.effects.delay"} : std::vector<std::string>{"org.oscairn.delay"};
     const std::string fmFile = files[0].filename().string();
     const double loud = 1e-4; // a block's peak above this sounds

@@ -1820,7 +1820,7 @@ on the display; `--engine-only` the engine alone.
    one host whose audio thread took 86 % of a core. `OSCAIRN_PLUGIN_HOSTS=3 ./oscairn-fantom-start`
    still gives three hosts, for comparing; there a crash or hang takes down one host, which restarts
    with its instances, and the plugin it is put down to gets a worker of its own from then on;
-   `OSCAIRN_OWN_HOST=org.oscairn.analog` (IDs separated by commas) gives a plugin a worker of its
+   `OSCAIRN_OWN_HOST=org.oscairn.va` (IDs separated by commas) gives a plugin a worker of its
    own beside the hosts. `oscairn-engine-timing` still lists every
    instance; its `wake` in a host includes waiting for the host's instances before it in the block.
 

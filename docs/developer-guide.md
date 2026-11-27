@@ -256,7 +256,7 @@ FANTOM-0's panel device and print its messages
 | `OSCAIRN_WORKERS` | How plugins share worker processes (the profile's `compute.workers`, [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#placement-by-group-2026-11-15)): `plugin`, a worker per instance; `chain`, a worker per plugin group (a part's instrument alone, its inserts together, each bus and the master their own); `pool`, the groups in `OSCAIRN_PLUGIN_HOSTS` hosts (3 if unset), never split. Unset: as `OSCAIRN_PLUGIN_HOSTS` says. `OSCAIRN_OWN_HOST` wins over each. The app sets it from its profile's `compute.workers` unless it is set already (`chain` on the FANTOM-07; no other profile sets it) |
 | `OSCAIRN_ENGINE_AUDIO_CORES`, `OSCAIRN_WORKER_AUDIO_CORES` | CPU lists for the engine's audio thread and helpers, and for workers' audio threads, each in place of `OSCAIRN_AUDIO_THREAD_CORES` for its side (the profile's `compute.engineAudioCores`, `compute.workerAudioCores`); with `chain` or `pool` each worker process takes one core of the workers' list, round-robin |
 | `OSCAIRN_WORKER_GROUPS` | `0`: nodes sharing a worker process each cross to it on their own. Otherwise (the default) nodes of one process whose audio flows between them render there in one round trip ([RFC 0045's plugin groups](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-groups-2026-11-15)); with a worker per plugin instance nothing is grouped. Read as each plan is made |
-| `OSCAIRN_WORKER_EXTRA_BLOCK` | Experimental, off by default: plugin IDs, comma-separated (`org.oscairn.analog,org.oscairn.sampler`). Each instance of a listed plugin in a worker, in real time, renders each block while the engine plays the one before: it is heard exactly one block late, and has its allowance plus a block's period for each block ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Read as each instance loads, fixed for its life; nothing switches it automatically |
+| `OSCAIRN_WORKER_EXTRA_BLOCK` | Experimental, off by default: plugin IDs, comma-separated (`org.oscairn.va,org.oscairn.sampler`). Each instance of a listed plugin in a worker, in real time, renders each block while the engine plays the one before: it is heard exactly one block late, and has its allowance plus a block's period for each block ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Read as each instance loads, fixed for its life; nothing switches it automatically |
 | `OSCAIRN_UI_PAINT_LOG` | `1`: the app and each app process (the Setlist, Settings) write to their logs, once a second, a line for each window that drew: its frames, the pixels painted in them and the milliseconds painting took, each a second (`oscairn: UI paint "<window>": ...`; [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md)). On macOS the windows then paint with JUCE's software renderer, as on Linux. Unset: nothing is counted |
 | `OSCAIRN_WORKER_REPLY_SECONDS` | Tests: how long a control call waits for a worker |
 | `OSCAIRN_REQUIRE_SOCKET_BIND` | Tests: fail, rather than skip, when local sockets cannot be bound |
@@ -455,8 +455,8 @@ beside `repository.json`.
 
 `tools/package-repository/live-check.py BUILD-DIR` checks the live repository at
 packages.oscairn.org from a user's side, with a desktop build (`OSCAIRN_STANDALONE`, for HTTPS)
-and a throwaway data folder: trusting its root key and the publisher's, installing Analog, FM and
-the effects with their asset libraries, and playing a factory preset of each instrument offline,
+and a throwaway data folder: trusting its root key and the publisher's, installing VA, FM and
+the effects (FM with its asset library), and playing a factory preset of FM offline,
 in the engine and in a worker, through `oscairn-installed-play`. It needs the network, so it is
 not part of ctest; run it after publishing.
 

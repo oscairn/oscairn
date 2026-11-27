@@ -706,3 +706,117 @@ fn signing_keys_page_is_a_no_touch_walk() {
     assert!(rows(&ui).iter().any(|r| r.label == "stage"), "the new key is listed: {:?}", labels(&ui));
     assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one key made");
 }
+
+// A no-touch walk of the Audio page: from Home by the panel's moves alone, up to the page rail and along it to
+// the Audio tab, a press shows it, then every row the page shows (Output, Input, Sample rate, Buffer size) is
+// walked by the dial and pressed, each choice laid down and held against the `audio.set` the fake engine got with
+// its parameters, the count the page's own rows give (never a hard-coded one) and no row twice. Only a profile
+// that does not fix its audio device has the Audio page, so the walk runs on a computer.
+#[test]
+fn audio_page_is_a_no_touch_walk() {
+    let mut e = Fake::new();
+    // The two outputs offer the same rates and sizes, so the menus do not shift when the open device changes.
+    e.audio.outputs = vec![
+        super::settings_fake::dev("Room", &[44100, 48000, 96000], &[64, 128, 256, 512]),
+        super::settings_fake::dev("Stage", &[44100, 48000, 96000], &[64, 128, 256, 512]),
+    ];
+    e.audio.output = "Room".into();
+    e.audio.inputs = vec![
+        super::settings_fake::dev("Mic In", &[48000], &[128]),
+        super::settings_fake::dev("Line In", &[48000], &[128]),
+    ];
+    e.audio.input = "Mic In".into();
+    e.audio.rate = 48000;
+    e.audio.size = 128;
+    let mut s = Shelf::on("w15-audio-walk", None, e);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (always the last one the screen offers) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !ui.global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    // The Audio page is a tab of this computer's app: where it sits among the pages the screen shows.
+    let audio_tab = {
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        pages.iter().position(|p| p == "Audio").expect("a computer's app has the Audio page") as i32
+    };
+    // Up to the page rail (not the top bar), along to the Audio tab, a press shows it.
+    nav(&mut s, "move", -1);
+    nav(&mut s, "move", -1);
+    assert!(ui.global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+    let mut tries = 0;
+    while ui.global::<crate::SettingsState>().get_page_cursor() != audio_tab {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries <= audio_tab as usize + 1, "the rail reaches the Audio tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.global::<crate::SettingsState>().get_page(), audio_tab, "a press shows the Audio page");
+    assert_eq!(title(&ui), "Settings › Audio");
+    // Down past the rail's last tab to the list: the cursor on its first row (Output).
+    while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+        nav(&mut s, "move", 1);
+    }
+    // Every row the page shows, walked and pressed: each choice laid down is one `audio.set` of that choice alone,
+    // its parameters held. The walk visits as many rows as the page shows, none twice.
+    let n = rows(&ui).len();
+    assert!(n >= 4, "Output, Input, Sample rate and Buffer size all show (the fake has inputs): {n} rows");
+    for step in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        let label = rows(&ui)[step].label.to_string();
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert!(ui.global::<crate::MenuState>().get_open(), "{label}: the press opens its choice");
+        // The current choice is ticked; the dial walks one choice on and turns the menu a page at a time
+        // until a different (unticked) one has the cursor — every choice row offers more than the current,
+        // so one always differs — and a press lays that one down as one `audio.set`.
+        nav(&mut s, "move", 1);
+        s.serve();
+        let mut guards = 0;
+        while ui.global::<crate::MenuState>().get_rows().iter().any(|r| r.cursor && r.tick == 1) {
+            nav(&mut s, "move", 1);
+            s.serve();
+            guards += 1;
+            assert!(guards < 8, "{label}: the dial reaches a different choice");
+        }
+        let chose = ui.global::<crate::MenuState>().get_rows().iter().find(|r| r.cursor).map(|r| r.label.to_string()).expect("{label}: the menu has the cursor");
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert!(!ui.global::<crate::MenuState>().get_open(), "{label}: the choice closed the menu");
+        let called = s.e.called("audio.set").last().cloned().expect("{label}: a laid-down choice is one audio.set");
+        match label.as_str() {
+            "Output" => assert_eq!(called, json!({"output": chose}), "{label}: the choice sets that output"),
+            "Input" => assert_eq!(called, json!({"input": chose}), "{label}: the choice sets that input"),
+            "Sample rate" => {
+                let rate: i64 = chose.split_whitespace().next().unwrap().parse().unwrap();
+                assert_eq!(called, json!({"sampleRate": rate}), "{label}: the choice sets that rate");
+            }
+            "Buffer size" => {
+                let size: u32 = chose.split_whitespace().next().unwrap().parse().unwrap();
+                assert_eq!(called, json!({"bufferSize": size}), "{label}: the choice sets that size");
+            }
+            other => panic!("a row the walk did not expect: {other}"),
+        }
+        if step + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+}

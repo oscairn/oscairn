@@ -60,10 +60,11 @@ So the family has three users today: the parameter pages (two levels), and Play'
 ### Rails (`side`)
 
 - **Height.** A rail runs from just under the top bar to the bottom of the screen, edge to edge, one continuous track (the
-  screen's left edge to the content, the first rail from `x = 0`). Its tabs share that height equally: each is the rail's height
-  (less its heading, if it has one) over the number of tabs, at least a touch target (`Theme.touch`); with more tabs than
-  that, the rail scrolls (a touch drags it, the cursor's tab is kept in view) with an arrow box over each cut end, as the
-  strips do. With 5 pages on the keyboard's screen each page tab is 83 logical px tall; that is intended.
+  screen's left edge to the content, the first rail from `x = 0`). Its tabs share that height equally: each is the rail's
+  height (less its heading, if it has one; the folder style keeps the theme's gap between neighbor tabs) over the number of
+  tabs, at least a touch target (`Theme.touch`); with more tabs than that, the rail scrolls (a touch drags it, the cursor's
+  tab is kept in view) with an arrow box over each cut end, as the strips do. With 5 pages on the keyboard's screen each
+  page tab is 83 logical px tall; that is intended.
 - **Width, fixed by the theme and not by the names.** `Theme.rail-width` = 5 x the small type's size + 1.5 x the tight padding
   (13 x 5 + 1.5 x 4 = **71 logical px** at the touch scale, 110 physical px on the keyboard at 1.55), at most
   `Theme.side-share` (**12%**) of the screen's width (99 at 826, 77 at 640, 48 at 400). It grows with `fontScale` and
@@ -120,8 +121,10 @@ is a literal.
   left of a column's or rail's); a rule runs along the page side. In a row every tab is the row's whole height, on the rule,
   the theme's gap between them, the first one at the row's left edge, rounded by the corner: the selected one differs by fill
   and ink only, not size, and the row is as tall as what stands beside it (the Library's search box: tests/library_tabs.rs, in
-  every theme at 1.55 and 1). In a column or rail the selected one reaches the rule and the page past it; the others stop short
-  of it and sit 4 px back, outlined by the hairline.
+  every theme at 1.55 and 1). In a column or rail every tab is likewise the whole height of its row, the theme's gap
+  between them (none in a segmented style); the selected one reaches the rule and the page past it, the others stop short
+  of it and sit 4 px back, outlined by the hairline. The gap is designed: a strip of the screen between two tabs is not a
+  seam (tests/vertical_tabs.rs measures each tab's height and the gap between neighbors in every theme at 1.55 and 1).
 - The selected tab is told by its fill, not an outline: `Theme.tab-on` with its text `Theme.tab-on-ink` in
   bold, against an unselected tab's `Theme.tab-off` with `Theme.tab-off-ink` in regular weight. They are set
   from the theme by src/palette.rs `tabs`: the selected fill is the accent where the accent holds

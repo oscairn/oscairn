@@ -40,7 +40,7 @@ pub(super) fn percent(_: u32, v: f64) -> String {
 }
 
 /// The window `w` x `h` at `scale` with the plugin's page in the placement chosen (whatever the theme says).
-fn placed(list: &serde_json::Value, (w, h): (usize, usize), scale: f32, theme: &theme::Loaded, style: TabStyle, placement: TabPlacement) -> (Screen, crate::params::Screen) {
+pub(super) fn placed(list: &serde_json::Value, (w, h): (usize, usize), scale: f32, theme: &theme::Loaded, style: TabStyle, placement: TabPlacement) -> (Screen, crate::params::Screen) {
     fit_to_window();
     let mut s = Screen::sized(w, h);
     s.set_scale(scale);
@@ -149,7 +149,7 @@ fn bars(s: &Screen, scale: f32) -> (Box4, Box4) {
 }
 
 /// The two rails of the `side` placement in the window's pixels: from under the top bar to the bottom of the window.
-fn rails(s: &Screen, scale: f32) -> (Box4, Box4) {
+pub(super) fn rails(s: &Screen, scale: f32) -> (Box4, Box4) {
     let (g, t) = (s.ui.global::<GridState>(), s.ui.global::<Theme>());
     let to = |v: f32| (v * scale).round() as usize;
     let (rail, gap) = (g.get_rail(), t.get_gap());
@@ -634,17 +634,22 @@ fn a_rail_is_the_height_of_the_screen_under_the_bar_and_its_tabs_share_it_equall
                 let th = s.ui.global::<Theme>();
                 let (on, track) = (th.get_tab_on(), if style == TabStyle::Segmented { th.get_tab_off() } else { th.get_surface() });
                 let (pages, tabs) = rails(&s, scale);
-                // One continuous track: its color at the rail's left edge (x = 1) on every row under the bar.
+                // One continuous track: its color at the rail's left edge (x = 1) on every row under the bar, past the
+                // arrow box a rail that goes on has at a cut end (the eight operators' tabs, with the theme's gap
+                // between them, do not fit this rail: it scrolls, `a_rail_that_overflows_scrolls`).
+                let drop = (th.get_touch() * 0.6 * scale).round() as usize;
                 for (what, r) in [("pages", pages), ("tabs", tabs)] {
                     let x = r.0 + 1;
-                    let rows: Vec<usize> = (r.1..s.h).filter(|&y| (s.pixels[y * s.w + x].r, s.pixels[y * s.w + x].g, s.pixels[y * s.w + x].b) != (track.red(), track.green(), track.blue())).collect();
+                    let rows: Vec<usize> = (r.1..s.h - drop.min(s.h.saturating_sub(r.1))).filter(|&y| (s.pixels[y * s.w + x].r, s.pixels[y * s.w + x].g, s.pixels[y * s.w + x].b) != (track.red(), track.green(), track.blue())).collect();
                     let missing = rows.len();
-                    assert_eq!(missing, 0, "rows {:?}..{:?} x {x} {:?} want {:?} rail {} gap {} ", rows.first(), rows.last(), s.pixels[rows.first().copied().unwrap_or(0) * s.w + x], track, s.ui.global::<GridState>().get_rail(), s.ui.global::<Theme>().get_gap());
+                    assert_eq!(missing, 0, "{label} {what} {size:?}@{scale}: rows {:?}..{:?} x {x} {:?} want {:?} rail {} gap {} ", rows.first(), rows.last(), s.pixels[rows.first().copied().unwrap_or(0) * s.w + x], track, s.ui.global::<GridState>().get_rail(), s.ui.global::<Theme>().get_gap());
                     assert_eq!(missing, 0,"{} {label} {what} {size:?}@{scale}: {missing} rows without the rail's track", t.id);
                 }
                 // Equal tabs: the page rail has five tabs; the fill of each, selected in turn, is as tall as the others'.
                 let logical = (size.1 as f32 / scale) - 48.;
-                let item = logical / 5.;
+                let gap = if style == TabStyle::Folder { s.ui.global::<Theme>().get_gap() } else { 0. };
+                let item = (logical - 4. * gap) / 5.;
+                let step = item + gap;
                 let mut tops = vec![];
                 for k in 0..5 {
                     p.show_page(k);
@@ -657,9 +662,9 @@ fn a_rail_is_the_height_of_the_screen_under_the_bar_and_its_tabs_share_it_equall
                 let heights: Vec<usize> = tops.iter().map(|t| t.1).collect();
                 let spread = heights.iter().max().unwrap() - heights.iter().min().unwrap();
                 assert!(spread <= 2, "{} {label} {size:?}@{scale}: the tabs' fills are {heights:?} tall", t.id);
-                let step: Vec<f32> = tops.windows(2).map(|w| (w[1].0 as f32 - w[0].0 as f32) / scale).collect();
-                for d in &step {
-                    assert!((d - item).abs() <= 1.5, "{} {label} {size:?}@{scale}: the tabs are {item:.1} apart, not {step:?}", t.id);
+                let diffs: Vec<f32> = tops.windows(2).map(|w| (w[1].0 as f32 - w[0].0 as f32) / scale).collect();
+                for d in &diffs {
+                    assert!((d - step).abs() <= 1.5, "{} {label} {size:?}@{scale}: the tab tops are {step:.1} apart (a tab and a gap), not {diffs:?}", t.id);
                 }
             }
         }

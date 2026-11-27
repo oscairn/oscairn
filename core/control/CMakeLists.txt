@@ -188,9 +188,7 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     $<TARGET_FILE:oscairn_transpose> $<TARGET_FILE:oscairn_midi_delay> $<TARGET_FILE:kick-clap-fixture-normal>
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
-if(BUILD_TESTING) # the Legacy Sampler
-    add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn_sampler>)
-endif()
+add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn-test-sampler>)
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)
@@ -345,20 +343,18 @@ set(switch_timeout 120)
 if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set(switch_timeout 600)
 endif()
-if(BUILD_TESTING) # the Legacy Sampler
-    add_executable(oscairn-setlist-change-test tests/setlist_change.cpp)
-    target_include_directories(oscairn-setlist-change-test PRIVATE ../clap-host/tests)
-    target_link_libraries(oscairn-setlist-change-test PRIVATE oscairn_control)
-    add_test(NAME control-setlist-change COMMAND oscairn-setlist-change-test
-        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_sampler> $<TARGET_FILE:oscairn_delay>)
-    set_tests_properties(control-setlist-change PROPERTIES TIMEOUT ${switch_timeout})
-    add_executable(oscairn-performance-switch-test tests/performance_switch.cpp)
-    target_include_directories(oscairn-performance-switch-test PRIVATE ../clap-host/tests)
-    target_link_libraries(oscairn-performance-switch-test PRIVATE oscairn_control)
-    add_test(NAME control-performance-switch COMMAND oscairn-performance-switch-test
-        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
-    set_tests_properties(control-performance-switch PROPERTIES TIMEOUT ${switch_timeout})
-endif()
+add_executable(oscairn-setlist-change-test tests/setlist_change.cpp)
+target_include_directories(oscairn-setlist-change-test PRIVATE ../clap-host/tests)
+target_link_libraries(oscairn-setlist-change-test PRIVATE oscairn_control)
+add_test(NAME control-setlist-change COMMAND oscairn-setlist-change-test
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay>)
+set_tests_properties(control-setlist-change PROPERTIES TIMEOUT ${switch_timeout})
+add_executable(oscairn-performance-switch-test tests/performance_switch.cpp)
+target_include_directories(oscairn-performance-switch-test PRIVATE ../clap-host/tests)
+target_link_libraries(oscairn-performance-switch-test PRIVATE oscairn_control)
+add_test(NAME control-performance-switch COMMAND oscairn-performance-switch-test
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-performance-switch PROPERTIES TIMEOUT ${switch_timeout})
 if(Python3_Interpreter_FOUND)
     add_test(NAME control-performance-format COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/performance.py"
         $<TARGET_FILE:oscairn-json-rpc-test> $<TARGET_FILE:oscairn_basic_synth>)
@@ -455,21 +451,17 @@ set(control_worker_tests
     "control-hostile-notes|oscairn-hostile-notes-test|$<TARGET_FILE:oscairn-hostile-notes-fixture>|$<TARGET_FILE:kick-clap-fixture-normal>|$<TARGET_FILE:oscairn_basic_synth>"
     "control-performance-switch-stress|oscairn-performance-switch-stress-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:kick-clap-fixture-normal>"
     "control-performance|oscairn-performance-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:oscairn_step_sequencer>|$<TARGET_FILE:kick-clap-fixture-normal>")
-if(BUILD_TESTING) # the Legacy Sampler
-    list(APPEND control_worker_tests
-        "control-performance-switch|oscairn-performance-switch-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_sampler>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:kick-clap-fixture-normal>")
-endif()
+list(APPEND control_worker_tests
+    "control-performance-switch|oscairn-performance-switch-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn-test-sampler>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:kick-clap-fixture-normal>")
 if(UNIX)
     list(APPEND control_worker_tests
         "control-native-sounds|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--sounds"
         "control-native-effects|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--effects|$<TARGET_FILE:oscairn_delay>")
 endif()
-if(BUILD_TESTING) # RFC 0045: instances kept warm idle and let go, a worker per instance
-    add_test(NAME control-residents-workers COMMAND oscairn-performance-switch-test
-        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
-    set_tests_properties(control-residents-workers PROPERTIES TIMEOUT ${switch_timeout}
-        ENVIRONMENT "OSCAIRN_SWITCH_RESIDENTS=1;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
-endif()
+add_test(NAME control-residents-workers COMMAND oscairn-performance-switch-test
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-residents-workers PROPERTIES TIMEOUT ${switch_timeout}
+    ENVIRONMENT "OSCAIRN_SWITCH_RESIDENTS=1;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
 foreach(entry IN LISTS control_worker_tests)
     string(REPLACE "|" ";" parts "${entry}")
     list(POP_FRONT parts name)

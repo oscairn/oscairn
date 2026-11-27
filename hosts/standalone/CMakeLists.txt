@@ -188,15 +188,13 @@ target_sources(oscairn_pad_editor_test PRIVATE tests/pad_editor.cpp PadEditor.cp
 target_link_libraries(oscairn_pad_editor_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_pad_editor_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_pad_editor_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_splitters oscairn-plugin-scan oscairn-plugin-worker)
-if(BUILD_TESTING) # the Legacy Sampler
-    juce_add_console_app(oscairn_desktop_shell_test PRODUCT_NAME "Oscairn Desktop Shell Test")
-    target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
-    target_link_libraries(oscairn_desktop_shell_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
-    target_compile_definitions(oscairn_desktop_shell_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
-    add_dependencies(oscairn_desktop_shell_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_transpose oscairn_sampler oscairn_splitters oscairn-plugin-scan kick-clap-fixture-normal oscairn-plugin-worker)
-    add_test(NAME desktop-shell COMMAND oscairn_desktop_shell_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
-    set_tests_properties(desktop-shell PROPERTIES TIMEOUT 120) # it covers most of the app; about 47 s alone
-endif()
+juce_add_console_app(oscairn_desktop_shell_test PRODUCT_NAME "Oscairn Desktop Shell Test")
+target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_desktop_shell_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_desktop_shell_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_dependencies(oscairn_desktop_shell_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_transpose oscairn_splitters oscairn-plugin-scan kick-clap-fixture-normal oscairn-plugin-worker)
+add_test(NAME desktop-shell COMMAND oscairn_desktop_shell_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+set_tests_properties(desktop-shell PROPERTIES TIMEOUT 120) # it covers most of the app; about 47 s alone
 # A third-party plugin for RFC 0019's Compact gate, used where it is built (Odin 2 beside this
 # checkout by default); the test skips it otherwise.
 set(OSCAIRN_THIRD_PARTY_CLAP "${PROJECT_SOURCE_DIR}/../ports/odin2/build/Odin2_artefacts/Release/CLAP/Odin2.clap" CACHE FILEPATH "A third-party CLAP plugin for the desktop-shell test")
@@ -208,9 +206,7 @@ set(shell_environment "OSCAIRN_TEST_FIXTURE=$<TARGET_FILE:kick-clap-fixture-norm
 if(EXISTS "${OSCAIRN_THIRD_PARTY_CLAP}")
     list(APPEND shell_environment "OSCAIRN_THIRD_PARTY_CLAP=${OSCAIRN_THIRD_PARTY_CLAP}")
 endif()
-if(BUILD_TESTING) # the Legacy Sampler
-    set_tests_properties(desktop-shell PROPERTIES ENVIRONMENT "${shell_environment}")
-endif()
+set_tests_properties(desktop-shell PROPERTIES ENVIRONMENT "${shell_environment}")
 # Desktop controls for features the control API had first, against a socket session; no MIDI device is opened.
 juce_add_console_app(oscairn_desktop_gaps_test PRODUCT_NAME "Oscairn Desktop Gaps Test")
 target_sources(oscairn_desktop_gaps_test PRIVATE tests/desktop_gaps.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

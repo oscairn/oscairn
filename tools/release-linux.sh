@@ -30,7 +30,7 @@ folder=oscairn-$version-linux-$arch
 echo "Oscairn $version ($commit)"
 
 rm -rf "$build"
-cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON -DBUILD_TESTING=OFF \
+cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON \
 	-DOSCAIRN_SOURCE_COMMIT="$commit"
 cmake --build "$build" --target oscairn_standalone oscairn-sign ${OSCAIRN_BUILD_JOBS:+-j "$OSCAIRN_BUILD_JOBS"}
 

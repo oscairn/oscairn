@@ -22,7 +22,7 @@ namespace oscairn::standalone
             }
         result.sounds = control.sounds(result.node);
         // The Sampler prepares an SFZ patch whose samples resolve through oscairn.assets.
-        if(result.pluginId == "org.oscairn.sampler" || result.pluginId == "org.oscairn.legacy-sampler") // the legacy one only while the tests use it as their sampler (#320)
+        if(result.pluginId == "org.oscairn.sampler")
             result.importsSamples = true;
         else if(result.sounds.capacity)
         {

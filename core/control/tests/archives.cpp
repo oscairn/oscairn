@@ -14,7 +14,7 @@
 // signature and signs its items and the whole archive when asked.
 // A plugin package carries one bundle holding several plugins (Oscairn's Splitters) once.
 // Asset libraries (RFC 0009 step 4): exports carry them whole, and garbage collection
-// from explicit roots (with the Legacy Sampler playing one). A whole library exported carries
+// from explicit roots (with the test sampler playing one). A whole library exported carries
 // what its items use from installed libraries, and installs without adding twice what is there.
 //   oscairn-archives-test FIXTURE.clap OSCAIRN-SIGN [SPLITTERS.clap [SAMPLER.clap]]
 #include "oscairn/session.h"
@@ -953,7 +953,7 @@ int main(int argc, char** argv)
             std::ofstream(doc, std::ios::binary | std::ios::trunc) << text;
             q.libraryRescan();
             q.remove(synth); q.commit();
-            // The Legacy Sampler plays org.test.gig, and the Performance is saved outside the library.
+            // The test sampler plays org.test.gig, and the Performance is saved outside the library.
             const auto player = q.add("player", sampler);
             q.selectSound(player, q.prepareSound(player, "Gig", {}, {}, {}, "<region> sample=tone.wav\n", "org.test.gig", ""));
             q.commit();

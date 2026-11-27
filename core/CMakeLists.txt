@@ -341,15 +341,6 @@ add_dependencies(oscairn-install-memory-test samplepack_cli)
 add_test(NAME control-install-memory COMMAND oscairn-install-memory-test "${SAMPLEPACK_CLI}" "${CMAKE_CURRENT_SOURCE_DIR}/control/types/org.oscairn.sample-types")
 set_tests_properties(control-install-memory PROPERTIES TIMEOUT 120)
 
-if(BUILD_TESTING) # the Legacy Sampler
-    add_executable(oscairn-sampler-test engine/tests/sampler.cpp)
-    target_link_libraries(oscairn-sampler-test PRIVATE oscairn_control_json)
-    target_include_directories(oscairn-sampler-test PRIVATE clap-host/tests)
-    add_dependencies(oscairn-sampler-test oscairn_sampler)
-    add_test(NAME sampler COMMAND oscairn-sampler-test $<TARGET_FILE:oscairn_sampler>)
-    set_tests_properties(sampler PROPERTIES TIMEOUT 60)
-endif()
-
 add_executable(oscairn-note-end-legato-test engine/tests/note_end_legato.cpp)
 target_link_libraries(oscairn-note-end-legato-test PRIVATE oscairn_engine)
 target_include_directories(oscairn-note-end-legato-test PRIVATE clap-host/tests)
@@ -745,14 +736,12 @@ target_link_libraries(oscairn-plugin-hosts-test PRIVATE oscairn_engine)
 add_test(NAME plugin-hosts COMMAND oscairn-plugin-hosts-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:kick-clap-fixture-leak> ${worker_timing})
 set_tests_properties(plugin-hosts PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
-if(BUILD_TESTING) # the Legacy Sampler
-    add_executable(oscairn-worker-recovery-test engine/tests/worker_recovery.cpp)
-    target_link_libraries(oscairn-worker-recovery-test PRIVATE oscairn_engine)
-    add_test(NAME worker-recovery COMMAND oscairn-worker-recovery-test $<TARGET_FILE:oscairn-plugin-worker>
-        $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:kick-clap-fixture-process_crash>
-        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_sampler> $<TARGET_FILE:oscairn_delay>)
-    set_tests_properties(worker-recovery PROPERTIES TIMEOUT 60 ENVIRONMENT OSCAIRN_WORKER_BUDGET_US=50000)
-endif()
+add_executable(oscairn-worker-recovery-test engine/tests/worker_recovery.cpp)
+target_link_libraries(oscairn-worker-recovery-test PRIVATE oscairn_engine)
+add_test(NAME worker-recovery COMMAND oscairn-worker-recovery-test $<TARGET_FILE:oscairn-plugin-worker>
+    $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:kick-clap-fixture-process_crash>
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay>)
+set_tests_properties(worker-recovery PROPERTIES TIMEOUT 60 ENVIRONMENT OSCAIRN_WORKER_BUDGET_US=50000)
 
 # The existing graph tests again, with every CLAP plugin in a worker: native sound and effect
 # contexts, sound assets and tails across the boundary included (RFC 0010 step 5).
@@ -772,9 +761,6 @@ set(worker_tests
     "parallel-render|oscairn-parallel-render-test|$<TARGET_FILE:oscairn_transpose>|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>"
     "voice-extension|oscairn-voice-extension-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn-voice-fixture>"
     "shared-engine|oscairn-shared-engine-test|$<TARGET_FILE:oscairn_basic_synth>")
-if(BUILD_TESTING) # the Legacy Sampler
-    list(APPEND worker_tests "sampler|oscairn-sampler-test|$<TARGET_FILE:oscairn_sampler>")
-endif()
 # A sanitizer slows rendering several times over: a full 512-frame block of 128 Basic Synth voices
 # in a worker passed 50 ms in a local ThreadSanitizer build.
 set(worker_budget 50000)

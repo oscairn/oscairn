@@ -46,7 +46,8 @@
 #      process ended. Stopped on purpose (oscairn-fantom-stop leaves var/oscairn/run/stopped), it
 #      stays while the panel holder runs (Oscairn started again by hand is watched the same way),
 #      and ends once nothing of it runs.
-#   5. A crash: when the app and engine end without oscairn-fantom-stop, Oscairn is started again
+#   5. A crash: when the engine (or the app holding it) ends without oscairn-fantom-stop, even with
+#      the UI still running (stopped first), Oscairn is started again
 #      (oscairn-fantom-start, with --cold if the last start was; the engine reopens the last
 #      Performance), logged. OSCAIRN_BOOT_RESTARTS (3) restarts within OSCAIRN_BOOT_RESTART_WINDOW
 #      seconds (60) are made; the next end is the fallback. A stop through oscairn-fantom-stop, or
@@ -161,13 +162,24 @@ restart() {
 	tries="$tries $now"
 	say "$1; starting Oscairn again (restart $((n + 1)) of $restarts within $window seconds)"
 	cold=""; [ ! -e "$state/run/cold" ] || cold=--cold
-	bounded "$limit" "$root/oscairn-fantom-start" $cold || say "oscairn-fantom-start failed or ran out of its $limit seconds"
+	# The engine ended but its UI (and the keeper that starts it again) did not: stopped first, the
+	# way oscairn-fantom-restart does, so the start finds nothing of the old run.
+	if [ -n "$(named oscairn-ui)" ]; then
+		say "the UI still runs without its engine; stopping it first (oscairn-fantom-stop)"
+		bounded 60 "$root/oscairn-fantom-stop" || say "oscairn-fantom-stop failed or ran out of its 60 seconds"
+	fi
+	if ! bounded "$limit" "$root/oscairn-fantom-start" $cold; then
+		say "oscairn-fantom-start failed or ran out of its $limit seconds"
+		rm -f "$state/run/stopped" # the stop above was ours, not the owner's: the next check counts this as an end
+	fi
 }
 # 4. In the foreground for as long as Oscairn runs (above).
 watch() {
 	quiet="" lockfrom=""
 	while :; do
-		if [ -n "$(named Oscairn)$(named oscairn-engine)$(named oscairn-ui)" ]; then
+		# The engine (or the app that holds it) is Oscairn: the UI alone is not, as its keeper keeps it up
+		# after the engine's end. Liveness is the process, never a reply (a long load is busy, not dead).
+		if [ -n "$(named Oscairn)$(named oscairn-engine)" ]; then
 			[ -n "$quiet" ] || say "Oscairn runs; staying in the foreground while it does"
 			quiet=1 lockfrom=""
 		elif [ -d "$state/run/start.lock" ] && [ $(( $(date +%s) - ${lockfrom:=$(date +%s)} )) -lt "$limit" ]; then

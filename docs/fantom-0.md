@@ -1121,11 +1121,15 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
    `oscairn-fantom-stop` was run (it leaves `var/oscairn/run/stopped`), it stays while the panel
    holder runs (Oscairn started again by hand is watched the same way) and ends once nothing is
    left.
-4. **A crash is restarted:** when the app and engine end without `oscairn-fantom-stop`, the
-   boot script runs `oscairn-fantom-start` again (with `--cold` if the last start was one, which
+4. **A crash is restarted:** when the engine (or the app holding it) ends without `oscairn-fantom-stop`,
+   even with the UI still running (its keeper keeps it up; the UI alone is not Oscairn), the
+   boot script stops the UI left (`oscairn-fantom-stop`, as the restart command does) and runs `oscairn-fantom-start` again (with `--cold` if the last start was one, which
    the start records in `var/oscairn/run/cold`), and logs "starting Oscairn again (restart n of
    3 within 60 seconds)" to `boot.log`; the engine reopens the last Performance by itself.
-   `OSCAIRN_BOOT_RESTARTS` (3) restarts within `OSCAIRN_BOOT_RESTART_WINDOW` seconds (60) are
+   Only the process counts, never an answer: an engine busy with a long Performance load is not
+   dead. The UI alone ending is its keeper's restart (up to 4 a minute), not the boot script's; a
+   plugin worker's end is the engine's to handle; the panel holder alone is not watched while the
+   engine runs. `OSCAIRN_BOOT_RESTARTS` (3) restarts within `OSCAIRN_BOOT_RESTART_WINDOW` seconds (60) are
    made; 0 turns restarting off. Not counted, and not a crash: `oscairn-fantom-stop`, and
    [`oscairn-fantom-restart`](#restarting-oscairn), whose stop and start the boot script waits
    through (a start in this bundle holds `var/oscairn/run/start.lock`; a lock older than the

@@ -322,13 +322,15 @@ rm -f "$s/stopped"
 [ ! -e "$d/hang" ] || exec sleep 30
 [ ! -e "$d/fails" ] || exit 1
 mkdir -p "$OSCAIRN_PROC/4242" && echo oscairn-engine > "$OSCAIRN_PROC/4242/comm"
+# The Rust UI (its keeper runs on in the real start): put back when the test has it running.
+[ ! -e "$d/with-ui" ] || { mkdir -p "$OSCAIRN_PROC/4244" && echo oscairn-ui > "$OSCAIRN_PROC/4244/comm"; }
 EOF
 cat > "$fb/b/oscairn-fantom-stop" <<'EOF'
 #!/bin/sh
 d=$(dirname "$0")
 echo stop "$@" >> "$d/ran"
 mkdir -p "$d/var/oscairn/run" && : > "$d/var/oscairn/run/stopped"
-rm -rf "$OSCAIRN_PROC/4242"
+rm -rf "$OSCAIRN_PROC/4242" "$OSCAIRN_PROC/4244"
 EOF
 chmod +x "$fb/b"/*
 real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_SYSTEMD_RUN="$fb/b/systemd-run" "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
@@ -428,6 +430,29 @@ mkdir -p "$fb/b/var/oscairn/run"; : > "$fb/b/var/oscairn/run/cold"
 OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-restart" > /dev/null 2>&1
 check "restart command: the start is --cold when the last was, and the boot script stays" "kill -0 $watcher && tail -n 1 '$fb/b/ran' | grep -q '^start --cold'"
 endsv
+
+# The engine ended while the UI (pid 4244; its keeper keeps it up in the real start) lives on: the
+# end of Oscairn all the same. The stand-in stop ends the UI too; the stand-in start brings it back
+# while the file with-ui exists.
+ui() { mkdir -p "$fb/proc/4244" && echo oscairn-ui > "$fb/proc/4244/comm"; }
+fresh; : > "$fb/b/with-ui"; up; ui; holder; sv
+rm -rf "$fb/proc/4242"; sleep 1
+check "engine alone killed, UI alive: restart 1 logged, the leftover UI stopped once, Oscairn started once with its UI" "kill -0 $watcher && [ \"\$(starts)\" = 1 ] && [ \"\$(grep -c '^stop' '$fb/b/ran')\" = 1 ] && ! grep -q 'stop --panel' '$fb/b/ran' && grep -q 'ended without oscairn-fantom-stop; starting Oscairn again (restart 1 of 3' '$fb/dir/boot.log' && [ -d '$fb/proc/4242' ] && [ -d '$fb/proc/4244' ]"
+crash; crash; crash
+check "engine alone killed again and again with the UI alive: three restarts, then the fallback" "until_done $watcher && [ \"\$(starts)\" = 3 ] && grep -q 'stop --panel' '$fb/b/ran' && grep -q '3 restarts within the last 60 seconds did not keep it running' '$fb/dir/boot.log'"
+fresh; : > "$fb/b/with-ui"; up; ui; holder; sv
+rm -rf "$fb/proc/4244"; sleep 0.6
+check "the UI alone killed: no supervisor restart (its keeper's business)" "kill -0 $watcher && [ ! -e '$fb/b/ran' ] && ! grep -q 'starting Oscairn again' '$fb/sv.out'"
+endsv
+fresh; : > "$fb/b/with-ui"; up; ui; holder; sv
+OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-stop"; sleep 0.6
+check "oscairn-fantom-stop with the UI running: still a deliberate stop, no restart" "kill -0 $watcher && ! grep -q '^start' '$fb/b/ran' && ! grep -q 'starting Oscairn again' '$fb/sv.out'"
+endsv
+fresh; : > "$fb/b/with-ui"; up; ui; holder; sv
+OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-restart" > /dev/null 2>&1; sleep 0.5
+check "oscairn-fantom-restart with the UI running: engine and UI back, not counted" "kill -0 $watcher && [ -d '$fb/proc/4242' ] && [ -d '$fb/proc/4244' ] && ! grep -q 'starting Oscairn again' '$fb/sv.out'"
+endsv
+rm -f "$fb/b/with-ui"
 
 # Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
 fake=$bundle/fakeproc

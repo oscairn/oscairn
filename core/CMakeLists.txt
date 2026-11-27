@@ -679,6 +679,13 @@ set_tests_properties(worker-sleep-disabled PROPERTIES TIMEOUT 60)
 add_test(NAME worker-sleep-off COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
 set_tests_properties(worker-sleep-off PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=0")
+# Resting changes no sample: one session run with every worker called, with all resting and with the default, compared.
+add_executable(oscairn-worker-rest-diff-test engine/tests/worker_rest_diff.cpp)
+target_link_libraries(oscairn-worker-rest-diff-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-worker-rest-diff-test oscairn-follower-fixture oscairn-sound-snapshots-fixture)
+add_test(NAME worker-rest-diff COMMAND oscairn-worker-rest-diff-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
+set_tests_properties(worker-rest-diff PROPERTIES TIMEOUT 120)
 # The cost of waking a rested chain of workers, in real time: the chain switched off while it rests and on with the note
 # (a few cycles here; more by hand, and the modes by OSCAIRN_WORKER_REST).
 add_executable(oscairn-worker-wake-test engine/tests/worker_wake.cpp)

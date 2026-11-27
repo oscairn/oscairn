@@ -829,8 +829,6 @@ namespace oscairn
                     const auto* p = reinterpret_cast<const clap_event_param_value_t*>(event.header());
                     if( p->note_id == -1 && p->port_index == -1 && p->channel == -1 && p->key == -1 && hasParameter(node,p->param_id) )
                     {
-                        // A value of its own (its editor, its modulation saved): its state may no longer be the one it opened with (holding).
-                        if( const auto was = observed_.find({node,p->param_id}); was != observed_.end() && was->second != p->value ) edited_.insert(node);
                         publish(ChangeKind::Value,node,p->param_id,p->value,true);
                         observed_[{node,p->param_id}] = p->value;
                     }
@@ -839,6 +837,9 @@ namespace oscairn
                 {
                     const auto* p = reinterpret_cast<const clap_event_param_gesture_t*>(event.header());
                     publish(type == CLAP_EVENT_PARAM_GESTURE_BEGIN ? ChangeKind::GestureBegin : ChangeKind::GestureEnd,node,p->param_id,0,true);
+                    // An edit in its own editor (CLAP wraps a user's change in a gesture): its state may no longer be the one it opened with
+                    // (holding). Values it reports on its own (a sound it now plays, claimed beside another's) are not edits.
+                    if( type == CLAP_EVENT_PARAM_GESTURE_BEGIN ) edited_.insert(node);
                 }
             }
             // Values that changed with no event and not by a set of this Session's (a values rescan, a preset, a

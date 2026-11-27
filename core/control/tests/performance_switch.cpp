@@ -1350,6 +1350,62 @@ int main(int argc, char** argv)
             };
             const auto incoming = temp.path / "steps-incoming"; ringing(incoming, 1, argv[1], argv[3], .5); // a synth through a Delay, nothing held in it
 
+            // A, an instance that came by claim (its sounds prepared beside, RFC 0021, as the FANTOM's TSO Samplers come from ST
+            // Final): it holds the node's sound in another slot, the plugin showing that sound's values once it plays it. The next
+            // load of the same Performance, a key held, keeps it as it is, as it keeps one that opened from the file.
+            {
+                const auto from = temp.path / "steps-claim-a", to = temp.path / "steps-claim-b";
+                ringing(from, 0, argv[1], argv[3], .5); ringing(to, 2, argv[1], argv[3], .5);
+                Live l; l.serve(4);
+                load(l.s, from); l.serve(1200);
+                const auto claimed = load(l.s, to); l.serve(1200);
+                check(claimed.beside == 1, "steps, a claimed instance: B's synth sound prepared beside A's: " + std::to_string(claimed.beside));
+                l.s.controller(64, 127); l.s.note(true, 60, .8); l.serve(20); l.s.note(false, 60, 0); l.serve(20);
+                const auto w = load(l.s, to); report("steps: B -> B, B's synth claimed from A, pedaled", w); l.serve(40);
+                const auto r = l.s.sessionStatus().ringOut;
+                check(w.kept >= 1 && w.beside == 0 && r.kept == 1 && r.chokedOlder == 0, "steps, a claimed instance: kept as it is at the next load of its state, nothing beside it: " +
+                      std::to_string(w.kept) + " kept, " + std::to_string(w.beside) + " beside, " + std::to_string(r.kept) + " counted");
+                check(l.at(l.block.load() - 2) != 0, "steps, a claimed instance: the pedaled note rings on");
+                const auto again = load(l.s, to); l.serve(40);
+                check(again.beside == 0 && l.s.sessionStatus().ringOut.chokedOlder == 0 && !l.said("two Performances ago"), "steps, a claimed instance: and again, nothing choked");
+                l.s.controller(64, 0);
+            }
+            // The notice of a tail's chain given up means something audible: an instrument of the last Performance whose sounds the next
+            // one prepares beside its own while it is silent, its effect let go for want of room, gives up nothing to hear (FANTOM k5:
+            // the notice on every switch with a chord held elsewhere). Two parts apart, each a synth through a Delay; a key held on the
+            // first; beside both the incoming pair does not fit, beside the first it does.
+            {
+                ::unsetenv("OSCAIRN_SHARING");
+                auto pair = [&](const fs::path& file, int variant) {
+                    Session s(48000, frames);
+                    for(int i = 0; i < 2; ++i)
+                    {
+                        const auto n = s.add("synth " + std::to_string(i), argv[1]), fx = s.add("delay " + std::to_string(i), argv[3]);
+                        PartInput keys; keys.zones = {NoteZone{uint8_t(64 * i), uint8_t(64 * i + 63)}};
+                        const auto part = s.addPart("Part " + std::to_string(i), keys); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx); s.commit();
+                        check(s.setParameter(fx, 1, .25) && s.setParameter(fx, 2, .5) && s.setParameter(fx, 3, .6), "delay settings");
+                        check(s.selectSound(n, s.prepareSound(n, "Pair " + std::to_string(variant) + std::to_string(i), {{1, .3 + .2 * variant + .1 * i}, {4, double(i)}})), "select a sound");
+                    }
+                    blocks(s, 2); s.savePerformance(file.string());
+                };
+                const auto a = temp.path / "steps-chain-a", b = temp.path / "steps-chain-b"; pair(a, 0); pair(b, 1);
+                Live l; l.serve(4);
+                load(l.s, a); l.serve(1200);
+                l.s.note(true, 30, .8); l.serve(20);
+                l.s.setBudget({64}); l.s.forgetMeasurements();
+                uint64_t first = 0; for(const auto& c : l.s.estimate("").plugins) if(c.name == "synth 0" || c.name == "delay 0") first += c.memory;
+                const auto next = l.s.estimate(b.string()).memory;
+                allow(l.s, next + first + first / 4); l.s.forgetMeasurements();
+                check(!l.s.estimate(b.string()).seamless, "steps, a silent chain: beside both it does not fit");
+                const auto before = l.s.sessionStatus().ringOut;
+                load(l.s, b); l.serve(40);
+                const auto r = l.s.sessionStatus().ringOut;
+                check(r.releasedSilent > before.releasedSilent && r.partial == before.partial && !l.said("without part of their chain") && l.at(l.block.load() - 2) != 0,
+                      "steps, a silent chain: the silent part let go says nothing, the held note rings on: " + std::to_string(r.partial - before.partial) + " partial");
+                l.s.note(false, 30, 0); l.s.setBudget({});
+                ::setenv("OSCAIRN_SHARING", "memory", 1);
+            }
+
             // A: the same Performance loaded again with a key held. Its instrument holds that state already and nothing changed it,
             // so it is kept as it is: nothing is loaded beside it (one copy in memory, where two do not fit), it is not reset, and
             // the held note plays on through the change and ends when its key comes up.

@@ -1104,7 +1104,7 @@ change is seamless: the previous Performance's plugins ring out (held notes unti
 tails until idle) and are hidden from `graph.get` meanwhile. A node whose saved state an open
 instance holds as it is (the same Performance loaded again, or another with a state of the same
 bytes), opened from that state and changed by nothing since (no edit of the Performance, a control
-moved included, and no value its plugin reported of its own), keeps that instance, sounding or not:
+moved included, and no edit in its plugin's own editor, a gesture; values a plugin reports for a sound it now plays, as one claimed beside another's does, are not edits), keeps that instance, sounding or not (one whose earlier sounds still ring out of it is not kept):
 nothing is loaded beside it, it is not reset, and the notes it holds go on through the new node
 (issue 330; `engine.timing`'s `open` counts it in `kept`).
 `performance.prepare` takes the same `{"directory":...}` and returns `{"prepared":true}`: the

@@ -542,7 +542,7 @@ namespace oscairn
         // Those of `kept` that no outgoing node not kept plays into while it sounds: a tail ringing out through its own chain
         // needs that chain carried over (Graph::ringOut), so a node it feeds is not kept for the next one.
         std::set<NodeId> unfed(std::set<NodeId> kept) const;
-        std::set<NodeId> edited_; // open nodes whose plugin reported a value of its own since the Performance opened (holding)
+        std::set<NodeId> edited_; // open nodes edited in their plugin's own editor (a gesture) since the Performance opened (holding)
         bool memoryFits(const Estimate& e) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel

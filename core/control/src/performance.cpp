@@ -784,7 +784,7 @@ void Session::openPerformance(const std::string& directory) {
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
     bool seamless=true,fades=false;uint64_t incoming=0;std::string uncertain,cut;Sharing shares;shares.share=sharesParts();
-    std::set<NodeId> released,faded;size_t keptSounding=0; // issue 330: let go for it, and of those the ones sounding (faded out first)
+    std::set<NodeId> released,faded; // issue 330: let go for it, and of those the ones sounding (faded out first)
     if(!staged_)record(); // an edit not yet a step (a control moved) is one before holding asks whether any was made
     if(budget_.cpu>0){shares=sharing(root.string(),!keepInstances_);const auto& e=shares.estimate;const auto& steps=shares.steps;if(!e.fits)bad("this Performance "+tooMuch(e));
         // The owner's rule (2026-11-27): the new Performance loads; the last one's held notes ring on only as far as they let it.
@@ -798,7 +798,6 @@ void Session::openPerformance(const std::string& directory) {
         if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");
         std::set<NodeId> outgoing(leaving_);for(const auto& [n,name]:nodes_)outgoing.insert(n);
         const auto heard=[&](NodeId n){return graph_.contains(n) && !graph_.silent(n,uint64_t(sampleRate_/10));};
-        for(const auto n:steps.kept)keptSounding+=heard(n);
         if(!seamless)for(const auto n:outgoing)if(!steps.kept.count(n))released.insert(n); // a cut: all of it, but what is kept as it is
         for(const auto n:released)if(heard(n))faded.insert(n);
         // A cut, a tail faded out fast, or a part of it let go is never silent to the player (the owner's rule: held notes ring
@@ -839,6 +838,8 @@ void Session::openPerformance(const std::string& directory) {
     // those let go for it, whether they sounded or not.
     if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming,shares,released);
     auto stats=prepared->stats;
+    size_t keptSounding=0; // instances kept as they are while they sound, budget or not
+    for(const auto& [was,now]:prepared->held)keptSounding+=graph_.contains(was) && !graph_.silent(was,uint64_t(sampleRate_/10));
     {Clock publish{stats.publish};open(*prepared,seamless,fades,released);}
     unfading.on=false; // those it faded are gone with the plan they played in (fadeOut sets the gain again before it names it)
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
@@ -1032,7 +1033,7 @@ std::vector<Session::Free> Session::freeInstances(bool all,const std::set<NodeId
 
 // Issue 330 (A). Nothing is saved from the instance to compare (a whole-state save while it sounds resets it in a worker:
 // learning 2026-11-21): it opened from that state (its source, or a state of the same bytes) and nothing changed it since,
-// no edit of this Performance (a control moved counts) and no value its plugin reported of its own.
+// no edit of this Performance (a control moved counts) and none in its plugin's own editor (a gesture, edited_).
 NodeId Session::holding(const fs::path& root,const std::string& key,const std::string& id,const std::string& version,const std::set<NodeId>& skip) const {
     if(keepInstances_ || unsaved())return 0; // an audition takes nothing set aside over
     const auto folder=root/"nodes"/key;
@@ -1043,8 +1044,12 @@ NodeId Session::holding(const fs::path& root,const std::string& key,const std::s
         const auto loaded=loaded_.find(n);if(skip.count(n) || edited_.count(n) || loaded==loaded_.end())continue;
         const auto& h=graph_.host(n);
         if(h.descriptor().id!=id || h.descriptor().version!=version || !h.failure().empty() || dynamic_cast<const SoundContext*>(&h))continue;
-        // An earlier change's tail still ringing out of it (its ring-out routes are this node's).
-        if(std::any_of(retiringSounds_.begin(),retiringSounds_.end(),[&](const Retiring& r){return r.host.lock().get()==&h;}))continue;
+        // An earlier change's tail still ringing out of it: its ring-out routes are this node's, which a kept instance leaves behind.
+        // Its sounds prepared beside an earlier change's (it came by claim) once those are silent, their discarding still to come, keep it.
+        if(std::any_of(retiringSounds_.begin(),retiringSounds_.end(),[&](const Retiring& r){return r.host.lock().get()==&h;})){
+            bool ringing=false;
+            try{for(const auto& c:h.soundContexts())ringing=ringing || (c.id && !c.selected_channels && !c.idle);}catch(const std::exception&){ringing=true;}
+            if(ringing)continue;}
         bool same=loaded->second.source==source;
         if(const auto s=stateOf_.find(n);!same && s!=stateOf_.end() && !s->second.empty()){if(!digest)digest=stateDigest(folder);same=*digest==s->second;}
         if(!same)continue;
@@ -1701,7 +1706,8 @@ void Session::open(Prepared& p,bool seamless,bool fades,const std::set<NodeId>& 
     // Only one change's tail carries over: one still ringing out of it is cut at the cue (chokes).
     if(seamless)for(const auto& b:p.beside){next->takeNotes(graph_,b->was,b->now);
         // A way out of the outgoing chain into a plugin this Performance took over is left out: the others ring, said.
-        if(const auto lost=next->ringOut(graph_,b->was,b->now)){const auto n=nodes_.find(b->was);++ringOut_.partial;
+        // Said only when it sounds: an instrument silent three seconds (no note in it, asleep or quiet) gives up nothing to hear (issue 330).
+        if(const auto lost=next->ringOut(graph_,b->was,b->now);lost && !graph_.silent(b->was,uint64_t(sampleRate_*3))){const auto n=nodes_.find(b->was);++ringOut_.partial;
             p.notices.push_back("the last Performance's notes ring out without part of their chain: "+(n==nodes_.end()?std::string("a plugin"):n->second)+" also played into a plugin this Performance took over");
             std::fprintf(stderr,"oscairn: %s\n",p.notices.back().c_str());}
         // Only one change's tail rings out: one a change before left ringing in this instance fades out in the plugin's choke time, said.

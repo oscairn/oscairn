@@ -594,7 +594,7 @@ namespace oscairn
         auto d=impl_->call("budget.estimate",directory.empty()?std::string("{}"):"{\"directory\":"+quote(directory)+'}',30000);auto r=field(d.get(),"result");
         Estimate e;e.cpu=number(field(r,"cpu"));e.memory=uint64_t(integer(field(r,"memory")));e.fits=boolean(field(r,"fits"));e.seamless=boolean(field(r,"seamless"));if(detail::member(r,"fades"))e.fades=boolean(field(r,"fades"));
         e.budget.cpu=number(field(field(r,"budget"),"cpu"));e.budget.memory=uint64_t(integer(field(field(r,"budget"),"memory")));
-        for(auto x:array(field(r,"plugins")))e.plugins.push_back({string(field(x,"name")),string(field(x,"plugin")),number(field(x,"cpu")),uint64_t(integer(field(x,"memory"))),boolean(field(x,"measured"))});
+        for(auto x:array(field(r,"plugins"))){e.plugins.push_back({string(field(x,"name")),string(field(x,"plugin")),number(field(x,"cpu")),uint64_t(integer(field(x,"memory"))),boolean(field(x,"measured"))});if(detail::member(x,"earlier"))e.plugins.back().earlier=boolean(field(x,"earlier"));}
         return e;
     }
     void RemoteControl::loadPerformance(const std::string& directory) {

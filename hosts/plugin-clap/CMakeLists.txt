@@ -21,5 +21,10 @@ target_include_directories(oscairn-clap-shell-test PRIVATE ${PROJECT_SOURCE_DIR}
 target_link_libraries(oscairn-clap-shell-test PRIVATE oscairn_control oscairn_clap_headers ${CMAKE_DL_LIBS})
 target_compile_options(oscairn-clap-shell-test PRIVATE -Wall -Wextra)
 add_dependencies(oscairn-clap-shell-test oscairn_clap oscairn_basic_synth)
-add_test(NAME plugin-clap COMMAND oscairn-clap-shell-test $<TARGET_BUNDLE_DIR:oscairn_clap> $<TARGET_FILE:oscairn_basic_synth>)
+if(APPLE)
+    set(oscairn_clap_path $<TARGET_BUNDLE_DIR:oscairn_clap>) # the test opens the bundle as a host does
+else()
+    set(oscairn_clap_path $<TARGET_FILE:oscairn_clap>)
+endif()
+add_test(NAME plugin-clap COMMAND oscairn-clap-shell-test ${oscairn_clap_path} $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(plugin-clap PROPERTIES TIMEOUT 180)

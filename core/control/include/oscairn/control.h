@@ -328,7 +328,7 @@ namespace oscairn
             // plugin and its state), within it the loads (process start, plugin load and activation
             // together), the state loads (fresh and reused instances), the resets and the saves of
             // a taken-over instance's own state, and the publish at the cue.
-            struct Open { std::string name; uint64_t reused = 0, loaded = 0, kept = 0; double total = 0, read = 0, load = 0, restore = 0, reset = 0, save = 0, publish = 0; };
+            struct Open { std::string name; uint64_t reused = 0, loaded = 0, kept = 0; double total = 0, read = 0, load = 0, restore = 0, reset = 0, save = 0, beside = 0, publish = 0; };
             Open open;
         };
         virtual Timing engineTiming(bool reset) = 0;

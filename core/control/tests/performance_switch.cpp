@@ -789,6 +789,30 @@ int main(int argc, char** argv)
             }
         }
 
+        // The same Performance loaded again directly (issue 9): a silent synth holding the node's state is taken over, as
+        // the Delay is (in a worker, kept with a reset), instead of its sound being prepared beside again (a Sampler loads
+        // every sample again that way); one sounding still gets it beside and rings out, and is taken over the next time.
+        {
+            const auto again = temp.path / "again";
+            ringing(again, 0, argv[1], argv[3], .5);
+            Session t(48000, frames);
+            load(t, again); quiet(t);
+            w = load(t, again); report("again: J -> J, silent", w);
+            check(w.reused == 2 && w.beside == 0 && w.loaded == 0 && w.kept >= 1, "loaded again, silent: the synth taken over, no sound beside: " + std::to_string(w.beside) + " beside");
+            compare(t, again, "again: J -> J, silent"); quiet(t);
+            t.note(true, 60, .8); blocks(t, 10);
+            w = load(t, again); report("again: J -> J, a note held", w);
+            check(w.beside == 1 && w.loaded == 0 && w.open.beside > 0, "loaded again, a note held: the synth given its sound beside, to ring out, timed as beside");
+            {
+                Audio audio; bool rang = false; for(int i = 0; i < 20; ++i) { audio.run(t); rang = rang || audio.sounding(); }
+                check(rang, "again: the held note plays on through the change");
+            }
+            t.note(false, 60, 0); quiet(t); quiet(t);
+            w = load(t, again); report("again: J -> J, after sounds beside", w);
+            check(w.reused == 2 && w.beside == 0 && w.loaded == 0, "after sounds beside, silent: the synth taken over");
+            compare(t, again, "again: after sounds beside");
+        }
+
         // The outgoing sounds ring out through the outgoing chain (RFC 0021, "Ringing out through the
         // outgoing chain"): G is a Basic Synth through a Delay at half level, H the same synth dry at
         // full level. A note held on G through the change to H: its tail must go through G's Delay and

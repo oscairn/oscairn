@@ -293,3 +293,57 @@ impl Page for About {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A row as its label and value, for the tests to name a shape.
+    fn lv(r: SettingData) -> (String, String) {
+        (r.label.as_str().to_string(), r.value.as_str().to_string())
+    }
+
+    // A reply with the keys field missing or of the wrong shape reads as none without failing (an unhandled field).
+    #[test]
+    fn keys_reply_missing_or_wrong_field_is_none() {
+        for missing in [json!({}), json!({"keys": "none"}), json!({"keys": {"name": "Stage", "id": "x"}})] {
+            let mut k = Keys::default();
+            let mut c = Ctx::default();
+            k.reply(Step::List, Ok(missing), &mut c);
+            assert_eq!(lv(k.rows()[0].clone()), ("Signing keys".into(), "No keys yet".into()));
+        }
+    }
+
+    // A key whose name or id field is missing or not a string is shown with empty strings, not lost (an unhandled field).
+    #[test]
+    fn key_with_missing_or_wrong_typed_fields_still_counts() {
+        let mut k = Keys::default();
+        let mut c = Ctx::default();
+        k.reply(Step::List, Ok(json!({"keys": [{"name": "OnlyName"}, {"id": "0123456789ab", "key": ""}]})), &mut c);
+        let rows = k.rows();
+        assert_eq!(rows.len(), 3, "two keys, each still a row, then make");
+        assert_eq!(lv(rows[0].clone()), ("OnlyName".into(), "".into()), "an id missing shows an empty fingerprint");
+        assert_eq!(lv(rows[1].clone()), ("".into(), "0123 4567 89ab".into()), "a name missing shows an empty name");
+    }
+
+    // ---- B: About ----
+
+    // The released source is the build's commit, twelve characters, and a dev build says so (B3).
+    #[test]
+    fn about_source_is_the_commit_or_a_dev_build() {
+        assert_eq!(About::with("0.2.0", "").source(), "Development build");
+        assert_eq!(About::with("0.2.0", "0123456789abcdef0123").source(), "0123456789ab");
+        assert_eq!(About::with("0.2.0", "short").source(), "short", "a commit shorter than twelve is whole");
+    }
+
+    // A reply with the release field missing or not a string reads as an empty release (an unhandled field).
+    #[test]
+    fn about_reply_missing_or_wrong_release_is_empty() {
+        for missing in [json!({}), json!({"release": 3}), json!({"state": "idle"})] {
+            let mut a = About::with("0.2.0", "");
+            let mut c = Ctx::default();
+            a.reply(AboutStep::Engine, Ok(missing), &mut c);
+            assert_eq!(lv(a.rows()[2].clone()), ("Engine".into(), "".into()));
+        }
+    }
+}

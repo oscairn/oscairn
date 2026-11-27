@@ -23,7 +23,6 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -41,7 +40,6 @@ namespace
         if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; }
     }
 
-    std::string read(const fs::path& file) { std::ifstream in(file, std::ios::binary); return {std::istreambuf_iterator<char>(in), {}}; }
 
     const clap_host_t host = {CLAP_VERSION, nullptr, "oscairn-clap-shell-test", "Oscairn", "", "1", [](const clap_host_t*, const char*) -> const void* { return nullptr; }, [](const clap_host_t*) {}, [](const clap_host_t*) {}, [](const clap_host_t*) {}};
 

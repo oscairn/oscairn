@@ -1763,3 +1763,141 @@ impl Screen {
         self.show();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn zone(channels: Option<u64>) -> Value {
+        let mut z = json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0});
+        if let Some(c) = channels {
+            z["channels"] = json!(c);
+        } else {
+            z.as_object_mut().unwrap().remove("channels");
+        }
+        z
+    }
+
+    #[test]
+    fn two_trims_and_rounds() {
+        assert_eq!(two(0.0), "0");
+        assert_eq!(two(12.34), "12.34");
+        assert_eq!(two(12.30), "12.3");
+        assert_eq!(two(-5.0), "-5");
+        assert_eq!(two(100.0), "100");
+    }
+
+    #[test]
+    fn num_gives_a_pair() {
+        assert_eq!(num(3.0, 7.0), "3 7");
+        assert_eq!(num(-1.5, 0.0), "-1.5 0");
+    }
+
+    #[test]
+    fn wire_commands_need_two_points() {
+        assert_eq!(wire_commands(&[], 1, 10., None), "");
+        assert_eq!(wire_commands(&[(5., 5.)], 1, 10., None), "");
+    }
+
+    #[test]
+    fn wire_commands_single_line_one_cubic_per_pair() {
+        // A straight run: the control points sit at the middle in x, on each end's height.
+        assert_eq!(wire_commands(&[(0., 0.), (100., 0.)], 1, 10., None), "M 0 0 C 50 0 50 0 100 0");
+        assert_eq!(wire_commands(&[(0., 0.), (100., 50.)], 1, 10., None), "M 0 0 C 50 0 50 50 100 50");
+        // A longer path gets one cubic per pair of points, still one move.
+        let g = wire_commands(&[(0., 0.), (50., 50.), (100., 0.)], 1, 10., None);
+        assert_eq!(g, "M 0 0 C 25 0 25 50 50 50 C 75 50 75 0 100 0");
+        assert_eq!(g.matches(" M ").count(), 0);
+    }
+
+    #[test]
+    fn wire_commands_bus_is_a_line_per_channel() {
+        let g = wire_commands(&[(0., 0.), (100., 0.)], 2, 10., None);
+        assert_eq!(g.matches("M ").count(), 2);
+        let seven = wire_commands(&[(0., 0.), (100., 0.)], 7, 10., None);
+        assert_eq!(seven.matches("M ").count(), 7);
+    }
+
+    #[test]
+    fn wire_commands_dash_keeps_drawing_marks() {
+        let g = wire_commands(&[(0., 0.), (200., 0.)], 1, 10., Some((3., 2.)));
+        // Short dashes: more than one draw, so more than one move.
+        assert!(g.matches("M ").count() > 1);
+        assert!(!g.is_empty());
+    }
+
+    #[test]
+    fn rounded_empty_or_one_point() {
+        assert_eq!(rounded(&[], 4.), "");
+        assert_eq!(rounded(&[(10., 10.)], 4.), "M 10 10");
+    }
+
+    #[test]
+    fn rounded_straight_line_is_a_line() {
+        assert_eq!(rounded(&[(0., 0.), (100., 0.)], 4.), "M 0 0 L 100 0");
+    }
+
+    #[test]
+    fn rounded_rounds_a_corner_with_quadratics() {
+        // A right-angle corner: the joins move radius toward each neighbor and the corner itself stays.
+        assert_eq!(rounded(&[(0., 0.), (50., 50.), (100., 0.)], 4.), "M 0 0 L 47.17 47.17 Q 50 50 52.83 47.17 L 100 0");
+    }
+
+    #[test]
+    fn zone_channel_names_a_channel_any_or_several() {
+        assert_eq!(zone_channel(&[]), 0);
+        assert_eq!(zone_channel(&[zone(Some(65535))]), 0);
+        assert_eq!(zone_channel(&[zone(Some(1))]), 1);
+        assert_eq!(zone_channel(&[zone(Some(1 << 15))]), 16);
+        assert_eq!(zone_channel(&[zone(Some(1)), zone(Some(2))]), -1);
+        // A mask of two channels is several, not one.
+        assert_eq!(zone_channel(&[zone(Some(3))]), -1);
+        // A zone with no channels field defaults to any.
+        assert_eq!(zone_channel(&[zone(None)]), 0);
+    }
+
+    #[test]
+    fn set_zone_channel_sets_and_dedups() {
+        // Empty is left alone when asking for any.
+        assert_eq!(set_zone_channel(&[], 0), Vec::<Value>::new());
+        // A named channel creates a zone to carry it, one that reads back as that channel.
+        let made = set_zone_channel(&[], 3);
+        assert_eq!(made.len(), 1);
+        assert_eq!(zone_channel(&made), 3);
+        // Identical zones collapse to one.
+        let two = set_zone_channel(&[zone(Some(1)), zone(Some(1))], 5);
+        assert_eq!(two.len(), 1);
+        assert_eq!(zone_channel(&two), 5);
+        // A single channel-1 zone, the default, is dropped when asking for any.
+        assert_eq!(set_zone_channel(&[zone(Some(1))], 0), Vec::<Value>::new());
+    }
+
+    #[test]
+    fn follow_holds_the_stretch_or_moves_the_least() {
+        // Already inside the window: the pan is left alone.
+        assert_eq!(follow(20., 100., 10., 100., 5.), 20.);
+        // Starts to the left of the window: up to its start, minus the margin.
+        assert_eq!(follow(20., 10., 10., 100., 5.), 5.);
+        // Runs past the window's right edge: the least move that brings its end in.
+        assert_eq!(follow(0., 200., 10., 50., 5.), 165.);
+        // Longer than the window: to the stretch's start.
+        assert_eq!(follow(0., 200., 100., 50., 5.), 195.);
+    }
+
+    #[test]
+    fn sync_grows_shrinks_and_changes_only_what_moved() {
+        let model = VecModel::from(vec![1, 2, 3]);
+        let mut last = vec![1, 2, 3];
+        // Fewer rows: the tail is dropped; a changed row is rewritten.
+        sync(&model, &mut last, vec![1, 9], |p| *p);
+        assert_eq!(model.row_count(), 2);
+        assert_eq!(model.row_data(0), Some(1));
+        assert_eq!(model.row_data(1), Some(9));
+        assert_eq!(last, vec![1, 9]);
+        // More rows than the model has: the new tail is added.
+        sync(&model, &mut last, vec![7, 8, 9], |p| *p);
+        assert_eq!(model.row_count(), 3);
+        assert_eq!(model.row_data(2), Some(9));
+        assert_eq!(last, vec![7, 8, 9]);
+    }
+}

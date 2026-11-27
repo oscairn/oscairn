@@ -766,3 +766,62 @@ impl Row {
         self.end_edit();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The dial shows a parameter in its own units: a whole value without decimals, otherwise two, so a stepped
+    // parameter's value and a drag to a hundredth both come out exactly, never more precision than a knob has.
+    #[test]
+    fn tidy_shows_whole_values_whole_and_rounds_the_rest() {
+        assert_eq!(tidy(0.), "0");
+        assert_eq!(tidy(1.), "1");
+        assert_eq!(tidy(-3.), "-3");
+        assert_eq!(tidy(-1.0), "-1");
+        assert_eq!(tidy(1.5), "1.50");
+        assert_eq!(tidy(-0.25), "-0.25");
+        assert_eq!(tidy(0.1 + 0.2), "0.30", "a shifting sum is not shown whole");
+    }
+
+    // A part's level in dB: a whole scale reads 0 dB, a tenth is -20 dB, and at or below silence the level is read
+    // as minus infinity, never the logarithm of zero. (Finite levels are shown with an ASCII '-' while silence uses
+    // the proper U+2212 minus and part.rs's db does too; that is raised, not pinned here.)
+    #[test]
+    fn db_reads_a_whole_part_as_0_db_and_silence_as_minus_infinity() {
+        assert_eq!(db(1.), "0.0 dB");
+        assert_eq!(db(0.), "\u{2212}\u{221e} dB");
+        assert_eq!(db(-100.), "\u{2212}\u{221e} dB");
+    }
+
+    fn plain() -> Row {
+        Row::new(vec![])
+    }
+
+    // What a target shows when it moves: a control as a whole percent, a mute switched On or Muted, a scene marked
+    // Playing only while it is, panic and nothing offering nothing to read.
+    #[test]
+    fn a_target_is_shown_with_its_own_units() {
+        assert_eq!(plain().described(Target::Control(1), 0.25, &[], 0), (0.25, "25%".to_string()));
+        assert_eq!(plain().described(Target::Control(2), 1., &[], 0), (1., "100%".to_string()));
+        assert_eq!(plain().described(Target::PartMute(3), 0.49, &[], 0), (0.49, "On".to_string()));
+        assert_eq!(plain().described(Target::PartMute(3), 0.5, &[], 0), (0.5, "Muted".to_string()));
+        assert_eq!(plain().described(Target::Scene(4), 0., &[], 4), (0., "Playing".to_string()));
+        assert_eq!(plain().described(Target::Scene(4), 0., &[], 5), (0., "Scene".to_string()));
+        assert_eq!(plain().described(Target::Panic, 0., &[], 0), (0., "All notes off".to_string()));
+        assert_eq!(plain().described(Target::None, 0., &[], 0), (0., String::new()));
+    }
+
+    // A step moves beside a knob: a mute flips at the middle, and a level or a control goes in hundredths and
+    // holds within 0 and 1.
+    #[test]
+    fn a_step_flips_a_mute_and_holds_a_level_and_a_control() {
+        assert_eq!(plain().stepped(Target::PartMute(3), 0.5, 1), 0., "a mute at the middle flips off (On)");
+        assert_eq!(plain().stepped(Target::PartMute(3), 0.49, 1), 1., "a mute just under is on");
+        assert_eq!(plain().stepped(Target::Control(1), 0.1, -50), 0., "a control is held at zero");
+        assert_eq!(plain().stepped(Target::Control(1), 0.9, 50), 1., "a control is held at one");
+        assert_eq!(plain().stepped(Target::PartLevel(2), 0., 150), 1., "a level is held at one");
+        let stepped = plain().stepped(Target::Control(1), 0.5, 10);
+        assert!((stepped - 0.6).abs() < 1e-9, "a control goes up a hundredth {stepped}");
+    }
+}

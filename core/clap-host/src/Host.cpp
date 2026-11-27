@@ -1391,7 +1391,7 @@ bool Host::restful() const noexcept {
     const auto& s = *impl;
     return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount.load(std::memory_order_relaxed);
 }
-void Host::rested(uint32_t frames, uint32_t blocks) noexcept { impl->steadyTime += frames; impl->idleBlocks.fetch_add(blocks); }
+void Host::rested(uint32_t frames, uint32_t blocks) noexcept { impl->steadyTime += frames; impl->idleBlocks.fetch_add(blocks); impl->transport.skipped(frames); }
 void Host::mirrorWake(std::atomic<uint32_t>* mirror) noexcept { impl->wakeMirror.store(mirror); if (mirror) mirror->store(impl->wake.load() ? 1 : 0); }
 bool Host::wasReset() const noexcept { return impl->resetInProcess; }
 Statistics Host::statistics() const noexcept { auto& s = *impl; Statistics r{s.blocks.load(), s.dropped.load(), s.errors.load(), s.lastUs.load(), s.maxUs.load(), s.deadlineMisses.load(), s.controlSilences.load(), s.idleBlocks.load()}; r.cpuMicroseconds = s.totalUs.load(); return r; }

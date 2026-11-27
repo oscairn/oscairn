@@ -129,6 +129,8 @@ class TransportWatch {
 public:
     bool changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept;
     void reset() noexcept { observed = false; }
+    // Blocks its plugin slept through uncalled (rested): the next block is expected that much further on.
+    void skipped(uint32_t frames) noexcept { previousFrames += frames; }
 private:
     bool observed = false, had = false;
     clap_event_transport_t previous{};

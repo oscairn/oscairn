@@ -1354,4 +1354,37 @@ mod tests {
         assert!((stepped_crossover(stepped_crossover(2000., 1), -1) - 2000.).abs() <= 1.);
         assert_eq!(stepped_crossover(20., -5000), min, "a long turn is held at the end");
     }
+
+    // The chain is read as the engine sends it: a plugin is a number, a split an object; entries of another
+    // shape (a missing field, the wrong type, a null) do not appear.
+    #[test]
+    fn a_chain_reads_its_plugins_and_splits() {
+        use serde_json::json;
+        assert!(Screen::entries_of(&Value::Null).is_empty(), "no chain has no rows");
+        assert!(Screen::entries_of(&json!([])).is_empty(), "an empty chain has no rows");
+        assert_eq!(Screen::entries_of(&json!([1, 2])), vec![Entry::Node(1), Entry::Node(2)]);
+        assert_eq!(Screen::entries_of(&json!([{"split": 7}])), vec![Entry::Split(7)]);
+        assert_eq!(Screen::entries_of(&json!(["a name", {}, 3, {"split": 8}, null])), vec![Entry::Node(3), Entry::Split(8)], "things that are not a plugin or a split are passed over");
+    }
+
+    // A value steps to the hundredth, held at the least and at 1, and a step down meets the step up again.
+    #[test]
+    fn a_value_steps_to_the_hundredth() {
+        assert_eq!(stepped(0.5, 1, 0.02, 0.), 0.52);
+        assert_eq!(stepped(0.5, -3, 0.02, 0.), 0.44);
+        assert_eq!(stepped(0.52, -1, 0.02, 0.), 0.5, "a step down meets the step up");
+        assert_eq!(stepped(0., -1, 0.05, 0.), 0., "a level holds at 0");
+        assert_eq!(stepped(0.99, 5, 0.02, 0.), 1., "a level holds at 1");
+        assert_eq!(stepped(-0.5, -2, 0.05, -1.), -0.6, "a pan steps below 0");
+        assert_eq!(stepped(-1., -1, 0.05, -1.), -1., "a pan holds at -1");
+        assert_eq!(stepped(0.123, 0, 0., 0.), 0.12, "rounded to the hundredth");
+    }
+
+    // Something the graph does not name is the layers of a copy.
+    #[test]
+    fn a_split_kind_has_words() {
+        assert_eq!(split_kind("copy"), "layers");
+        assert_eq!(split_kind(""), "layers");
+        assert_eq!(split_kind("no_such_kind"), "layers");
+    }
 }

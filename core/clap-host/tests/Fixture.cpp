@@ -80,6 +80,7 @@ struct Plugin {
     // Atomic: CLAP lets the main thread (state save, get_value) read these while
     // the audio thread writes them in process().
     std::atomic<double> gain{.5}, toggle{0}, mode{0};
+    std::atomic<bool> selfWoken{false}; // KICK_FIXTURE_SELF_WAKE: asked for a block by itself (request_process), sounded on it
     int bend = 8192, wheel = 0; // audio thread: the last pitch bend and CC 1 heard (KICK_FIXTURE_WHEELS plays them: the MIDI instrument's left channel is bend/16383, its right wheel/127)
     double modulation = 0; // audio thread: the gain's CLAP modulation, added to it in the output
     double shownMode = 0; // main thread: the mode the parameters' info last described
@@ -263,6 +264,8 @@ struct Plugin {
                 for (uint32_t i = 0; i < b->frames_count; ++i) silent &= b->audio_inputs[0].data32[c][i] == 0.f;
             if (silent) return CLAP_PROCESS_SLEEP;
         }
+        if (s.selfWoken.exchange(false))
+            for (uint32_t c = 0; c < b->audio_outputs[0].channel_count; ++c) for (uint32_t i = 0; i < b->frames_count; ++i) b->audio_outputs[0].data32[c][i] = .25f;
         return !s.gate && (s.kind == 5 || s.kind == 11) ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
     }
     static const void* extension(const clap_plugin_t* plugin, const char* id) {
@@ -310,6 +313,9 @@ struct Plugin {
             [](const clap_plugin_t* p, clap_id id, double value, char* out, uint32_t size) {
                 if (id == 8 && get(p).kind == 8) std::snprintf(out, size, "%s", value > .5 ? "1.5 s" : "250 ms"); // its stage's time, with units
                 else std::snprintf(out, size, "%.2f", value);
+                // KICK_FIXTURE_SELF_WAKE: the sleep instrument wakes itself, as a plugin whose own thread has something to
+                // play (worker-rest-diff): asked for a text on the main thread, it asks for a block and sounds .25 in it.
+                if (get(p).kind == 5 && std::getenv("KICK_FIXTURE_SELF_WAKE")) { get(p).selfWoken = true; get(p).host->request_process(get(p).host); }
                 return true;
             },
             [](const clap_plugin_t*, clap_id, const char* text, double* value) { *value = std::atof(text); return true; },

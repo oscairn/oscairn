@@ -8,4 +8,4 @@ org.oscairn.va 0.11.6
 org.oscairn.sampler 0.9.12
 org.oscairn.effects 0.3.7
 org.oscairn.arpeggiator 0.1.8
-org.oscairn.sampler.init 0.9.12
+org.oscairn.sampler.init 0.9.15

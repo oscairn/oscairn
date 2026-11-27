@@ -76,8 +76,9 @@ namespace oscairn::worker
     // Whether OSCAIRN_WORKER_DEADLINE asks for step 6 (a graph reads it as it is made).
     bool deadlineAllowance() noexcept;
     // OSCAIRN_WORKER_REST, read once at the engine's start: which workers whose plugin is asleep with nothing for it
-    // are left uncalled (RFC 0045). disabled (unset, or anything but the others): only one no note can reach in the
-    // plan playing (Graph's playable); all ("all"): any, after its hold; never ("0"): none, every worker every block.
+    // are left uncalled (RFC 0045). all (unset, "all", or anything but the others; the default since 2026-11-27): any,
+    // after its hold; disabled ("disabled", the earlier default): only one no note can reach in the plan playing
+    // (Graph's playable); never ("0"): none, every worker every block.
     enum class WorkerRest { disabled, all, never };
     WorkerRest workerRest() noexcept;
     // OSCAIRN_WORKER_GROUPS, read as each plan is made: unless "0", nodes of one worker process whose audio flows between

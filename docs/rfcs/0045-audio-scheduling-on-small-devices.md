@@ -1644,6 +1644,19 @@ deadline rule and the main thread's 20 ms service are always on in these builds;
 shows against bundle c4bc60da's figures: the engine's main thread well under 38 % of a core, and
 no callback longer than the period from a worker's wait.
 
+### Resting asleep workers is the default (2026-11-27)
+
+A worker whose plugin returned `CLAP_PROCESS_SLEEP` is left uncalled, after a hold of 192 blocks,
+until something comes for it (RFC's rest: `OSCAIRN_WORKER_REST`). From 2026-11-15 the default rested
+only a worker no note could reach, so a part that could be played was never cold; `all` rested any.
+On 2026-11-27, after the FANTOM measurement (ST Final at rest, 13 workers: the engine thread about
+20 % cheaper; 40 notes after more than 1 s of silence, alone and with ten keys held on another part,
+with no late, silent, lost or deadline-missed block), the owner made `all` the default. Unset and
+`all` are the same; `disabled` keeps the 2026-11-15 rule and `0` calls every worker every block.
+Workers of the extra block never rest, so on the FANTOM the Sampler (alone in its profile's extra
+block) does not rest either. `worker-rest-diff` plays one session unset, `all` and `0` and compares
+every output bit for bit.
+
 ## Share by default, split under load
 
 ### Where it is decided today

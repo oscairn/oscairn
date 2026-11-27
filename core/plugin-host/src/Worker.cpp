@@ -123,7 +123,7 @@ namespace oscairn::worker
         static const WorkerRest mode = [] {
             const char* v = std::getenv("OSCAIRN_WORKER_REST");
             const std::string s = v ? v : "";
-            return s == "0" ? WorkerRest::never : s == "all" ? WorkerRest::all : WorkerRest::disabled;
+            return s == "0" ? WorkerRest::never : s == "disabled" ? WorkerRest::disabled : WorkerRest::all;
         }();
         return mode;
     }

@@ -975,7 +975,7 @@ namespace oscairn
                 source.routes.back().notes=noteSourceOf(target,{from.first,t.target});
                 target.lanesIn = true;
             }
-        // OSCAIRN_WORKER_REST=disabled (realtime.h): a step can be played, so it is never rested, when a note can reach it
+        // OSCAIRN_WORKER_REST=disabled (realtime.h; not the default since 2026-11-27, which is all): a step can be played, so it is never rested, when a note can reach it
         // (a note connection not draining, from the input or a step that can be played), audio comes from the input or such
         // a step, lanes reach it, or nothing comes into it at all (it sounds on its own). Steps come after their sources.
         for(size_t i=0;i<plan->steps.size();++i)

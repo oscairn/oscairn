@@ -47,10 +47,6 @@ fn the_menu_is_by_kind_and_ownership() {
     r.settle();
     let sound = options_for(&mut r, "Soft Felt");
     assert_eq!(sound.iter().map(|m| m.0.as_str()).collect::<Vec<_>>()[..3], ["New part", "Audition", "Add to favorites"]);
-    r.c.show_page(2);
-    r.settle();
-    let setlist = options_for(&mut r, "Friday Set");
-    assert_eq!(setlist.iter().map(|m| m.0.as_str()).collect::<Vec<_>>()[..2], ["Add to favorites", "Edit name, description and tags..."], "a setlist is neither opened, tried nor made a part");
     // An item indexed in place or whose type's package is gone: read only, and not exported or deleted in place.
     let mut items = library();
     items[3].read_only = true;

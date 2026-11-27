@@ -5,7 +5,7 @@
 use super::*;
 
 /// The colors the menus give a Performance, a Sound or a tag (PerformanceColors.h `performanceColors`).
-pub const COLORS: [(&str, &str); 9] = [
+pub(crate) const COLORS: [(&str, &str); 9] = [
     ("Red", "#e5484d"),
     ("Orange", "#f76b15"),
     ("Yellow", "#ffc53d"),
@@ -16,6 +16,17 @@ pub const COLORS: [(&str, &str); 9] = [
     ("Pink", "#d6409f"),
     ("Gray", "#8b8d98"),
 ];
+
+/// Tags typed as one text: separated by commas, trimmed, each once, in order.
+pub(crate) fn tags_from(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for t in text.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        if !tags.iter().any(|x| x == t) {
+            tags.push(t.to_string());
+        }
+    }
+    tags
+}
 
 /// A menu entry that can be chosen or not, as its item says.
 trait Enabled {
@@ -217,12 +228,7 @@ impl Screen {
     /// Save in the editor: the item's name, description and tags (separated by commas, trimmed, each once).
     pub(super) fn edit_save(&mut self) {
         let Mode::Edit(d) = self.mode.clone() else { return };
-        let mut tags: Vec<String> = Vec::new();
-        for t in d.tags.split(',').map(str::trim).filter(|t| !t.is_empty()) {
-            if !tags.iter().any(|x| x == t) {
-                tags.push(t.to_string());
-            }
-        }
+        let tags = tags_from(&d.tags);
         let shown = if d.name.is_empty() { "Untitled".to_string() } else { d.name.clone() };
         self.push(Request::Do(Do::Edit(shown)), "library.edit", json!({"id": d.id, "name": d.name, "description": d.description, "tags": tags, "color": d.color}));
         self.mode = Mode::List;

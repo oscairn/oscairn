@@ -1732,6 +1732,7 @@ mod library_open;
 mod library_items;
 mod library_setlist;
 mod setlist_bar;
+mod setlist_manage;
 mod library_install;
 mod library_manage;
 mod library_catalog;

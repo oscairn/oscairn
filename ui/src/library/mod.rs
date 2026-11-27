@@ -15,7 +15,7 @@
 //! seconds to open (`open.rs`), and the engine answers anything else as busy meanwhile, so each step of the
 //! opening is asked again until it is not refused, and the screen shows what is loading.
 
-mod actions;
+pub(crate) mod actions;
 mod catalog;
 mod catalog_flow;
 mod export;
@@ -27,7 +27,7 @@ mod item;
 mod jobs;
 mod libraries;
 mod open;
-mod setlist;
+pub(crate) mod setlist;
 mod side;
 
 pub use filters::Installed;
@@ -514,7 +514,7 @@ impl Screen {
                     (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), detail: item.description.as_str().into(), warn: !item.unfit.is_empty(), star: item.favorite, reason: item.unfit.as_str().into(), fluid: true, busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
                 }));
                 // Nothing of the kind and nothing narrowing it: a way to the Catalog (LibraryPane.cpp: "Browse the Catalog").
-                if self.total == 0 && !self.filters.narrowed() && self.kind != Kind::Setlist {
+                if self.total == 0 && !self.filters.narrowed() {
                     rows.push((Row::Browse, row("Browse the Catalog".into(), String::new(), 2)));
                 }
                 rows

@@ -197,6 +197,14 @@ Now (`Session::estimate`, `measurementFor`, `costOf` in `core/control/src/budget
   busiest figure not sampled for more than a week counts at half for each week since, never below
   what its voices were measured to cost (`rest + voice x voices`). It is not rewritten: playing the
   sound measures it again.
+- **A plugin update keeps what was learned (2026-11-26).** Figures are kept per plugin id, version and
+  build, so a newly installed version had none and counted at its package's estimate or the default,
+  and an open part's further sounds at 2.5 times the declared size. `measurementFor` now falls back
+  to the newest older version's records of the same plugin (merged as one version's are: memory the
+  most, CPU the median), and a saved sound's `states` link to an older version's key is followed
+  while the new version has no record; `budget.estimate` marks such a plugin `earlier`, `measured`
+  false. The new version's own record replaces them as soon as it exists; an older version never
+  borrows from a newer one. The aging and median rules are unchanged.
 
 Tested: control-parts (`outlierSound`: the memory fixture's modes as sounds, three ordinary at 2 to
 3 % and one at 51 %; a Performance of the default mode never opened here opens without the notice,

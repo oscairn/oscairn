@@ -5,7 +5,7 @@
 // channel, mute and solo), the master pinned at the right. A cursor is a focus border; the scene
 // playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
-import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle, FitText, TabBar } from "theme.slint";
+import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle, FitText, TabBar, TabStyle } from "theme.slint";
 import { TileRow, GridTile } from "grid.slint";
 
 export struct SceneData {
@@ -308,6 +308,9 @@ export component Play inherits Rectangle {
     property <bool> has-bank: buttons > 0 && PlayState.knob-buttons[buttons - 1].bank;
     property <bool> has-column: buttons - (has-bank ? 1 : 0) > 0;
     property <length> column-width: Theme.button-width;
+    // A vertical column of the tab family: neighbor tabs sit the theme's gap apart (none in a segmented style), and the
+    // column is that much taller than the tabs (ui/TABS.md).
+    property <length> knob-gap: Theme.tabs == TabStyle.segmented ? 0px : Theme.gap;
     property <length> bank-width: Theme.button-width * 0.8;
     property <length> column-x: self.width - Theme.margin - column-width;
     property <length> bank-x: (has-column ? column-x - gap : self.width - Theme.margin) - bank-width;
@@ -449,7 +452,7 @@ export component Play inherits Rectangle {
         x: root.column-x;
         y: root.knobs-y + (root.knob-row - self.height) / 2;
         width: root.column-width;
-        height: PlayState.column-names.length * root.pair-height;
+        height: PlayState.column-names.length * root.pair-height + max(0px, (PlayState.column-names.length - 1) * root.knob-gap);
         vertical: true;
         item: root.pair-height;
         names: PlayState.column-names;

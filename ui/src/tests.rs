@@ -1758,6 +1758,7 @@ mod fm_lines;
 mod grid;
 mod tabs;
 mod tabs_model;
+mod vertical_tabs;
 mod search;
 mod shots;
 mod loading;

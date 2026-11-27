@@ -21,6 +21,7 @@ Written 2026-11-16, branch `rust-settings` from `rust-library` (bca03b01). Nothi
 still hands the display to the JUCE app (`PORTED` in `ui/src/shell/settings_glue.rs`); the Rust app is reached with
 `OSCAIRN_UI_SETTINGS=1`, and the tests enter it directly. All 54 rows are built and ticked, and the rows of the new
 page P (Installed, P1 to P5) too; the tile flips when the whole app is judged working on the device, which no one has done.
+The Start page (St1, a boot choice the JUCE app has no page for) was added later on branch `ds/issue-Q273`.
 See the last section.
 
 ## What the reference is
@@ -51,6 +52,7 @@ hardware target (only a given instrument has it). A page shows only where the de
 | MIDI controllers | U | every profile |
 | Package repositories | U | every profile |
 | Signing keys | U | every profile |
+| Start | U | every profile |
 | About | U | every profile |
 | Audio | D, and H where a device chooses | every profile whose `audio.device` is absent: a computer (no `platform.runtime`) and every built-in device profile but the keyboard's (the devices leave the choice to the engine); **not** the keyboard, whose profile fixes the device and its channels (the engine says `fixed: true`) so nothing on the page could be changed |
 
@@ -74,7 +76,7 @@ difference is recorded in the row.
 | # | Cut | Kind | Item | Ref | Request or file | No touch | Status |
 |---|---|---|---|---|---|---|---|
 | S1 | 1 | U | Home's Settings tile opens the app (the line "Audio, controllers, keys"); its bar says `Settings`, then the page; Back goes Home; the tile hands over as before until the switch | `SettingsApp.cpp`; Home `Main.cpp` | none | press the tile; Cancel on the first level goes Home | [x] src/shell/settings_glue.rs `PORTED`, `OSCAIRN_UI_SETTINGS`; tests/settings_shell.rs `the_tile_opens_the_rust_app_only_when_it_is_switched_on` |
-| S2 | 1 | U | The pages as the shared tabs (a strip or a rail by the theme's `tabPlacement`), in the order Appearance, Top bar, MIDI controllers, Audio, Package repositories, Signing keys, About (the reference's order with Appearance new, the player's most used first) | `Pages.cpp:25-44`, `Frame.cpp:131-218` | none | the dial or the left knob walks the tabs then the rows, a press on a tab shows it | [x] src/settings_app.rs, slint/settings.slint; tests/settings.rs `the_pages_are_the_profiles_tabs`, `a_tab_shows_its_page_by_touch_and_by_the_dial` |
+| S2 | 1 | U | The pages as the shared tabs (a strip or a rail by the theme's `tabPlacement`), in the order Appearance, Top bar, MIDI controllers, Audio, Package repositories, Signing keys, Start, About (the reference's order with Appearance and Start new, the player's most used first) | `Pages.cpp:25-44`, `Frame.cpp:131-218` | none | the dial or the left knob walks the tabs then the rows, a press on a tab shows it | [x] src/settings_app.rs, slint/settings.slint; tests/settings.rs `the_pages_are_the_profiles_tabs`, `a_tab_shows_its_page_by_touch_and_by_the_dial` |
 | S3 | 1 | U | Which pages show for the profile (the table above); a page for hardware the profile lacks is not there | `Pages.cpp:19-24`, `Frame.cpp:117-121` (`shownPages`) | profile | - | [x] `Id::applies`, `Profile::audio_fixed`; tests/settings.rs `the_pages_are_the_profiles_tabs` (the keyboard's profile has no Audio; every other built-in device profile has it) |
 | S4 | 1 | U | Every page's reads and writes are asked without waiting: the screen answers the dial while a request is out, a request the engine refuses as busy (`-32009`) is asked again, a listing that fails is said under the page ("could not be read: why") | `Engine::job` (`README.md` "Adding a page" 2) | all | - | [x] `Screen::reply` (busy: again after 300 ms), every page's listing error; tests/settings.rs `a_busy_engine_is_asked_again`, `a_fixed_device_is_shown_so_and_cannot_be_changed`, `a_refused_choice_is_said_under_its_port` |
 | S5 | 1 | U | Nothing at rest costs a request or a frame: a page lists again only when the status says its list changed (`audioDeviceList`, `midiPortList`), never on a timer | `AudioPage.cpp:104-108`, `MidiControllersPage.cpp:145-148` (a 250 ms timer there) | `status` notification | - | [x] tests/settings.rs `a_page_asks_when_shown_and_nothing_at_rest`, tests/settings_shell.rs `at_rest_it_costs_no_request_and_no_frame` |
@@ -184,6 +186,12 @@ whole app). A refusal or a lost connection is the app's usual failed row.
 | B4 | 2 | U | The license, AGPL-3.0-or-later, in its words, and where the texts are | `AboutPage.cpp:12`, `:19-21` | none | the right knob scrolls the panel | [x] tests/settings_second.rs `about_says_what_this_is` |
 | B5 | 2 | H | Roland's system: on a device whose profile says `rolandNextBoot` (the FANTOM-07's is the only one) and whose engine answers `system.rolandNextBoot {}` as supported (its start names the file its boot script honors), the last row "Roland's system", Off or Next power-on. Off: asked first, "Start Roland's system next time?" "Roland's system will start at the next power-on. Turn the power off and on to start it." (Start Roland next time, Cancel), and only then `{set:true}`; Next power-on: a press takes it back (`{set:false}`). No restart is offered: no request reaches a reboot from the engine's chroot (docs/fantom-0.md, "Starting at power-on"). A refusal: "Not changed: why" | none (owner, 2026-11-26) | `system.rolandNextBoot {set?}` -> `{supported,set}` | press, then the question's choices | [x] src/settings_keys.rs `About`; tests/settings_second.rs `rolands_system_next_time_is_asked_first` |
 
+## St. Start (new in the Rust app: the reference has no such page; `N6`'s boot choice moves here)
+
+| # | Cut | Kind | Item | Ref | Request or file | No touch | Status |
+|---|---|---|---|---|---|---|---|
+| St1 | 2 | U | What Oscairn opens to at start, the row "Opens to": Home (the default), Setlist, Performance or Library; the choice is stored at once, start.txt replaced whole by `write_atomic`, and the shell reads it after the splash (`shell.rs start`, on a boot that does not hand the display over) and `go`s to the screen — Home sends nothing | `N6` (the boot choice was the start script's); the pages the choice opens are this shell's (Setlist, the Performance app's Play, the Library) | file `<config>/start.txt` (`home`, `setlist`, `performance`, `library`; anything unknown reads as Home) | a press on the row, then the choices, as T1 | [x] `Start` (src/settings_look.rs), `settings::start_page`; tests/settings.rs `choosing_a_start_page_keeps_it` (reached by the dial) and `the_shell_opens_to_the_start_page_setting` (src/tests.rs) |
+
 ## N. Not in the Settings app
 
 What the owner's scope examples or an RFC name that the JUCE Settings app does not have, with no request to build
@@ -197,7 +205,7 @@ changed here). None is shown.
 | N3 | Date and time (RFC 0035) | `notBuilt`, no request | n/a |
 | N4 | Storage (RFC 0037) | `notBuilt`, no `drives.*` request | n/a |
 | N5 | Installed content (RFC 0006): the packages installed, withdrawn ones, removal | `notBuilt`; the Library's Libraries menu has the plugin store and uninstalling (LIBRARY-APP.md D) | page P |
-| N6 | The panel, the audio routing, pedals and keys of a given instrument, boot behavior, window scaling | no page in the JUCE Settings app; routing and levels are the Performance app's Mixer and Routing; the profile fixes the panel; the boot choice is the start script's | n/a |
+| N6 | The panel, the audio routing, pedals and keys of a given instrument, boot behavior, window scaling | no page in the JUCE Settings app; routing and levels are the Performance app's Mixer and Routing; the profile fixes the panel; the boot choice is the Settings' Start page (St1), which the JUCE app has no page for | n/a |
 | N7 | The capture buffer's length (`<config>/capture`) | read by the engine's start (`SessionSetup.cpp:11`); no Settings page writes it | n/a |
 | N8 | The trust store (`trust.list`, `trust.set`, `trust.remove`) | `Control` has it; no Settings page lists it (RFC 0037 puts it in Settings later) | n/a |
 
@@ -206,10 +214,11 @@ changed here). None is shown.
 What the JUCE Settings app does that is not an engine request, and what the Rust shell does instead (it can only use
 the control socket and its own files; the engine is not changed):
 
-- **The chosen theme** (`appearance.txt`), **the installed themes** (`themes/`) and **the top bar's choice**
-  (`top-bar.json`): files in the configuration folder (`OSCAIRN_CONFIG_HOME`, else `~/Library/Application
-  Support/Oscairn` or `~/.config/Oscairn`), shared with the JUCE app; the shell reads and writes them with `std::fs`
-  (A1-A7, T1-T4). `Theme::apply` writes through a temporary file (`Theme.cpp:50-54`); so does the shell.
+- **The chosen theme** (`appearance.txt`), **the installed themes** (`themes/`), **the top bar's choice**
+  (`top-bar.json`) and **the start page's choice** (`start.txt`, St1): files in the configuration folder
+  (`OSCAIRN_CONFIG_HOME`, else `~/Library/Application Support/Oscairn` or `~/.config/Oscairn`), shared with the JUCE
+  app where it reads them; the shell reads and writes them with `std::fs` (A1-A7, T1-T4, St1). `Theme::apply` writes
+  through a temporary file (`Theme.cpp:50-54`); so does the shell, and `write_atomic` for the choice files.
 - **The theme install's file chooser** (A6): JUCE's `FileChooser`; the shell's own, over `std::fs`
   (`library/files.rs`).
 - **A key's ID from its public key** (R6): `signing::keyId`, the first 16 hex digits of the SHA-256 of the 32 raw bytes
@@ -283,8 +292,8 @@ What the real engine did that the doc or the handler's reading does not say, or 
 
 ## Where it stands
 
-54 rows: S 7, A 7, T 4, D 11, C 8, R 9, K 4, B 4, plus the new page P's 5 rows (P1 to P5); first cut 36 (S, A except A6, T, D, C), second cut 18 (A6, R, K, B);
-by kind 43 universal, 11 desktop-OS (the Audio page) and none hardware-specific; plus 8 rows of N, all n/a. Later: B5 (2026-11-26), hardware-specific (the FANTOM's Roland's system next time).
+55 rows: S 7, A 7, T 4, D 11, C 8, R 9, K 4, B 4, St 1, plus the new page P's 5 rows (P1 to P5); first cut 36 (S, A except A6, T, D, C), second cut 19 (A6, R, K, B, St);
+by kind 44 universal, 11 desktop-OS (the Audio page) and none hardware-specific; plus 8 rows of N, all n/a. Later: B5 (2026-11-26), hardware-specific (the FANTOM's Roland's system next time).
 
 2026-11-16: all 54 are built and ticked, against a fake engine that answers as the real handlers do, and the real-engine harness
 (`real_engine/settings.rs`, ignored by default, run only against an engine built in the worktree with its own folders and

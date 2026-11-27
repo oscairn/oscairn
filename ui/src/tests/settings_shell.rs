@@ -27,7 +27,7 @@ impl Shelf {
 
     /// On a profile (a built-in's id; none: a computer's).
     pub(super) fn on(name: &str, profile: Option<&str>, e: Fake) -> Shelf {
-        let mut f = Fixture::on(name, profile);
+        let mut f = Fixture::on(name, profile, true);
         f.engine.answer(); // session.hello
         f.pump();
         let config = folder(name);
@@ -103,7 +103,7 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert_eq!(ui.get_screen(), 14);
     assert_eq!(title(&ui), "Settings › Appearance");
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
-    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "About"], "the keyboard's profile fixes its audio device");
+    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"], "the keyboard's profile fixes its audio device");
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
     assert_eq!(actions, ["Install...", "Record", "Capture"], "the page's own action and the two every screen has; Undo, Redo and Save are the Performance app's");
     // Back goes Home.
@@ -270,7 +270,7 @@ fn every_page_is_reached_by_moves_alone() {
         assert!(!ui.global::<crate::Theme>().get_bar_cursor(), "the top bar did not take the move");
     };
     open_settings(&mut s, &mut nav);
-    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "About"];
+    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"];
     let last = pages.len() as i32 - 1;
     for (want, name) in pages.iter().enumerate() {
         let want = want as i32;

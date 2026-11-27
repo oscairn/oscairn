@@ -548,6 +548,16 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         app.play.offer_keyboard(profile.on_screen_keyboard, crate::settings::keyboard_hint_dismissed());
         app.play.knobs(profile.controls.clone());
         app.show_home();
+        // What Oscairn opens to at start (the Settings' Start page): the splash over, Home as always
+        // unless the choice says another screen. `go` sends nothing for Home, and what the others
+        // ask is queued until the engine answers. A hand-over boot honors it too: the keyboard
+        // always starts with --handover, and the issue asks for the setting there.
+        match crate::settings::start_page() {
+            crate::settings::StartPage::Home => {}
+            crate::settings::StartPage::Setlist => app.go(Screen::Setlist),
+            crate::settings::StartPage::Performance => app.go(Screen::Play),
+            crate::settings::StartPage::Library => app.go(Screen::Library),
+        }
         *a.borrow_mut() = Some(app);
     });
     Ok(())

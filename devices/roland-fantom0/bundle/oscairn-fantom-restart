@@ -1,0 +1,17 @@
+#!/bin/sh
+# Restarts Oscairn's engine (and its UI) on the unit the way the boot script accepts: it stops
+# this bundle's Oscairn with oscairn-fantom-stop (the panel holder stays, so the panel keeps
+# reporting), which marks the stop as on purpose, then starts it again with oscairn-fantom-start,
+# --cold if the last start was one (var/oscairn/run/cold). oscairn-fantom-boot, if it runs, stays
+# in the foreground through both and does not count it as a crash. The start's environment
+# (OSCAIRN_WORKER_* and the other tuning variables) is this script's. Run by hand, as root,
+# outside the chroot, in the bundle that runs (docs/fantom-0.md, "Restarting Oscairn").
+#
+#   ./oscairn-fantom-restart
+set -u
+[ $# -eq 0 ] || { echo "usage: $0" >&2; exit 2; }
+root=$(cd -P "$(dirname "$0")" && pwd -P)
+cold=""
+[ ! -e "$root/var/oscairn/run/cold" ] || cold=--cold
+"$root/oscairn-fantom-stop" || exit 1
+exec "$root/oscairn-fantom-start" $cold

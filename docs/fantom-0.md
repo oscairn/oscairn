@@ -903,7 +903,23 @@ cd /home/root/oscairn
 ./oscairn-fantom-start --engine-only    # or the engine alone
 ./oscairn-fantom-stop               # the holder keeps the panel
 ./oscairn-fantom-stop --panel       # the panel silent until power-on
+./oscairn-fantom-restart            # stop and start again
 ```
+
+### Restarting Oscairn
+
+`oscairn-fantom-restart` stops this bundle's Oscairn (`oscairn-fantom-stop`, the panel holder
+left running) and starts it again (`oscairn-fantom-start`, `--cold` if the last start was; the
+start's tuning variables are the restart's environment). Use it, not a stop and start of your
+own, on a unit that has been power-cycled: `oscairn-fantom-boot` is then watching, and it
+treats the stop's mark and the start's lock as a deliberate restart, never as a crash, so it
+neither starts Oscairn itself nor counts the restart toward its fallback to Roland's app. (A
+stop followed by a start by hand in the same bundle is accepted the same way. The first restart
+after a power-on once ended with the boot script starting Roland's app: the start removes the
+stop's mark before its processes run, and the boot script, seeing neither, read it as a crash.)
+Swapping to another bundle: `oscairn-fantom-stop` in the running one, then the other's
+`oscairn-fantom-start`, as before; the mark holds the boot script until the new processes run
+(not tried with the boot script alive).
 
 ## The display
 
@@ -1105,8 +1121,17 @@ gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
    `oscairn-fantom-stop` was run (it leaves `var/oscairn/run/stopped`), it stays while the panel
    holder runs (Oscairn started again by hand is watched the same way) and ends once nothing is
    left.
-4. **The fallback:** when the start fails or runs out of time, or the app and engine end without
-   `oscairn-fantom-stop`, it runs `oscairn-fantom-stop --panel` and ends, logging that Roland's
+4. **A crash is restarted:** when the app and engine end without `oscairn-fantom-stop`, the
+   boot script runs `oscairn-fantom-start` again (with `--cold` if the last start was one, which
+   the start records in `var/oscairn/run/cold`), and logs "starting Oscairn again (restart n of
+   3 within 60 seconds)" to `boot.log`; the engine reopens the last Performance by itself.
+   `OSCAIRN_BOOT_RESTARTS` (3) restarts within `OSCAIRN_BOOT_RESTART_WINDOW` seconds (60) are
+   made; 0 turns restarting off. Not counted, and not a crash: `oscairn-fantom-stop`, and
+   [`oscairn-fantom-restart`](#restarting-oscairn), whose stop and start the boot script waits
+   through (a start in this bundle holds `var/oscairn/run/start.lock`; a lock older than the
+   start's 120 seconds is ignored).
+5. **The fallback:** when the start fails or runs out of time, or the restarts did not hold (the
+   end after the last of them within the window), it runs `oscairn-fantom-stop --panel` and ends, logging that Roland's
    app cannot be started again this boot: started again after it had run earlier in the same
    boot it showed "program version error". A power cycle, pressing TEMPO at the FANTOM picture if needed, gives
    Roland's system. A start that fails before it stopped Roland's app leaves the app running.
@@ -1181,8 +1206,10 @@ and, not dry, in a stand-in bundle with a stand-in `systemd-run`: the takeover s
 failing `systemd-run`, the second run in a boot, the attempt left, the dry-run file, `go.sh`'s
 line around them, and the takeover waiting for `mi078` and its hold on the panel, starting warm,
 staying while the engine runs, and stopping what it started (never starting `mi078`) after a
-failed or hung start, the engine ending unasked, or TEMPO held. None of the takeover has run on
-the unit.
+failed or hung start or TEMPO held; and the crash restarts (the engine killed once, restarted
+and logged; `--cold` when the last start was; the fallback after the restarts allowed within the
+window; the two settings; a deliberate stop; `oscairn-fantom-restart` four times with a slow
+start, not counted). None of the takeover has run on the unit, nor have the restarts.
 
 ## The panel reader
 

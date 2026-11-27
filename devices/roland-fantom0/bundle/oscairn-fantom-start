@@ -311,6 +311,8 @@ if [ -n "$cold" ]; then
 fi
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
+# How this start began, for oscairn-fantom-boot's and oscairn-fantom-restart's starts after it.
+if [ -z "$dry" ]; then if [ -n "$cold" ]; then : > "$state/run/cold"; else rm -f "$state/run/cold"; fi; fi
 # The display (docs/fantom-0.md, "The display"). Under Roland's Weston, with its GPU 2D renderer,
 # the audio threads stalled while the app drew (ST Final, 41 s: 774 deadline misses against 0 on
 # the bundle's own X server), so Oscairn owns the display: weston.service stopped (nothing of

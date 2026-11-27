@@ -46,8 +46,14 @@
 #      process ended. Stopped on purpose (oscairn-fantom-stop leaves var/oscairn/run/stopped), it
 #      stays while the panel holder runs (Oscairn started again by hand is watched the same way),
 #      and ends once nothing of it runs.
-#   5. The fallback, when the warm start fails or runs out of time, or the app and engine end
-#      without oscairn-fantom-stop: oscairn-fantom-stop --panel. Roland's application is not
+#   5. A crash: when the app and engine end without oscairn-fantom-stop, Oscairn is started again
+#      (oscairn-fantom-start, with --cold if the last start was; the engine reopens the last
+#      Performance), logged. OSCAIRN_BOOT_RESTARTS (3) restarts within OSCAIRN_BOOT_RESTART_WINDOW
+#      seconds (60) are made; the next end is the fallback. A stop through oscairn-fantom-stop, or
+#      oscairn-fantom-restart (stop and start; the start's lock var/oscairn/run/start.lock is
+#      waited out), is not a crash and is not counted.
+#      The fallback, when the warm start fails or runs out of time, or the restarts did not hold:
+#      oscairn-fantom-stop --panel. Roland's application is not
 #      started again: started again after it had run earlier in the same boot it showed "program
 #      version error". A power cycle, TEMPO pressed at the FANTOM picture if Oscairn would start again, gives Roland's
 #      system. A start that failed before Roland's application was stopped leaves it running.
@@ -83,6 +89,8 @@ run=${OSCAIRN_BOOT_RUN:-/run}
 limit=${OSCAIRN_BOOT_LIMIT:-120}
 systemd_run=${OSCAIRN_SYSTEMD_RUN:-systemd-run}
 settle=${OSCAIRN_TAKEOVER_SETTLE:-10}
+restarts=${OSCAIRN_BOOT_RESTARTS:-3}
+window=${OSCAIRN_BOOT_RESTART_WINDOW:-60}
 wait_limit=${OSCAIRN_TAKEOVER_WAIT:-60}
 state=$root/var/oscairn
 log=$boot/boot.log
@@ -135,19 +143,44 @@ fallback() {
 	fi
 	roland "Oscairn did not start or did not keep running"
 }
+# The app and engine ended without oscairn-fantom-stop: Oscairn started again (the engine reopens
+# the last Performance by itself), the way the last start was (var/oscairn/run/cold: --cold). After
+# $restarts restarts within $window seconds the next end is the fallback: what keeps failing is
+# left, and Roland's application takes the unit as it would at a plain boot.
+tries=""
+restart() {
+	now=$(date +%s) keep=""
+	for t in $tries; do [ $((now - t)) -lt "$window" ] && keep="$keep $t"; done
+	tries=$keep
+	n=$(echo $tries | wc -w)
+	if [ -n "$dry" ]; then
+		say "would start Oscairn again, up to $restarts times within $window seconds, before the fallback"
+		fallback "$1"
+	fi
+	[ "$n" -lt "$restarts" ] || fallback "$1, and $n restarts within the last $window seconds did not keep it running"
+	tries="$tries $now"
+	say "$1; starting Oscairn again (restart $((n + 1)) of $restarts within $window seconds)"
+	cold=""; [ ! -e "$state/run/cold" ] || cold=--cold
+	bounded "$limit" "$root/oscairn-fantom-start" $cold || say "oscairn-fantom-start failed or ran out of its $limit seconds"
+}
 # 4. In the foreground for as long as Oscairn runs (above).
 watch() {
-	quiet=""
+	quiet="" lockfrom=""
 	while :; do
 		if [ -n "$(named Oscairn)$(named oscairn-engine)$(named oscairn-ui)" ]; then
 			[ -n "$quiet" ] || say "Oscairn runs; staying in the foreground while it does"
-			quiet=1
+			quiet=1 lockfrom=""
+		elif [ -d "$state/run/start.lock" ] && [ $(( $(date +%s) - ${lockfrom:=$(date +%s)} )) -lt "$limit" ]; then
+			# A start by hand (or oscairn-fantom-restart) in this bundle: it clears the stopped mark
+			# before its processes run. A lock left behind is given up on after $limit seconds.
+			quiet=""
 		elif [ -e "$state/run/stopped" ]; then
 			[ -n "$(named oscairn-panel-h)" ] || { say "stopped on purpose and the panel holder is gone: nothing left to keep"; exit 0; }
 			[ "$quiet" = held ] || say "Oscairn was stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs"
 			quiet=held
 		else
-			fallback "the app and its engine ended without oscairn-fantom-stop"
+			restart "the app and its engine ended without oscairn-fantom-stop"
+			quiet="" lockfrom=""
 		fi
 		sleep "$poll"
 	done

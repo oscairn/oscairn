@@ -13,7 +13,7 @@ scripts=$1
 fail=0
 check() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1"; fail=1; fi; }
 
-for s in oscairn-fantom-start oscairn-fantom-stop oscairn-fantom-boot; do
+for s in oscairn-fantom-start oscairn-fantom-stop oscairn-fantom-boot oscairn-fantom-restart; do
 	check "$s parses" "sh -n '$scripts/$s'"
 done
 
@@ -306,7 +306,7 @@ check "boot, the panel free again: Roland's application, nothing still holds" "[
 fb=$bundle/fakeboot
 mkdir -p "$fb/b" "$fb/run" "$fb/dir" "$fb/proc"
 : > "$fb/dir/roland-first"
-cp "$scripts/oscairn-fantom-boot" "$fb/b/"
+cp "$scripts/oscairn-fantom-boot" "$scripts/oscairn-fantom-restart" "$fb/b/"
 printf '#!/bin/sh\necho systemd-run "$@" >> "$(dirname "$0")/ran"\n[ ! -e "$(dirname "$0")/sysrun-fails" ]\n' > "$fb/b/systemd-run"
 cat > "$fb/b/oscairn-fantom-start" <<'EOF'
 #!/bin/sh
@@ -314,14 +314,25 @@ d=$(dirname "$0")
 echo start "$@" >> "$d/ran"
 [ ! -e "$d/fails-early" ] || exit 1
 rm -rf "$OSCAIRN_PROC/500"
+# As the real start: its lock held while it runs, the stopped mark cleared at once, the engine up later.
+s=$d/var/oscairn/run; mkdir -p "$s"; mkdir "$s/start.lock" 2>/dev/null || exit 1
+trap 'rmdir "$s/start.lock"' EXIT
+rm -f "$s/stopped"
+[ ! -e "$d/slow" ] || sleep 1
 [ ! -e "$d/hang" ] || exec sleep 30
 [ ! -e "$d/fails" ] || exit 1
 mkdir -p "$OSCAIRN_PROC/4242" && echo oscairn-engine > "$OSCAIRN_PROC/4242/comm"
 EOF
-printf '#!/bin/sh\necho stop "$@" >> "$(dirname "$0")/ran"\n' > "$fb/b/oscairn-fantom-stop"
+cat > "$fb/b/oscairn-fantom-stop" <<'EOF'
+#!/bin/sh
+d=$(dirname "$0")
+echo stop "$@" >> "$d/ran"
+mkdir -p "$d/var/oscairn/run" && : > "$d/var/oscairn/run/stopped"
+rm -rf "$OSCAIRN_PROC/4242"
+EOF
 chmod +x "$fb/b"/*
 real() { rm -f "$fb/b/ran"; out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_SYSTEMD_RUN="$fb/b/systemd-run" "$fb/b/oscairn-fantom-boot" 2>&1); status=$?; }
-fresh() { rm -rf "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/fails-early" "$fb/b/hang" "$fb/b/sysrun-fails" "$fb/proc"/*; }
+fresh() { rm -rf "$fb/run"/* "$fb/dir/attempt" "$fb/b/fails" "$fb/b/fails-early" "$fb/b/hang" "$fb/b/slow" "$fb/b/var" "$fb/b/sysrun-fails" "$fb/proc"/*; }
 # The direct start for real: no roland-first, the stand-in start failing: its stop, then Roland's application.
 fresh; rm -f "$fb/dir/roland-first"; : > "$fb/b/fails"; real
 check "real, no roland-first: a failed --cold start is stopped, attempt removed, Roland's application" "[ $status = 3 ] && grep -q 'start --cold' '$fb/b/ran' && grep -q 'stop --panel' '$fb/b/ran' && [ ! -e '$fb/dir/attempt' ] && ! grep -q systemd-run '$fb/b/ran'"
@@ -350,7 +361,7 @@ check "go.sh: exit 0 once Oscairn ran starts nothing" "[ -z \"\$(gosh '$fb/zero'
 
 # --takeover for real on the stand-in /proc: mi078 as pid 500, its hold on the panel a link.
 mi078() { mkdir -p "$fb/proc/500/fd" && echo mi078 > "$fb/proc/500/comm"; [ -z "${1:-}" ] || ln -sf "$OSCAIRN_PANEL_DEVICE" "$fb/proc/500/fd/3"; }
-tk() { rm -f "$fb/b/ran"; : > "$fb/dir/attempt"; OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 OSCAIRN_TAKEOVER_SETTLE=0 OSCAIRN_TAKEOVER_WAIT=${2:-5} "$fb/b/oscairn-fantom-boot" --takeover > "$fb/tk.out" 2>&1; }
+tk() { rm -f "$fb/b/ran"; : > "$fb/dir/attempt"; OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_RESTARTS=0 OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 OSCAIRN_TAKEOVER_SETTLE=0 OSCAIRN_TAKEOVER_WAIT=${2:-5} "$fb/b/oscairn-fantom-boot" --takeover > "$fb/tk.out" 2>&1; }
 until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
 fresh; tk & watcher=$!
 sleep 0.5; mi078; sleep 1.5
@@ -372,6 +383,51 @@ fresh; tk 1 1; status=$?
 check "takeover: mi078 never starting: gives up, attempt removed" "[ $status = 0 ] && grep -q 'mi078 did not start within 1 seconds' '$fb/tk.out' && [ ! -e '$fb/b/ran' ] && [ ! -e '$fb/dir/attempt' ]"
 fresh; out=$(OSCAIRN_KEY_HELD="sh -c 'exit 1'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" "$bundle/oscairn-fantom-boot" --takeover --dry-run 2>&1); status=$?
 check "takeover --dry-run: the waits and the warm start's dry run, nothing changed" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would wait (at most 60 s) for mi078 to run' && echo \"\$out\" | grep -q 'oscairn-fantom-start: would run' && ! echo \"\$out\" | grep -q -e '--cold' && [ ! -e '$fb/run/oscairn-boot-started' ]"
+
+# A crash restarted (the boot script's step 5), for real on the stand-in /proc: the engine as pid
+# 4242, the panel holder as 4243; the stand-in start puts the engine back and the stand-in stop
+# makes the mark and ends it.
+up() { mkdir -p "$fb/proc/4242" && echo oscairn-engine > "$fb/proc/4242/comm"; }
+holder() { mkdir -p "$fb/proc/4243" && echo oscairn-panel-h > "$fb/proc/4243/comm"; }
+sv() { rm -f "$fb/b/ran"; ( [ $# -eq 0 ] || export "$@"; OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_POLL=0.1 OSCAIRN_BOOT_LIMIT=5 exec "$fb/b/oscairn-fantom-boot" --supervise ) > "$fb/sv.out" 2>&1 & watcher=$!; sleep 0.5; }
+# The engine killed, then the wait until the boot script has it back (or has ended).
+crash() { rm -rf "$fb/proc/4242"; i=0; until [ -d "$fb/proc/4242" ] || ! kill -0 $watcher 2>/dev/null || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done; sleep 0.4; }
+endsv() { kill $watcher 2>/dev/null; wait $watcher 2>/dev/null; }
+starts() { grep -c '^start' "$fb/b/ran"; }
+fresh; up; sv
+crash
+check "restart: the engine killed once, Oscairn started again, logged in the output and boot.log" "kill -0 $watcher && [ \"\$(starts)\" = 1 ] && ! grep -q 'start --cold' '$fb/b/ran' && grep -q 'ended without oscairn-fantom-stop; starting Oscairn again (restart 1 of 3 within 60 seconds)' '$fb/sv.out' && grep -q 'starting Oscairn again (restart 1 of 3' '$fb/dir/boot.log' && ! grep -q 'stop --panel' '$fb/b/ran'"
+mkdir -p "$fb/b/var/oscairn/run"; : > "$fb/b/var/oscairn/run/cold"
+crash
+check "restart: started with --cold as the last start was (var/oscairn/run/cold), the second restart counted" "kill -0 $watcher && grep -q '^start --cold' '$fb/b/ran' && grep -q 'restart 2 of 3' '$fb/sv.out'"
+crash
+check "restart: the third restart, still kept" "kill -0 $watcher && [ \"\$(starts)\" = 3 ] && grep -q 'restart 3 of 3' '$fb/sv.out'"
+crash
+check "restart: the end after the third restart within the window is the fallback: the stop, Roland's application, why in boot.log" "until_done $watcher && [ \"\$(starts)\" = 3 ] && grep -q 'stop --panel' '$fb/b/ran' && grep -q '3 restarts within the last 60 seconds did not keep it running' '$fb/dir/boot.log' && grep -q '$roland' '$fb/sv.out'"
+fresh; up; sv OSCAIRN_BOOT_RESTARTS=1
+crash; crash
+check "restart: OSCAIRN_BOOT_RESTARTS=1: one restart, the second end the fallback" "until_done $watcher && [ \"\$(starts)\" = 1 ] && grep -q '1 restarts within the last 60 seconds' '$fb/sv.out' && grep -q 'stop --panel' '$fb/b/ran'"
+fresh; up; sv OSCAIRN_BOOT_RESTARTS=0
+crash
+check "restart: OSCAIRN_BOOT_RESTARTS=0: no restart, the fallback at once" "until_done $watcher && [ ! -e '$fb/proc/4242' ] && ! grep -q '^start' '$fb/b/ran' && grep -q 'stop --panel' '$fb/b/ran'"
+fresh; up; sv OSCAIRN_BOOT_RESTARTS=1 OSCAIRN_BOOT_RESTART_WINDOW=1
+crash; sleep 1.2; crash
+check "restart: OSCAIRN_BOOT_RESTART_WINDOW=1: ends more than a second apart do not add up, started again each time" "kill -0 $watcher && [ \"\$(starts)\" = 2 ] && ! grep -q 'stop --panel' '$fb/b/ran'"
+endsv
+fresh; up; holder; sv
+OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-stop"; sleep 0.6
+check "restart: oscairn-fantom-stop is a deliberate stop: no restart, boot stays while the holder runs" "kill -0 $watcher && ! grep -q '^start' '$fb/b/ran' && ! grep -q 'stop --panel' '$fb/b/ran' && grep -q 'stopped on purpose' '$fb/sv.out'"
+endsv
+# The restart command four times (more than the three restarts allowed), its start taking a second
+# after it cleared the mark: not a crash, nothing counted, Oscairn back each time.
+fresh; up; holder; : > "$fb/b/slow"; sv
+i=0; while [ $i -lt 4 ]; do OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-restart" > /dev/null 2>&1; i=$((i + 1)); done
+sleep 0.5
+check "restart command: four times, each a stop then a start: Oscairn back, no crash seen, no fallback" "kill -0 $watcher && [ -d '$fb/proc/4242' ] && [ \"\$(starts)\" = 4 ] && ! grep -q 'starting Oscairn again' '$fb/sv.out' && ! grep -q 'stop --panel' '$fb/b/ran'"
+mkdir -p "$fb/b/var/oscairn/run"; : > "$fb/b/var/oscairn/run/cold"
+OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-restart" > /dev/null 2>&1
+check "restart command: the start is --cold when the last was, and the boot script stays" "kill -0 $watcher && tail -n 1 '$fb/b/ran' | grep -q '^start --cold'"
+endsv
 
 # Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
 fake=$bundle/fakeproc

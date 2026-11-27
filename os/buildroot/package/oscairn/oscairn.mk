@@ -47,6 +47,7 @@ define OSCAIRN_INSTALL_FANTOM0_SCRIPTS
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-start $(TARGET_DIR)/oscairn-fantom-start
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-stop $(TARGET_DIR)/oscairn-fantom-stop
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-boot $(TARGET_DIR)/oscairn-fantom-boot
+	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-restart $(TARGET_DIR)/oscairn-fantom-restart
 	mkdir -p $(TARGET_DIR)/usr/share/oscairn
 	python3 $(@D)/devices/roland-fantom0/tools/splash_raw.py $(@D)/branding/splash.png $(TARGET_DIR)/usr/share/oscairn/splash-720x1280.bgrx.gz
 endef

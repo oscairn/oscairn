@@ -336,6 +336,8 @@ struct Plugin {
                 auto& s = get(p); s.main(); if (s.active) ++threadErrors;
                 // One slow load, for hosts' reply timeouts: when the file named here exists, it is removed and the load takes 6 s.
                 if (const char* once = std::getenv("KICK_FIXTURE_SLOW_LOAD_ONCE")) if (std::remove(once) == 0) std::this_thread::sleep_for(std::chrono::seconds(6));
+                // Refuses every load while the file named here exists, for tests of what a host does with a refused state.
+                if (const char* refuse = std::getenv("KICK_FIXTURE_REFUSE_STATE")) if (std::filesystem::exists(refuse)) return false;
                 double value = 0;
                 if (in->read(in, &value, sizeof(value)) != sizeof(value) || !std::isfinite(value)) return false;
                 // After the gain, optionally a sound asset ("library\0path"), which must resolve, as a

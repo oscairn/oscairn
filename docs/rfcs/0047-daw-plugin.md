@@ -12,7 +12,7 @@ of u-he and Bitwig. Oscairn is not affiliated with or endorsed by any of them.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Wrapper core around one Performance (#293)
+- [x] 1. Wrapper core around one Performance (#293)
 - [ ] 2. CLAP format (#294)
 - [ ] 3. VST3 format (#295)
 - [ ] 4. AU format (#296)
@@ -43,7 +43,10 @@ of outputs, a project file that must open later, and a host that must not crash.
 
 Each plugin instance holds one Performance, picked in the editor from the library. Setlists,
 Groovebox and Recordings are not in the plugin. The wrapper core (step 1) is shared by every
-format; each format is a thin shell over it.
+format; each format is a thin shell over it. It is `hosts/plugin-core`, in C++ over the engine's
+Session: the instance's Session runs on a control thread of its own, where picks and restores
+load while the DAW's blocks keep playing; the state is the Performance's identity and its folder
+as Session::savePerformance writes it, versioned; `oscairn-plugin-core-test` is its test host.
 
 ### Parameter slots
 

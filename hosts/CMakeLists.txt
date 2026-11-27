@@ -67,6 +67,7 @@ if(OSCAIRN_LV2 AND EXISTS "${OSCAIRN_LV2_EXAMPLE_DIR}/eg-fifths.lv2/manifest.ttl
 endif()
 
 if(UNIX)
+    add_subdirectory(plugin-core)
     add_subdirectory(process)
     add_executable(oscairn-sound-picker-test standalone/tests/sound_picker.cpp standalone/SoundPickerModel.cpp)
     target_link_libraries(oscairn-sound-picker-test PRIVATE oscairn_control_socket)

@@ -15,6 +15,10 @@ Programs built on the core: a file renderer, a live audio/MIDI engine and a desk
 - `engine/`: `oscairn-engine`, a console process that owns that audio/MIDI adapter and a
   local JSON-RPC server. No JUCE GUI modules are linked. Closing a connected controller
   does not close the audio engine or reset its transport/held notes.
+- `plugin-core/`: the DAW plugin's core ([RFC 0047](../docs/rfcs/0047-daw-plugin.md) step 1),
+  a library every plugin format wraps: one Performance per instance, picked from the library and
+  loaded on a control thread of its own while the DAW's blocks keep playing, its state the whole
+  Performance as the engine saves it. No device layer: the DAW's blocks are the clock.
 - `process/`: desktop helper startup and lifetime locks, independent of JUCE. A
   launcher attaches to a running engine or starts the bundled helper. Its destruction
   leaves that helper alive. Concurrent launches share one engine per plugin directory and audio configuration.

@@ -252,3 +252,197 @@ impl Menu {
         slint::Model::row_count(&*self.rows)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn menu() -> Menu {
+        Menu { ui: slint::Weak::default(), levels: vec![], rows: Rc::new(VecModel::default()) }
+    }
+
+    /// The index of the cursor's row, or None when the list is empty or the cursor nowhere.
+    fn at(m: &Menu) -> Option<usize> {
+        m.labels().iter().position(|(_, _, c)| *c)
+    }
+
+    fn sample() -> Vec<Item> {
+        vec![
+            Item::head("Curve"),
+            Item::ticked("Curve A", 0, true),
+            Item::choice("Curve B", 1),
+            Item::choice("Curve C", 2).off(),
+            Item::sub("More", vec![Item::choice("Inner", 9)]),
+        ]
+    }
+
+    #[test]
+    fn rows_carry_what_they_are() {
+        let head = Item::head("H");
+        let dis = Item::choice("X", 1).off();
+        let sub = Item::sub("S", vec![]);
+        assert!(!head.selectable(), "a heading is not chosen");
+        assert_eq!(Item::head("H").tick, None);
+        let ticked = Item::ticked("T", 2, false);
+        assert_eq!((ticked.tick, ticked.enabled, ticked.kind), (Some(false), true, Kind::Choice(2)));
+        assert!(!dis.selectable(), "an off row is not chosen");
+        assert!(!sub.selectable(), "an empty submenu is not chosen");
+        assert_eq!((sub.enabled, sub.kind), (false, Kind::Sub(vec![])));
+        let on = Item::sub("S", vec![Item::choice("A", 0)]);
+        assert!(on.selectable(), "a submenu with a list can be chosen");
+    }
+
+    #[test]
+    fn opens_on_the_first_row_that_can_be_chosen() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        assert_eq!(at(&m), Some(1), "a heading and an off row are skipped");
+        let mut m = menu();
+        m.push("t".into(), vec![Item::head("H"), Item::head("G")]);
+        assert_eq!(at(&m), Some(0), "nothing to choose: the first row");
+        let mut m = menu();
+        m.push("t".into(), vec![]);
+        assert_eq!(at(&m), None, "no rows");
+        assert_eq!(m.press(0), Outcome::Stay, "a press on an empty list");
+    }
+
+    #[test]
+    fn the_cursor_steps_along_the_rows_that_can_be_chosen() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        m.step(1);
+        assert_eq!(at(&m), Some(2), "over the off row to Curve B");
+        m.step(1);
+        assert_eq!(at(&m), Some(4), "to the submenu");
+        m.step(1);
+        assert_eq!(at(&m), Some(4), "held at the end");
+        m.step(-1);
+        assert_eq!(at(&m), Some(2));
+        m.step(2);
+        assert_eq!(at(&m), Some(4), "over the off row, held at the end");
+        m.step(-99);
+        assert_eq!(at(&m), Some(1), "held at the start");
+    }
+
+    #[test]
+    fn step_stands_still_with_nothing_to_choose() {
+        let mut m = menu();
+        m.push("t".into(), vec![Item::head("H"), Item::choice("X", 1).off()]);
+        assert_eq!(at(&m), Some(0));
+        m.step(1);
+        assert_eq!(at(&m), Some(0), "no row can be chosen");
+        let mut m = menu();
+        m.push("t".into(), vec![Item::choice("Only", 1)]);
+        m.step(5);
+        m.step(-5);
+        assert_eq!(at(&m), Some(0), "one row: held");
+    }
+
+    #[test]
+    fn a_press_chooses_opens_or_does_nothing() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        assert_eq!(m.press(5), Outcome::Stay, "an out-of-range row");
+        assert_eq!(m.press(3), Outcome::Stay, "an off row");
+        assert_eq!(m.press(0), Outcome::Stay, "a heading");
+        assert_eq!(at(&m), Some(1), "none of those moved the cursor");
+        assert_eq!(m.press(1), Outcome::Choose(0), "a ticked choice chooses its number");
+        assert!(m.levels.is_empty(), "choosing closed the menu");
+    }
+
+    #[test]
+    fn a_submenu_opens_its_list_and_back_returns() {
+        let mut m = menu();
+        m.push("t".into(), vec![Item::sub("More", vec![Item::choice("Inner", 7)])]);
+        assert_eq!(m.press(0), Outcome::Stay, "opening is not choosing");
+        assert_eq!(at(&m), Some(0), "the inner row is chosen");
+        assert_eq!(m.labels(), vec![("Inner".to_string(), None, true)]);
+        assert_eq!(m.back(), Outcome::Stay, "back goes up a level");
+        assert_eq!(m.labels(), vec![("More".to_string(), None, true)]);
+        assert_eq!(m.back(), Outcome::Close, "back at the first closes");
+        assert!(m.labels().is_empty());
+    }
+
+    #[test]
+    fn tap_presses_the_view_row_and_closes_with_a_choice() {
+        let mut m = menu();
+        m.push("t".into(), vec![Item::choice("A", 5), Item::head("H"), Item::choice("B", 6)]);
+        assert_eq!(m.tap(2), Outcome::Choose(6), "row 2 of the view");
+        assert!(m.labels().is_empty(), "the choice closed it");
+        let mut m = menu();
+        m.push("t".into(), vec![Item::choice("A", 5), Item::head("H")]);
+        assert_eq!(m.tap(1), Outcome::Stay, "a heading in the view");
+    }
+
+    #[test]
+    fn confirm_chooses_the_cursor_and_cancel_goes_back() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        assert_eq!(m.act(Action::Confirm(None)), Outcome::Choose(0), "confirm presses the cursor's row");
+        assert!(m.labels().is_empty());
+        let mut m = menu();
+        m.push("t".into(), sample());
+        assert_eq!(m.act(Action::Cancel(None)), Outcome::Close);
+        assert!(m.labels().is_empty());
+        let mut m = menu();
+        assert_eq!(m.act(Action::Confirm(None)), Outcome::Stay, "nothing open");
+    }
+
+    #[test]
+    fn the_arrows_move_and_end_jumps_to_an_end() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        assert_eq!(m.act(Action::Arrow { dx: 1, dy: 0 }), Outcome::Stay, "an arrow step");
+        assert_eq!(at(&m), Some(2));
+        m.act(Action::End(1));
+        assert_eq!(at(&m), Some(4), "End 1 to the last row that can be chosen");
+        m.act(Action::End(-1));
+        assert_eq!(at(&m), Some(1), "End -1 to the first");
+        m.act(Action::End(1));
+        assert_eq!(at(&m), Some(4));
+        m.act(Action::End(1));
+        assert_eq!(at(&m), Some(4), "End past the end is held");
+    }
+
+    #[test]
+    fn a_page_turns_the_view_and_holds_at_the_ends() {
+        let items: Vec<Item> = (0..5).map(|i| Item::choice(format!("R{i}"), i)).collect();
+        let mut m = menu();
+        m.push("t".into(), items);
+        assert_eq!(at(&m), Some(0));
+        m.turn(1);
+        assert_eq!(at(&m), Some(1), "a page lands on the first row that can be chosen of that view");
+        m.turn(99);
+        assert_eq!(at(&m), Some(4), "past the last view: held at the end");
+        m.turn(-99);
+        assert_eq!(at(&m), Some(0), "past the first: held at the start");
+    }
+
+    #[test]
+    fn start_moves_the_cursor_only_to_a_row_that_can_be_chosen() {
+        let mut m = menu();
+        m.push("t".into(), sample());
+        m.start(3);
+        assert_eq!(at(&m), Some(1), "an off row is not a start");
+        m.start(2);
+        assert_eq!(at(&m), Some(2));
+        m.start(9);
+        assert_eq!(at(&m), Some(2), "out of range: unchanged");
+        m.start(0);
+        assert_eq!(at(&m), Some(2), "a heading is not a start");
+    }
+
+    #[test]
+    fn a_detached_menu_has_no_window_and_leaves_empty_titles_out_of_the_path() {
+        let m = menu();
+        assert_eq!(m.per_view(), 1, "no window: one row a view");
+        let mut m = menu();
+        m.push("".into(), sample());
+        m.push("Second".into(), sample());
+        assert_eq!(m.path(), "Second", "empty titles are left out, the rest joined");
+        let mut m = menu();
+        m.push("First".into(), sample());
+        m.push("Second".into(), sample());
+        assert_eq!(m.path(), "First › Second");
+    }
+}

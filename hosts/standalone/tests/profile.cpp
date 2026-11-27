@@ -81,6 +81,21 @@ int main()
         check(refused(replaced(fantomJson, "\"device\": \"/dev/ttyGS0\"", "\"device\": \"/dev/ttyGS0\", \"map\": \"x\"")), "a keyboard takes no map");
         check(refused(replaced(fantomJson, "\"localOff\": true", "\"localOff\": 1")), "localOff is true or false");
         check(loadProfile("fantom-07").rolandNextBoot && refused(replaced(fantomJson, "\"rolandNextBoot\": true", "\"rolandNextBoot\": 1")), "a rolandNextBoot that is not true or false is refused");
+        // Issue 217 (RFC 0028): the install block. The FANTOM-07 installs as an app and a boot hook, updates by a
+        // bundle swap and has room for two; the desktop says desktop; a profile without the block states nothing.
+        check(fantom.install.method == "app-and-boot-hook" && fantom.install.update == "bundle-swap" && fantom.install.systems == 2 && fantom.install.userData == "with-system",
+              "the FANTOM-07's install: app and boot hook, bundle swap, two systems, user data with the system");
+        check(loadProfile("").install.method == "desktop" && loadProfile("").install.update == "none" && loadProfile("").install.userData == "separate" && kick.install.method.empty() && kick.install.systems == 0,
+              "the desktop's install says desktop; a profile without one states nothing");
+        const std::string fantomInstall = "\"method\": \"app-and-boot-hook\"";
+        check(refused(replaced(fantomJson, fantomInstall, "\"method\": \"flash\"")), "an install method that is not known is refused");
+        check(refused(replaced(fantomJson, "\"update\": \"bundle-swap\"", "\"update\": \"ota\"")), "an update method that is not known is refused");
+        check(refused(replaced(fantomJson, "\"userData\": \"with-system\"", "\"userData\": \"elsewhere\"")), "a user data place that is not known is refused");
+        check(refused(replaced(fantomJson, "\"systems\": 2", "\"systems\": 3")), "more than two systems is refused");
+        check(refused(replaced(fantomJson, "\"systems\": 2", "\"systems\": 0")), "no systems is refused");
+        const auto ab = replaced(fantomJson, "\"update\": \"bundle-swap\"", "\"update\": \"ab\"");
+        check(!refused(ab) && refused(replaced(ab, "\"systems\": 2", "\"systems\": 1")), "ab with room for two systems parses, for one is refused");
+        check(refused(replaced(fantomJson, ", \"userData\": \"with-system\"", "")), "an install block missing a field is refused");
         using Key = std::pair<std::string, int>;
         check(fantom.inputKeys.protocol == "linux-input" && fantom.inputKeys.name == "gpio-keys" && kick.inputKeys.name.empty() &&
               fantom.inputKeys.keys == std::vector<Key>{{"write", 157}, {"menu", 139}, {"tempo", 152}}, "the FANTOM-07's WRITE, MENU and TEMPO: gpio-keys 157, 139 and 152");

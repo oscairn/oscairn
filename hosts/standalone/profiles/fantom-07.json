@@ -45,5 +45,6 @@
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,
   "rolandNextBoot": true,
+  "install": { "method": "app-and-boot-hook", "update": "bundle-swap", "systems": 2, "userData": "with-system" },
   "estimated": ["audio", "controls", "midi"]
 }

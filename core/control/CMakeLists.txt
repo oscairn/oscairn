@@ -433,6 +433,11 @@ target_link_libraries(oscairn-reload-recovery-test PRIVATE oscairn_control)
 add_test(NAME control-reload-recovery COMMAND oscairn-reload-recovery-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(control-reload-recovery PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
+add_executable(oscairn-refused-state-test tests/refused_state.cpp)
+target_link_libraries(oscairn-refused-state-test PRIVATE oscairn_control)
+add_test(NAME control-refused-state COMMAND oscairn-refused-state-test $<TARGET_FILE:kick-clap-fixture-normal>)
+add_test(NAME control-refused-state-workers COMMAND oscairn-refused-state-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-plugin-worker>)
+
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
 target_link_libraries(oscairn-sound-presets-test PRIVATE oscairn_control_json)
 add_test(NAME control-sound-presets COMMAND oscairn-sound-presets-test $<TARGET_FILE:oscairn_basic_synth>)

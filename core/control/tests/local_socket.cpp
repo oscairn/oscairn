@@ -701,6 +701,36 @@ namespace
             check(remote.sounds(remote.nodeId("synth")).contexts.size()==1,"remote restored sound list");
         });
     }
+    // RFC 0025, a plugin update: a version with no record of its own is priced from the newest older
+    // version's (`earlier`), and budget.estimate reaches that figure over the socket: the remote client
+    // reads `earlier` true for such a plugin (control.h's Cost::earlier). The saved Performance is
+    // estimated before the plugin plays, so the older version's figures still stand (playing would
+    // give the version a record of its own and `earlier` would be false).
+    void estimateEarlier(const char* plugin)
+    {
+        const char* kept_=std::getenv("OSCAIRN_DATA_HOME");const std::string was_=kept_?kept_:"";
+        TemporaryDirectory root;const auto home=root.child("older");
+        std::filesystem::create_directories(home);
+        std::ofstream(home+"/measurements.json")<<"{\"version\":6,\"plugins\":{\"org.oscairn.test.control@0.0.1\":{\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000,\"samples\":10000}}}\n";
+        ::setenv("OSCAIRN_DATA_HOME",home.c_str(),1);
+        const auto dir=home+"/saved";
+        {Session s(48000,64);const auto node=s.add("a",plugin);s.commit();s.savePerformance(dir);}
+        Fixture f(plugin);f.session.setBudget({.9,0}); // a CPU budget reads the measurements (RFC 0025)
+        auto fd=pair();f.server.adopt(fd[0]);
+        { // the client asks and waits; the fixture's server answers without rendering audio, so the
+          // version's own measurement is not started and the older version's figures stand.
+            std::atomic<bool> done=false;std::exception_ptr failure;
+            std::thread client([&]{try{
+                LocalClient client;client.adopt(fd[1]);RemoteControl remote(client);
+                const auto e=remote.estimate(dir);
+                check(e.plugins.size()==1 && e.plugins.at(0).earlier,
+                      "an update is priced from the older version's figures through the remote control: earlier true");
+            }catch(...){failure=std::current_exception();}done=true;});
+            while(!done){const auto time=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();f.server.poll(time);f.session.service();std::this_thread::yield();}
+            client.join();if(failure)std::rethrow_exception(failure);
+        }
+        ::setenv("OSCAIRN_DATA_HOME",was_.c_str(),1);
+    }
     void instanceClient(const char* plugin)
     {
         TemporaryDirectory directory;const auto state=(std::filesystem::path(directory.path)/"sound").string();
@@ -1064,7 +1094,7 @@ int main(int argc,char** argv)
         if(argc==3 && std::string_view(argv[2])=="--path-policy"){pathPolicy(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--named")return named(argv[1],argv[0]);
         if(argc!=2)return 2;
-        framing(argv[1]);apps(argv[1]);permissions(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
+        framing(argv[1]);apps(argv[1]);permissions(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);estimateEarlier(argv[1]);controllerCrash(argv[1],argv[0]);
         std::cout<<"ok: real Unix streams, framing, backpressure, notifications, reconnect, continuing audio and client failures\n";
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

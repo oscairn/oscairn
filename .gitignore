@@ -8,3 +8,5 @@ demo/
 build-tsan/
 build-asan/
 .cache/
+__pycache__/
+*.pyc

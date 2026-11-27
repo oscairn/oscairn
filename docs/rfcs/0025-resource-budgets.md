@@ -325,7 +325,7 @@ never write the user's data folder.
   **Given up in steps** (issue 330, the owner's rule of 2026-11-27: the new Performance loads; the last one's
   held notes ring on, but never at the price of the new one not loading). An incoming node whose saved state an
   open instance holds as it is (opened from it, or from a state of the same bytes, and changed by nothing since)
-  keeps that instance, sounding or not, so it counts once: the same Performance loaded again with a pedaled
+  keeps that instance while it sounds (a silent one is taken over as before, its state compared with the file), so it counts once: the same Performance loaded again with a pedaled
   chord needs one copy in memory, not two (TSO Carol Bells at about 230 MB, twice past the FANTOM's 420 MB).
   When the two still do not fit together, the load (`Session::estimate` with `Steps`) lets go of the outgoing
   plugins in order until the incoming one fits beside what is left: first, short of memory, those making no

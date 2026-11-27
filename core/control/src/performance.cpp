@@ -1031,8 +1031,8 @@ std::vector<Session::Free> Session::freeInstances(bool all,const std::set<NodeId
     return out;
 }
 
-// Issue 330 (A). Nothing is saved from the instance to compare (a whole-state save while it sounds resets it in a worker:
-// learning 2026-11-21): it opened from that state (its source, or a state of the same bytes) and nothing changed it since,
+// Issue 330 (A), for an instance that sounds. Nothing is saved from it to compare (a whole-state save while it sounds resets it in a
+// worker: learning 2026-11-21): it opened from that state (its source, or a state of the same bytes) and nothing changed it since,
 // no edit of this Performance (a control moved counts) and none in its plugin's own editor (a gesture, edited_).
 NodeId Session::holding(const fs::path& root,const std::string& key,const std::string& id,const std::string& version,const std::set<NodeId>& skip) const {
     if(keepInstances_ || unsaved())return 0; // an audition takes nothing set aside over
@@ -1042,6 +1042,9 @@ NodeId Session::holding(const fs::path& root,const std::string& key,const std::s
     std::optional<std::string> digest;
     for(const auto& [n,name]:nodes_){
         const auto loaded=loaded_.find(n);if(skip.count(n) || edited_.count(n) || loaded==loaded_.end())continue;
+        // Silent three seconds: take compares it with the file and resets it, or gives it the state again where they differ (a
+        // Sampler loaded fresh saves another state than its file until it is given it again: FANTOM k8). Unseen only what sounds.
+        if(graph_.silent(n,uint64_t(sampleRate_*3)))continue;
         const auto& h=graph_.host(n);
         if(h.descriptor().id!=id || h.descriptor().version!=version || !h.failure().empty() || dynamic_cast<const SoundContext*>(&h))continue;
         // An earlier change's tail still ringing out of it: its ring-out routes are this node's, which a kept instance leaves behind.

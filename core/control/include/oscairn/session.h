@@ -538,7 +538,7 @@ namespace oscairn
         Estimate estimate(const std::string& directory, bool share, Steps* steps = nullptr);
         // Issue 330 (A): an open node whose instance holds the saved state of node `key` of the Performance in `root` (opened from it,
         // or from a state of the same bytes), of plugin `id` `version`, changed by nothing since, and not in `skip`: that node keeps
-        // it as it is, sounding or not (no save, load or reset, so a held note goes on); 0: none.
+        // it as it is while it sounds (no save, load or reset, so a held note goes on; a silent one is taken over, compared); 0: none.
         NodeId holding(const std::filesystem::path& root, const std::string& key, const std::string& id, const std::string& version, const std::set<NodeId>& skip) const;
         // Those of `kept` that no outgoing node not kept plays into while it sounds: a tail ringing out through its own chain
         // needs that chain carried over (Graph::ringOut), so a node it feeds is not kept for the next one.

@@ -390,6 +390,52 @@ namespace
     // Issue 330's steps (control-performance-switch-steps, OSCAIRN_SWITCH_STEPS): on their own, the rest of this one is long enough.
     void issue330(char** argv, const fs::path& tempPath, const fs::path& samples)
     {
+        // With a build of the Sampler (OSCAIRN_SWITCH_SAMPLER) and a folder holding sine.osp (OSCAIRN_SWITCH_SAMPLES): FANTOM k6's
+        // "again" series as on the unit, five Sampler parts each through a Delay; A, A four more times, a synth through a Delay,
+        // then A: the return takes A's instances kept warm back holding A's state, as many as a series without the repeats.
+        if(const char* sampler = std::getenv("OSCAIRN_SWITCH_SAMPLER"); sampler && *sampler)
+        {
+            const char* pack = std::getenv("OSCAIRN_SWITCH_SAMPLES");
+            if(!pack || !*pack) throw std::runtime_error("OSCAIRN_SWITCH_SAMPLES names the folder holding sine.osp");
+            const auto a = tempPath / "real-a", organ = tempPath / "real-organ";
+            ::unsetenv("OSCAIRN_SHARING"); // parts apart, as on the unit, saved so too
+            {
+                Session s(48000, frames);
+                const auto folder = s.registerAssetFolder(pack);
+                for(int i = 0; i < 5; ++i)
+                {
+                    const auto n = s.add("sampler " + std::to_string(i), sampler), fx = s.add("delay " + std::to_string(i), argv[3]);
+                    const auto part = s.addPart("Layer " + std::to_string(i)); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx); s.commit();
+                    check(s.setParameter(fx, 1, .2 + .02 * i) && s.setParameter(fx, 2, .3) && s.setParameter(fx, 3, .3), "delay settings");
+                    const std::string sound = "oscairn-sampler-sound/0\nsample sine.osp\nelement ampeg_decay1=127 ampeg_decay2=127 ampeg_release=" + std::to_string(40 + 5 * i) +
+                        "\nregion key=0-127 root=" + std::to_string(48 + i) + " element=0 sample=0 loop=0-44100\n";
+                    check(s.selectSound(n, s.prepareSound(n, "Layer " + std::to_string(i), {}, {}, {}, sound, folder.library, folder.directory)), "a Sampler sound");
+                }
+                blocks(s, 2); s.savePerformance(a.string());
+            }
+            // The other: a synth through a Delay, and one Sampler part of a sound of its own (# Organ has one).
+            {
+                Session s(48000, frames);
+                const auto folder = s.registerAssetFolder(pack);
+                const auto n = s.add("organ sampler", sampler), fx = s.add("organ delay", argv[3]), synth = s.add("organ synth", argv[1]);
+                const auto part = s.addPart("Organ"); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx);
+                const auto lead = s.addPart("Lead"); s.insertIntoPart(lead, 0, synth); s.commit();
+                const std::string sound = "oscairn-sampler-sound/0\nsample sine.osp\nelement ampeg_release=90\nregion key=0-127 root=60 element=0 sample=0 loop=0-44100\n";
+                check(s.selectSound(n, s.prepareSound(n, "Organ", {}, {}, {}, sound, folder.library, folder.directory)), "the other's Sampler sound");
+                blocks(s, 2); s.savePerformance(organ.string());
+            }
+            auto series = [&](int repeats) {
+                Session t(48000, frames);
+                load(t, a); quiet(t);
+                for(int i = 0; i < repeats; ++i) { const auto w = load(t, a); report(("real: A again " + std::to_string(i + 1)).c_str(), w); quiet(t); }
+                load(t, organ); quiet(t); quiet(t);
+                const auto w = load(t, a); report(repeats ? "real: back to A after repeats" : "real: back to A", w);
+                return w;
+            };
+            const auto plain = series(0), repeated = series(4);
+            check(repeated.kept == plain.kept && repeated.loaded == plain.loaded, "real Sampler: back to A after kept repeats keeps as many as with none: " + std::to_string(repeated.kept) + " against " + std::to_string(plain.kept));
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
+        }
     // Issue 330, the owner's rule (2026-11-27): the new Performance loads; the last one's held notes ring on only as far as
     // that allows. The memory budget lets the incoming Performance fit alone and not beside the whole of the last, so before
     // these the change cut every held note (about 1 ms on the FANTOM). Each Session renders on a thread of its own, as on a
@@ -441,6 +487,19 @@ namespace
         };
         const auto incoming = tempPath / "steps-incoming"; ringing(incoming, 1, argv[1], argv[3], .5); // a synth through a Delay, nothing held in it
 
+        // A silent instance holding the node's state is taken over as before issue 330: its state saved and compared with the file,
+        // then reset (or given the state again where they differ), never kept unseen. FANTOM k8: a Sampler loaded fresh saves a state
+        // that differs from its file until it is given it again; kept as it was through the direct repeats, it still differed when
+        // its warm instance was taken back after another Performance, so the return loaded every state again (kept 0, where main
+        // kept 3 to 4). Only a sounding instance, which cannot be saved without a reset in a worker, is kept unseen.
+        {
+            const auto same = tempPath / "steps-silent-same"; single(same, argv[4], .3);
+            Session t(48000, frames);
+            load(t, same); quiet(t);
+            const auto w = load(t, same); report("steps: the same Performance again, silent", w);
+            check(w.reused == 1 && w.loaded == 0 && w.open.save > 0 && t.sessionStatus().ringOut.kept == 0, "steps, silent: the instance taken over and compared with its file, not kept unseen: " +
+                  std::to_string(w.open.save) + " ms saving, " + std::to_string(t.sessionStatus().ringOut.kept) + " kept unseen");
+        }
         // Back to a Performance after one other, nothing held (FANTOM k6's "again"): A, A again (kept as it is), B, then A. What A
         // left warm at A -> B (or B took over) holds A's state as on main: the return keeps as many as it does with no repeat first.
         // A memory budget everything fits in, as on the device.

@@ -90,3 +90,9 @@ pub fn settings_in_rust(on: bool) {
 pub fn settings_folders(config: Option<PathBuf>, places: crate::theme::Places) {
     with_app(|a| a.settings.set_folders(config, places))
 }
+
+/// Tests: the folder the Appearance page's theme chooser starts in.
+#[cfg(test)]
+pub fn settings_files_dir(dir: PathBuf) {
+    with_app(|a| a.settings.set_files_dir(dir))
+}

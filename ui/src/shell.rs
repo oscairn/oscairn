@@ -51,7 +51,7 @@ mod wait_glue;
 
 pub use settings_glue::theme_followed;
 #[cfg(test)]
-pub use settings_glue::{settings_folders, settings_in_rust};
+pub use settings_glue::{settings_files_dir, settings_folders, settings_in_rust};
 
 /// What each request is for, so its answer goes where it belongs.
 pub enum Request {

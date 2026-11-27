@@ -1509,8 +1509,12 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
                 (a.event.header()->time == b.event.header()->time && a.order < b.order);
         });
         bool hasInput = false;
-        if (input) for (uint32_t c = 0; c < ni && !hasInput; ++c) if (input[c])
-            for (uint32_t i = 0; i < frames; ++i) if (input[c][i] != 0.f) { hasInput = true; break; }
+        // One pass a channel without an exit, sign bits dropped (-0.0 is silence): it vectorizes, and silence reads every sample anyway.
+        if (input) for (uint32_t c = 0; c < ni && !hasInput; ++c) if (input[c]) {
+            uint32_t bits = 0;
+            for (uint32_t i = 0; i < frames; ++i) { uint32_t x; std::memcpy(&x, &input[c][i], sizeof x); bits |= x << 1; }
+            hasInput = bits != 0;
+        }
         const bool transportWake = s.transport.changed(transport, frames, s.sampleRate);
         // The beat and a harmony change alone wake no plugin asleep: they come with the block that does (the beat's
         // tempo changes only with the transport, which wakes it); a harmony held back here is sent again then.

@@ -2808,8 +2808,10 @@ unsafe fn render(
         for c in 0..ni as usize {
             // SAFETY: the caller's: ni input channels, each null or of frames samples.
             let i = unsafe { *input.add(c) };
+            // One pass without an exit, sign bits dropped (-0.0 is silence, as `x != 0.0` has it): it vectorizes, and silence, the
+            // common case here, read every sample anyway (Audio::quiet in the engine core alike).
             // SAFETY: as above.
-            if !i.is_null() && unsafe { std::slice::from_raw_parts(i, frames as usize) }.iter().any(|&x| x != 0.0) {
+            if !i.is_null() && unsafe { std::slice::from_raw_parts(i, frames as usize) }.iter().fold(0u32, |m, x| m | x.to_bits() << 1) != 0 {
                 has_input = true;
                 break;
             }

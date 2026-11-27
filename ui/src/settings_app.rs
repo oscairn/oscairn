@@ -622,3 +622,50 @@ impl Screen {
         self.show();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pages_are_the_tabs_each_its_own_title() {
+        let titles: Vec<&'static str> = Id::ALL.iter().map(|&id| id.title()).collect();
+        assert_eq!(titles, ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Installed", "Available", "Signing keys", "About"]);
+        let mut sorted = titles.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), titles.len(), "each page has its own title");
+    }
+
+    #[test]
+    fn the_audio_page_lies_where_the_profile_fixes_the_device() {
+        assert!(Id::Audio.applies(&Profile::default()), "a profile that does not fix the device offers Audio");
+        let mut fixed = Profile::default();
+        fixed.audio_fixed = true;
+        assert!(!Id::Audio.applies(&fixed), "a profile that fixes the device has no Audio page");
+        for id in Id::ALL {
+            if id != Id::Audio {
+                assert!(id.applies(&Profile::default()), "{id:?} applies to every profile");
+            }
+        }
+    }
+
+    #[test]
+    fn said_and_failed_fit_the_panel() {
+        let one = said("Played by MIDI channel.");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].text.as_str(), "Played by MIDI channel.");
+        assert!(!one[0].head && !one[0].failed);
+
+        let long = said("A sentence about the panel that is much longer than one line of thirty-four characters and so it wraps onto more than one.");
+        assert!(long.len() > 1, "a long sentence wraps");
+        assert_eq!(long.iter().filter(|l| l.text.chars().count() > crate::library::INFO_WIDTH).count(), 0, "no line is wider than the panel");
+        assert!(long.iter().all(|l| !l.head && !l.failed));
+
+        assert!(said("").is_empty(), "nothing to say is no lines");
+        assert!(failed("it does not fit this device").iter().all(|l| l.failed && !l.head));
+        let failed_long = failed("A refusal that is much longer than one line of the panel and so it wraps while staying in the danger color.");
+        assert!(failed_long.len() > 1);
+        assert!(failed_long.iter().all(|l| l.failed && l.text.chars().count() <= crate::library::INFO_WIDTH));
+    }
+}

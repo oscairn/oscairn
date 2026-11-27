@@ -1022,4 +1022,105 @@ mod tests {
         assert_eq!((meter(0.), meter(1.), meter(10.)), (0., 0.91, 1.), "0 dB on the -60..+6 dB scale");
         assert_eq!((meter(0.001), meter(0.01)), (0., 0.3), "-60 dB is the bottom, -40 dB 0.3");
     }
+
+    #[test]
+    fn note_names_cover_the_range_and_fall_outside_it() {
+        assert_eq!(note_name(0), "C-1");
+        assert_eq!(note_name(12), "C0");
+        assert_eq!(note_name(127), "G9");
+        assert_eq!(note_name(-1), "–");
+        assert_eq!(note_name(128), "–");
+        assert_eq!(note_name(i64::MAX), "–");
+    }
+
+    #[test]
+    fn device_names_default_to_any_and_name_the_rest() {
+        assert_eq!(devices_name(&json!(null)), "Any device");
+        assert_eq!(devices_name(&json!([])), "Any device");
+        assert_eq!(devices_name(&json!([{"kind": "builtIn"}])), "Built in");
+        assert_eq!(devices_name(&json!([{"kind": "external"}])), "All external");
+        assert_eq!(devices_name(&json!([{"kind": "all"}])), "Any device");
+        assert_eq!(devices_name(&json!([{"kind": "port", "port": 3}])), "Port 3");
+        assert_eq!(devices_name(&json!([{"kind": "port"}])), "Port 0");
+        assert_eq!(devices_name(&json!([{"kind": "usb"}])), "All USB");
+        assert_eq!(devices_name(&json!([{"kind": "usbNamed", "pattern": "MPK"}])), "MPK");
+        assert_eq!(devices_name(&json!([{"kind": "usbNamed", "pattern": "MPK", "match": "contains"}])), "“MPK”");
+        assert_eq!(devices_name(&json!([{"kind": "usbNamed", "pattern": "mpk", "match": "regex"}])), "/mpk/");
+        assert_eq!(devices_name(&json!([{"kind": "usbNamed", "pattern": "X", "match": "other"}])), "X");
+        assert_eq!(devices_name(&json!([{"kind": "network"}])), "Network");
+        assert_eq!(devices_name(&json!([{"kind": "network", "pattern": "Op"}])), "Network Op");
+        assert_eq!(devices_name(&json!([{"kind": "network", "pattern": "Op", "match": "regex"}])), "Network /Op/");
+        assert_eq!(devices_name(&json!([{"kind": "external"}, {"kind": "builtIn"}])), "All external + Built in");
+    }
+
+    #[test]
+    fn instruments_have_outputs_no_inputs_and_note_inputs() {
+        assert!(is_instrument(&json!({"audioInputs": [], "audioOutputs": [{"channels": 2}], "noteInputs": 1})));
+        assert!(!is_instrument(&json!({"audioInputs": [], "audioOutputs": [], "noteInputs": 1})));
+        assert!(!is_instrument(&json!({"audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}], "noteInputs": 0})));
+        assert!(!is_instrument(&json!({"audioInputs": [], "audioOutputs": [{"channels": 0}], "noteInputs": 1})));
+        assert!(!is_instrument(&json!({})));
+        assert!(!is_instrument(&json!(null)));
+    }
+
+    #[test]
+    fn chain_nodes_follow_lanes_in_order_and_respect_the_depth_limit() {
+        let mut out = vec![];
+        chain_nodes(&json!([]), &json!([]), 0, &mut out);
+        assert!(out.is_empty());
+        let mut out = vec![];
+        chain_nodes(&json!([1, 2]), &json!([]), 0, &mut out);
+        assert_eq!(out, [1, 2]);
+        // A split's lanes stand in its place, in order.
+        let mut out = vec![];
+        chain_nodes(&json!([5, {"split": 1}]), &json!([{"id": 1, "lanes": [{"chain": [6]}, {"chain": [7, 8]}]}]), 0, &mut out);
+        assert_eq!(out, [5, 6, 7, 8]);
+        // A split inside a lane is followed too.
+        let mut out = vec![];
+        chain_nodes(&json!([{"split": 1}]), &json!([{"id": 1, "lanes": [{"chain": [{"split": 2}]}]}, {"id": 2, "lanes": [{"chain": [9]}]}]), 0, &mut out);
+        assert_eq!(out, [9]);
+        // An unknown split id is dropped.
+        let mut out = vec![];
+        chain_nodes(&json!([{"split": 9}]), &json!([{"id": 1, "lanes": [{"chain": [6]}]}]), 0, &mut out);
+        assert!(out.is_empty());
+        // At or past the depth limit a split is dropped, not followed.
+        let mut out = vec![];
+        chain_nodes(&json!([{"split": 1}]), &json!([{"id": 1, "lanes": [{"chain": [6]}]}]), 8, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn input_text_names_the_inputs_or_says_its_own_notes() {
+        assert_eq!(input_text(&json!({"input": {"kind": "none"}})), "Its own notes");
+        assert_eq!(input_text(&json!({})), "Its own notes");
+        assert_eq!(input_text(&json!({"input": {"kind": "audio", "port": 0}})), "Audio in 1");
+        assert_eq!(input_text(&json!({"input": {"kind": "notes"}})), "Any device · all keys");
+        assert_eq!(input_text(&json!({"input": {"kind": "notes", "zones": [{"keys": [36, 96], "transpose": -12}]}})), "Any device · C2–C7 · −12");
+        assert_eq!(input_text(&json!({"input": {"kind": "notes", "zones": [{"keys": [36, 96], "transpose": 5}]}})), "Any device · C2–C7 · +5");
+        assert_eq!(input_text(&json!({"input": {"kind": "notes", "zones": [{"keys": [0, 127], "transpose": 0}]}})), "Any device · all keys");
+    }
+
+    #[test]
+    fn parse_parts_defaults_missing_fields_and_flattens_a_chain() {
+        let parts = parse_parts(&json!({
+            "nodes": [{"id": 1, "name": "Rhodes", "audioInputs": [], "audioOutputs": [{"channels": 2}], "noteInputs": 1}],
+            "parts": [{"id": 9, "chain": [1]}],
+            "wires": [], "scenes": [], "scene": 0, "master": {"level": 1.0, "pan": 0.0},
+        }));
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "");
+        assert_eq!(parts[0].level, 1., "a missing level defaults to full");
+        assert_eq!(parts[0].detail, "Rhodes · Its own notes");
+        assert!(!parts[0].mute);
+        assert!(parse_parts(&json!({"nodes": [], "parts": [], "wires": []})).is_empty());
+    }
+
+    #[test]
+    fn scales_clamp_and_meter_survives_nonfinite() {
+        assert_eq!((fraction(-1., 1.), fraction(2., 1.), fraction(0.5, 2.)), (0., 1., 0.5));
+        assert_eq!(level_at(0., 1.), 0.);
+        assert_eq!(level_at(1., 1.), 1.);
+        assert_eq!(level_at(0.5, 2.), 0.5);
+        assert_eq!((meter(-1.), meter(f64::NAN), meter(f64::INFINITY)), (0., 0., 1.));
+    }
 }

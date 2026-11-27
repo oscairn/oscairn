@@ -57,6 +57,12 @@ impl Browser {
         Browser { ui: ui.as_weak(), rows: Rc::new(VecModel::default()), info: Rc::new(VecModel::default()), cursor: Cursor::new(0, 1), info_cursor: Cursor::new(0, 1), editing: false, count: 0, active: false }
     }
 
+    /// A Browser that shows nothing (no window): for a screen's pure logic in a test.
+    #[cfg(test)]
+    pub fn detached() -> Browser {
+        Browser { ui: slint::Weak::default(), rows: Rc::new(VecModel::default()), info: Rc::new(VecModel::default()), cursor: Cursor::new(0, 1), info_cursor: Cursor::new(0, 1), editing: false, count: 0, active: false }
+    }
+
     /// Makes these the models the window shows: the screen that is shown does it.
     pub fn install(&mut self) {
         self.active = true;

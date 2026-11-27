@@ -270,11 +270,11 @@ struct Fixture {
 
 impl Fixture {
     fn new(name: &str) -> Fixture {
-        Fixture::on(name, Some("fantom-07"))
+        Fixture::on(name, Some("fantom-07"), true)
     }
 
     /// The shell on a profile (a built-in's id; none: a computer's).
-    fn on(name: &str, profile: Option<&str>) -> Fixture {
+    fn on(name: &str, profile: Option<&str>, hands_over: bool) -> Fixture {
         let screen = Screen::new();
         let path = std::env::temp_dir().join(format!("oscairn-ui-shell-{name}-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -282,7 +282,7 @@ impl Fixture {
         let (tx, events) = mpsc::channel();
         // The shell reads routing-view.txt as it starts; the test that toggles it (and puts it back) holds this meanwhile.
         let _routing_file = ROUTING_FILE.lock().unwrap_or_else(|e| e.into_inner());
-        shell::start(&screen.ui, path, &crate::profile::Profile::load(profile).unwrap(), true, move |e| {
+        shell::start(&screen.ui, path, &crate::profile::Profile::load(profile).unwrap(), hands_over, move |e| {
             let _ = tx.send(e);
         })
         .unwrap();
@@ -872,6 +872,25 @@ impl Fixture {
         self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
         self.pump();
     }
+}
+
+// The Settings' Start page's choice (start.txt, tests/settings.rs's choosing_a_start_page_keeps_it): with it on the
+// Setlist the shell opens to the Setlist after the splash; none chosen (Home) keeps today's start. A hand-over boot
+// (the device's) opens to the choice too. Each choice is for this test's thread, so the shells of the tests that run beside it stay where
+// they belong.
+#[test]
+fn the_shell_opens_to_the_start_page_setting() {
+    crate::settings::test_start::set(Some(crate::settings::StartPage::Setlist));
+    let f = Fixture::on("start-setlist", Some("fantom-07"), false);
+    assert_eq!(f.screen.ui.get_screen(), 1, "with the choice on the Setlist, the shell opens to it");
+    crate::settings::test_start::set(None);
+    let f = Fixture::on("start-home", Some("fantom-07"), false);
+    assert_eq!(f.screen.ui.get_screen(), 0, "with none chosen, it opens Home as before");
+    // The keyboard's boot is a hand-over boot: it honors the choice too (the issue asks for it there).
+    crate::settings::test_start::set(Some(crate::settings::StartPage::Setlist));
+    let f = Fixture::on("start-handover", Some("fantom-07"), true);
+    assert_eq!(f.screen.ui.get_screen(), 1, "a hand-over boot opens to the choice too");
+    crate::settings::test_start::set(None);
 }
 
 // The Setlist on the shell: two panes, E1 (pane 0) along the setlist bar and E6 (pane 1) or the
@@ -1713,6 +1732,7 @@ mod library_open;
 mod library_items;
 mod library_setlist;
 mod setlist_bar;
+mod setlist_manage;
 mod library_install;
 mod library_manage;
 mod library_catalog;

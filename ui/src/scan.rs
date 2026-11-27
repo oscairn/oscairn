@@ -304,6 +304,140 @@ pub mod tests {
         assert_eq!(decode(&noisy).unwrap().len(), 2);
     }
 
+    /// A full, well-formed reply with `count` minimal plugins, so a refusal is the named count bound and
+    /// not a buffer cut short.
+    fn many_plugins(count: usize) -> Vec<u8> {
+        let mut out = MAGIC.to_vec();
+        number(&mut out, count as u32);
+        for _ in 0..count {
+            field(&mut out, "/p/x.clap");
+            field(&mut out, "id");
+            field(&mut out, "name");
+            field(&mut out, "vendor");
+            field(&mut out, "1.0");
+            field(&mut out, "");
+            number(&mut out, 0); // features
+            number(&mut out, 0); // discovery
+            number(&mut out, 0); // presets
+        }
+        number(&mut out, 0); // failures
+        out
+    }
+
+    /// A full reply with one plugin carrying `features` features, discovery `discovery` and `presets` presets.
+    fn one_plugin(features: u32, discovery: u32, presets: u32) -> Vec<u8> {
+        let mut out = MAGIC.to_vec();
+        number(&mut out, 1);
+        field(&mut out, "/p/x.clap");
+        field(&mut out, "id");
+        field(&mut out, "name");
+        field(&mut out, "vendor");
+        field(&mut out, "1.0");
+        field(&mut out, "");
+        number(&mut out, features);
+        for _ in 0..features {
+            field(&mut out, "instrument");
+        }
+        number(&mut out, discovery);
+        number(&mut out, presets);
+        for _ in 0..presets {
+            field(&mut out, "");
+            number(&mut out, 0);
+            field(&mut out, "");
+            field(&mut out, "");
+        }
+        number(&mut out, 0); // failures
+        out
+    }
+
+    /// A full reply with one plugin and `failures` failure entries.
+    fn with_failures(failures: u32) -> Vec<u8> {
+        let mut out = one_plugin(0, 1, 0);
+        out.truncate(out.len() - 4); // drop the trailing "0 failures"
+        number(&mut out, failures);
+        for _ in 0..failures {
+            field(&mut out, "");
+            field(&mut out, "");
+        }
+        out
+    }
+
+    #[test]
+    fn decode_refuses_out_of_range_counts() {
+        // An empty reply is nothing, not a crash.
+        assert!(decode(b"").is_none());
+        // Each count bound is paired with a full reply at the maximum that decodes and one past it that
+        // does not, so the refusal is the guard, not a truncated buffer (the earlier blobs stopped right
+        // after the oversized count, so any short-tail refusal would have passed whether the guard existed).
+        assert_eq!(decode(&many_plugins(4096)).unwrap().len(), 4096, "the count at the maximum decodes");
+        assert!(decode(&many_plugins(4097)).is_none(), "one past the maximum is refused");
+        // A feature count of 128 decodes; 129 is refused.
+        assert_eq!(decode(&one_plugin(128, 1, 0)).unwrap().len(), 1);
+        assert!(decode(&one_plugin(129, 1, 0)).is_none());
+        // A discovery value of 0 or 1 decodes; 2 is refused.
+        assert_eq!(decode(&one_plugin(0, 0, 0)).unwrap().len(), 1);
+        assert_eq!(decode(&one_plugin(0, 1, 0)).unwrap().len(), 1);
+        assert!(decode(&one_plugin(0, 2, 0)).is_none());
+        // A preset count of 4096 decodes; 4097 is refused.
+        assert_eq!(decode(&one_plugin(0, 1, 4096)).unwrap().len(), 1);
+        assert!(decode(&one_plugin(0, 1, 4097)).is_none());
+        // A failure count of 8192 decodes; 8193 is refused.
+        assert_eq!(decode(&with_failures(8192)).unwrap().len(), 1);
+        assert!(decode(&with_failures(8193)).is_none());
+    }
+
+    #[test]
+    fn decode_versions_reads_each_field_and_version() {
+        let blob = encode(&[("/p/楽器à.clap", "org.unicode", "Synth Naïve", "Oscairn", &["instrument"])]);
+        let got = decode_versions(&blob).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].1, "1.0", "the version travels with its plugin");
+        let p = &got[0].0;
+        assert_eq!(p.path, "/p/楽器à.clap");
+        assert_eq!(p.id, "org.unicode");
+        assert_eq!(p.name, "Synth Naïve");
+        assert_eq!(p.vendor, "Oscairn");
+        assert_eq!(p.features, ["instrument"]);
+        assert!(p.is_instrument());
+        assert_eq!(decode(&blob).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn is_instrument_means_the_exact_feature() {
+        let mut p = Plugin::default();
+        assert!(!p.is_instrument(), "no features is not an instrument");
+        p.features = vec!["instrument".into()];
+        assert!(p.is_instrument());
+        p.features = vec!["audio-effect".into()];
+        assert!(!p.is_instrument());
+        p.features = vec!["Instrument".into()];
+        assert!(!p.is_instrument(), "the CLAP feature names are lowercase, matched exactly");
+        p.features = vec!["audio-effect".into(), "instrument".into()];
+        assert!(p.is_instrument());
+    }
+
+    #[test]
+    fn choices_strip_the_vendor_prefix_and_sort_edges() {
+        assert!(choices(vec![]).is_empty(), "no plugins, no menu");
+        // A name without the vendor's prefix, and one shorter than prefix + space, are untouched.
+        let plain = Plugin { name: "My Synth".into(), vendor: "Oscairn".into(), ..Default::default() };
+        assert_eq!(choices(vec![plain.clone()])[0].name, "My Synth");
+        let short = Plugin { name: "Osc".into(), vendor: "Oscairn".into(), ..Default::default() };
+        assert_eq!(choices(vec![short])[0].name, "Osc", "a name no longer than vendor + space is not cut");
+        // Exactly "vendor " with nothing after it is not cut either.
+        let bare = Plugin { name: "Oscairn ".into(), vendor: "Oscairn".into(), ..Default::default() };
+        assert_eq!(choices(vec![bare])[0].name, "Oscairn ");
+        // An unsorted list comes back ordered by name; a vendor-less prefix still sorts by what shows.
+        let list = vec![
+            Plugin { name: "B Son".into(), vendor: "X".into(), ..Default::default() },
+            Plugin { name: "A Son".into(), vendor: "X".into(), ..Default::default() },
+            Plugin { name: "Oscairn Basic".into(), vendor: "Oscairn".into(), ..Default::default() },
+        ];
+        let got = choices(list);
+        let names: Vec<_> = got.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["A Son", "B Son", "Basic"], "the vendor-prefixed name is last, cut and sorted by name");
+    }
+
     #[test]
     fn scans_a_folder_with_the_helper_and_survives_a_bad_one() {
         let dir = scratch("scan");

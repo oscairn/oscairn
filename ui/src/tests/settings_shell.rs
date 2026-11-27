@@ -8,7 +8,18 @@ use super::settings::{folder, installed_theme, tabs};
 use super::settings_fake::Settings as Fake;
 use super::*;
 use crate::{KeyboardState, MenuState, NoticeState, PartState};
+use serde_json::{json, Value};
+use slint::Model;
 use std::time::Duration;
+
+fn inst_pkg(id: &str, name: &str, version: &str, kind: &str, repository: &str, signers: &[&str]) -> Value {
+    json!({"id": id, "version": version, "kind": kind, "repository": repository, "sha256": "", "signers": signers, "otherBuild": false, "withdrawn": null, "dependency": false, "name": name})
+}
+
+fn offered_pkg(id: &str, name: &str, version: &str, types: Value) -> Value {
+    json!({"id": id, "name": name, "summary": "", "license": "", "publisher": "", "publisherKey": "", "tags": [],
+           "versions": [{"version": version, "channel": "stable", "yanked": "", "incompatible": "", "sha256": "", "size": 1234, "installed": 0, "types": types, "dependencies": [], "withdrawn": null, "exports": []}]})
+}
 
 pub(super) struct Shelf {
     pub(super) f: Fixture,
@@ -27,7 +38,7 @@ impl Shelf {
 
     /// On a profile (a built-in's id; none: a computer's).
     pub(super) fn on(name: &str, profile: Option<&str>, e: Fake) -> Shelf {
-        let mut f = Fixture::on(name, profile);
+        let mut f = Fixture::on(name, profile, true);
         f.engine.answer(); // session.hello
         f.pump();
         let config = folder(name);
@@ -103,7 +114,7 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert_eq!(ui.get_screen(), 14);
     assert_eq!(title(&ui), "Settings › Appearance");
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
-    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "About"], "the keyboard's profile fixes its audio device");
+    assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"], "the keyboard's profile fixes its audio device");
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
     assert_eq!(actions, ["Install...", "Record", "Capture"], "the page's own action and the two every screen has; Undo, Redo and Save are the Performance app's");
     // Back goes Home.
@@ -270,7 +281,7 @@ fn every_page_is_reached_by_moves_alone() {
         assert!(!ui.global::<crate::Theme>().get_bar_cursor(), "the top bar did not take the move");
     };
     open_settings(&mut s, &mut nav);
-    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "About"];
+    let pages = ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"];
     let last = pages.len() as i32 - 1;
     for (want, name) in pages.iter().enumerate() {
         let want = want as i32;
@@ -427,6 +438,184 @@ fn midi_controllers_reachable_from_home_by_panel_moves() {
             s.serve();
         }
     }
+}
+
+// W20: the Settings Installed and Available pages are reached from Home by the panel's moves alone, and every action
+// they offer is pressed to its real effect. The count of rows is the screen's own (the rows it shows), never hard-coded.
+// Installed: a press on each row opens its detail in the panel (the bar's path gains the row) and Back closes it on
+// the same row; the bar's Remove... on a row asks `packages.removal` and, answered, one `packages.uninstall` takes it
+// out of the list. Available: the bar's Refresh reads the repositories and what is installed again; a row offered
+// Install is `packages.install` after its question, the job polled until the offer shows installed, and a row offered
+// Update is the same for the newer version. Nothing is reached by touch.
+#[test]
+fn installed_and_available_reachable_from_home_by_panel_moves() {
+    let official = "https://packages.oscairn.org".to_string();
+    let official_key = "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".to_string();
+    let mut e = Fake::new();
+    e.installed_packages = vec![
+        inst_pkg("org.example.reverb", "Example Reverb", "1.0.0", "plugin", &official, &["6a2dd1acf4d4e23c"]),
+        inst_pkg("lib-1", "Wicked Synths", "", "library", "", &[]),
+        inst_pkg("org.beta", "Beta Pack", "1.0.0", "asset", &official, &[]),
+    ];
+    e.libraries = vec![("lib-sec".into(), "Field Recordings".into(), 34)];
+    e.sources = vec![(official.clone(), super::settings_fake::Reads::Done("Oscairn".into(), official_key.clone()))];
+    e.offers = vec![(official.clone(), vec![
+        offered_pkg("org.delta", "Delta Pack", "3.0.0", json!({"oscairn.asset": 1})),
+        offered_pkg("org.beta", "Beta Pack", "2.5.0", json!({"oscairn.asset": 1})),
+    ])];
+    let done = json!({"added": 1, "skipped": 0, "notes": [], "code": [], "dependencies": []});
+    e.installs = vec![
+        (official.clone(), "org.delta".into(), "3.0.0".into(), done.clone(), inst_pkg("org.delta", "Delta Pack", "3.0.0", "asset", &official, &[])),
+        (official.clone(), "org.beta".into(), "2.5.0".into(), done, inst_pkg("org.beta", "Beta Pack", "2.5.0", "asset", &official, &[])),
+    ];
+    let mut s = Shelf::with("w20-installed-available", e);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": json!(total.clone())}})));
+        s.f.pump();
+        s.serve();
+    };
+    // The bar's path has "Settings" and the page: two parts without a detail, three with it.
+    let path_rows = |ui: &Shell| ui.global::<crate::Bar>().get_path().row_count();
+    // Up out of the whole list to the page rail (the dial walks the rows, then one stop up reaches the tabs), then along
+    // it to the page `want` (found in the screen's own get_pages by name) and a press shows it; past the last tab the
+    // list has the cursor again.
+    let to_page = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), want: &str| {
+        while ui.global::<crate::SettingsState>().get_page_cursor() < 0 {
+            nav(s, "move", -1);
+        }
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        let want = pages.iter().position(|p| p == want).expect("the rail names the page") as i32;
+        let mut tries = 0;
+        while ui.global::<crate::SettingsState>().get_page_cursor() != want {
+            nav(s, "move", 1);
+            tries += 1;
+            assert!(tries <= 9, "the rail reaches the page");
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+        assert_eq!(ui.global::<crate::SettingsState>().get_page(), want, "a press shows the page");
+        while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+            nav(s, "move", 1);
+        }
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the list's first row has the cursor");
+    };
+    // A bar tool stop: enter the top bar's actions from the list (pane 2), walk to the action `label` of the page by
+    // name in the screen's own get_actions, and press.
+    let bar_tool = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), label: &str| {
+        let at = ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == label).expect("the bar action the test wants") as i32;
+        nav(s, "move:2", 1); // the bar, at its first stop (Back)
+        for _ in 0..=at {
+            nav(s, "move", 1);
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+    };
+    // A move past the bar's last stop puts the cursor back on the screen's list (the bar had it).
+    let drop_bar = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64)| {
+        nav(s, "move", 30);
+        s.serve();
+    };
+    // Home → the Settings tile → the Rust app, then the rail along to the Installed page.
+    nav(&mut s, "move", 0); // the first read is only a baseline
+    for _ in 0..5 {
+        nav(&mut s, "move", 1); // onto the Settings tile
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    to_page(&mut s, &mut nav, "Installed");
+    assert_eq!(title(&ui), "Settings › Installed");
+    assert_eq!(path_rows(&ui), 2, "the bar names Settings and the page");
+    // Installed: every row the screen shows is reached by the dial, and a press on each opens its detail (the bar's
+    // path gains the row) which Back closes on the same row — nothing is asked.
+    let n = rows(&ui).len();
+    let mut visited = Vec::new();
+    for step in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        let label = rows(&ui)[step].label.clone();
+        visited.push(label.to_string());
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert_eq!(path_rows(&ui), 3, "{label}: the press opened its detail in the panel");
+        assert!(info(&ui).contains(&label.to_string()), "{label}: its detail is the one shown: {:?}", info(&ui));
+        nav(&mut s, "cancel", 1);
+        s.serve();
+        assert_eq!(path_rows(&ui), 2, "{label}: Back closed the detail, still on the page");
+        if step + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+    assert_eq!(visited, labels(&ui), "every row once, none twice, in the order shown");
+    // The cursor is on the last row (Wicked Synths), after the press that opened its detail and the Back that closed it:
+    // the bar's Remove... asks what uses it, and one uninstall takes it out of the list — the list it shows counts one
+    // fewer, of the screen's own rows.
+    assert_eq!(rows(&ui)[n - 1].label, "Wicked Synths");
+    let base = s.e.called("packages.removal").len();
+    bar_tool(&mut s, &mut nav, "Remove..."); // Remove... on the row under the cursor
+    assert_eq!(s.e.called("packages.removal").last().unwrap(), &json!({"id": "lib-1"}), "what uses it is asked first");
+    assert!(ui.global::<NoticeState>().get_open(), "the question is open");
+    nav(&mut s, "move", 1); // the question's cursor onto Remove
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    drop_bar(&mut s, &mut nav);
+    assert_eq!(s.e.called("packages.removal").len(), base + 1);
+    assert_eq!(s.e.called("packages.uninstall"), [json!({"id": "lib-1"})], "one uninstall, with the row's id");
+    assert!(!labels(&ui).contains(&"Wicked Synths".to_string()), "the list no longer shows it: {:?}", labels(&ui));
+    assert_eq!(rows(&ui).len(), n - 1, "the count is of the items left");
+    // The rail to the Available page.
+    to_page(&mut s, &mut nav, "Available");
+    assert_eq!(title(&ui), "Settings › Available");
+    // Available: every offer the screen shows is reached by the dial.
+    let m = rows(&ui).len();
+    for step in 0..m {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached the offer {step}");
+        // A press on an offer row opens nothing and asks nothing: the install/update is the bar's action alone, after
+        // its question. The list is unchanged and no request went to the engine.
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert!(!ui.global::<NoticeState>().get_open(), "a press on an offer asks nothing");
+        assert!(s.e.called("packages.install").is_empty(), "a press on an offer installs nothing");
+        assert_eq!(path_rows(&ui), 2, "a press on an offer opens no detail");
+        if step + 1 < m {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+    // Refresh reads the repositories and what is installed again; the same offers remain.
+    let before = s.e.called("packages.repositories").len();
+    bar_tool(&mut s, &mut nav, "Refresh");
+    drop_bar(&mut s, &mut nav);
+    assert_eq!(s.e.called("packages.repositories").len(), before + 1, "refresh reads the repositories again");
+    assert_eq!(labels(&ui).len(), m, "the same offers after a refresh");
+    // The first offer (Beta Pack, an older version installed) is Updated after its question. A refresh leaves the
+    // cursor on the first offer (Beta Pack).
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the cursor on the first offer after the refresh");
+    assert_eq!(rows(&ui)[0].label, "Beta Pack", "the list is alphabetical");
+    bar_tool(&mut s, &mut nav, "Update"); // the Update action of the row under the cursor
+    assert!(ui.global::<NoticeState>().get_open(), "an update asks first");
+    nav(&mut s, "move", 1);
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    drop_bar(&mut s, &mut nav);
+    assert_eq!(s.e.called("packages.install").last().unwrap(), &json!({"source": official.clone(), "id": "org.beta", "version": "2.5.0", "acceptUnsignedCode": false, "replace": false}));
+    assert_eq!(value_of(&ui, "Beta Pack"), "Samples 2.5.0  ·  Installed", "the new version is the installed one");
+    // The second offer (Delta Pack, not installed) is Installed the same way.
+    nav(&mut s, "move", 1);
+    s.serve();
+    assert_eq!(rows(&ui)[1].label, "Delta Pack");
+    bar_tool(&mut s, &mut nav, "Install"); // Install, the row's action
+    assert!(ui.global::<NoticeState>().get_open(), "an install asks first");
+    nav(&mut s, "move", 1);
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    drop_bar(&mut s, &mut nav);
+    assert_eq!(s.e.called("packages.install").last().unwrap(), &json!({"source": official, "id": "org.delta", "version": "3.0.0", "acceptUnsignedCode": false, "replace": false}));
+    assert_eq!(value_of(&ui, "Delta Pack"), "Samples 3.0.0  ·  Installed");
 }
 
 // A no-touch walk of the Signing keys page: from Home by the panel's moves alone, then every action the page

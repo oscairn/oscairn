@@ -14,7 +14,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Performance, Kind::Sound, Kind::Setlist];
+    /// The kinds the Library lists, one tab each. Setlists are the Setlist app's (`Setlist` stays for the requests that name it).
+    pub const ALL: [Kind; 2] = [Kind::Performance, Kind::Sound];
 
     /// The item type's kind, as `library.query`'s `kind` takes it.
     pub fn key(self) -> &'static str {
@@ -26,7 +27,7 @@ impl Kind {
     }
 
     pub fn from_key(key: &str) -> Option<Kind> {
-        Kind::ALL.into_iter().find(|k| k.key() == key)
+        [Kind::Performance, Kind::Sound, Kind::Setlist].into_iter().find(|k| k.key() == key)
     }
 
     pub fn plural(self) -> &'static str {
@@ -145,7 +146,7 @@ pub fn library_line(plugins: usize, performances: u64, sounds: u64) -> String {
 /// presets are not Sounds in the library, and an empty list must not say it has none.
 pub fn empty_saying(kind: Kind, plugins: usize) -> String {
     match kind {
-        Kind::Setlist => "No setlists yet. The Setlist app makes them.".into(),
+        Kind::Setlist => String::new(), // not listed here: the Setlist app's
         Kind::Sound if plugins > 0 => format!("No Sounds yet. The presets of the {} installed are in the sound picker, not here.", instruments_and_effects(plugins)),
         Kind::Sound => "No Sounds yet. An instrument's own presets are in the sound picker, not here.".into(),
         Kind::Performance if plugins > 0 => format!("No Performances yet. {} {} installed, to start one with.", instruments_and_effects(plugins), if plugins == 1 { "is" } else { "are" }),
@@ -248,7 +249,6 @@ mod tests {
         assert_eq!(empty_saying(Kind::Performance, 5), "No Performances yet. 5 instruments and effects are installed, to start one with.");
         assert_eq!(empty_saying(Kind::Sound, 5), "No Sounds yet. The presets of the 5 instruments and effects installed are in the sound picker, not here.");
         assert_eq!(empty_saying(Kind::Sound, 0), "No Sounds yet. An instrument's own presets are in the sound picker, not here.");
-        assert_eq!(empty_saying(Kind::Setlist, 0), "No setlists yet. The Setlist app makes them.");
     }
 
     #[test]

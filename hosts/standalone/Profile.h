@@ -133,6 +133,11 @@ namespace oscairn::standalone
         // Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn
         // (docs/fantom-0.md): Settings' About row asks the engine about it. Absent from the file: no (the FANTOM-07's says yes).
         bool rolandNextBoot = false;
+        // RFC 0028's install block: how Oscairn gets onto the device (method: desktop, app-and-boot-hook or
+        // image), how it is updated (update: none, bundle-swap or ab), how many systems fit at once (systems: 1
+        // or 2; ab needs 2) and where the user's content lives (userData: with-system, inside what an update
+        // replaces, or separate). Absent from the file: all empty and 0, not stated.
+        struct Install { std::string method, update, userData; int systems = 0; } install;
         std::string reliability = "desktop"; // desktop, instrument or pass-through (RFC 0027)
         std::vector<std::string> apps;       // RFC 0022's apps installed with it
         // RFC 0025: the apps reserved whether they run or not, each in apps; absent from the file,

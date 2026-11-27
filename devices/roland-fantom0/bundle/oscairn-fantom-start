@@ -267,7 +267,7 @@ fi
 # and OSCAIRN_OWN_HOST (plugin IDs given workers of their own),
 # and OSCAIRN_UI_PAINT_LOG (1: the app and its apps log what their windows draw each second),
 # and OSCAIRN_DEADLINE_SLACK_US (the profile's compute.deadlineSlack, RFC 0045's guard),
-# and OSCAIRN_WORKER_REST (which idle workers rest: disabled, the default, all, or 0 for none; for comparing),
+# and OSCAIRN_WORKER_REST (which idle workers rest: all, the default, disabled for only those no note can reach, or 0 for none; for comparing),
 # and OSCAIRN_WORKERS (the profile's compute.workers: plugin, chain or pool, RFC 0045's plugin groups),
 # and OSCAIRN_ENGINE_AUDIO_CORES and OSCAIRN_WORKER_AUDIO_CORES (each side's own core list in place of
 # OSCAIRN_AUDIO_THREAD_CORES; with chain or pool, each worker process one of the workers' cores, round-robin),

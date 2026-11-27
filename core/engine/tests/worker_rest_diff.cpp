@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // RFC 0045, sleeping plugins: leaving a worker uncalled while its plugin sleeps changes nothing it plays. One session, run
 // three times in processes of its own (OSCAIRN_WORKER_REST is read once at the engine's start): all (any worker asleep with
-// nothing for it rests, playable or not), unset (disabled: none here, every node can be played) and 0 (every worker called
+// nothing for it rests, playable or not), unset (the default, all: the same as it) and 0 (every worker called
 // every block, its host leaving the plugin uncalled). Every node's outputs and the graph's, every block, must be the same,
 // sample for sample. The nodes, each in its own worker, all playable: the fixture's sleep instrument into its effect
 // (sleeping on silent input), the sound-snapshots example (a 5 ms release, then asleep) and the follower (asleep after every
@@ -34,9 +34,9 @@ constexpr int hold = 192; // WorkerHost's: blocks asleep still called before a w
 int render(char** argv, const std::string& out)
 {
     const char* restVar = std::getenv("OSCAIRN_WORKER_REST");
-    const bool resting = restVar && std::string(restVar) == "all";
+    const bool resting = !restVar || std::string(restVar) == "all";
     int failures = 0;
-    auto check = [&](bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL (rest %s): %s\n", restVar ? restVar : "disabled", what.c_str()); ++failures; } };
+    auto check = [&](bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL (rest %s): %s\n", restVar ? restVar : "default", what.c_str()); ++failures; } };
     setenv("KICK_FIXTURE_EFFECT_SLEEP", "1", 1); setenv("KICK_FIXTURE_SELF_WAKE", "1", 1); setenv("FOLLOWER_SLEEPS", "1", 1); // the workers inherit them
     const auto mode = oscairn::ProcessingMode::Offline;
     auto synth = oscairn::loadPluginInWorker(argv[1], argv[2], "org.kick.test.sleep", rate, frames, mode);
@@ -110,7 +110,7 @@ int render(char** argv, const std::string& out)
     uint64_t lost = 0; for(auto& h : hosts) lost += h->statistics().lateBlocks + h->statistics().silentBlocks;
     check(lost == 0, "no block lost: " + std::to_string(lost));
     std::ofstream(out + ".txt") << block << " blocks, " << restedAfter << " rested\n";
-    std::printf("rest %s: %d blocks, %llu rested (%llu at the first note), %llu of %llu note blocks called\n", restVar ? restVar : "disabled", block,
+    std::printf("rest %s: %d blocks, %llu rested (%llu at the first note), %llu of %llu note blocks called\n", restVar ? restVar : "default", block,
                 (unsigned long long)restedAfter, (unsigned long long)restedAtRest, (unsigned long long)notesCalled, (unsigned long long)notes);
     return failures;
 }
@@ -136,18 +136,18 @@ int main(int argc, char** argv)
     std::vector<std::string> outputs;
     for(const char* mode : {"all", "", "0"})
     {
-        const auto out = base + "-" + (*mode ? mode : "disabled");
+        const auto out = base + "-" + (*mode ? mode : "default");
         std::string command = std::string(*mode ? "OSCAIRN_WORKER_REST=" + std::string(mode) + " " : "") + quoted(argv[0]);
         for(int i = 1; i < 5; ++i) command += " " + quoted(argv[i]);
         command += " --render " + quoted(out);
-        // Unset for the disabled run: the parent's own environment may hold the variable.
+        // Unset for the default run: the parent's own environment may hold the variable.
         if(!*mode) command = "env -u OSCAIRN_WORKER_REST " + command;
-        if(std::system(command.c_str()) != 0) { std::fprintf(stderr, "FAIL: the run with rest %s failed\n", *mode ? mode : "disabled"); ++failures; }
+        if(std::system(command.c_str()) != 0) { std::fprintf(stderr, "FAIL: the run with rest %s failed\n", *mode ? mode : "default"); ++failures; }
         outputs.push_back(slurp(out));
         std::remove(out.c_str()); std::remove((out + ".txt").c_str());
     }
     const auto& reference = outputs.back(); // every worker called
-    const char* names[]{"all", "disabled"};
+    const char* names[]{"all", "default"};
     for(size_t i = 0; i < 2; ++i)
     {
         if(outputs[i].size() != reference.size() || reference.empty()) { std::fprintf(stderr, "FAIL: rest %s rendered %zu bytes, every worker called %zu\n", names[i], outputs[i].size(), reference.size()); ++failures; continue; }
@@ -159,6 +159,6 @@ int main(int argc, char** argv)
             ++failures;
         }
     }
-    if(!failures) std::printf("worker rest diff: resting changed no sample (all and disabled against every worker called)\n");
+    if(!failures) std::printf("worker rest diff: resting changed no sample (all and the default against every worker called)\n");
     return failures ? 1 : 0;
 }

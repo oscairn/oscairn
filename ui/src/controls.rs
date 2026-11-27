@@ -1386,3 +1386,282 @@ impl Screen {
         self.controls.iter().map(|c| (c.id, c.targets.clone())).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// graph.get with nothing set: an empty read, no parts, no controls, nothing panicking (the shell's
+    /// first read when the graph has no controls yet, ui/src/tests/controls.rs `no_controls`).
+    #[test]
+    fn read_of_an_empty_graph() {
+        let (controls, parts) = read(&json!({}));
+        assert!(controls.is_empty());
+        assert!(parts.is_empty());
+        let (controls, parts) = read(&json!({"controls": null, "parts": "none"}));
+        assert!(controls.is_empty());
+        assert!(parts.is_empty());
+    }
+
+    /// One control with its targets and a part with its level, mute and sends, as the JUCE page reads them.
+    #[test]
+    fn read_parses_a_control_and_a_part() {
+        let graph = json!({
+            "controls": [{
+                "id": 3, "name": "Overdrive", "value": 0.4,
+                "targets": [
+                    {"kind": "partLevel", "part": 1, "start": 0., "end": 0.5, "curve": "linear", "relative": false, "base": 0., "offIn": [2]},
+                    {"kind": "control", "control": 7, "start": 0., "end": 1., "curve": {"kind": "db", "min": -60., "max": -6.}, "relative": true, "base": 0.2, "offIn": []}
+                ]
+            }],
+            "parts": [{
+                "id": 1, "name": "Lead", "input": {"kind": "synth"}, "level": 0.8, "mute": false,
+                "sends": [{"bus": 2, "level": 0.25}, {"bus": 5, "level": 0.}]
+            }]
+        });
+        let (controls, parts) = read(&graph);
+        assert_eq!(controls.len(), 1);
+        let m = &controls[0];
+        assert_eq!((m.id, m.name.as_str()), (3, "Overdrive"));
+        assert_eq!(m.value, 0.4);
+        assert_eq!(m.targets.len(), 2);
+        assert_eq!(m.targets[0].kind, Kind::PartLevel(1));
+        assert_eq!(m.targets[0].end, 0.5);
+        assert_eq!(m.targets[0].curve.kind, 0);
+        assert_eq!(m.targets[0].off_in, vec![2]);
+        assert_eq!(m.targets[1].kind, Kind::Control(7));
+        assert!(m.targets[1].relative);
+        assert_eq!(m.targets[1].base, 0.2);
+        assert_eq!(m.targets[1].curve.kind, 4);
+        assert_eq!(m.targets[1].curve.low, -60.);
+        assert_eq!(parts.len(), 1);
+        let p = &parts[0];
+        assert_eq!((p.id, p.name.as_str(), p.bus), (1, "Lead", false));
+        assert_eq!(p.level, 0.8);
+        assert!(!p.mute);
+        assert_eq!(p.sends, vec![(2, 0.25), (5, 0.)]);
+    }
+
+    /// A part whose input is a bus counts as a bus, children of audio count as not.
+    #[test]
+    fn read_calls_a_bus_input_a_bus() {
+        let (_, parts) = read(&json!({
+            "parts": [
+                {"id": 1, "name": "Mix", "input": {"kind": "bus"}, "sends": []},
+                {"id": 2, "name": "Synth", "input": null, "sends": []},
+                {"id": 3, "name": "No input", "sends": []}
+            ]
+        }));
+        assert!(parts[0].bus, "a bus input is a bus");
+        assert!(!parts[1].bus);
+        assert!(!parts[2].bus, "no input at all is not a bus");
+    }
+
+    /// A control with a missing or wrong-typed field keeps the defaults, nothing panicking.
+    #[test]
+    fn read_of_missing_and_wrong_typed_fields() {
+        let (controls, parts) = read(&json!({
+            "controls": [
+                {"name": 7, "value": "loud", "targets": "none"},
+                {"id": -2, "targets": [{}]}
+            ],
+            "parts": [
+                {"name": null, "level": "quiet", "mute": 1, "sends": [{"bus": null}, {"level": 0.5}]}
+            ]
+        }));
+        assert_eq!(controls.len(), 2);
+        assert_eq!((controls[0].id, controls[0].name.as_str(), controls[0].value), (0, "", 0.));
+        assert!(controls[0].targets.is_empty(), "a target list that is not an array reads as none");
+        assert_eq!((controls[1].id, controls[1].name.as_str()), (0, ""));
+        assert_eq!(controls[1].targets, vec![Target::new(Kind::Parameter(0, 0))], "an empty target is a parameter of 0");
+        assert_eq!(parts.len(), 1);
+        assert_eq!((parts[0].id, parts[0].name.as_str(), parts[0].level, parts[0].mute), (0, "", 1., false));
+        assert!(parts[0].sends.is_empty(), "a send without a bus is dropped");
+    }
+
+    /// Unicode and very long names come through whole.
+    #[test]
+    fn read_keeps_unicode_and_long_names() {
+        let long = "x".repeat(2000);
+        let (controls, parts) = read(&json!({
+            "controls": [{"id": 1, "name": "主音量 🎛", "targets": []}],
+            "parts": [{"id": 2, "name": long, "sends": []}]
+        }));
+        assert_eq!(controls[0].name, "主音量 🎛");
+        assert_eq!(parts[0].name.len(), 2000);
+    }
+
+    /// A new target is the full range, linear, relative off, with no base and no scenes off.
+    #[test]
+    fn a_new_target_is_the_default_range() {
+        let t = Target::new(Kind::PartMute(4));
+        assert_eq!(t.kind, Kind::PartMute(4));
+        assert_eq!((t.start, t.end), (0., 1.));
+        assert_eq!(t.curve, Curve::default());
+        assert!(!t.relative);
+        assert_eq!((t.base, t.off_in.as_slice()), (0., &[][..]));
+    }
+
+    /// `controls.targets` names each kind and reads them back the same, the fields its kind does not use zero.
+    #[test]
+    fn target_json_round_trips_every_kind_and_zeroes_unused_fields() {
+        let kinds = vec![
+            Kind::Parameter(9, 12),
+            Kind::PartLevel(5),
+            Kind::PartMute(5),
+            Kind::SendLevel(5, 2),
+            Kind::Control(6),
+            Kind::Morph(1, 3),
+        ];
+        // The field a kind drives is in its id place, the fields it does not use are 0.
+        for kind in kinds {
+            let json = Target::new(kind.clone()).json();
+            let id = |k: &str| json[k].as_u64().unwrap() as u32;
+            assert_eq!((id("node"), id("param"), id("part"), id("bus"), id("control"), id("from"), id("to")), match kind {
+                Kind::Parameter(n, p) => (n as u32, p as u32, 0, 0, 0, 0, 0),
+                Kind::PartLevel(x) | Kind::PartMute(x) => (0, 0, x, 0, 0, 0, 0),
+                Kind::SendLevel(x, b) => (0, 0, x, b, 0, 0, 0),
+                Kind::Control(x) => (0, 0, 0, 0, x, 0, 0),
+                Kind::Morph(a, b) => (0, 0, 0, 0, 0, a, b),
+            });
+            assert_eq!(json["curve"], json!("linear"));
+            assert!(!json["relative"].as_bool().unwrap());
+            assert_eq!(json["offIn"], json!([]));
+            assert_eq!(json["kind"], json!(kind.name()));
+            assert_eq!(Target::read(&json), Target::new(kind), "a kind reads back as itself");
+        }
+        assert_eq!(Target::new(Kind::Parameter(9, 12)).json()["node"], json!(9));
+        assert_eq!(Target::new(Kind::Morph(1, 3)).json()["from"], json!(1));
+        assert_eq!(Target::new(Kind::Morph(1, 3)).json()["to"], json!(3));
+    }
+
+    /// A missing or wrong-typed kind falls back to a parameter of 0, its fields to the defaults.
+    #[test]
+    fn target_read_of_a_missing_curve_and_fields() {
+        let t = Target::read(&json!({"start": 3., "end": "wide", "curve": 7, "relative": 1}));
+        assert_eq!(t.kind, Kind::Parameter(0, 0));
+        assert_eq!(t.start, 3.);
+        assert_eq!(t.end, 1., "an end that is not a number keeps 1");
+        assert_eq!(t.curve.kind, 0);
+        assert!(!t.relative);
+        let t = Target::read(&json!({"kind": "morph", "from": "a", "to": 2, "offIn": [1, "two", 3]}));
+        assert_eq!(t.kind, Kind::Morph(0, 2));
+        assert_eq!(t.off_in, vec![1, 3], "only numbers in offIn");
+    }
+
+    /// The point of a value in the range is start plus the curve's shape over the width, the default the
+    /// shape itself.
+    #[test]
+    fn a_targets_point_lies_in_its_range() {
+        let t = Target { kind: Kind::PartLevel(1), start: 0.2, end: 0.8, curve: Curve::default(), relative: false, base: 0., off_in: vec![] };
+        assert!((t.point(0.5) - 0.5).abs() < 1e-12);
+        assert_eq!(t.point(-1.), 0.2, "a value below 0 clamps to the start");
+        assert_eq!(t.point(2.), 0.8, "a value above 1 clamps to the end");
+        let r = Target { start: 0.8, end: 0.2, ..t.clone() };
+        assert!((r.point(1.) - 0.2).abs() < 1e-12, "an inverted range still maps end to the end");
+    }
+
+    /// A target sums to the destination only with another sender of the same summed kind (`MacroTarget::sums`).
+    #[test]
+    fn same_destination_requires_a_summing_kind() {
+        let a = Target::new(Kind::PartLevel(2));
+        let b = Target::new(Kind::PartLevel(2));
+        let c = Target::new(Kind::Control(2));
+        let d = Target::new(Kind::Morph(1, 2));
+        assert!(a.same_destination(&b), "two part levels share the destination");
+        assert!(!a.same_destination(&Target::new(Kind::PartLevel(3))));
+        assert!(!c.same_destination(&c), "a control is not a summing sender");
+        assert!(!d.same_destination(&d), "a morph is not a summing sender");
+        assert!(!Target::new(Kind::Parameter(1, 2)).same_destination(&Target::new(Kind::PartLevel(2))), "a parameter and a part level differ");
+    }
+
+    /// The curves' kinds name themselves as `controls.targets` and `MacroTarget::Curve` order.
+    #[test]
+    fn curve_json_round_trips_and_indexes_curves() {
+        for kind in 0..3 {
+            let curve = Curve { kind, ..Curve::default() };
+            assert_eq!(Curve::read(&curve.json()), curve, "{kind} reads back as itself");
+        }
+        assert_eq!(Curve::read(&json!("s-curve")).kind, 3);
+        assert_eq!(Curve::read(&json!("linear")).kind, 0);
+        assert_eq!(Curve::read(&json!("no such curve")).kind, 0, "an unknown name is linear");
+        assert_eq!(Curve { kind: 7, ..Curve::default() }.json(), json!("s-curve"), "a kind past the curves clamps to the last");
+        assert_eq!(Curve { kind: 4, low: -60., high: -6., ..Curve::default() }.json(), json!({"kind": "db", "min": -60., "max": -6.}));
+        assert_eq!(Curve { kind: 5, exponent: 0.5, ..Curve::default() }.json(), json!({"kind": "power", "exponent": 0.5}));
+    }
+
+    /// A curve's numbers are read from the object its kind takes, the defaults kept for a missing field.
+    #[test]
+    fn curve_read_of_db_power_and_unknown() {
+        let db = Curve::read(&json!({"kind": "db", "min": -90., "max": 3.}));
+        assert_eq!((db.kind, db.low, db.high), (4, -90., 3.));
+        let db = Curve::read(&json!({"kind": "db"}));
+        assert_eq!((db.kind, db.low, db.high), (4, -96., 0.), "missing numbers keep the default band");
+        let db = Curve::read(&json!({"kind": "db", "min": "soft", "max": null}));
+        assert_eq!((db.low, db.high), (-96., 0.));
+        let p = Curve::read(&json!({"kind": "power", "exponent": 0.5}));
+        assert_eq!((p.kind, p.exponent), (5, 0.5));
+        let u = Curve::read(&json!({"kind": "other", "exponent": 0.1}));
+        assert_eq!(u, Curve::default(), "an unknown curve object keeps the defaults");
+        let n = Curve::read(&json!(null));
+        assert_eq!(n, Curve::default());
+        let s = Curve::read(&json!(4));
+        assert_eq!(s, Curve::default(), "a curve that is neither string nor object is default");
+    }
+
+    /// The shape of every curve is clamped to 0 to 1, 0 at its start and 1 at its end.
+    #[test]
+    fn a_curves_shape_is_clamped_and_lands_on_its_ends() {
+        for kind in 0..6 {
+            let c = Curve { kind, ..Curve::default() };
+            assert_eq!(c.shape(-0.5), 0., "{kind} below 0 is 0");
+            assert!((c.shape(1.5) - 1.).abs() < 1e-12, "{kind} above 1 is 1");
+            assert_eq!(c.shape(0.), 0., "{kind} at 0 is 0");
+            assert!((c.shape(1.) - 1.).abs() < 1e-12, "{kind} at 1 is 1");
+        }
+        let e = Curve { kind: 5, exponent: 3., ..Curve::default() };
+        assert_eq!(e.shape(0.5), 0.125);
+        let db = Curve { kind: 4, low: -60., high: 0., ..Curve::default() };
+        assert!((db.shape(0.25) - 10f64.powf(-45. / 20.)).abs() < 1e-12, "evenly in decibels");
+    }
+
+    /// The kinds' names to the engine, and which of them a summing rule adds.
+    #[test]
+    fn kinds_name_themselves_and_tell_whether_they_sum() {
+        assert_eq!(Kind::Parameter(1, 2).name(), "parameter");
+        assert_eq!(Kind::PartLevel(1).name(), "partLevel");
+        assert_eq!(Kind::PartMute(1).name(), "partMute");
+        assert_eq!(Kind::SendLevel(1, 2).name(), "sendLevel");
+        assert_eq!(Kind::Control(1).name(), "control");
+        assert_eq!(Kind::Morph(1, 2).name(), "morph");
+        assert!(Kind::Parameter(1, 2).sums());
+        assert!(Kind::PartLevel(1).sums());
+        assert!(Kind::PartMute(1).sums());
+        assert!(Kind::SendLevel(1, 2).sums());
+        assert!(!Kind::Control(1).sums());
+        assert!(!Kind::Morph(1, 2).sums());
+    }
+
+    /// A fortieth of the slider per click, to a thousandth, held at the ends.
+    #[test]
+    fn stepped_is_fortieths_clamped_to_thousandths() {
+        assert_eq!(stepped(0.5, 1), 0.525);
+        assert_eq!(stepped(0.5, 0), 0.5);
+        assert_eq!(stepped(0.5, -1), 0.475);
+        assert_eq!(stepped(0., -1), 0., "held at the bottom");
+        assert_eq!(stepped(1., 1), 1., "held at the top");
+        assert_eq!(stepped(0.999, 1), 1.);
+        assert_eq!(stepped(0.004, -1), 0.);
+        assert_eq!(stepped(-2., 0), 0., "below 0 clamps to 0");
+    }
+
+    /// To a thousandth; a value is not clamped here, the callers clamp.
+    #[test]
+    fn thousandths_rounds_but_does_not_clamp() {
+        assert_eq!(thousandths(0.001234), 0.001);
+        assert_eq!(thousandths(0.9999), 1.);
+        assert_eq!(thousandths(-0.0014), -0.001);
+        assert_eq!(thousandths(1.5), 1.5);
+    }
+}

@@ -22,7 +22,7 @@ use crate::settings_controllers::Controllers;
 use crate::settings_installed::Installed;
 use crate::settings_available::Available;
 use crate::settings_keys::{About, Keys};
-use crate::settings_look::{Appearance, TopBarPage};
+use crate::settings_look::{Appearance, Start, TopBarPage};
 use crate::menu;
 use crate::nav::Action;
 use crate::profile::Profile;
@@ -46,11 +46,12 @@ pub enum Id {
     Available,
     Keys,
     About,
+    Start,
 }
 
 impl Id {
     /// In the order the tabs show them: what a player changes most first.
-    pub const ALL: [Id; 9] = [Id::Appearance, Id::TopBar, Id::Controllers, Id::Audio, Id::Repositories, Id::Installed, Id::Available, Id::Keys, Id::About];
+    pub const ALL: [Id; 10] = [Id::Appearance, Id::TopBar, Id::Controllers, Id::Audio, Id::Repositories, Id::Installed, Id::Available, Id::Keys, Id::Start, Id::About];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -63,6 +64,7 @@ impl Id {
             Id::Available => "Available",
             Id::Keys => "Signing keys",
             Id::About => "About",
+            Id::Start => "Start",
         }
     }
 
@@ -225,6 +227,7 @@ pub struct Screen {
     top_bar: TopBarPage,
     controllers: Controllers,
     audio: Audio,
+    start: Start,
     repos: Repositories,
     installed: Installed,
     available: Available,
@@ -248,9 +251,10 @@ impl Screen {
             at: 0,
             tab_at: None,
             appearance: Appearance::new(crate::theme::Places::found(), profile.theme.clone(), config.clone()),
-            top_bar: TopBarPage::new(config),
+            top_bar: TopBarPage::new(config.clone()),
             controllers: Controllers::default(),
             audio: Audio::default(),
+            start: Start::new(config),
             repos: Repositories::default(),
             installed: Installed::default(),
             available: Available::default(),
@@ -267,7 +271,8 @@ impl Screen {
     #[cfg(test)]
     pub fn set_folders(&mut self, config: Option<std::path::PathBuf>, places: crate::theme::Places) {
         self.appearance.set_folders(config.clone(), places);
-        self.top_bar.set_folder(config);
+        self.top_bar.set_folder(config.clone());
+        self.start.set_folder(config);
     }
 
     /// Tests: where the theme chooser starts.
@@ -310,6 +315,7 @@ impl Screen {
             Id::Available => &self.available,
             Id::Keys => &self.keys,
             Id::About => &self.about,
+            Id::Start => &self.start,
         }
     }
 
@@ -325,6 +331,7 @@ impl Screen {
             Id::Available => f(&mut self.available, &mut self.ctx),
             Id::Keys => f(&mut self.keys, &mut self.ctx),
             Id::About => f(&mut self.about, &mut self.ctx),
+            Id::Start => f(&mut self.start, &mut self.ctx),
         };
         self.take_up();
         r
@@ -620,5 +627,52 @@ impl Screen {
         }
         self.take_up();
         self.show();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pages_are_the_tabs_each_its_own_title() {
+        let titles: Vec<&'static str> = Id::ALL.iter().map(|&id| id.title()).collect();
+        assert_eq!(titles, ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"]);
+        let mut sorted = titles.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), titles.len(), "each page has its own title");
+    }
+
+    #[test]
+    fn the_audio_page_lies_where_the_profile_fixes_the_device() {
+        assert!(Id::Audio.applies(&Profile::default()), "a profile that does not fix the device offers Audio");
+        let mut fixed = Profile::default();
+        fixed.audio_fixed = true;
+        assert!(!Id::Audio.applies(&fixed), "a profile that fixes the device has no Audio page");
+        for id in Id::ALL {
+            if id != Id::Audio {
+                assert!(id.applies(&Profile::default()), "{id:?} applies to every profile");
+            }
+        }
+    }
+
+    #[test]
+    fn said_and_failed_fit_the_panel() {
+        let one = said("Played by MIDI channel.");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].text.as_str(), "Played by MIDI channel.");
+        assert!(!one[0].head && !one[0].failed);
+
+        let long = said("A sentence about the panel that is much longer than one line of thirty-four characters and so it wraps onto more than one.");
+        assert!(long.len() > 1, "a long sentence wraps");
+        assert_eq!(long.iter().filter(|l| l.text.chars().count() > crate::library::INFO_WIDTH).count(), 0, "no line is wider than the panel");
+        assert!(long.iter().all(|l| !l.head && !l.failed));
+
+        assert!(said("").is_empty(), "nothing to say is no lines");
+        assert!(failed("it does not fit this device").iter().all(|l| l.failed && !l.head));
+        let failed_long = failed("A refusal that is much longer than one line of the panel and so it wraps while staying in the danger color.");
+        assert!(failed_long.len() > 1);
+        assert!(failed_long.iter().all(|l| l.failed && l.text.chars().count() <= crate::library::INFO_WIDTH));
     }
 }

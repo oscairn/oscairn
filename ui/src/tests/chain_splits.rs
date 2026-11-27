@@ -558,3 +558,280 @@ fn splits_and_lanes_are_drawn() {
         c.act(Action::Confirm(None));
     });
 }
+
+// W06: the chain's splits and lanes walked from Home with panel moves only (no touch): the dial and the
+// left/right knobs, Confirm, cancel/EXIT — no tap. Home's Performance tile, a part, then Insert effects
+// open the chain; the walk then presses every row the chain itself declares ("Chain 1–N of N"), each to
+// a real effect (a plugin's actions, an insert row's split choices, a split's lanes) and EXIT back, and
+// dives into the band split: its lanes, a lane's settings value by value (each `parts.lane` with the whole
+// lane), Add band (`parts.addLane`), a crossover (`params.set`), Remove lane (`parts.removeLane` +
+// `graph.remove`) and Remove split (`parts.removeSplit` + `graph.remove`), each asserted as the request the
+// fake engine received or the view changed. Every count comes from the screen's own models, never the test's;
+// nothing switches until Confirm.
+#[test]
+fn chain_splits_walked_from_home_with_panel_moves() {
+    let mut f = Fixture::new("chain-splits-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let graph = std::cell::RefCell::new(split_graph("bands", 3));
+    let ui = f.screen.ui.clone_strong();
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.borrow().clone(),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // The screen's own title (the shown screen's `show`, not the bar's breadcrumb).
+    let scrn_title = |ui: &Shell| ui.global::<crate::PartState>().get_title().to_string();
+    // Home → the Performance tile → Play, by panel moves only (nothing tapped).
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move", 0); // the first read is only a baseline
+    nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "Home's Performance tile opens Play");
+    // Play → a part → the Part screen.
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!((ui.get_screen(), title(&ui)), (4, "Keys".to_string()), "a press on a part opens the Part screen");
+    // The Part screen → the dial down to Insert effects → the chain.
+    nav(&mut f, "move", 1);
+    settle(&mut f);
+    let mut on_chain = false;
+    for _ in 0..50 {
+        let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+        let label = rows(&ui)[at].label.clone();
+        if label == "Insert effects" {
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            on_chain = ui.get_screen() == 5;
+            break;
+        }
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+    }
+    assert!(on_chain, "Insert effects opens the chain screen");
+    assert_eq!(scrn_title(&ui), "Insert effects");
+    // The chain's own count, from its view line ("Chain 1–N of N"), read while the screen is up.
+    let declared = |ui: &Shell| -> usize {
+        let view = ui.global::<crate::PartState>().get_view().to_string();
+        view.rsplit(" of ").next().unwrap_or("0").trim().parse().unwrap_or(0)
+    };
+    let n = declared(&ui);
+    assert!(n >= 7, "the chain declares {n} rows (Chorus, a split, a Reverb and their insert rows)");
+    // The next engine request, captured for the effect (before settle drains it). A meter poll that
+    // fired in the same tick would otherwise shadow the effect request, so skip (and answer) any
+    // `*.meters` poll instead of taking it as the effect.
+    let next = |f: &mut Fixture, what: &str| -> serde_json::Value {
+        loop {
+            let r = f.engine.try_request(std::time::Duration::from_secs(5)).unwrap_or_else(|| panic!("no request after {what}"));
+            if r["method"].as_str().unwrap_or_default().ends_with(".meters") {
+                f.reply(&r, json!({"result": {}}));
+                continue;
+            }
+            return r;
+        }
+    };
+    // The split dive: the lanes and a lane's settings, then the split's own actions; Remove split returns
+    // the chain list.
+    let split_dived = std::cell::Cell::new(false);
+    let dive_split = |f: &mut Fixture, nav: &mut dyn FnMut(&mut Fixture, &str, i64), settle: &dyn Fn(&mut Fixture)| {
+        split_dived.set(true);
+        assert_eq!(scrn_title(&ui), "Split: frequency bands", "the split opens on Confirm");
+        assert!(declared(&ui) >= 6, "the split declares its rows");
+        // Confirm on a lane opens it; the lane's rows, counted from its own view.
+        let lane_of = |ui: &Shell| rows(ui).iter().position(|r| r.cursor).map(|i| rows(ui)[i].label.to_string());
+        nav(f, "move", 1);
+        settle(f);
+        let mut lane_ok = false;
+        for _ in 0..6 {
+            let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+            if rows(&ui)[at].label == "Band 1" {
+                nav(f, "confirm", 1);
+                settle(f);
+                lane_ok = scrn_title(&ui) == "Band 1";
+                break;
+            }
+            nav(f, "move", 1);
+            settle(f);
+        }
+        assert!(lane_ok, "a lane opens by Confirm");
+        assert!(declared(&ui) >= 5, "a lane declares its settings");
+        // The lane's settings, each to its `parts.lane`: a value starts with Confirm, the dial lays it down
+        // and Confirm ends it; Mute sends the lane at once; Remove lane removes it and leaves the split.
+        let (mut lane_visited, mut previous, mut removed_lane, mut lane_sent) = (Vec::new(), String::new(), false, false);
+        nav(f, "move", 1);
+        settle(f);
+        for _ in 0..20 {
+            let Some(at) = lane_of(&ui) else { nav(f, "move", 1); settle(f); continue };
+            if at == previous {
+                break;
+            }
+            if !lane_visited.contains(&at) {
+                lane_visited.push(at.clone());
+                match at.as_str() {
+                    "Lane level" | "Lane pan" | "Lowest key" | "Highest key" => {
+                        nav(f, "confirm", 1); // starts the change
+                        settle(f);
+                        nav(f, "move", 1); // the dial makes it: `parts.lane` with the whole lane
+                        let r = next(f, &format!("{at} changed"));
+                        assert_eq!((r["method"].as_str(), r["params"]["split"].as_u64(), r["params"]["lane"].as_u64()),
+                            (Some("parts.lane"), Some(5), Some(0)), "{at}: the lane sent whole");
+                        f.reply(&r, json!({"result": {}}));
+                        settle(f);
+                        lane_sent = true;
+                        nav(f, "confirm", 1); // lays it down
+                        settle(f);
+                    }
+                    "Mute" | "Solo" => {
+                        nav(f, "confirm", 1); // toggled and sent at once
+                        let r = next(f, &format!("{at} toggled"));
+                        assert_eq!(r["method"].as_str(), Some("parts.lane"), "{at}: the lane sent whole");
+                        f.reply(&r, json!({"result": {}}));
+                        settle(f);
+                        lane_sent = true;
+                    }
+                    "Remove lane" => {
+                        nav(f, "confirm", 1);
+                        let r = next(f, "Remove lane");
+                        assert_eq!((r["method"].as_str(), r["params"]["split"].as_u64(), r["params"]["lane"].as_u64()),
+                            (Some("parts.removeLane"), Some(5), Some(0)), "Remove lane removes the lane");
+                        f.reply(&r, json!({"result": {}}));
+                        settle(f);
+                        removed_lane = true;
+                        nav(f, "move", 1);
+                        settle(f);
+                        break;
+                    }
+                    _ => {} // the lane's "+ Insert plugin here" (it has none)
+                }
+            }
+            previous = at;
+            nav(f, "move", 1);
+            settle(f);
+        }
+        assert!(removed_lane, "the walk removed a lane, which the lane's last row does");
+        assert!(lane_sent, "a lane setting sent `parts.lane`");
+        assert!(lane_visited.len() >= declared(&ui) - 1, "the lane's rows reached {lane_visited:?}");
+        assert_eq!(scrn_title(&ui), "Split: frequency bands", "Remove lane leaves the split");
+        // The split's own actions: Add band, a crossover, Remove split. Each press leaves its first request
+        // queued for the caller to assert, then settle answers it.
+        let find_press = |f: &mut Fixture, nav: &mut dyn FnMut(&mut Fixture, &str, i64), target: &str| -> bool {
+            nav(f, "move", 1);
+            settle(f);
+            for _ in 0..12 {
+                let at = rows(&ui).iter().position(|r| r.cursor).expect("the cursor is on a row");
+                let lab = rows(&ui)[at].label.clone();
+                if lab == target {
+                    nav(f, "confirm", 1);
+                    return true; // its request stays queued for the caller to assert
+                }
+                nav(f, "move", 1);
+                settle(f);
+            }
+            false
+        };
+        assert!(find_press(f, nav, "Add band"), "Add band is reached and pressed");
+        let r = next(f, "Add band");
+        assert_eq!(r["method"].as_str(), Some("parts.addLane"), "Add band adds a lane");
+        f.reply(&r, json!({"result": {}}));
+        settle(f);
+        // Add band keeps the cursor where it was; return it to the top of the split, one step at a
+        // time until the move no longer moves the cursor up (the dial clamps at the first row).
+        nav(f, "move", -1);
+        settle(f);
+        loop {
+            let before = rows(&ui).iter().position(|r| r.cursor);
+            nav(f, "move", -1);
+            settle(f);
+            let after = rows(&ui).iter().position(|r| r.cursor);
+            match (before, after) {
+                (Some(b), Some(a)) if a < b => continue,
+                _ => break,
+            }
+        }
+        assert!(find_press(f, nav, "Crossover 1"), "a crossover is reached and pressed");
+        nav(f, "move", 1); // a step of the change
+        let r = next(f, "a crossover step");
+        assert_eq!(r["method"].as_str(), Some("params.set"), "a crossover is set in hertz");
+        f.reply(&r, json!({"result": {}}));
+        settle(f);
+        nav(f, "confirm", 1); // lays the change down
+        settle(f);
+        assert!(find_press(f, nav, "Remove split"), "Remove split is reached and pressed");
+        let r = next(f, "Remove split");
+        assert_eq!(r["method"].as_str(), Some("parts.removeSplit"), "Remove split names the split");
+        f.reply(&r, json!({"result": {}}));
+        settle(f);
+        assert_eq!(scrn_title(&ui), "Insert effects", "Remove split returns the chain");
+    };
+    // The chain's list, walked by the dial: every row it declares, pressed and EXIT back, the split dived
+    // into. Nothing switches before Confirm. The count is the screen's own `rows()` (its cursor stops, one
+    // per row), not the test's.
+    let n = rows(&ui).len();
+    assert_eq!(n, declared(&ui), "the screen's list and its view agree on the count");
+    assert!(n >= 7, "the chain declares {n} rows (Chorus, a split, a Reverb and their insert rows)");
+    let mut done = vec![false; n];
+    let mut visited = Vec::<String>::new();
+    nav(&mut f, "move", 1);
+    settle(&mut f);
+    for _ in 0..400 {
+        let Some(i) = rows(&ui).iter().position(|r| r.cursor) else {
+            nav(&mut f, "move", 1);
+            settle(&mut f);
+            continue;
+        };
+        if i >= n {
+            break;
+        }
+        if done[i] {
+            let before = i;
+            nav(&mut f, "move", 1);
+            settle(&mut f);
+            if rows(&ui).iter().position(|r| r.cursor) == Some(before) {
+                break; // the move left the cursor where it was: past the last row
+            }
+            continue;
+        }
+        done[i] = true;
+        let at = rows(&ui)[i].label.to_string();
+        visited.push(at.clone());
+        if at.starts_with('+') {
+            // An insert row: the plugins and the four split kinds, counted from the screen's own list.
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            assert_eq!(scrn_title(&ui), "Insert: choose a plugin");
+            let splits = labels(&ui).iter().filter(|l| l.starts_with("Split here:")).count();
+            assert!(splits >= 4, "an insert row offers the four kinds of split, got {splits}");
+            nav(&mut f, "cancel", 1);
+            settle(&mut f);
+            assert_eq!(ui.get_screen(), 5, "EXIT from the insert list back to the chain");
+        } else if at == "2. Split" {
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            dive_split(&mut f, &mut nav, &settle);
+        } else {
+            // A plugin: its actions.
+            nav(&mut f, "confirm", 1);
+            settle(&mut f);
+            assert_ne!(scrn_title(&ui), "Insert effects", "{at} opens its actions");
+            assert!(labels(&ui).iter().any(|l| l == "Parameters" || l == "Turn off" || l == "Remove"), "{at}'s actions: {:?}", labels(&ui));
+            nav(&mut f, "cancel", 1);
+            settle(&mut f);
+            assert_eq!(ui.get_screen(), 5, "EXIT from {at}'s actions back to the chain");
+        }
+    }
+    assert_eq!(visited.len(), n, "every row pressed once, got {visited:?}");
+    assert!(split_dived.get(), "the split was dived into");
+}

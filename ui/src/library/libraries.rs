@@ -517,3 +517,31 @@ impl Screen {
         self.graph = graph.clone();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_devices_platform_is_one_the_store_names() {
+        // The plugin store names a platform "<edition>-<arch>" (package.cpp `platform`), and the
+        // device's own is among the listed ones so a build can be chosen for it.
+        let p = platform();
+        assert_eq!(p.split('-').count(), 2, "a store platform is an edition and an arch, nothing else");
+        assert_eq!(p.split('-').next(), Some(std::env::consts::OS), "the edition is the running OS");
+        assert!(!p.contains(' '), "no space in a store platform");
+        assert!(PLATFORMS.contains(&p.as_str()), "platform {p} is not one of the store's {PLATFORMS:?}");
+    }
+
+    #[test]
+    fn a_plugin_is_shown_by_its_name_and_version() {
+        let p = PluginRef { format: "clap".into(), id: "com.example.amp".into(), version: "1.2.3".into(), name: "Amp".into() };
+        assert_eq!(p.title(), "Amp 1.2.3", "the shown title is the human name, not the id");
+    }
+
+    #[test]
+    fn an_unnamed_plugin_is_shown_by_its_id() {
+        let p = PluginRef { format: "clap".into(), id: "com.example.amp".into(), version: "2".into(), name: String::new() };
+        assert_eq!(p.title(), "com.example.amp 2", "an empty name falls back to the id");
+    }
+}

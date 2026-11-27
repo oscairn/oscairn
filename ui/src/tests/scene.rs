@@ -221,3 +221,151 @@ fn scene_setup_at_rest_costs_no_request_and_no_frame() {
     slint::platform::update_timers_and_animations();
     assert!(f.engine.try_request(std::time::Duration::from_millis(500)).is_none(), "nothing is asked at rest");
 }
+
+// Reachability: the Scene screen is reached and every action it offers is activated from Home with
+// panel moves only (move, confirm, cancel/EXIT), no touch. The walk reaches the Scene setup from
+// Home through the Performance tile, Play and the top bar's Scene stop, then turns the dial over
+// the whole list (pane 0), presses each row and holds what it does against what the screen
+// declares: Store sends scenes.store, Rename opens the text keyboard, a scope kind sends
+// scenes.scope, and the values change the scenes.transition (a press starts the change, the dial
+// steps it, a second press lays it down, the curve once a glide time is set). The count walked is
+// the screen's own rows, read while it is up before the walk starts.
+#[test]
+fn scenes_reachable_from_home_by_panel_moves() {
+    let mut f = Fixture::new("scene-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    let scenes = |ui: &Shell| -> Vec<crate::SettingData> { ui.global::<crate::PartState>().get_rows().iter().collect() };
+    let cursor_at = |ui: &Shell| -> Option<usize> { ui.global::<crate::PartState>().get_rows().iter().position(|r| r.cursor) };
+    let editing_at = |ui: &Shell| -> Option<usize> { ui.global::<crate::PartState>().get_rows().iter().position(|r| r.editing) };
+    // The scene edits, in the order they are sent, with their parameters; a quiet engine answers
+    // the rest and changes the graph as the real engine does for a scene edit (no commit, a read after).
+    let mut sent: Vec<(String, serde_json::Value)> = Vec::new();
+    fn settle(f: &mut Fixture, sent: &mut Vec<(String, serde_json::Value)>, g: &mut serde_json::Value) {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => g.clone(),
+                "library.query" => json!({"items": [], "total": 0}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => json!({"presets": []}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                "scenes.store" | "scenes.name" | "scenes.scope" | "scenes.transition" => {
+                    sent.push((method.clone(), r["params"].clone()));
+                    if let Some(s) = g["scenes"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == r["params"]["scene"]) {
+                        match method.as_str() {
+                            "scenes.name" => s["name"] = r["params"]["name"].clone(),
+                            "scenes.scope" => s["scope"] = r["params"]["scope"].clone(),
+                            "scenes.transition" => {
+                                for k in ["glide", "curve", "launch"] {
+                                    s[k] = r["params"][k].clone();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    json!({"accepted": true})
+                }
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    }
+    let mut g: serde_json::Value = graph();
+    fn nav(f: &mut Fixture, key: &str, by: i64, total: &mut std::collections::BTreeMap<String, i64>, sent: &mut Vec<(String, serde_json::Value)>, g: &mut serde_json::Value) {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+        settle(f, sent, g);
+    }
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    nav(&mut f, "move", 0, &mut total, &mut sent, &mut g); // the first read is only a baseline
+    nav(&mut f, "move", 1, &mut total, &mut sent, &mut g);
+    nav(&mut f, "confirm", 1, &mut total, &mut sent, &mut g);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play → the top bar's Scene stop: the third pane enters at Back, then the bar's own menu finds
+    // Scene (as the mixer walk finds its stop), so a bar change can't put the press on the wrong one.
+    nav(&mut f, "move:2", 1, &mut total, &mut sent, &mut g);
+    assert!(ui.global::<crate::Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let scene_at = |_f: &Fixture| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == "Scene" && a.enabled);
+    let bar_cursor = |_f: &Fixture| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.cursor);
+    let mut moves = 0;
+    while bar_cursor(&f).is_none() {
+        nav(&mut f, "move", 1, &mut total, &mut sent, &mut g);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached its actions");
+    }
+    moves = 0;
+    while scene_at(&f).is_none() || bar_cursor(&f) != scene_at(&f) {
+        nav(&mut f, "move", 1, &mut total, &mut sent, &mut g);
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached Scene");
+    }
+    nav(&mut f, "confirm", 1, &mut total, &mut sent, &mut g);
+    assert_eq!(ui.get_screen(), 8, "the Scene stop opens the scene's setup");
+    // The whole list the screen declares, counted from it before the walk starts.
+    let n = scenes(&ui).len();
+    assert!(n > 0, "the scene's setup declares no rows");
+    let mut visited: Vec<String> = Vec::new();
+    let mut previous = String::new();
+    for _ in 0..n + 8 {
+        let Some(at) = cursor_at(&ui) else {
+            nav(&mut f, "move:0", 1, &mut total, &mut sent, &mut g); // the dial onto the list again
+            continue;
+        };
+        let label = scenes(&ui)[at].label.to_string();
+        let was_on = scenes(&ui)[at].on; // the row's switch state before the press
+        if label == previous {
+            break; // the move left the cursor where it was: past the last row
+        }
+        if !visited.contains(&label) {
+            visited.push(label.clone());
+            nav(&mut f, "confirm", 1, &mut total, &mut sent, &mut g);
+            match label.as_str() {
+                "Store" => {
+                    let (m, p) = sent.last().expect("Store");
+                    assert_eq!((m.as_str(), p), ("scenes.store", &json!({"scene": 2})));
+                }
+                "Rename" => {
+                    assert!(ui.global::<crate::KeyboardState>().get_open(), "Rename: the press opens the text keyboard");
+                    nav(&mut f, "cancel", 1, &mut total, &mut sent, &mut g); // EXIT closes it
+                    assert_eq!(ui.get_screen(), 8, "Rename: closed, the walk still on the scene's setup");
+                }
+                kind if scenes(&ui)[at].switch => {
+                    let (m, p) = sent.last().expect(kind);
+                    assert_eq!(m.as_str(), "scenes.scope");
+                    assert_eq!(p["scene"], 2);
+                    let scope = p["scope"].as_array().unwrap_or_else(|| panic!("{kind}: the press sent a scope array"));
+                    let word = crate::scene::KINDS.iter().find(|(_, l)| *l == kind).map(|(w, _)| *w).unwrap_or_else(|| panic!("{kind}: one of the scope kinds"));
+                    // The press toggled the pressed kind in the sent scope: shown off, now included,
+                    // or shown on and dropped.
+                    assert_eq!(scope.iter().any(|k| k == word), !was_on, "{kind}: the press toggled {word} in the sent scope");
+                }
+                "Glide time" | "Curve" | "While playing" => {
+                    assert!(editing_at(&ui).is_some(), "{label}: the press starts the change");
+                    nav(&mut f, "move:0", 1, &mut total, &mut sent, &mut g); // the dial steps the value
+                    let (m, p) = sent.last().expect(label.as_str());
+                    assert_eq!(m.as_str(), "scenes.transition");
+                    assert_eq!(p["scene"], 2);
+                    nav(&mut f, "confirm", 1, &mut total, &mut sent, &mut g); // a press lays the change down
+                    assert!(editing_at(&ui).is_none(), "{label}: the second press ends the change");
+                }
+                _ => panic!("the walk pressed “{label}”, which it knows no effect of"),
+            }
+        }
+        previous = label;
+        nav(&mut f, "move:0", 1, &mut total, &mut sent, &mut g); // the dial on
+    }
+    // What the walk visited against what the screen declares: every one of its rows, no row twice.
+    assert_eq!(visited.len(), n, "the walk visited {visited:?}, the screen declares {n}");
+    assert_eq!(visited.iter().collect::<std::collections::HashSet<_>>().len(), visited.len(), "a row visited twice: {visited:?}");
+    // A value row the walk changed by the dial: the last transition carries the glide the dial set.
+    assert_eq!(sent.last().unwrap().1["glide"].as_u64(), Some(100), "the last transition carries the glide set");
+    // Cancel is Back in one step: to Play, and the cursor left the list.
+    nav(&mut f, "cancel", 1, &mut total, &mut sent, &mut g);
+    assert_eq!(ui.get_screen(), 3, "the walk back out to Play");
+}

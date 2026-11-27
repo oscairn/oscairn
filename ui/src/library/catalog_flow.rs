@@ -551,3 +551,186 @@ pub enum PackageRow {
     Install,
     Back,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// An offer of `kind` ("sound", "performance", ...): `holds` comes from its version's types.
+    fn offer(id: &str, name: &str, kind: &str, summary: &str, tags: &[&str]) -> Offer {
+        Offer {
+            repository: "Example".into(),
+            package: Package { id: id.into(), name: name.into(), summary: summary.into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), tags: tags.iter().map(|t| t.to_string()).collect(), ..Default::default() },
+            version: catalog::Version { version: "1.0".into(), types: vec![(format!("oscairn.{kind}"), 1)], ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn noun_names_each_kind() {
+        assert_eq!(noun("performance"), "Performance");
+        assert_eq!(noun("sound"), "Sound");
+        assert_eq!(noun("plugin"), "plugin");
+        assert_eq!(noun("asset"), "content");
+        assert_eq!(noun("something else"), "content", "a kind outside the tabs reads as content");
+    }
+
+    #[test]
+    fn the_catalog_shows_the_kind_the_tab_holds_in_list_order() {
+        let c = Catalog { kind: "sound".into(), all: vec![offer("a", "Arps", "sound", "Pads", &["warm"]), offer("b", "Bass", "sound", "Subs", &["deep"]), offer("p", "Pad", "performance", "Layers", &[])], ..Catalog::new("sound", 1) };
+        let shown = c.shown();
+        assert_eq!(shown.iter().map(|o| o.package.id.as_str()).collect::<Vec<_>>(), ["a", "b"], "the performance stay off the sound tab; the first and last come in list order");
+    }
+
+    #[test]
+    fn the_search_is_every_word_anywhere_in_case_insensitively() {
+        let c = Catalog {
+            kind: "sound".into(),
+            search: "WARM  PADS".into(),
+            all: vec![offer("a", "Arps", "sound", "Pads", &["warm"]), offer("b", "Bass", "sound", "Warm pads", &[]), offer("c", "Cello", "sound", "Strings", &[])],
+            ..Catalog::new("sound", 1)
+        };
+        let shown = c.shown();
+        assert_eq!(shown.iter().map(|o| o.package.id.as_str()).collect::<Vec<_>>(), ["a", "b"], "every word, any field, either case; a two-word search matches both");
+        // Out of range: a search matching nobody.
+        let c = Catalog { kind: "sound".into(), search: "   no-such-word   ".into(), all: vec![offer("a", "Arps", "sound", "Pads", &[])], ..Catalog::new("sound", 1) };
+        assert!(c.shown().is_empty(), "whitespace is trimmed and nothing matches");
+    }
+
+    #[test]
+    fn empty_saying_is_empty_while_reading_or_listing_something() {
+        let c = Catalog::new("sound", 1);
+        assert!(c.reading, "new catalogs are still reading");
+        assert_eq!(c.empty_saying(), "");
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.all = vec![offer("a", "Arps", "sound", "Pads", &[])];
+        assert_eq!(c.empty_saying(), "", "a tab with something listed says nothing");
+    }
+
+    #[test]
+    fn empty_saying_names_what_to_do_each_way() {
+        let where_ = "Repositories are turned on and added in the Settings app, on its Package repositories page.";
+        // No repository on.
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.none_on = true;
+        assert_eq!(c.empty_saying(), format!("No package repository is on. {where_}"));
+        // None could be read.
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        assert_eq!(c.empty_saying(), format!("No repository could be read: check the connection. {where_}"));
+        // They read but offered nothing.
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.read.push("Example".into());
+        assert_eq!(c.empty_saying(), format!("The repositories you have on offer no packages. {where_}"));
+        // A search with no match.
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.all = vec![offer("a", "Arps", "sound", "Pads", &[])];
+        c.search = "no-such-word".into();
+        assert_eq!(c.empty_saying(), "Nothing here matches the search.");
+        // This tab is empty but another has something: point to it.
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.all = vec![offer("p", "Pad", "performance", "Layers", &[])];
+        assert_eq!(c.empty_saying(), "No Sound packages in the repositories you have on. Look under Performances.");
+        // Nothing anywhere: a repository offering only a kind no tab holds leaves every tab empty, with no redirection.
+        let others = |id: &str, name: &str| Offer { repository: "Example".into(), package: Package { id: id.into(), name: name.into(), ..Default::default() }, version: catalog::Version { version: "1.0".into(), types: vec![("oscairn.midi".into(), 1)], ..Default::default() }, ..Default::default() };
+        let mut c = Catalog::new("sound", 1);
+        c.reading = false;
+        c.all = vec![others("d", "Drums"), others("e", "SFX")];
+        assert_eq!(c.empty_saying(), "No Sound packages in the repositories you have on.");
+    }
+
+    #[test]
+    fn install_params_carry_the_id_the_source_and_the_choices() {
+        let ctx = Ctx { source: "https://repo.example".into(), id: "a".into(), version: "1.0".into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), replace: false, accept: false };
+        assert_eq!(install_params(&ctx), json!({"source": "https://repo.example", "id": "a", "version": "1.0", "acceptUnsignedCode": false, "replace": false}));
+        // An install over a build, trusting code, with no version learnable: replace on, accept on, no version.
+        let ctx = Ctx { version: String::new(), replace: true, accept: true, ..ctx };
+        let params = install_params(&ctx);
+        assert_eq!(params, json!({"source": "https://repo.example", "id": "a", "acceptUnsignedCode": true, "replace": true}));
+        assert!(params.get("version").is_none(), "an empty version is left out of the request");
+    }
+
+    #[test]
+    fn ended_tells_running_a_question_a_failure_or_done() {
+        let ctx = Ctx { source: "s".into(), id: "a".into(), version: "1.0".into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), replace: false, accept: false };
+        assert_eq!(install_ended(&json!({"state": "running"}), &ctx), Ended::Running);
+        // Not run but not failed either: done, even when a field is missing or wrong-typed. (The blank
+        // phrase "  installed." it shows there is pinned as a decision, not intent.)
+        assert!(matches!(install_ended(&json!({"state": 5, "package": 3}), &ctx), Ended::Done(_)), "a state neither running nor failed is done");
+        assert_eq!(install_ended(&json!({"state": "failed", "error": "the server said no"}), &ctx), Ended::Failed("the server said no".into()));
+        assert_eq!(install_ended(&json!({"state": "failed"}), &ctx), Ended::Failed("".into()), "a failure with no words is still a failure");
+        // A state that says done and its notes: it is the phrase the UI shows.
+        assert_eq!(install_ended(&json!({"state": "done", "package": "a", "version": "1.0", "installed": {"notes": ["Added to the sound bank"]}}), &ctx), Ended::Done("a 1.0 installed. Added to the sound bank.".into()));
+    }
+
+    #[test]
+    fn code_the_device_does_not_trust_asks() {
+        let ctx = Ctx { source: "s".into(), id: "a".into(), version: "1.0".into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), replace: false, accept: false };
+        let state = json!({"state": "failed", "error": "code from an unknown source", "name": "a", "installed": {"code": [{"publicKey": "ffff", "key": "1111222233334444", "status": "unknown", "name": "Fuzz", "version": "1.0", "kind": "clap", "platform": "linux-arm64"}]}});
+        match install_ended(&state, &ctx) {
+            Ended::Code(q) => {
+                assert_eq!(q.title, "Install code from an unknown key?", "a question about the unknown code, not {}", q.title);
+                assert!(q.message.contains("Quill"), "the publisher is named in the question");
+            }
+            other => panic!("unknown-source code is a question, not {other:?}"),
+        }
+        // No code listed at all: still a question, not a panic.
+        assert!(matches!(install_ended(&json!({"state": "failed", "error": "unknown source"}), &ctx), Ended::Code(_)));
+    }
+
+    #[test]
+    fn trust_params_name_the_publishers_key_and_keep_what_was_trusted() {
+        let ctx = Ctx { source: "s".into(), id: "a".into(), version: "1.0".into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), replace: false, accept: false };
+        assert_eq!(trust_params(&ctx, &[("pub1".into(), "0123456789abcdef".into()), ("pub2".into(), "ffee".into())], &[]), vec![
+            json!({"key": "pub1", "name": "Quill", "scope": ["plugins"], "revoked": false}),
+            json!({"key": "pub2", "name": "Key ffee", "scope": ["plugins"], "revoked": false}),
+        ]);
+        // A key already trusted for other things keeps them, plugins added, and its held name.
+        let had = vec![json!({"key": "pub1", "name": "Q the publisher", "scope": ["clap"]})];
+        assert_eq!(trust_params(&ctx, &[("pub1".into(), "0123456789abcdef".into())], &had)[0], json!({"key": "pub1", "name": "Q the publisher", "scope": ["clap", "plugins"], "revoked": false}));
+        // The publisher's name is used only where the repository vouches for the key.
+        let ctx = Ctx { source: "s".into(), id: "a".into(), version: "1.0".into(), publisher: String::new(), publisher_key: "0123456789abcdef".into(), replace: false, accept: false };
+        assert_eq!(trust_params(&ctx, &[("pub1".into(), "0123456789abcdef".into())], &[])[0]["name"], "Key 0123456789abcdef");
+    }
+
+    #[test]
+    fn an_opened_package_offers_install_or_update_and_always_back() {
+        let facts = |o: &Offer| Screen::package_rows(o);
+        let rows = facts(&offer("a", "Arps", "sound", "Pads", &[]));
+        let (first, back) = (rows.first().unwrap(), rows.last().unwrap());
+        assert_eq!((first.0.label.as_str(), first.1), ("Install", Some(PackageRow::Install)));
+        assert_eq!((back.0.label.as_str(), back.1), ("Back", Some(PackageRow::Back)), "Back is last, whatever is offered");
+        // Not installable on this device: the row says so and is off.
+        let mut o = offer("a", "Arps", "sound", "Pads", &[]);
+        o.installable = false;
+        o.version.incompatible = "it has no build for this device (linux-arm64)".into();
+        let rows = facts(&o);
+        let first = rows.first().unwrap();
+        assert_eq!(first.0.value.as_str(), "not here");
+        assert!(first.0.off);
+        // An update is offered in place of Install.
+        let mut o = offer("a", "Arps", "sound", "Pads", &[]);
+        o.installed = Some("0.9".into());
+        o.update = true;
+        o.version.version = "2.0".into();
+        let rows = facts(&o);
+        assert_eq!(rows.first().unwrap().0.label.as_str(), "Update to 2.0");
+        // The repository's build when a different build is installed.
+        let mut o = offer("a", "Arps", "sound", "Pads", &[]);
+        o.other_build = true;
+        let rows = facts(&o);
+        assert_eq!(rows.first().unwrap().0.label.as_str(), "Install the repository's build");
+        // Installed as built, nothing to install: only the facts and Back.
+        let mut o = offer("a", "Arps", "sound", "Pads", &[]);
+        o.installed = Some("1.0".into());
+        let rows = facts(&o);
+        assert!(rows.iter().all(|(_, row)| *row != Some(PackageRow::Install)));
+        assert!(!rows.is_empty() && rows[rows.len() - 1].1 == Some(PackageRow::Back));
+    }
+}

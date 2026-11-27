@@ -10,7 +10,7 @@ boots into Oscairn), device profiles ([RFC 0024](0024-device-profiles.md)) and r
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. A read-only system partition, with the user's data on its own (#203)
-- [ ] 2. Signed A/B updates, falling back to the previous system if the new one does not start
+- [ ] 2. Signed A/B updates, falling back to the previous system if the new one does not start (#217 install methods and #220 user content: [the section below](#install-methods-and-user-content); #218, #264)
 - [ ] 3. Factory reset that keeps or clears the user's data, as asked (#205)
 - [ ] 4. Boot time measured and reduced to each product's target (#207)
 - [ ] 5. Safe power loss: no corrupted data, checked by cutting power in tests (#209)
@@ -103,6 +103,106 @@ For battery products (RFC 0024's `power`): plugins that sleep (CLAP sleep) and P
 rest let the cores slow down; the screen dims; a warning before the battery runs out leaves time
 to save. Never at the cost of a missed audio deadline: the cores reserved for audio keep their
 speed while anything sounds.
+
+## Install methods and user content
+
+Added 2026-11-27 for #217 and #220. What exists or is decided is stated; the rest is marked open.
+
+### What a profile says
+
+A device profile (RFC 0024) has an `install` block with four fields, all required when the block
+is there; a profile without it states nothing (`hosts/standalone/Profile.h`, `Profile::Install`):
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `method` | `desktop`, `app-and-boot-hook`, `image` | How Oscairn gets onto the device |
+| `update` | `none`, `bundle-swap`, `ab` | How it is updated |
+| `systems` | `1`, `2` | How many systems the device holds at once; `ab` needs 2 |
+| `userData` | `with-system`, `separate` | Whether the user's content lives inside what an update replaces, or apart from it |
+
+- **`desktop`:** the app on a computer, installed by the user (an installer is #292, not built).
+  The data folder is the platform's, outside the app: `separate`. Oscairn does not update
+  itself: `none`. The desktop profile says `desktop`, `none`, 1, `separate`.
+- **`app-and-boot-hook`:** an app with a userland of its own that runs beside the product's own
+  system, started by a line the owner adds to the product's start script, ahead of its own. The
+  FANTOM's, the first and so far the only one: its profile says `app-and-boot-hook`,
+  `bundle-swap`, 2, `with-system`. Its install and update, as they are done today, are in
+  [docs/fantom-0.md](../fantom-0.md#installing-and-updating-oscairn).
+- **`image`:** a whole system image written to the device, which is the product's system
+  (the images in `os/`). Not yet in a profile: the QEMU and EVK images exist, but nothing
+  updates them and their data folder is on the one root file system, so their profiles will say
+  `image`, `none`, 1, `with-system` when a step needs them to.
+- **`bundle-swap`:** a new system unpacked beside the running one, switched to, and the old one
+  deleted once the new one is confirmed. It needs room for two, which is what `systems` states.
+  Not atomic and not signed: the link is switched after the new one ran under a timer, and the
+  steps are by hand.
+- **`ab`:** the signed A/B update above (Updates). Decided, not built (#218); it waits on the
+  package format and signing (#264), which are the owner's.
+
+Open: a device installed through debug pins or another flashing path (the issue named it): no
+such device is in the lineup yet, so no value for it; it is added to `method` with the first
+device that needs it, with the steps of its install written down as the FANTOM's are. Also open:
+whether `systems` should say how much room (a size) rather than how many, once a device has too
+little for a whole second copy; and whether a client shows the block (Settings' About page could;
+not now).
+
+### What is user content
+
+User content is everything the user made, bought or chose, which an update must keep. All of it
+is in the data folder (`OSCAIRN_DATA_HOME`; [RFC 0037](0037-storage-and-file-transfer.md) has
+the layout): Performances and Sounds (`Performances/`, `Sounds/`), Setlists (`Setlists/`), the
+library, its index and user file (`Libraries/`, `library/`), imported samples (`assets/`),
+settings (`audio.json`, `controllers.json`, and the files beside them), recordings
+(`recordings/`), installed packages and their stores (`Plugins/`, `packages.json`,
+`preinstalled.json`), what was learned (`measurements.json`), and trust and repository settings
+(`Keys/`, `trust.json`, `Repositories/`, `repositories.json`). On the FANTOM two files choosing
+how the next power-on starts (`roland-first` and the others in `/home/root/oscairn-boot`) are
+the owner's choices too, and already outside every bundle.
+
+Not user content: the programs, plugins that came with the system, the profile built into the
+programs, the files in `etc/default` (written from the profile at build time), logs and running
+state (`var/oscairn`, on the FANTOM). An update replaces these.
+
+### The rule
+
+**An update replaces the system only.** Nothing in an install or update path deletes, rewrites
+or moves a file of user content; what must change in it (a format step) is done by the engine
+after the update, on its own copy-then-rename, as a save is. A device whose data is not apart
+from the system (`userData` `with-system`) carries the folder across by copying it before the
+old system goes, and may delete the old system only after the copy was compared and the new
+system ran.
+
+### Where the FANTOM's data folder should live
+
+Today it is inside the bundle (`root/.local/share/oscairn`: the engine runs with `HOME=/root` in
+the chroot) and each install copies it, 2.6 GB on the test unit. That is why a second bundle
+costs a copy, why a bundle's deletion deletes the data in it, and why two bundles
+that both ran diverge.
+
+**It should live in one folder outside every bundle that every bundle uses**, and the name for
+it is the existing `/home/root/oscairn-data`: it is empty on the unit today and no script or
+program of Oscairn reads or writes it, so it can be taken for this without moving anything.
+With that, an update is a new bundle and a switch of the link, and the profile says `separate`.
+
+How is open, and not built, because the chroot sees only the bundle: a link to
+`/home/root/oscairn-data` would point at nothing inside the chroot, and the engine's
+`OSCAIRN_DATA_HOME` is read there. The way that works is a bind mount of the outside folder on
+the bundle's `root/.local/share/oscairn`, made by `start-chroot.sh` (as it mounts `/proc` and
+the rest) when it is asked to, and unmounted first by `stop-chroot.sh`. It is not built in this
+step because a mistake in it loses content, and it cannot be tried on the unit without the
+owner: a bundle's deletion with the mount still up would delete the data folder through it, the
+mount would hide the bundle's own copy (an empty library on the next start if it were made
+before the copy was moved), and the move of 2.6 GB is once, by hand, with room for it. The next
+step, in this order: `start-chroot.sh` and `stop-chroot.sh` handle the mount, only when an
+outside folder is named (unset, today's layout is unchanged), refusing when both the outside
+and the bundle's folder hold content; a test of the pair with a stand-in `mount`; the one move
+of a unit's data to the outside folder, by hand, checked with `diff -rq`; the profile's
+`userData` becomes `separate`; the install steps in docs/fantom-0.md lose the copy.
+
+What is built for #220 is the test (`devices/roland-fantom0/tests/fantom_start.sh`) that the
+start, stop and restart scripts leave the data folder as it was (names, contents, inodes and
+modification times), and that the copy-based install gives a new bundle's start the same content
+as the old one's, with the old bundle's data deleted afterward.
 
 ## Open questions
 

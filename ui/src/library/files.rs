@@ -62,11 +62,18 @@ pub struct Files {
 /// Where a chooser starts: the user's Documents folder, else the home folder, else the root.
 pub fn start_dir(music: bool) -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
+    start_dir_at(&home, music)
+}
+
+/// The chooser's default folder under a given home: its Documents (Music for a music folder) if that exists, else the
+/// home folder if it exists, else the root. `start_dir` is this with the process HOME; taking the home here keeps
+/// that function testable without mutating a process-wide variable.
+fn start_dir_at(home: &Path, music: bool) -> PathBuf {
     let wanted = home.join(if music { "Music" } else { "Documents" });
     if wanted.is_dir() {
         wanted
     } else if home.is_dir() {
-        home
+        home.to_path_buf()
     } else {
         PathBuf::from("/")
     }
@@ -341,5 +348,87 @@ mod tests {
         assert_eq!(size_text(10), "10 bytes");
         assert_eq!(size_text(2048), "2.0 KB");
         assert_eq!(size_text(5 << 20), "5.0 MB");
+    }
+
+    #[test]
+    fn sizes_are_worded_at_the_unit_edges() {
+        assert_eq!(size_text(0), "0 bytes");
+        assert_eq!(size_text(1023), "1023 bytes");
+        assert_eq!(size_text(1024), "1.0 KB");
+        assert_eq!(size_text(2047), "2.0 KB", "1.999 KB rounds to the next tenth's unit, it rounds, it does not floor");
+        assert_eq!(size_text(1536), "1.5 KB");
+        assert_eq!(size_text(1 << 20), "1.0 MB");
+        assert_eq!(size_text(1 << 30), "1.0 GB");
+        assert!(size_text(u64::MAX).ends_with("GB"), "no unit above GB");
+    }
+
+    #[test]
+    fn an_empty_path_wraps_to_nothing_and_the_root_to_one_line() {
+        assert_eq!(wrap_path("", 16), Vec::<String>::new());
+        assert_eq!(wrap_path("/", 4), ["/"]);
+    }
+
+    #[test]
+    fn a_line_is_width_characters_and_a_word_is_kept_until_it_must_be_cut() {
+        for width in [1usize, 2, 3, 17, 60] {
+            for path in ["/a b/c d/e", "/x", "/ first ", "/letters", "no-slashes-here"] {
+                let lines = wrap_path(path, width);
+                assert!(!lines.is_empty(), "a path always yields a line, width {width}");
+                let joined = lines.join("");
+                assert_eq!(joined, path, "wrapping never drops or misplaces text");
+                assert!(lines.iter().all(|l| l.chars().count() <= width), "no line over {width} chars");
+            }
+        }
+    }
+
+    #[test]
+    fn wrapping_never_splits_a_character() {
+        let path = "/naïve-file/é章";
+        let lines = wrap_path(path, 3);
+        let joined: String = lines.iter().flat_map(|l| l.chars()).collect();
+        assert_eq!(joined, path, "multi-byte characters stay whole");
+    }
+
+    #[test]
+    fn a_press_out_of_range_or_well_above_is_nothing() {
+        let dir = folder("outofrange");
+        let mut f = Files::new(dir, Want::File, "olib", "", After::Install, "Install");
+        assert_eq!(f.press(1000), Pressed::Nothing);
+    }
+
+    #[test]
+    fn up_is_false_at_the_root() {
+        let mut f = Files::new(PathBuf::from("/"), Want::File, "olib", "", After::Install, "Install");
+        assert!(!f.up());
+        assert_eq!(f.dir, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn a_folder_with_nothing_of_the_kind_says_so() {
+        let dir = std::env::temp_dir().join(format!("oscairn-ui-files-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+        let f = Files::new(dir, Want::File, "olib", "", After::Install, "Install");
+        let text: Vec<String> = f.info().into_iter().map(|l| l.text.to_string()).collect();
+        assert!(text.iter().any(|t| t.contains("No folders or .olib files here")));
+    }
+
+    #[test]
+    fn start_dir_uses_documents_then_home_then_the_root() {
+        let home = std::env::temp_dir().join(format!("oscairn-ui-files-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        // Documents exists: a file chooser starts there, Music for a folder to index.
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        std::fs::create_dir_all(home.join("Music")).unwrap();
+        assert_eq!(start_dir_at(&home, false), home.join("Documents"));
+        assert_eq!(start_dir_at(&home, true), home.join("Music"));
+        // No Documents: the home folder itself.
+        std::fs::remove_dir_all(home.join("Documents")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(start_dir_at(&home, false), home);
+        // A home that does not exist: the root.
+        assert_eq!(start_dir_at(&home.join("gone"), false), PathBuf::from("/"));
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }

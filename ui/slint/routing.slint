@@ -81,6 +81,8 @@ export global RoutingState {
     in property <bool> more-panel;
     in property <string> message;
     in property <string> view;
+    // The zoom buttons over the canvas: which one the cursor is on (0 none, 1 Zoom in, 2 Zoom out, 3 Fit).
+    in property <int> zoom-cursor: 0;
     // What the screen needs to fit the drawing and the panel: set by the screen's component.
     in-out property <length> canvas-width: 0px;
     in-out property <length> canvas-height: 0px;
@@ -95,6 +97,7 @@ export global RoutingState {
     callback panel-moved(int, int, float); // a row, a cell, the slider's new place
     callback panel-held(int, int, bool);
     callback turn-panel(int);
+    callback zoom-press(int); // 0 Zoom in, 1 Zoom out, 2 Fit
 }
 
 component Chevron inherits Rectangle {
@@ -379,6 +382,26 @@ component PanelCell inherits Rectangle {
     }
 }
 
+// A zoom button over the canvas: Zoom in, Zoom out or Fit, with the focus border when the cursor is on it.
+component ZoomButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> cursor;
+    callback clicked();
+    width: Theme.touch;
+    height: Theme.touch;
+    Button {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        size: Theme.small;
+        clicked => { root.clicked(); }
+    }
+    Cursor {
+        shown: root.cursor;
+        corner: Theme.button-radius(self.height);
+    }
+}
+
 export component Routing inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
@@ -502,6 +525,16 @@ export component Routing inherits Rectangle {
             data: c;
             tapped => { RoutingState.tapped(2, i); }
         }
+    }
+    // The zoom buttons, floating over the canvas at its top-right, outside the scrolling view: a press (or the
+    // cursor's Confirm on one) shrinks or grows the drawing, or fits it. The right edge stays inside the canvas.
+    zoom := HorizontalLayout {
+        x: max(Theme.margin + root.inset, Theme.margin + root.inset + root.canvas-w - self.width);
+        y: root.canvas-y + root.inset;
+        spacing: Theme.gap;
+        ZoomButton { label: "+"; cursor: RoutingState.zoom-cursor == 1; clicked => { RoutingState.zoom-press(0); } }
+        ZoomButton { label: "−"; cursor: RoutingState.zoom-cursor == 2; clicked => { RoutingState.zoom-press(1); } }
+        ZoomButton { label: "Fit"; cursor: RoutingState.zoom-cursor == 3; clicked => { RoutingState.zoom-press(2); } }
     }
     // What is chosen: its words and the cells a row of them holds, a view of rows at a time.
     Section {

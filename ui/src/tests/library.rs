@@ -182,7 +182,7 @@ fn opening_asks_for_what_it_shows() {
     assert_eq!(r.e.calls[0].1, json!({"kind": "performance", "limit": 1000}));
     assert_eq!(r.e.calls[1].1, json!({}));
     assert!(r.delayed.is_empty(), "nothing is asked again at rest: {:?}", r.delayed);
-    assert_eq!(tabs(r.ui()), ["Performances", "Sounds", "Setlists"]);
+    assert_eq!(tabs(r.ui()), ["Performances", "Sounds"], "setlists are the Setlist app's");
 }
 
 // A row says the item's name ("Untitled" when it has none), its tags and description, "Locked" for an installed
@@ -221,7 +221,7 @@ fn the_kinds_are_tabs_and_clear_the_tags() {
     assert_eq!(footer(r.ui()).1, "Sounds 1–2 of 2");
     r.c.show_page(2);
     r.settle();
-    assert_eq!(labels(r.ui()), ["Friday Set"]);
+    assert_eq!(labels(r.ui()), ["Hollow Reed", "Soft Felt"], "there is no third tab: the Sounds stay");
 }
 
 /// Every name the Library's fixtures use for an item, a library, a package, a publisher or a signer: invented, none a person's

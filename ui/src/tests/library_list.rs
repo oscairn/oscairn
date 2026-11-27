@@ -128,9 +128,6 @@ fn an_empty_library_says_what_is_installed() {
     r.c.show_page(1);
     r.settle();
     assert!(info(r.ui()).join(" ").contains("No Sounds yet. The presets of the 5 instruments and effects installed are in the sound picker, not here."), "{:?}", info(r.ui()));
-    r.c.show_page(2);
-    r.settle();
-    assert!(info(r.ui()).join(" ").contains("No setlists yet. The Setlist app makes them."));
     let mut r = Rig::new(library());
     r.search("zzz");
     assert!(labels(r.ui()).is_empty());

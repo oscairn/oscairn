@@ -259,3 +259,135 @@ impl Page for Controllers {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(used: &str) -> Port {
+        Port {
+            name: "Pad Controller".into(),
+            profiles: vec![("padbox".into(), "Pad Box".into()), ("padbox2".into(), "Pad Box Mk 2".into())],
+            automatic: true,
+            chosen: vec![],
+            playing: vec![],
+            used: used.into(),
+            ignored: false,
+        }
+    }
+
+    #[test]
+    fn all_rejects_a_missing_inputs_field() {
+        assert!(Port::all(&json!({})).is_empty());
+        assert!(Port::all(&json!({"inputs": "not a list"})).is_empty());
+        assert!(Port::all(&json!({"inputs": []})).is_empty());
+    }
+
+    #[test]
+    fn all_parses_every_field() {
+        let p = &Port::all(&json!({"inputs": [{"name": "Keys", "profiles": [{"id": "a", "name": "Alpha"}], "automatic": false, "chosen": ["a"], "playing": ["a"], "use": "controls", "ignored": true}]}))[0];
+        assert_eq!(p.name, "Keys");
+        assert_eq!(p.profiles, vec![("a".to_string(), "Alpha".to_string())]);
+        assert!(!p.automatic);
+        assert_eq!(p.chosen, vec!["a".to_string()]);
+        assert_eq!(p.playing, vec!["a".to_string()]);
+        assert_eq!(p.used, "controls");
+        assert!(p.ignored);
+    }
+
+    #[test]
+    fn all_defaults_missing_and_wrong_typed_fields() {
+        let p = &Port::all(&json!({"inputs": [{}]}))[0];
+        // No name, no choice made, no ignored: the parser's defaults.
+        assert_eq!(p.name, "");
+        assert_eq!(p.profiles, Vec::<(String, String)>::new());
+        assert!(p.automatic);
+        assert_eq!(p.chosen, Vec::<String>::new());
+        assert_eq!(p.playing, Vec::<String>::new());
+        assert_eq!(p.used, "");
+        assert!(!p.ignored);
+        // A list that is the wrong type is left out; a profile with an id only is kept with an empty name.
+        let q = &Port::all(&json!({"inputs": [{"profiles": [{"id": "x"}], "chosen": 5, "playing": "a"}]}))[0];
+        assert_eq!(q.profiles, vec![("x".to_string(), "".to_string())]);
+        assert_eq!(q.chosen, Vec::<String>::new());
+        assert_eq!(q.playing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn all_keeps_a_profile_whose_id_only_is_known() {
+        // A renamed port: the chosen id no longer fits, kept as it is by id (RFC 0024).
+        let p = &Port::all(&json!({"inputs": [{"name": "Keys", "profiles": [{"id": "new", "name": "New"}], "automatic": false, "chosen": ["old"], "use": ""}]}))[0];
+        assert_eq!(p.chosen, vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn named_returns_the_profile_name_or_the_id() {
+        let p = port("");
+        assert_eq!(p.named("padbox"), "Pad Box");
+        assert_eq!(p.named("not-a-profile"), "not-a-profile");
+        assert_eq!(port("").with_no_profiles().named("padbox"), "padbox");
+    }
+
+    #[test]
+    fn said_names_each_use() {
+        let played = Port { playing: vec!["padbox".into()], ..port("controls") };
+        assert_eq!(played.said(), "Played by Pad Box: its controls join.");
+        let both = Port { playing: vec!["padbox".into(), "padbox2".into()], used: "controls".into(), ..port("controls") };
+        assert_eq!(both.said(), "Played by Pad Box and the others chosen, by MIDI channel: its controls join.");
+        let mackie = Port { playing: vec!["padbox".into()], used: "mackie".into(), ..port("mackie") };
+        assert_eq!(mackie.said(), "Read as Mackie Control by Pad Box.");
+        let dup = Port { playing: vec!["padbox".into()], used: "duplicate".into(), ..port("duplicate") };
+        assert_eq!(dup.said(), "Left out: Pad Box sends the same on another port.");
+        assert_eq!(port("").with_no_profiles().said(), "No controller profile fits it: it plays notes as any MIDI input does.");
+        assert_eq!(port("").said(), "No profile: it plays notes as any MIDI input does.");
+    }
+
+    #[test]
+    fn said_leads_with_ignored() {
+        let p = Port { ignored: true, used: "controls".into(), ..port("controls") };
+        assert_eq!(p.said(), "Ignored: everything it sends is left out.");
+        let p = Port { ignored: true, playing: vec!["padbox".into()], used: "mackie".into(), ..port("mackie") };
+        assert_eq!(p.said(), "Ignored: everything it sends is left out.");
+    }
+
+    #[test]
+    fn choice_text_names_a_chosen_profile() {
+        assert_eq!(port("").choice_text(), "Automatic (Pad Box)");
+        let auto_empty = Port { profiles: vec![], ..port("") };
+        assert_eq!(auto_empty.choice_text(), "Automatic");
+        let none = Port { automatic: false, ..port("") };
+        assert_eq!(none.choice_text(), "None");
+        let one = Port { automatic: false, chosen: vec!["padbox".into()], ..port("") };
+        assert_eq!(one.choice_text(), "Pad Box");
+        let renamed = Port { automatic: false, chosen: vec!["old".into()], ..port("") };
+        assert_eq!(renamed.choice_text(), "old");
+    }
+
+    #[test]
+    fn choice_text_says_each_when_several_are_chosen() {
+        let several = Port { automatic: false, chosen: vec!["padbox".into(), "padbox2".into()], ..port("") };
+        assert_eq!(several.choice_text(), "Each of these, by MIDI channel");
+        // One fitting profile but several chosen ids: the first chosen is named (RFC 0024's renamed port).
+        let only_one = Port { profiles: vec![("padbox".into(), "Pad Box".into())], automatic: false, chosen: vec!["padbox".into(), "old".into()], ..port("") };
+        assert_eq!(only_one.choice_text(), "Pad Box");
+    }
+
+    #[test]
+    fn at_maps_every_other_row_to_a_switch() {
+        let c = Controllers { ports: vec![port("")], ..Default::default() };
+        assert_eq!(c.at(0), Some((0, false)));
+        assert_eq!(c.at(1), Some((0, true)));
+        assert_eq!(c.at(2), None);
+        assert_eq!(c.at(usize::MAX), None);
+        let two = Controllers { ports: vec![port(""), port("mackie")], ..Default::default() };
+        assert_eq!(two.at(3), Some((1, true)));
+        assert_eq!(two.at(4), None);
+        assert_eq!(Controllers::default().at(0), None);
+    }
+
+    impl Port {
+        fn with_no_profiles(self) -> Port {
+            Port { profiles: vec![], playing: vec![], ..self }
+        }
+    }
+}

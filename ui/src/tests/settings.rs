@@ -240,10 +240,10 @@ impl Rig {
 #[test]
 fn the_pages_are_the_profiles_tabs() {
     let r = Rig::desktop("tabs-desktop");
-    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Installed", "Available", "Signing keys", "About"]);
+    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Audio", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"]);
     assert_eq!(r.c.path(), ["Settings", "Appearance"]);
     let r = Rig::new("tabs-fantom", Some("fantom-07"), Fake::null());
-    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "About"], "no Audio where the profile fixes the device");
+    assert_eq!(tabs(r.ui()), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Installed", "Available", "Signing keys", "Start", "About"], "no Audio where the profile fixes the device");
     for id in ["ignite", "imx8mm-evk", "kick", "modx-m", "qemu-aarch64"] {
         let r = Rig::new(&format!("tabs-{id}"), Some(id), Fake::new());
         assert!(tabs(r.ui()).contains(&"Audio".to_string()), "{id} leaves the device to the engine: it has the page");
@@ -491,6 +491,42 @@ fn the_top_bar_says_why_it_was_not_saved() {
     r.choose("Bar");
     let danger = r.danger_lines();
     assert!(danger.join(" ").starts_with("Not saved: ") && danger.join(" ").contains("cannot be written"), "{danger:?}");
+}
+
+// ---- St: the Start page ----
+
+// Opens to is a choice of Home (the default), Setlist, Performance and Library, the one kept ticked; a choice is
+// stored in start.txt at once, whole by write_atomic, which the shell reads at its start.
+#[test]
+fn choosing_a_start_page_keeps_it() {
+    let mut r = Rig::desktop("start");
+    // Reached by the dial (the pages are a tab, never touch-only): the first move puts the cursor on the first row,
+    // up out of it reaches the tabs, along to the Start tab, a press shows it, and past the last tab the dial leaves
+    // the rail for the list, on the first row.
+    let start_at = r.c.pages().iter().position(|p| *p == Id::Start).unwrap();
+    let last = r.c.pages().len() - 1;
+    r.act(Action::Move { pane: None, by: 1 });
+    r.act(Action::Move { pane: None, by: -1 });
+    r.act(Action::Move { pane: None, by: start_at as i32 });
+    r.act(Action::Confirm(None));
+    assert_eq!(r.c.path(), ["Settings", "Start"]);
+    r.act(Action::Move { pane: None, by: (last - start_at + 1) as i32 });
+    assert_eq!(labels(r.ui()), ["Opens to"]);
+    assert_eq!(value_of(r.ui(), "Opens to"), "Home ›", "Home the default");
+    r.press_row("Opens to");
+    assert_eq!(r.menu_labels(), ("Start".to_string(), ["Home", "Setlist", "Performance", "Library"].map(String::from).to_vec()));
+    assert_eq!(r.ticked(), ["Home"]);
+    r.choose("Setlist");
+    assert_eq!(std::fs::read_to_string(r.config.join("start.txt")).unwrap(), "setlist\n");
+    assert_eq!(value_of(r.ui(), "Opens to"), "Setlist ›");
+    r.press_row("Opens to");
+    r.choose("Library");
+    assert_eq!(std::fs::read_to_string(r.config.join("start.txt")).unwrap(), "library\n");
+    assert_eq!(value_of(r.ui(), "Opens to"), "Library ›");
+    // The page shown again reads what is kept.
+    r.page(Id::Appearance);
+    r.page(Id::Start);
+    assert_eq!(value_of(r.ui(), "Opens to"), "Library ›");
 }
 
 // ---- C: MIDI controllers ----

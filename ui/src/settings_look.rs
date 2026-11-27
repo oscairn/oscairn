@@ -410,6 +410,77 @@ impl Page for TopBarPage {
     }
 }
 
+// ---- Start ----
+
+/// The choices start.txt keeps, as the list shows them.
+const OPTIONS: [crate::settings::StartPage; 4] = [crate::settings::StartPage::Home, crate::settings::StartPage::Setlist, crate::settings::StartPage::Performance, crate::settings::StartPage::Library];
+
+/// What Oscairn opens to at start, as the Settings' Start page keeps it: the word in start.txt beside the theme,
+/// whole by `write_atomic`, which the shell reads when it starts (`settings::start_page`).
+pub struct Start {
+    folder: Option<PathBuf>,
+    /// The choice, by `settings::StartPage`.
+    at: crate::settings::StartPage,
+    failure: String,
+}
+
+impl Start {
+    pub fn new(folder: Option<PathBuf>) -> Start {
+        Start { folder, at: crate::settings::StartPage::Home, failure: String::new() }
+    }
+
+    #[cfg(test)]
+    pub fn set_folder(&mut self, folder: Option<PathBuf>) {
+        self.folder = folder;
+    }
+
+    fn file(&self) -> Option<PathBuf> {
+        self.folder.as_ref().map(|f| f.join("start.txt"))
+    }
+}
+
+impl Page for Start {
+    fn open(&mut self, _c: &mut Ctx) {
+        self.failure.clear();
+        let word = self.file().and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
+        self.at = crate::settings::StartPage::parse(word.trim());
+    }
+
+    fn rows(&self) -> Vec<SettingData> {
+        vec![choice("Opens to", self.at.name())]
+    }
+
+    fn info(&self, at: Option<usize>) -> Vec<InfoLine> {
+        let mut lines = vec![head("Start")];
+        lines.extend(said("What Oscairn opens to when it starts: Home, the Setlist, the Performance or the Library. The shell opens it after the splash."));
+        if at.is_some() {
+            lines.push(head("Now"));
+            lines.push(line(&format!("Opens to {}", self.at.name())));
+        }
+        if !self.failure.is_empty() {
+            lines.push(head("Not saved"));
+            lines.extend(failed(&self.failure));
+        }
+        lines
+    }
+
+    fn press(&mut self, at: usize, c: &mut Ctx) {
+        if at != 0 {
+            return;
+        }
+        c.menu = Some(("Start".into(), OPTIONS.iter().enumerate().map(|(i, p)| menu::Item::ticked(p.name(), i, *p == self.at)).collect()));
+    }
+
+    fn chosen(&mut self, id: usize, _c: &mut Ctx) {
+        let Some(&page) = OPTIONS.get(id) else { return };
+        self.at = page;
+        // Stored at once, the file replaced whole; read at the next start.
+        let text = format!("{}\n", page.word());
+        let saved = self.file().is_some_and(|f| write_atomic(&f, &text).is_ok());
+        self.failure = if saved { String::new() } else { format!("Not saved: {} cannot be written.", self.file().map(|f| f.display().to_string()).unwrap_or_else(|| "the configuration folder".into())) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

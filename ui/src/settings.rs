@@ -130,6 +130,74 @@ pub fn keep_routing_collapsed(collapsed: bool) {
     }
 }
 
+/// What Oscairn opens to at start, as the Settings' Start page keeps it: the word in start.txt beside the theme ...
+/// (`start.txt`, like appearance.txt); the shell reads it after the splash, and the default keeps opening Home.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartPage {
+    Home,
+    Setlist,
+    Performance,
+    Library,
+}
+
+impl StartPage {
+    /// The word the file keeps; anything unknown reads as Home.
+    pub fn parse(word: &str) -> StartPage {
+        match word {
+            "setlist" => StartPage::Setlist,
+            "performance" => StartPage::Performance,
+            "library" => StartPage::Library,
+            _ => StartPage::Home,
+        }
+    }
+
+    /// The word start.txt keeps for this choice.
+    pub fn word(self) -> &'static str {
+        match self {
+            StartPage::Home => "home",
+            StartPage::Setlist => "setlist",
+            StartPage::Performance => "performance",
+            StartPage::Library => "library",
+        }
+    }
+
+    /// What the Settings' Start page names the choice.
+    pub fn name(self) -> &'static str {
+        match self {
+            StartPage::Home => "Home",
+            StartPage::Setlist => "Setlist",
+            StartPage::Performance => "Performance",
+            StartPage::Library => "Library",
+        }
+    }
+}
+
+/// What Oscairn opens to at start, from start.txt (the Settings' Start page keeps it); Home the default.
+pub fn start_page() -> StartPage {
+    #[cfg(test)]
+    if let Some(p) = test_start::get() {
+        return p;
+    }
+    StartPage::parse(&read("start.txt").unwrap_or_default())
+}
+
+/// In the tests every thread has its own start page, not the file in the one folder the tests share (they run side by
+/// side, the choice tells the shell where to open, and one test's choice must not move another's): a test that means
+/// it switches it on for its thread; None reads the file.
+#[cfg(test)]
+pub mod test_start {
+    use std::cell::Cell;
+    thread_local! {
+        static PAGE: Cell<Option<super::StartPage>> = const { Cell::new(None) };
+    }
+    pub fn get() -> Option<super::StartPage> {
+        PAGE.with(Cell::get)
+    }
+    pub fn set(page: Option<super::StartPage>) {
+        PAGE.with(|p| p.set(page))
+    }
+}
+
 /// The profile's meter settings with the user's over them, each of `cpu` and `ram` on its own.
 pub fn top_bar(profile: MeterSettings) -> MeterSettings {
     let Some(doc) = read("top-bar.json").and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return profile };

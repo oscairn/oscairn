@@ -4,9 +4,10 @@
 // worker, played in real time: CYCLES times, REST blocks with nothing for them, a note for SOUND blocks, let go.
 // For chains of 1, 3 and 5 effects it prints the chain's time and each worker's wake (hand-over until its audio
 // thread ran) and round trip on the block the note comes, against the same on a later sounding block, the idle
-// block's cost (past the hold), and every block lost (late or silenced). With OSCAIRN_WORKER_REST unset (disabled) the
-// workers can be played, so none rests; with OFF given, the instrument's note connection is off (draining, as a part a
-// scene switches off) through each rest and back on in the very block of the note, so they rest and that enable wakes them.
+// block's cost (past the hold), and every block lost (late or silenced). With OSCAIRN_WORKER_REST unset (all, the
+// default) they rest after the hold, played or not; with "disabled" (the earlier default) the workers can be played, so none
+// rests unless OFF is given: the instrument's note connection is then off (draining, as a part a scene switches off) through
+// each rest and back on in the very block of the note, so they rest and that enable wakes them.
 // Fails on a lost block, or when a worker that may rest is called past the hold (or one that may not is rested). A block
 // a worker loses (late or silenced) is never one rested and begins its hold again, so where lost blocks are not held
 // against the run (below) each allows that worker one more hold in that rest.
@@ -38,7 +39,7 @@ int main(int argc, char** argv)
     const char* restVar = std::getenv("OSCAIRN_WORKER_REST");
     const std::string mode = restVar ? restVar : "";
     const bool off = argc > 7 && std::string(argv[7]) == "off";
-    const bool resting = mode == "all" || (mode != "0" && off); // whether an idle worker may rest here
+    const bool resting = mode != "0" && (mode != "disabled" || off); // whether an idle worker may rest here
     const uint32_t frames = argc > 5 ? uint32_t(std::atoi(argv[5])) : 128;
     constexpr int hold = 192; // WorkerHost's: blocks a plugin asleep is still called before it rests
     constexpr double rate = 48000;
@@ -111,7 +112,7 @@ int main(int argc, char** argv)
         const auto lostBlocks = lost() - lostBefore;
         std::printf("1 instrument + %d effects, %d cycles of %d rested blocks (rest %s%s): chain %.1f us on the waking block (max %.1f), %.1f sounding (max %.1f); "
                     "idle block %.2f us, %llu worker calls in %llu idle blocks; lost %llu\n",
-                    effects, cycles, rest, mode.empty() ? "disabled" : mode.c_str(), off ? ", part off while resting" : "", wakeChain / cycles, wakeMax, steadyChain / cycles, steadyMax, idle / std::max<uint64_t>(1, idleBlocks),
+                    effects, cycles, rest, mode.empty() ? "all (default)" : mode.c_str(), off ? ", part off while resting" : "", wakeChain / cycles, wakeMax, steadyChain / cycles, steadyMax, idle / std::max<uint64_t>(1, idleBlocks),
                     (unsigned long long)idleCalls, (unsigned long long)idleBlocks, (unsigned long long)lostBlocks);
         for(size_t k = 0; k < hosts.size(); ++k)
             std::printf("  worker %zu: wake %.1f us waking, %.1f sounding; round trip %.1f waking, %.1f sounding\n",

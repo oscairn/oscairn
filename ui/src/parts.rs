@@ -997,3 +997,160 @@ impl Screen {
         self.show();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The role a node's pins give it, as PartsModel.cpp's roleOf names it: notes and
+    /// sequencers from note pins, instruments and generators from audio out, effects from
+    /// audio in and out, analyzers from audio in alone. A node neither names is "Notes".
+    #[test]
+    fn role_of_names_a_node_by_its_pins() {
+        let instrument = json!({"audioInputs": [], "audioOutputs": [{"channels": 2}], "noteInputs": 1, "noteOutputs": 0});
+        assert_eq!(role_of(&instrument), "Instrument");
+        let generator = json!({"audioOutputs": [{"channels": 2}]});
+        assert_eq!(role_of(&generator), "Generator");
+        let effect = json!({"audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}]});
+        assert_eq!(role_of(&effect), "Effect");
+        let analyzer = json!({"audioInputs": [{"channels": 2}]});
+        assert_eq!(role_of(&analyzer), "Analyzer");
+        let sequencer = json!({"noteOutputs": 1});
+        assert_eq!(role_of(&sequencer), "Sequencer");
+        let notes = json!({"noteInputs": 1, "noteOutputs": 1});
+        assert_eq!(role_of(&notes), "Notes");
+    }
+
+    /// A node missing its ports, or a present array whose element carries no channels, reads as one
+    /// without audio in or out, and so as "Notes": a muted silence never draws as an effect.
+    #[test]
+    fn role_of_defaults_a_node_without_ports_to_notes() {
+        assert_eq!(role_of(&json!({})), "Notes");
+        let portless = json!({"audioInputs": [{}], "audioOutputs": [{}]});
+        assert_eq!(role_of(&portless), "Notes");
+    }
+
+    /// A node whose note output sits beside an audio output is a generator, not a sequencer: the
+    /// audio-out branch is earlier than the note-out one, so the pin's audio is what it is drawn as.
+    #[test]
+    fn role_of_an_audio_out_beats_a_note_out() {
+        let node = json!({"noteOutputs": 1, "audioOutputs": [{"channels": 2}]});
+        assert_eq!(role_of(&node), "Generator");
+    }
+
+    /// A split's lane is named by its instrument when it has one, else its last box, else by the
+    /// split's shape: Left/Right, Mid/Side, "Band N", and "Dry" for a plain copy.
+    #[test]
+    fn lane_name_prefers_an_instrument_then_a_last_box_then_the_shape() {
+        let named = Chip { node: 1, name: "Rhodes".into(), role: Role::Instrument, off: false };
+        assert_eq!(lane_name("leftRight", 0, std::slice::from_ref(&named)), "Rhodes", "an instrument names the split over the shape");
+        let last = Chip { node: 2, name: "Chorus".into(), role: Role::Effect, off: false };
+        assert_eq!(lane_name("bands", 3, &[last]), "Chorus", "the last box names it when no instrument is in it");
+    }
+
+    /// With no box to take a name from, a lane keeps the split's own words.
+    #[test]
+    fn lane_name_falls_back_to_the_shape_and_dry() {
+        assert_eq!(lane_name("leftRight", 0, &[]), "Left");
+        assert_eq!(lane_name("leftRight", 1, &[]), "Right");
+        assert_eq!(lane_name("leftRight", 9, &[]), "Right");
+        assert_eq!(lane_name("midSide", 0, &[]), "Mid");
+        assert_eq!(lane_name("midSide", 1, &[]), "Side");
+        assert_eq!(lane_name("bands", 0, &[]), "Band 1");
+        assert_eq!(lane_name("bands", 4, &[]), "Band 5");
+        assert_eq!(lane_name("copy", 0, &[]), "Dry");
+        assert_eq!(lane_name("", 0, &[]), "Dry");
+    }
+
+    /// A lane's instrument name is kept whole, whatever it is written in.
+    #[test]
+    fn lane_name_keeps_an_instruments_own_name() {
+        let named = Chip { node: 1, name: "カシオ · Rhodes".into(), role: Role::Instrument, off: false };
+        assert_eq!(lane_name("bands", 0, &[named]), "カシオ · Rhodes");
+    }
+
+    /// boxes maps each chain entry to its node's chip: an effect keeps its enabled-off mark and its
+    /// role's class; a node the graph does not name is left out.
+    #[test]
+    fn boxes_maps_chips_from_the_nodes_and_skips_a_plain_id() {
+        let effect = json!({"id": 5, "name": "Chorus", "audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}], "enabled": false});
+        let nodes: HashMap<u64, &Value> = [(5u64, &effect)].into_iter().collect();
+        let chips = boxes(&json!([5, 99]), &json!({"splits": []}), &nodes, 0);
+        assert_eq!(chips.len(), 1);
+        assert_eq!((chips[0].node, chips[0].name.as_str()), (5, "Chorus"));
+        assert_eq!(chips[0].role, Role::Effect);
+        assert!(chips[0].off, "a disabled node is drawn off");
+    }
+
+    #[test]
+    fn boxes_skips_entries_that_are_neither_a_node_nor_a_split() {
+        assert!(boxes(&json!([42]), &json!({"splits": []}), &HashMap::new(), 0).is_empty());
+        assert!(boxes(&json!([{"split": 7}]), &json!({"splits": []}), &HashMap::new(), 0).is_empty(), "a split the part has not is left out");
+        assert!(boxes(&json!(["name"]), &json!({"splits": []}), &HashMap::new(), 0).is_empty());
+    }
+
+    /// A split is one chip named after its lanes, in order; the whole leftRight fixture is covered by
+    /// the screen test, this one holds the empty lane's word.
+    #[test]
+    fn boxes_names_a_split_after_its_lanes() {
+        let bass = json!({"id": 1, "name": "Bass", "audioInputs": [], "audioOutputs": [{"channels": 1}], "noteInputs": 1, "noteOutputs": 0});
+        let nodes: HashMap<u64, &Value> = [(1u64, &bass)].into_iter().collect();
+        let part = json!({"splits": [{"id": 9, "kind": "leftRight", "lanes": [{"chain": [1]}, {"chain": []}]}]});
+        let chips = boxes(&json!([{"split": 9}]), &part, &nodes, 0);
+        assert_eq!(chips.len(), 1);
+        assert_eq!(chips[0].name, "Bass | Right");
+        assert_eq!(chips[0].role, Role::Other);
+    }
+
+    /// A part whose devices rules find nothing connected keeps its built-in keys: an empty or absent
+    /// rule list is "found" before any rule is read.
+    #[test]
+    fn devices_found_with_no_rules_is_true() {
+        assert!(devices_found(&json!([]), &[]));
+        assert!(devices_found(&Value::Null, &[]), "an absent rule list is as found as an empty one");
+    }
+
+    #[test]
+    fn devices_found_reads_each_rule_kind() {
+        let usb = [json!({"kind": "usb", "name": "KeyLab 61", "port": 0}), json!({"kind": "builtIn", "name": "Keys", "port": 0})];
+        let rule = |k: serde_json::Value| json!([k]);
+        assert!(devices_found(&rule(json!({"kind": "all"})), &usb));
+        assert!(devices_found(&rule(json!({"kind": "builtIn"})), &usb));
+        assert!(devices_found(&rule(json!({"kind": "usb"})), &usb), "a usb rule finds a usb input");
+        assert!(!devices_found(&rule(json!({"kind": "usb"})), &[json!({"kind": "port", "port": 0})]), "a usb rule alone does not find a port");
+        assert!(devices_found(&rule(json!({"kind": "usbNamed", "pattern": "keylab 61"})), &usb), "a usbNamed rule matches by name, heedless of case");
+        assert!(!devices_found(&rule(json!({"kind": "usbNamed", "pattern": "other"})), &usb));
+        assert!(devices_found(&rule(json!({"kind": "port", "port": 0})), &[json!({"kind": "port", "port": 0})]));
+        assert!(!devices_found(&rule(json!({"kind": "port", "port": 1})), &[json!({"kind": "port", "port": 0})]));
+        assert!(devices_found(&rule(json!({"kind": "external"})), &[json!({"kind": "usb"})]));
+        assert!(!devices_found(&rule(json!({"kind": "external"})), &[json!({"kind": "builtIn"})]));
+        assert!(devices_found(&rule(json!({"kind": "network"})), &[json!({"kind": "network", "name": "LAN"})]), "a network rule with no pattern is found");
+        assert!(devices_found(&rule(json!({"kind": "network", "pattern": "lan"})), &[json!({"kind": "network", "name": "LAN"})]));
+        assert!(!devices_found(&rule(json!({"kind": "network", "pattern": "x"})), &[json!({"kind": "network", "name": "LAN"})]));
+        assert!(!devices_found(&rule(json!({"kind": "unknown"})), &usb));
+    }
+
+    #[test]
+    fn devices_found_one_rule_suffices_and_two_fail_leave_it_unfound() {
+        let usb = [json!({"kind": "usb", "name": "KeyLab", "port": 0})];
+        assert!(devices_found(&json!([{"kind": "usb"}, {"kind": "port", "port": 2}]), &usb));
+        assert!(!devices_found(&json!([{"kind": "port", "port": 1}]), &usb));
+    }
+
+    /// A level is stepped by a fortieth of the slider a click, and held at the ends.
+    #[test]
+    fn stepped_moves_in_fortieths_and_is_held_at_the_ends() {
+        assert_eq!(stepped(0.5, 2), 0.55);
+        assert_eq!(stepped(0.5, -2), 0.45);
+        assert_eq!(stepped(0., 0), 0.);
+        assert_eq!(stepped(0., -1000), 0., "held at the bottom");
+        assert_eq!(stepped(1., 1000), 1., "held at the top");
+        assert_eq!(stepped(0.9, 1), 0.925, "a click off the top holds inside the slider");
+    }
+
+    #[test]
+    fn stepped_rounds_to_a_thousandth() {
+        assert_eq!(stepped(0.123, 1), 0.148, "0.123 + one click");
+    }
+}

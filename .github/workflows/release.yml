@@ -1,75 +1,202 @@
 name: Release
 
-# Builds the macOS dmg (tools/release-macos.sh) and a Linux tarball for each CPU
-# (tools/release-linux.sh), docs/releasing.md. From a v* tag they are also attached to a draft
-# release, which a person publishes; nothing here publishes one.
+# Builds the release files of the targets chosen when it is started by hand (Actions, Release, Run
+# workflow), docs/releasing.md. Each target is one job of the matrix, in parallel; one not chosen is
+# not run. Every job keeps its files and their SHA-256 sums as a workflow artifact. With publish on, they
+# are then attached to a draft release of an existing tag, which a person publishes; nothing here
+# creates a tag or publishes a release.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma list of macos-arm64, linux-arm64, linux-x86_64, fantom-0, or all (windows is not built yet)'
+        default: all
+      publish:
+        description: 'Attach the files to a draft release of the tag below (off: workflow artifacts only)'
+        type: boolean
+        default: false
+      tag:
+        description: 'With publish: the existing tag (v and the version) to build and to attach to'
+        default: ''
 
 permissions:
   contents: write
 
 jobs:
-  macos:
-    runs-on: macos-15
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Choose the targets
+        id: plan
+        env:
+          TARGETS: ${{ inputs.targets }}
+          PUBLISH: ${{ inputs.publish }}
+          TAG: ${{ inputs.tag }}
+          # The device bundle's runner: a repository variable can name a larger one (disk and time).
+          FANTOM_RUNNER: ${{ vars.OSCAIRN_FANTOM_RUNNER || 'ubuntu-24.04-arm' }}
+        run: |
+          if [ "$PUBLISH" = true ]; then
+            case "$TAG" in (v[0-9]*) ;; (*) echo "::error::publish needs the tag, v and the version (v0.1.0-alpha.1)"; exit 1;; esac
+          fi
+          list=$(echo "$TARGETS" | tr ',' ' ')
+          [ "$list" = all ] && list="macos-arm64 linux-arm64 linux-x86_64 fantom-0"
+          [ -n "$list" ] || { echo "::error::no targets"; exit 1; }
+          rows=
+          for target in $list; do
+            case $target in
+              macos-arm64) row='{"target":"macos-arm64","kind":"macos","runner":"macos-15","minutes":60}' ;;
+              linux-arm64) row='{"target":"linux-arm64","kind":"linux","runner":"ubuntu-24.04-arm","minutes":120}' ;;
+              linux-x86_64) row='{"target":"linux-x86_64","kind":"linux","runner":"ubuntu-24.04","minutes":120}' ;;
+              fantom-0) row=$(jq -nc --arg r "$FANTOM_RUNNER" '{target:"fantom-0",kind:"fantom",runner:$r,minutes:360}') ;;
+              windows*) echo "::error::windows is not built yet (docs/releasing.md); the targets are macos-arm64, linux-arm64, linux-x86_64, fantom-0"; exit 1 ;;
+              *) echo "::error::unknown target $target; the targets are macos-arm64, linux-arm64, linux-x86_64, fantom-0, or all"; exit 1 ;;
+            esac
+            rows="$rows$row,"
+          done
+          echo "matrix={\"include\":[${rows%,}]}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Ninja
-        run: brew install ninja
-
-      - name: Install Rust 1.95.0 (samplepack's pinned release)
-        run: tools/install-rust.sh
-
-      - name: Build the dmg
-        run: tools/release-macos.sh
-
-      - name: Check the tag names this version
-        if: github.ref_type == 'tag'
-        run: test -f "build-release/Oscairn-${GITHUB_REF_NAME#v}-macos-arm64.dmg"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: oscairn-macos-arm64
-          path: build-release/*.dmg
-          if-no-files-found: error
-
-  linux:
+  build:
+    needs: plan
+    name: ${{ matrix.target }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {runner: ubuntu-24.04, arch: x86_64}
-          - {runner: ubuntu-24.04-arm, arch: arm64}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.minutes }}
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
+      # A publish builds the tag's own commit, so the files are what the tag names.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.publish && format('refs/tags/{0}', inputs.tag) || github.sha }}
 
+      # macOS ---------------------------------------------------------------------------------
+      - name: Install Ninja
+        if: matrix.kind == 'macos'
+        run: brew install ninja
+
+      # Signing and notarization need the owner's Apple Developer secrets, and the step that imports them
+      # is not written yet (docs/releasing.md), so the dmg is signed ad hoc and the artifact says so.
+      - name: Say that the dmg is unsigned
+        if: matrix.kind == 'macos'
+        run: echo "::notice::the dmg is signed ad hoc, not with a Developer ID, and not notarized (no signing step yet)"
+
+      # Linux ---------------------------------------------------------------------------------
       - name: Install the build's packages
+        if: matrix.kind == 'linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build libasound2-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libxi-dev
 
       - name: Install Rust 1.95.0 (samplepack's pinned release)
+        if: matrix.kind != 'fantom'
         run: tools/install-rust.sh
 
-      - name: Build the tarball
-        run: tools/release-linux.sh
+      - name: Build
+        if: matrix.kind != 'fantom'
+        run: tools/release-${{ matrix.kind }}.sh
 
+      # The FANTOM-0 bundle ---------------------------------------------------------------------
+      # Buildroot's toolchain and packages in the builder container (os/fantom-bundle.sh). What a run
+      # keeps for the next is its downloads and ccache, in the Actions cache; the output folder (15 GB
+      # on the maintainer's machine) is not kept. The first, cold run may not finish in a runner's six
+      # hours: the build is stopped at 5 h 35 min so that the cache is still saved, and the next run
+      # continues from it (docs/releasing.md).
+      - name: Free disk space
+        if: matrix.kind == 'fantom'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+          df -h /
+
+      - name: Restore the downloads and ccache
+        if: matrix.kind == 'fantom'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/oscairn-os/dl
+            ${{ runner.temp }}/oscairn-os/ccache
+          key: fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-${{ github.run_id }}
+          restore-keys: |
+            fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-
+            fantom-0-buildroot-
+
+      - name: Build the bundle
+        id: bundle
+        if: matrix.kind == 'fantom'
+        run: |
+          work=$RUNNER_TEMP/oscairn-os
+          mkdir -p "$work"
+          # The container's builder user is uid 1000; the runner's cache restore is not.
+          sudo chown -R 1000:1000 "$work"
+          # As root, so that the script can write the tarball beside the folder the container filled.
+          sudo -E timeout 335m env OSCAIRN_OS_VOLUME="$work" os/fantom-bundle.sh BR2_JLEVEL="$(nproc)"
+
+      - name: Return the cached folders to the runner
+        if: matrix.kind == 'fantom' && always()
+        run: |
+          docker ps -q | xargs -r docker kill
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/oscairn-os/dl" "$RUNNER_TEMP/oscairn-os/ccache" build-os 2>/dev/null || true
+
+      - name: Save the downloads and ccache
+        if: matrix.kind == 'fantom' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/oscairn-os/dl
+            ${{ runner.temp }}/oscairn-os/ccache
+          key: fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-${{ github.run_id }}
+
+      - name: Collect the bundle
+        if: matrix.kind == 'fantom'
+        run: |
+          version=$(sed -n 's/^project(oscairn VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          label=$(sed -n 's/^set(OSCAIRN_PRERELEASE "\(.*\)")$/\1/p' CMakeLists.txt)
+          mkdir -p build-release
+          mv build-os/oscairn-fantom-bundle.tar.gz "build-release/oscairn-$version${label:+-$label}-fantom-0-bundle.tar.gz"
+
+      # Not built: the OTA upgrade package of the FANTOM-0 is issue 219's, and nothing stands in for it.
+      - name: OTA upgrade build (not built yet, issue 219)
+        if: matrix.kind == 'fantom'
+        run: |
+          echo "::notice::fantom-0: the OTA upgrade build is not built yet (issue 219); only the USB-install bundle is made"
+          echo "fantom-0: **OTA upgrade build: not built yet (issue 219).** Only the USB-install bundle is in the artifact." >> "$GITHUB_STEP_SUMMARY"
+
+      # All ---------------------------------------------------------------------------------------
       - name: Check the tag names this version
-        if: github.ref_type == 'tag'
-        run: test -f "build-release/oscairn-${GITHUB_REF_NAME#v}-linux-${{ matrix.arch }}.tar.gz"
+        if: inputs.publish
+        run: |
+          set -e
+          files=$(ls build-release/*.dmg build-release/*.tar.gz)
+          for f in $files; do
+            case $f in (*"${TAG#v}"*) ;; (*) echo "::error::$f does not carry the version of $TAG"; exit 1;; esac
+          done
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: SHA-256 sums
+        run: |
+          mkdir dist
+          cp build-release/*.dmg build-release/*.tar.gz dist/ 2>/dev/null || true
+          cd dist
+          [ -n "$(ls)" ] || { echo "::error::no files were built"; exit 1; }
+          for f in *; do
+            if command -v sha256sum > /dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+          done > "../SHA256SUMS-$TARGET.txt"
+          mv "../SHA256SUMS-$TARGET.txt" .
+          cat "SHA256SUMS-$TARGET.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: oscairn-linux-${{ matrix.arch }}
-          path: build-release/*.tar.gz
+          name: oscairn-${{ matrix.target }}${{ matrix.kind == 'macos' && '-unsigned' || '' }}
+          path: dist/*
           if-no-files-found: error
 
   draft:
-    # One job makes the draft, after every build, so that they do not race to create it.
-    if: github.ref_type == 'tag'
-    needs: [macos, linux]
+    # One job makes the draft, after every build, so that they do not race to create it. The
+    # tag must exist: this never creates one.
+    if: inputs.publish
+    needs: build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -81,8 +208,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
         run: |
-          prerelease=$(case "$GITHUB_REF_NAME" in (*-*) echo --prerelease;; esac)
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --draft $prerelease --verify-tag --title "Oscairn ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" files/* --clobber
+          set --
+          case "$TAG" in (*-*) set -- --prerelease;; esac
+          gh release view "$TAG" > /dev/null 2>&1 ||
+            gh release create "$TAG" --draft "$@" --verify-tag --title "Oscairn ${TAG#v}" --generate-notes
+          gh release upload "$TAG" files/* --clobber

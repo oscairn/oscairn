@@ -153,3 +153,106 @@ pub fn tabs(accent: Color, text: Color, surface: Color, background: Color, raise
     let on = if fits(accent) { accent } else { text };
     TabColors { on, on_ink: ink_on(on), off: raised, off_ink: muted }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_srgb_transfer_keeps_black_and_white_and_clamps() {
+        assert_eq!(linear(0), 0.);
+        assert_eq!(linear(255), 1.);
+        // A middle gray is brighter than black and between the two; the transfer rises monotonically.
+        let mid = linear(128);
+        assert!(0. < mid && mid < 1.);
+        assert!(linear(10) < linear(20));
+        // encode rounds back at the ends and clamps a value outside 0..1 to the nearer end.
+        assert_eq!(encode(0.), 0);
+        assert_eq!(encode(1.), 255);
+        assert_eq!(encode(-0.5), 0);
+        assert_eq!(encode(1.5), 255);
+    }
+
+    #[test]
+    fn contrast_is_one_against_itself_and_twenty_one_black_to_white() {
+        let (white, black) = (Color::from_rgb_u8(255, 255, 255), Color::from_rgb_u8(0, 0, 0));
+        assert_eq!(contrast(white, white), 1.);
+        // Black to white is the sheet's whole range, 21 to 1 (float rounding, not the exact value here).
+        let bw = contrast(black, white);
+        assert!(bw > 20.99 && bw <= 21., "black to white is {bw}");
+        assert_eq!(contrast(white, black), contrast(black, white));
+        assert_eq!(luminance(black), 0.);
+        assert_eq!(luminance(white), 1.);
+    }
+
+    #[test]
+    fn black_is_oklab_origin_and_an_accent_keeps_its_hue() {
+        assert_eq!(oklab(Color::from_rgb_u8(0, 0, 0)), (0., 0., 0.));
+        let accent = Color::from_rgb_u8(128, 128, 128);
+        let surface = Color::from_rgb_u8(0, 0, 0);
+        let text = Color::from_rgb_u8(255, 255, 255);
+        let eight = operators(accent, surface, surface, text);
+        assert_eq!(eight.len(), 8);
+        // A gray accent still gives eight colors, and none repeats (the lightness steps apart of the
+        // 0.07 band also separate neighbors whose same-chroma fills the gray hue would leave near one another).
+        for (i, a) in eight.iter().enumerate() {
+            for b in &eight[i + 1..] {
+                assert!(distance(a.fill, b.fill) > 0.02, "two operators are not apart in OKLab");
+            }
+        }
+        // The first operator keeps a colored accent's hue, whatever the filling does to lightness
+        // (a gray accent's hue is undefined, so the check needs a chroma-full accent).
+        let colored = Color::from_rgb_u8(0, 122, 204);
+        let (_, _, fill_hue) = oklch(operators(colored, surface, surface, text)[0].fill);
+        let (_, _, accent_hue) = oklch(colored);
+        assert!((fill_hue - accent_hue).abs() <= 2., "operator 1 left the accent's hue");
+    }
+
+    #[test]
+    fn from_oklch_and_fitted_stay_inside_srgb_or_say_so() {
+        // No chroma is a gray, always inside sRGB, with the three channels equal.
+        let (gray, inside) = from_oklch(0.5, 0., 0.);
+        assert!(inside);
+        assert_eq!(gray.red(), gray.blue());
+        // Chroma 0.8 is more than sRGB can hold at any hue: the flag says so, and fitted comes back inside.
+        assert!(!from_oklch(0.5, 0.8, 0.).1);
+        assert!(!from_oklch(0.5, 0.8, 45.).1);
+        let fit = fitted(0.5, 0.8, 0.);
+        assert!(oklch(fit).1 < 0.8, "fitted did not reduce the chroma to fit sRGB");
+        // A tiny chroma is already inside and is not reduced below what was asked.
+        assert!(from_oklch(0.5, 0.005, 0.).1);
+    }
+
+    #[test]
+    fn a_tab_takes_the_accent_where_it_fits_and_the_text_color_otherwise() {
+        let (white, black) = (Color::from_rgb_u8(255, 255, 255), Color::from_rgb_u8(0, 0, 0));
+        let muted = Color::from_rgb_u8(200, 200, 200);
+        // A white accent against black everywhere holds 3 to 1 against every panel and 4.5 to 1 against
+        // its ink, so the selectable fill is the accent and its ink the text.
+        let t = tabs(white, black, black, black, black, muted);
+        assert_eq!(t.on, white);
+        assert_eq!(t.on_ink, black);
+        assert_eq!((t.off, t.off_ink), (black, muted));
+        // An accent too close to the panels to hold 3 to 1 (gray on white) falls back to the theme's text
+        // color; the text is distinct from the accent, so `on` proves the fallback branch ran, not the accent's.
+        let accent = Color::from_rgb_u8(128, 128, 128);
+        let text = Color::from_rgb_u8(30, 30, 30);
+        let t = tabs(accent, text, white, white, white, muted);
+        assert_eq!(t.on, text, "the fill is the theme's text, not the accent");
+        assert_eq!(t.on_ink, white);
+        assert_eq!((t.off, t.off_ink), (white, muted));
+    }
+
+    #[test]
+    fn the_operator_fills_are_deterministic_and_their_ink_is_only_text_or_background() {
+        let accent = Color::from_rgb_u8(0, 122, 204);
+        let surface = Color::from_rgb_u8(238, 238, 238);
+        let background = Color::from_rgb_u8(255, 255, 255);
+        let text = Color::from_rgb_u8(30, 30, 30);
+        let a = operators(accent, surface, background, text);
+        assert_eq!(a, operators(accent, surface, background, text), "the same theme gives the same colors");
+        for o in &a {
+            assert!(o.on == text || o.on == background, "a fill's ink is only the theme's text or background");
+        }
+    }
+}

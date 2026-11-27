@@ -672,10 +672,10 @@ target_link_libraries(oscairn-sound-snapshots-fixture PRIVATE oscairn_clap_heade
 set_target_properties(oscairn-sound-snapshots-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
 add_test(NAME worker-sleep COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
-set_tests_properties(worker-sleep PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=all")
+set_tests_properties(worker-sleep PROPERTIES TIMEOUT 60) # unset: the default, all
 add_test(NAME worker-sleep-disabled COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
-set_tests_properties(worker-sleep-disabled PROPERTIES TIMEOUT 60)
+set_tests_properties(worker-sleep-disabled PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=disabled")
 add_test(NAME worker-sleep-off COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
 set_tests_properties(worker-sleep-off PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=0")
@@ -718,10 +718,7 @@ set_tests_properties(worker-failures PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 add_executable(oscairn-plugin-groups-test engine/tests/plugin_groups.cpp)
 target_link_libraries(oscairn-plugin-groups-test PRIVATE oscairn_engine)
 foreach(rest IN ITEMS disabled all 0)
-    set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1")
-    if(NOT rest STREQUAL "disabled")
-        set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1;OSCAIRN_WORKER_REST=${rest}")
-    endif()
+    set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1;OSCAIRN_WORKER_REST=${rest}")
     add_test(NAME plugin-groups-rest-${rest} COMMAND oscairn-plugin-groups-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
     set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
 endforeach()

@@ -423,6 +423,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     rt.on_panel_moved(|row, cell, f| with_app(|a| a.on_routing(|r| r.level(row, cell, f))));
     rt.on_panel_held(|row, cell, down| with_app(|a| a.on_routing(|r| r.hold(row, cell, down))));
     rt.on_turn_panel(|by| with_app(|a| a.on_routing(|r| r.turn_panel(by))));
+    rt.on_zoom_press(|i| with_app(|a| a.on_routing(|r| r.zoom_press(i))));
     rt.on_resized(|| with_app(|a| a.on_routing(routing::Screen::shown)));
     let menu = ui.global::<MenuState>();
     menu.on_tapped(|i| with_app(|a| a.menu_tap(i)));
@@ -547,6 +548,16 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         app.play.offer_keyboard(profile.on_screen_keyboard, crate::settings::keyboard_hint_dismissed());
         app.play.knobs(profile.controls.clone());
         app.show_home();
+        // What Oscairn opens to at start (the Settings' Start page): the splash over, Home as always
+        // unless the choice says another screen. `go` sends nothing for Home, and what the others
+        // ask is queued until the engine answers. A hand-over boot honors it too: the keyboard
+        // always starts with --handover, and the issue asks for the setting there.
+        match crate::settings::start_page() {
+            crate::settings::StartPage::Home => {}
+            crate::settings::StartPage::Setlist => app.go(Screen::Setlist),
+            crate::settings::StartPage::Performance => app.go(Screen::Play),
+            crate::settings::StartPage::Library => app.go(Screen::Library),
+        }
         *a.borrow_mut() = Some(app);
     });
     Ok(())
@@ -1476,7 +1487,8 @@ impl App {
     /// The screen's own action `i` of the bar.
     fn run_tool(&mut self, i: usize) {
         match self.screen {
-            Screen::Setlist => self.go(Screen::Play),
+            Screen::Setlist if i == 0 => self.go(Screen::Play),
+            Screen::Setlist => self.on_setlist(setlist::Screen::manage_menu),
             Screen::Routing => self.on_routing(|r| r.tap_tool(i as i32)),
             Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
             Screen::Params => self.params_act(|p| p.search_tap()),
@@ -1652,6 +1664,12 @@ impl App {
             if let Some((_, m)) = self.menu.as_mut() {
                 m.start(at);
             }
+        }
+        if let Some((title, text)) = self.setlist.prompt.take() {
+            self.open_keyboard(Screen::Setlist, &title, &text);
+        }
+        if let Some((title, message, choices)) = self.setlist.take_notice() {
+            self.open_notice(Screen::Setlist, &title, &message, &choices.iter().map(String::as_str).collect::<Vec<_>>());
         }
         // What it says (why a slot did not open) goes where the bar's actions say theirs, on the screens that step it.
         if let Some(text) = self.setlist.said.take().filter(|_| matches!(self.screen, Screen::Setlist | Screen::Play)) {
@@ -2208,6 +2226,8 @@ impl App {
             (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
             (Screen::Library, Some(text)) => self.on_library(|p| p.entered(&text)),
             (Screen::Library, None) => self.on_library(library::Screen::not_entered),
+            (Screen::Setlist, Some(text)) => self.on_setlist(|s| s.entered(&text)),
+            (Screen::Setlist, None) => self.on_setlist(setlist::Screen::not_entered),
             (Screen::Settings, Some(text)) => self.on_settings(|p| p.entered(&text)),
             (Screen::Settings, None) => self.on_settings(settings_app::Screen::not_entered),
             (Screen::Params, Some(text)) => self.on_params(|p| p.entered(&text)),

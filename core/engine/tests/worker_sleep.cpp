@@ -6,7 +6,8 @@
 // steady time goes on through the blocks it slept. A plugin taking the beat and harmony (the follower fixture, asleep after
 // every block as an idle arpeggiator) rests too: the beat alone does not wake it, the transport starting does, and it gets
 // the free-running beat's position then. With OSCAIRN_WORKER_REST=0 every worker is called every block instead, and its
-// host still leaves a plugin asleep uncalled for the beat alone. Those run with OSCAIRN_WORKER_REST=all; unset (disabled),
+// host still leaves a plugin asleep uncalled for the beat alone. Those run with OSCAIRN_WORKER_REST unset (all, the
+// default); with "disabled" (the earlier default),
 // a worker any note can reach is called every block too, and one whose every note connection is off (draining) rests:
 // a note in the very block its connection comes back on is played, the worker called on that block.
 //   oscairn-worker-sleep-test WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE FOLLOWER-FIXTURE
@@ -35,7 +36,7 @@ int main(int argc, char** argv)
     if(argc < 5) { std::fprintf(stderr, "usage: %s WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE FOLLOWER-FIXTURE\n", argv[0]); return 2; }
     const char* restVar = std::getenv("OSCAIRN_WORKER_REST");
     const std::string mode = restVar ? restVar : "";
-    const bool resting = mode == "all", disabled = mode != "all" && mode != "0";
+    const bool resting = mode != "0" && mode != "disabled", disabled = mode == "disabled";
     // A block it slept through: rested, or with resting off (or its node playable) called (its host leaving the plugin uncalled).
     auto slept = [&](std::pair<uint64_t, uint64_t> b) { return resting ? b == std::pair<uint64_t, uint64_t>{0, 1} : b == std::pair<uint64_t, uint64_t>{1, 0}; };
     // WorkerHost's hold: a plugin asleep is still called for this many blocks in a row before it rests; `after` the
@@ -173,6 +174,6 @@ int main(int argc, char** argv)
         check(host->statistics().lateBlocks + host->statistics().silentBlocks == 0, "no block lost");
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
-    if(!failures) std::printf("worker sleep (rest %s): asleep, not called; called on the block a note, a command, a panic, a select, a choke_retiring or a transport change comes, not for the beat\n", mode.empty() ? "disabled" : mode.c_str());
+    if(!failures) std::printf("worker sleep (rest %s): asleep, not called; called on the block a note, a command, a panic, a select, a choke_retiring or a transport change comes, not for the beat\n", mode.empty() ? "all (default)" : mode.c_str());
     return failures ? 1 : 0;
 }

@@ -123,6 +123,8 @@ pub enum Stop {
     Canvas(usize),
     /// A cell of a row of the whole panel.
     Panel(usize, usize),
+    /// A zoom button: 0 Zoom in, 1 Zoom out, 2 Fit.
+    Zoom(usize),
 }
 
 /// What a choice of the menu that is open means.
@@ -406,6 +408,8 @@ pub struct Screen {
     layout: Layout,
     /// The layout as it was drawn: its scale and where it starts in the canvas (centered when it is smaller).
     scale: f64,
+    /// The user's zoom over the theme's scale: Fit sets it to 1, Zoom in and out step it by a fifth.
+    zoom: f64,
     origin: (f64, f64),
     /// The place of the order the view last followed: the view moves to a place the cursor reaches, once.
     followed: Option<usize>,
@@ -467,6 +471,7 @@ impl Screen {
             routed_part: 0,
             layout: Layout::default(),
             scale: 1.,
+            zoom: 1.,
             origin: (0., 0.),
             followed: None,
             order: vec![],
@@ -744,7 +749,8 @@ impl Screen {
         // down with no floor, to a few pixels). What does not fit the canvas is scrolled: a drag, or the cursor
         // reaching a place that is out of view.
         let (lw, lh) = (f64::from(self.layout.width.max(1)), f64::from(self.layout.height.max(1)));
-        self.scale = f64::from(ui.global::<Theme>().get_font_scale()).max(1.);
+        // The theme's type scale, at the least 1, and the user's zoom over it (Fit brings it back to 1).
+        self.scale = f64::from(ui.global::<Theme>().get_font_scale()).max(1.) * self.zoom;
         self.origin = (((cw - lw * self.scale) / 2.).max(0.), ((ch - lh * self.scale) / 2.).max(0.));
         let (content_w, content_h) = (cw.max(lw * self.scale), ch.max(lh * self.scale));
         self.order = self.make_order();
@@ -938,6 +944,10 @@ impl Screen {
         }
         let state = ui.global::<RoutingState>();
         state.set_scale(self.scale as f32);
+        state.set_zoom_cursor(match self.stop {
+            Some(Stop::Zoom(i)) => i as i32 + 1,
+            _ => 0,
+        });
         state.set_panel_need(rows.len() as i32);
         state.set_more_panel(rows.len() > per);
         state.set_message(self.said.as_str().into());
@@ -1451,8 +1461,55 @@ impl Screen {
                     return self.press_cell(cell.act);
                 }
             }
+            Stop::Zoom(i) => self.zoom_action(i),
         }
         Outcome::Stay
+    }
+
+    /// Zoom in (0), Zoom out (1) or Fit (2): the drawing's scale steps by a fifth over the theme's, or fits the
+    /// whole graph to the canvas (Fit). Zoom in and out hold the graph place under the view's center so the view
+    /// does not jump from a panned position; Fit shows all of it. The cursor stays on the button.
+    fn zoom_action(&mut self, which: usize) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let fs = f64::from(ui.global::<Theme>().get_font_scale()).max(1.);
+        let (cw, ch) = self.canvas();
+        let (lw, lh) = (f64::from(self.layout.width.max(1)), f64::from(self.layout.height.max(1)));
+        let old_scale = self.scale;
+        let origin = (((cw - lw * old_scale) / 2.).max(0.), ((ch - lh * old_scale) / 2.).max(0.));
+        let view = ui.global::<RoutingState>();
+        // The graph place under the view's center, held as the scale changes.
+        let center = (
+            (f64::from(view.get_pan_x()) + cw / 2. - origin.0) / old_scale,
+            (f64::from(view.get_pan_y()) + ch / 2. - origin.1) / old_scale,
+        );
+        match which {
+            0 => self.zoom = (self.zoom * 1.25).min(4.),
+            1 => self.zoom = (self.zoom / 1.25).max(0.25),
+            // Fit: a graph larger than the canvas shrinks down to it; a smaller one returns to the designed size.
+            _ => {
+                let fit = (cw / lw).min(ch / lh);
+                self.zoom = if fit >= fs { 1. } else { (fit / fs).max(0.05) };
+                view.set_pan_x(0.);
+                view.set_pan_y(0.);
+            }
+        }
+        let new_scale = fs * self.zoom;
+        if which <= 1 {
+            let origin = (((cw - lw * new_scale) / 2.).max(0.), ((ch - lh * new_scale) / 2.).max(0.));
+            let (content_w, content_h) = (cw.max(lw * new_scale), ch.max(lh * new_scale));
+            let pan = ((center.0 * new_scale + origin.0 - cw / 2.).clamp(0., content_w - cw),
+                       (center.1 * new_scale + origin.1 - ch / 2.).clamp(0., content_h - ch));
+            view.set_pan_x(pan.0 as f32);
+            view.set_pan_y(pan.1 as f32);
+        }
+        self.followed = None; // the view follows the cursor again under the new scale
+        self.show();
+    }
+
+    /// A press on a zoom button by touch.
+    pub fn zoom_press(&mut self, which: i32) {
+        self.touched();
+        self.zoom_action(which.max(0) as usize);
     }
 
     // The cursor.
@@ -1460,6 +1517,8 @@ impl Screen {
     fn stops(&self) -> Vec<Stop> {
         let mut v: Vec<Stop> = (0..self.order.len()).map(Stop::Canvas).collect();
         v.extend(self.panel_stops().into_iter().map(|(r, c)| Stop::Panel(r, c)));
+        // The zoom buttons, after the panel: the dial goes on from the last cell to them.
+        v.extend((0..3).map(Stop::Zoom));
         v
     }
 
@@ -1702,5 +1761,143 @@ impl Screen {
     /// Shown: the sizes may have changed while it was not.
     pub fn shown(&mut self) {
         self.show();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn zone(channels: Option<u64>) -> Value {
+        let mut z = json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0});
+        if let Some(c) = channels {
+            z["channels"] = json!(c);
+        } else {
+            z.as_object_mut().unwrap().remove("channels");
+        }
+        z
+    }
+
+    #[test]
+    fn two_trims_and_rounds() {
+        assert_eq!(two(0.0), "0");
+        assert_eq!(two(12.34), "12.34");
+        assert_eq!(two(12.30), "12.3");
+        assert_eq!(two(-5.0), "-5");
+        assert_eq!(two(100.0), "100");
+    }
+
+    #[test]
+    fn num_gives_a_pair() {
+        assert_eq!(num(3.0, 7.0), "3 7");
+        assert_eq!(num(-1.5, 0.0), "-1.5 0");
+    }
+
+    #[test]
+    fn wire_commands_need_two_points() {
+        assert_eq!(wire_commands(&[], 1, 10., None), "");
+        assert_eq!(wire_commands(&[(5., 5.)], 1, 10., None), "");
+    }
+
+    #[test]
+    fn wire_commands_single_line_one_cubic_per_pair() {
+        // A straight run: the control points sit at the middle in x, on each end's height.
+        assert_eq!(wire_commands(&[(0., 0.), (100., 0.)], 1, 10., None), "M 0 0 C 50 0 50 0 100 0");
+        assert_eq!(wire_commands(&[(0., 0.), (100., 50.)], 1, 10., None), "M 0 0 C 50 0 50 50 100 50");
+        // A longer path gets one cubic per pair of points, still one move.
+        let g = wire_commands(&[(0., 0.), (50., 50.), (100., 0.)], 1, 10., None);
+        assert_eq!(g, "M 0 0 C 25 0 25 50 50 50 C 75 50 75 0 100 0");
+        assert_eq!(g.matches(" M ").count(), 0);
+    }
+
+    #[test]
+    fn wire_commands_bus_is_a_line_per_channel() {
+        let g = wire_commands(&[(0., 0.), (100., 0.)], 2, 10., None);
+        assert_eq!(g.matches("M ").count(), 2);
+        let seven = wire_commands(&[(0., 0.), (100., 0.)], 7, 10., None);
+        assert_eq!(seven.matches("M ").count(), 7);
+    }
+
+    #[test]
+    fn wire_commands_dash_keeps_drawing_marks() {
+        let g = wire_commands(&[(0., 0.), (200., 0.)], 1, 10., Some((3., 2.)));
+        // Short dashes: more than one draw, so more than one move.
+        assert!(g.matches("M ").count() > 1);
+        assert!(!g.is_empty());
+    }
+
+    #[test]
+    fn rounded_empty_or_one_point() {
+        assert_eq!(rounded(&[], 4.), "");
+        assert_eq!(rounded(&[(10., 10.)], 4.), "M 10 10");
+    }
+
+    #[test]
+    fn rounded_straight_line_is_a_line() {
+        assert_eq!(rounded(&[(0., 0.), (100., 0.)], 4.), "M 0 0 L 100 0");
+    }
+
+    #[test]
+    fn rounded_rounds_a_corner_with_quadratics() {
+        // A right-angle corner: the joins move radius toward each neighbor and the corner itself stays.
+        assert_eq!(rounded(&[(0., 0.), (50., 50.), (100., 0.)], 4.), "M 0 0 L 47.17 47.17 Q 50 50 52.83 47.17 L 100 0");
+    }
+
+    #[test]
+    fn zone_channel_names_a_channel_any_or_several() {
+        assert_eq!(zone_channel(&[]), 0);
+        assert_eq!(zone_channel(&[zone(Some(65535))]), 0);
+        assert_eq!(zone_channel(&[zone(Some(1))]), 1);
+        assert_eq!(zone_channel(&[zone(Some(1 << 15))]), 16);
+        assert_eq!(zone_channel(&[zone(Some(1)), zone(Some(2))]), -1);
+        // A mask of two channels is several, not one.
+        assert_eq!(zone_channel(&[zone(Some(3))]), -1);
+        // A zone with no channels field defaults to any.
+        assert_eq!(zone_channel(&[zone(None)]), 0);
+    }
+
+    #[test]
+    fn set_zone_channel_sets_and_dedups() {
+        // Empty is left alone when asking for any.
+        assert_eq!(set_zone_channel(&[], 0), Vec::<Value>::new());
+        // A named channel creates a zone to carry it, one that reads back as that channel.
+        let made = set_zone_channel(&[], 3);
+        assert_eq!(made.len(), 1);
+        assert_eq!(zone_channel(&made), 3);
+        // Identical zones collapse to one.
+        let two = set_zone_channel(&[zone(Some(1)), zone(Some(1))], 5);
+        assert_eq!(two.len(), 1);
+        assert_eq!(zone_channel(&two), 5);
+        // A single channel-1 zone, the default, is dropped when asking for any.
+        assert_eq!(set_zone_channel(&[zone(Some(1))], 0), Vec::<Value>::new());
+    }
+
+    #[test]
+    fn follow_holds_the_stretch_or_moves_the_least() {
+        // Already inside the window: the pan is left alone.
+        assert_eq!(follow(20., 100., 10., 100., 5.), 20.);
+        // Starts to the left of the window: up to its start, minus the margin.
+        assert_eq!(follow(20., 10., 10., 100., 5.), 5.);
+        // Runs past the window's right edge: the least move that brings its end in.
+        assert_eq!(follow(0., 200., 10., 50., 5.), 165.);
+        // Longer than the window: to the stretch's start.
+        assert_eq!(follow(0., 200., 100., 50., 5.), 195.);
+    }
+
+    #[test]
+    fn sync_grows_shrinks_and_changes_only_what_moved() {
+        let model = VecModel::from(vec![1, 2, 3]);
+        let mut last = vec![1, 2, 3];
+        // Fewer rows: the tail is dropped; a changed row is rewritten.
+        sync(&model, &mut last, vec![1, 9], |p| *p);
+        assert_eq!(model.row_count(), 2);
+        assert_eq!(model.row_data(0), Some(1));
+        assert_eq!(model.row_data(1), Some(9));
+        assert_eq!(last, vec![1, 9]);
+        // More rows than the model has: the new tail is added.
+        sync(&model, &mut last, vec![7, 8, 9], |p| *p);
+        assert_eq!(model.row_count(), 3);
+        assert_eq!(model.row_data(2), Some(9));
+        assert_eq!(last, vec![7, 8, 9]);
     }
 }

@@ -519,3 +519,217 @@ fn the_list_draws_in_every_theme_at_two_sizes() {
     mv(&mut p, Some(1), 1);
     at_fantom_scale(&mut s, "parts", || p.shown());
 }
+
+// The Parts list reached from Home by the panel alone (no taps), then every action it offers is
+// walked, counted from the screen's own models (the rows and their cells, the five tools); each
+// action is held to its real effect: the request that reached the engine, or the view that changed.
+#[test]
+fn the_parts_list_walks_from_home_without_touch() {
+    let mut f = Fixture::new("parts-walk");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    let graph = std::cell::RefCell::new(parts_graph());
+    // Answers everything the shell asks as an engine would, and returns what it answered.
+    // (parts.level/send/add name its effect; the polling and graph.get are answered silently.)
+    let settle = |f: &mut Fixture| {
+        let mut seen: Vec<(String, serde_json::Value)> = vec![];
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "graph.get" | "graph.changed" => graph.borrow().clone(),
+                "parts.meters" => json!({"meters": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": []}),
+                "harmony.get" => json!({"key": {"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10], "name": "Minor"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "library.query" => json!({"items": [], "total": 0}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "subscribe" | "unsubscribe" | "controllers.view" | "record.get" | "memory.state" | "transport.get" | "performance.reopen" | "packages.installed" | "presets.list" | "window.info" => json!({}),
+                _ => {
+                    seen.push((method, r["params"].clone()));
+                    json!({"accepted": true})
+                }
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+        seen
+    };
+
+    // Home, by the panel: the dial's first move shows the cursor, Confirm opens the Performance tile → Play.
+    shell::act(Action::Move { pane: None, by: 0 });
+    shell::act(Action::Confirm(None));
+    assert_eq!(ui.get_screen(), 3, "Home's Performance tile opens Play");
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3);
+    // Play's top bar by the panes: the third pane enters it at Back, then along to Edit (its place found
+    // in the bar's own actions, never a blind count), Confirm opens the list.
+    shell::act(Action::Move { pane: Some(2), by: 1 });
+    assert!(ui.global::<crate::Bar>().get_back_cursor(), "the third pane enters the bar at Back");
+    let edit_at = |ui: &crate::Shell| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == "Edit" && a.enabled);
+    let bar_cursor = |ui: &crate::Shell| ui.global::<crate::Bar>().get_actions().iter().position(|a| a.cursor);
+    let mut moves = 0;
+    while bar_cursor(&ui) != edit_at(&ui) {
+        shell::act(Action::Move { pane: None, by: 1 });
+        moves += 1;
+        assert!(moves < 20, "the bar's cursor never reached Edit");
+    }
+    shell::act(Action::Confirm(None));
+    assert_eq!(ui.get_screen(), 9, "Play's bar Edit opens the Parts list");
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 9);
+
+    // The stops the list actually offers, from its own models: every cell of every shown row, then the tools.
+    let state = ui.global::<crate::PartsState>();
+    // The nodes in the list's order (the parts first, then the buses), to name each edit's parameter, and
+    // the buses (each send's target), for the names a + Part / + Bus adds: the same read the list makes.
+    let (parts, bus_rows, _) = crate::parts::read(&parts_graph(), &[]);
+    let order = {
+        let mut ids = parts.iter().map(|r| r.id).collect::<Vec<_>>();
+        ids.extend(bus_rows.iter().map(|r| r.id));
+        ids
+    };
+    let add_part_name = format!("Part {}", parts.len() + 1);
+    let add_bus_name = format!("Bus {}", char::from(b'A' + (bus_rows.len() % 26) as u8));
+    // A row's cells, as the list shows them: a part's name, level, mute and a send per bus (the sends its
+    // row holds), a bus's same three, a shared row's single one.
+    let sends_in = |i: usize| state.get_sends().iter().filter(|s| s.row as usize == i).count() as i32;
+    let rows = (0..state.get_rows().row_count())
+        .map(|i| {
+            let r = state.get_rows().row_data(i).unwrap();
+            let cells = match r.kind {
+                0 => 3 + sends_in(i), // the part, its level, its mute, then a send per bus
+                1 => 3,
+                _ => 1,
+            };
+            (r, cells)
+        })
+        .collect::<Vec<_>>();
+    assert!(rows.len() >= 4, "the fixture's parts walk more than a view");
+    let tools = state.get_tools().row_count();
+    let total_stops: i32 = rows.iter().map(|(_, c)| c).sum::<i32>() + tools as i32;
+    let mut visited = std::collections::BTreeSet::<i32>::new();
+    // The shown row the cursor is on (the one whose cell it has), if any.
+    let cursor = |ui: &Shell| {
+        (0..ui.global::<crate::PartsState>().get_rows().row_count())
+            .find_map(|i| {
+                let r = ui.global::<crate::PartsState>().get_rows().row_data(i).unwrap();
+                (r.cell >= 0).then_some(r)
+            })
+    };
+    for k in 0..total_stops {
+        visited.insert(k);
+        // Give the cursor the first cell, then the dial reaches the k-th stop.
+        shell::act(Action::End(-1));
+        shell::act(Action::Move { pane: None, by: k });
+        // Which row (if any) this stop is on, mirroring the dial's reading order.
+        if let Some((row_index, row, cell)) = {
+            let mut a = 0i32;
+            let mut hit = None;
+            for (i, (r, c)) in rows.iter().enumerate() {
+                if k < a + *c {
+                    hit = Some((i, r, k - a));
+                    break;
+                }
+                a += *c;
+            }
+            hit
+        } {
+            let kind = row.kind;
+            let id = order.get(row_index).copied().unwrap_or(0) as u64;
+            let name = row.name.to_string();
+            if kind == 2 {
+                // A shared row: a press takes the Routing page.
+                shell::act(Action::Confirm(None));
+                assert_eq!(ui.get_screen(), 12, "the shared row opens Routing");
+                settle(&mut f);
+                shell::act(Action::Cancel(None));
+                assert_eq!(ui.get_screen(), 9);
+                settle(&mut f);
+            } else if cell == 0 {
+                // The part's first cell: a press opens the part, and it comes back.
+                shell::act(Action::Confirm(None));
+                assert_eq!(ui.get_screen(), 4, "{}'s first cell opens the part", name);
+                assert_eq!(title(&ui), name);
+                settle(&mut f);
+                shell::act(Action::Cancel(None));
+                assert_eq!(ui.get_screen(), 9);
+                settle(&mut f);
+            } else if cell == 1 {
+                // The level: a press starts changing it, the dial steps it a click, the other press lays
+                // it down and the engine hears `parts.level` naming the part.
+                shell::act(Action::Confirm(None));
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(true), "{}'s level is being changed", name);
+                shell::act(Action::Move { pane: None, by: -1 });
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(true), "{}'s level stepped by the dial", name);
+                shell::act(Action::Confirm(None));
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(false), "{}'s level laid down", name);
+                let seen = settle(&mut f);
+                let sent = seen.iter().find(|(m, _)| m == "parts.level").unwrap_or_else(|| panic!("{}'s level never reached the engine", name));
+                assert_eq!(sent.1["part"], json!(id), "{}'s level names the part", name);
+                assert!(seen.iter().any(|(m, _)| m == "graph.commit"));
+            } else if cell == 2 {
+                // The mute: a press toggles it and the engine hears `parts.level` with the part.
+                let was = cursor(&ui).unwrap().mute;
+                shell::act(Action::Confirm(None));
+                assert_eq!(cursor(&ui).map(|r| r.mute), Some(!was), "{}'s mute toggled", name);
+                let seen = settle(&mut f);
+                let sent = seen.iter().find(|(m, _)| m == "parts.level").expect("mute reaches the engine");
+                assert_eq!(sent.0, "parts.level");
+                assert_eq!(sent.1["part"], json!(id), "{}'s mute names the part", name);
+                assert_eq!(sent.1["mute"], json!(!was), "the engine hears the toggled mute");
+                assert!(seen.iter().any(|(m, _)| m == "graph.commit"));
+            } else {
+                // A send to a bus: a press starts changing it, the dial steps it a click, the other press
+                // lays it down and the engine hears `parts.send` naming the part and the bus.
+                let slot = (cell - 3) as usize;
+                shell::act(Action::Confirm(None));
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(true), "{}'s send is being changed", name);
+                shell::act(Action::Move { pane: None, by: 1 });
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(true), "{}'s send stepped by the dial", name);
+                shell::act(Action::Confirm(None));
+                assert_eq!(cursor(&ui).map(|r| r.editing), Some(false), "{}'s send laid down", name);
+                let seen = settle(&mut f);
+                let sent = seen.iter().find(|(m, _)| m == "parts.send").unwrap_or_else(|| panic!("{}'s send never reached the engine", name));
+                assert_eq!(sent.1["part"], json!(id), "{}'s send names the part", name);
+                assert_eq!(sent.1["bus"], json!(u64::from(bus_rows[slot].id)), "{}'s send names the bus", name);
+                assert!(seen.iter().any(|(m, _)| m == "graph.commit"));
+            }
+        } else {
+            // A tool, the one the buttons' model names at this stop: a page (Mixer, Controls, Routing)
+            // goes to it; + Part and + Bus add with the name the list would give the next part or bus.
+            let tool = (k - rows.iter().map(|(_, c)| c).sum::<i32>()) as usize;
+            let label = state.get_tools().row_data(tool).unwrap().label.to_string();
+            match label.as_str() {
+                "Mixer" | "Controls" | "Routing" => {
+                    let page = match label.as_str() {
+                        "Mixer" => crate::shell::Screen::Mixer,
+                        "Controls" => crate::shell::Screen::Controls,
+                        _ => crate::shell::Screen::Routing,
+                    };
+                    shell::act(Action::Confirm(None));
+                    assert_eq!(ui.get_screen(), page as i32, "the {} tool goes to its page", label);
+                    settle(&mut f);
+                    shell::act(Action::Cancel(None));
+                    assert_eq!(ui.get_screen(), 9);
+                    settle(&mut f);
+                }
+                "+ Part" => {
+                    shell::act(Action::Confirm(None));
+                    let seen = settle(&mut f);
+                    let sent = seen.iter().find(|(m, _)| m == "parts.add").expect("add reaches the engine");
+                    assert_eq!(sent.1["name"], json!(add_part_name), "+ Part adds {}", add_part_name);
+                    assert!(seen.iter().any(|(m, _)| m == "graph.commit"));
+                }
+                "+ Bus" => {
+                    shell::act(Action::Confirm(None));
+                    let seen = settle(&mut f);
+                    let sent = seen.iter().find(|(m, _)| m == "parts.add").expect("add reaches the engine");
+                    assert_eq!(sent.1["name"], json!(add_bus_name), "+ Bus adds {}", add_bus_name);
+                    assert!(seen.iter().any(|(m, _)| m == "graph.commit"));
+                }
+                other => panic!("an unexpected Parts-list tool: {}", other),
+            }
+        }
+    }
+    assert_eq!(visited.len(), total_stops as usize, "every stop the list offers was walked");
+}

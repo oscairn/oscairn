@@ -11,6 +11,8 @@
 //! opens opens next, the last one chosen winning (as the JUCE Engine queues library loads).
 //! Slots show a view at a time: the cursor leaving it turns a whole view, never scrolling.
 
+mod manage;
+
 use crate::menu::Item;
 use crate::nav::{Action, Cursor};
 use crate::{BarStop, SetlistState, Shell, SlotData};
@@ -43,6 +45,8 @@ pub struct Setlist {
     pub columns: u32,
     pub rows: u32,
     pub pages: Vec<Page>,
+    /// The document as the engine gave it: an edit changes this and saves it whole, so what the screen does not show is kept.
+    doc: Value,
 }
 
 fn text(v: &Value, key: &str) -> String {
@@ -71,7 +75,7 @@ impl Setlist {
         if pages.is_empty() {
             return Err("no pages".into());
         }
-        Ok(Setlist { id: text(&doc["info"], "id"), name: text(&doc["info"], "name"), grid: display["mode"] == "grid", columns: side("columns"), rows: side("rows"), pages })
+        Ok(Setlist { id: text(&doc["info"], "id"), name: text(&doc["info"], "name"), grid: display["mode"] == "grid", columns: side("columns"), rows: side("rows"), pages, doc: doc.clone() })
     }
 
     pub fn count(&self) -> usize {
@@ -127,6 +131,12 @@ pub enum Request {
     Setlists,
     Get(String),
     Performances,
+    /// setlists.save of an edit: what to say when it is saved, and the bank and slot the cursor goes to once it is read again.
+    Save(String, Option<(usize, usize)>),
+    /// library.copy of the setlist open.
+    Copy,
+    /// library.delete of the setlist open, with its name.
+    Delete(String),
     /// A slot opened, by its index in the setlist.
     Load(usize),
     Prepare,
@@ -160,9 +170,22 @@ pub struct Screen {
     slots: Cursor, // pane 1, over the page's slots, a view at a time
     /// The pane the dial moves: the one the cursor is in (0 the setlist bar, 1 the slots).
     touched: u8,
-    /// A dropdown's list for the shell to open as the menu, and whether the one asked for is the banks'.
+    /// A list for the shell to open as the menu, and what it is for.
     menu: Option<(String, Vec<Item>, usize)>, // its title, its rows, the row the cursor starts on (the one chosen now)
-    banks_menu: bool,
+    menu_for: manage::MenuFor,
+    /// Text asked for on the keyboard (title, what it starts with), and what it is for.
+    pub prompt: Option<(String, String)>,
+    asked: Option<manage::Ask>,
+    /// A question for the shell to open (title, message, choices), and what it is about.
+    notice: Option<(String, String, Vec<String>)>,
+    notice_for: Option<manage::Sure>,
+    /// The slot the management menu acts on when the cursor is not on one: the last the cursor or a tap was on.
+    picked: Option<usize>,
+    /// The setlist to open once the list of setlists is read again (one just made or copied), and the bank and slot to show.
+    focus: Option<String>,
+    pending: Option<(usize, usize)>,
+    /// The Performances the "add" list offered, by the row.
+    offered: Vec<String>,
     /// The slot stepped from (Play's Previous and Next): the one chosen here, or the first holding the engine's open
     /// Performance. Every slot holding the same Performance is marked as playing.
     current: Option<usize>,
@@ -248,7 +271,15 @@ impl Screen {
             slots: Cursor::new(0, 1),
             touched: 1,
             menu: None,
-            banks_menu: false,
+            menu_for: manage::MenuFor::Setlists,
+            prompt: None,
+            asked: None,
+            notice: None,
+            notice_for: None,
+            picked: None,
+            focus: None,
+            pending: None,
+            offered: vec![],
             current: None,
             open: None,
             opening: false,
@@ -274,8 +305,12 @@ impl Screen {
         self.opening = false;
         self.queued = None;
         self.retry_wanted = false;
-        self.out.push((Request::Setlists, "library.query", json!({"type": "oscairn.setlist", "limit": 1000})));
+        self.ask_setlists();
         self.out.push((Request::Performances, "library.query", json!({"kind": "performance", "limit": 1000})));
+    }
+
+    fn ask_setlists(&mut self) {
+        self.out.push((Request::Setlists, "library.query", json!({"type": "oscairn.setlist", "limit": 1000})));
     }
 
     /// Shown: on the bank of the slot playing, if one is; the views' sizes may have changed while it was not.
@@ -334,7 +369,11 @@ impl Screen {
                         self.next_queued();
                     }
                     Request::Prepare => {}
-                    _ => self.say(crate::client::refusal(&e)),
+                    _ => {
+                        self.pending = None;
+                        self.focus = None;
+                        self.say(crate::client::refusal(&e));
+                    }
                 }
                 return;
             }
@@ -342,8 +381,12 @@ impl Screen {
         match request {
             Request::Setlists => {
                 self.setlists = r["items"].as_array().map(|items| items.iter().map(|i| (text(i, "id"), text(i, "name"))).collect()).unwrap_or_default();
-                let open = self.setlist.as_ref().map(|s| s.id.clone()).or(self.restore.as_ref().map(|r| r.0.clone()));
+                let open = self.focus.take().or_else(|| self.setlist.as_ref().map(|s| s.id.clone())).or(self.restore.as_ref().map(|r| r.0.clone()));
                 let at = self.setlists.iter().position(|s| Some(&s.0) == open.as_ref()).unwrap_or(0);
+                if self.setlists.is_empty() {
+                    self.setlist = None; // the last one deleted
+                    self.current = None;
+                }
                 self.open_setlist(at); // with none, the dropdown says "No setlist"
                 self.show();
             }
@@ -368,11 +411,27 @@ impl Screen {
                     if other {
                         self.page = self.current_page().unwrap_or(0);
                     }
+                    self.place();
                     self.show();
                     self.keep();
                 }
                 Err(e) => self.say(format!("Cannot show setlist {id}: {e}")),
             },
+            Request::Save(said, place) => {
+                self.focus = r["id"].as_str().map(str::to_string);
+                self.pending = place;
+                self.say(said);
+                self.ask_setlists();
+            }
+            Request::Copy => {
+                self.focus = r["id"].as_str().map(str::to_string);
+                self.say("Duplicated.");
+                self.ask_setlists();
+            }
+            Request::Delete(name) => {
+                self.say(format!("{name} deleted."));
+                self.ask_setlists();
+            }
             Request::Load(_) => {
                 self.opening = false;
                 self.show();
@@ -486,7 +545,12 @@ impl Screen {
             stop(3, "Next", false, self.page + 1 < pages),
         ];
         update(&self.stops, stops);
-        let Some(s) = self.setlist.as_ref() else { return };
+        let Some(s) = self.setlist.as_ref() else {
+            update(&self.rows, vec![]);
+            state.set_count(0);
+            state.set_view("".into());
+            return;
+        };
         state.set_name(if s.name.is_empty() { "Untitled".into() } else { s.name.as_str().into() });
         let page = &s.pages[self.page];
         state.set_grid(s.grid);
@@ -496,6 +560,7 @@ impl Screen {
         self.slots = Cursor { count: page.slots.len(), per_page: per_view, ..self.slots };
         if let Some(at) = self.slots.at {
             self.slots = self.slots.to(at); // the view follows the cursor
+            self.picked = Some(s.first(self.page) + at);
         }
         let start = s.first(self.page) + self.slots.first;
         let end = s.first(self.page) + page.slots.len().min(self.slots.first + per_view);
@@ -625,12 +690,12 @@ impl Screen {
         match (stop, self.setlist.as_ref()) {
             (0, open) if !self.setlists.is_empty() => {
                 let name = |n: &str| if n.is_empty() { "Untitled".to_string() } else { n.to_string() };
-                self.banks_menu = false;
+                self.menu_for = manage::MenuFor::Setlists;
                 let at = self.setlists.iter().position(|s| open.is_some_and(|o| o.id == s.0)).unwrap_or(0);
                 self.menu = Some(("Setlist".into(), self.setlists.iter().enumerate().map(|(i, s)| Item::ticked(name(&s.1), i, i == at && open.is_some())).collect(), at));
             }
             (1, Some(s)) if pages > 1 => {
-                self.banks_menu = true;
+                self.menu_for = manage::MenuFor::Banks;
                 self.menu = Some(("Bank".into(), (0..pages).map(|i| Item::ticked(bank_name(s, i), i, i == self.page)).collect(), self.page));
             }
             (2, _) if self.page > 0 => self.show_bank(self.page - 1),
@@ -646,10 +711,11 @@ impl Screen {
 
     /// What was pressed in the dropdown: that setlist is read, or that bank is shown.
     pub fn chosen(&mut self, id: usize) {
-        if self.banks_menu {
-            self.show_bank(id);
-        } else {
-            self.open_setlist(id);
+        match self.menu_for {
+            manage::MenuFor::Banks => self.show_bank(id),
+            manage::MenuFor::Setlists => self.open_setlist(id),
+            manage::MenuFor::Manage => self.manage(id),
+            manage::MenuFor::Offered => self.add_performance(id),
         }
         self.show();
     }
@@ -713,6 +779,7 @@ impl Screen {
         self.slots = self.slots.clear();
         let Some(s) = self.setlist.as_ref() else { return };
         let index = s.first(self.page) + self.slots.first + row;
+        self.picked = Some(index);
         self.go(index);
     }
 
@@ -728,9 +795,9 @@ impl Screen {
         self.step(by);
     }
 
-    /// The screen's own action the top bar carries: Play, which opens Play.
+    /// The screen's own actions the top bar carries: Play, which opens Play, and Manage.
     pub fn bar_tools(&self) -> Vec<crate::topbar::Tool> {
-        vec![crate::topbar::Tool::new("Play")]
+        vec![crate::topbar::Tool::new("Play"), crate::topbar::Tool::new("Manage")]
     }
 
     /// The Performance's library ID in the slot playing, as the JUCE Setlist sends it to Play.

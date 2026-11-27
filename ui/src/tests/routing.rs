@@ -230,6 +230,135 @@ fn the_cursor_moves_over_boxes_and_the_panel() {
     assert!(r.at_top());
 }
 
+// The zoom buttons are the page's last stops, reached by the cursor's moves alone (no touch): Fit returns to the
+// designed size, Zoom out shrinks the view, Zoom in grows it again; pressing each changes the drawn scale.
+#[test]
+fn the_zoom_buttons_change_the_view_and_are_reached_by_moves() {
+    let mut s = Screen::sized(1280, 720);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    let base = state.get_scale();
+    mv(&mut r, None, 1); // the first move shows the cursor on the first box
+    mv(&mut r, None, 100); // it clamps at the last place: the Fit button
+    assert_eq!(state.get_zoom_cursor(), 3, "the cursor reached the Fit button");
+    assert_eq!(r.act(Action::Confirm(None)), Outcome::Stay);
+    assert_eq!(state.get_scale(), base, "Fit returns to the designed size");
+    mv(&mut r, None, -1);
+    assert_eq!(state.get_zoom_cursor(), 2, "Zoom out answered");
+    r.act(Action::Confirm(None));
+    let shrunk = state.get_scale();
+    assert!(shrunk < base, "Zoom out shrinks the view");
+    mv(&mut r, None, -1);
+    assert_eq!(state.get_zoom_cursor(), 1, "Zoom in answered");
+    r.act(Action::Confirm(None));
+    assert!(state.get_scale() > shrunk, "Zoom in grows the view");
+}
+
+// The touch path to the buttons (RoutingState.zoom-press -> Screen::zoom_press, wired on shell.rs): a touch presses a
+// button, clears a cursor reached by the knob, and changes the drawn scale; on a canvas smaller than the graph, Fit
+// shrinks the whole graph down to it (issue #270), and every box fits the canvas at that view.
+#[test]
+fn the_zoom_buttons_answer_a_touch_and_fit_shrinks() {
+    let mut s = Screen::sized(420, 320);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    let fs = f64::from(ui.global::<crate::Theme>().get_font_scale()).max(1.);
+    mv(&mut r, None, 1); // the knob shows the cursor on a box
+    assert!(cursor(&ui).is_some(), "the cursor is on a box before a button press");
+    r.zoom_press(2); // Fit by touch: clears the cursor, resets the pan to 0
+    assert_eq!(cursor(&ui), None, "a touch clears the cursor");
+    assert_eq!(f64::from(state.get_pan_x()), 0.);
+    assert_eq!(f64::from(state.get_pan_y()), 0.);
+    let fitted = state.get_scale();
+    assert!(fitted < fs as f32, "Fit shrank a graph larger than the small canvas: {fitted} vs the theme {fs}");
+    // After Fit the pan is 0, so a box's drawn place is the content place: the whole graph fits the canvas.
+    let (cw, ch, cx, cy) = (
+        f64::from(state.get_canvas_width()), f64::from(state.get_canvas_height()),
+        f64::from(state.get_canvas_x()), f64::from(state.get_canvas_y()),
+    );
+    for b in state.get_boxes().iter() {
+        let (bx, by) = (cx + f64::from(b.x), cy + f64::from(b.y));
+        assert!(bx >= cx - 0.01 && by >= cy - 0.01 && bx + f64::from(b.w) <= cx + cw + 0.01 && by + f64::from(b.h) <= cy + ch + 0.01,
+                "{} fits the canvas at Fit ({bx},{by} in {cw} x {ch})", b.name);
+    }
+    r.zoom_press(0); // Zoom in by touch grows the view from Fit
+    let bigger = state.get_scale();
+    assert!(bigger > fitted, "Zoom in grows the view ({fitted} -> {bigger})");
+    r.zoom_press(1); // Zoom out by touch shrinks it again
+    assert!(state.get_scale() < bigger, "Zoom out shrinks the view");
+}
+
+// Fit fits at a font scale above 1 too: the drawing's scale is the theme's times the zoom, so a graph that fits at
+// the designed size but not at the theme's scale still has to shrink to the canvas.
+#[test]
+fn fit_fits_at_a_larger_font_scale() {
+    let mut s = Screen::sized(1280, 720);
+    s.ui.global::<crate::Theme>().set_font_scale(3.);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    r.zoom_press(2);
+    let (cw, ch, cx, cy) = (
+        f64::from(state.get_canvas_width()), f64::from(state.get_canvas_height()),
+        f64::from(state.get_canvas_x()), f64::from(state.get_canvas_y()),
+    );
+    for b in state.get_boxes().iter() {
+        let (bx, by) = (cx + f64::from(b.x), cy + f64::from(b.y));
+        assert!(bx >= cx - 0.01 && by >= cy - 0.01 && bx + f64::from(b.w) <= cx + cw + 0.01 && by + f64::from(b.h) <= cy + ch + 0.01,
+                "{} fits the canvas at Fit ({bx},{by} in {cw} x {ch})", b.name);
+    }
+}
+
+// Zoom in holds the graph place under the view's center: from a panned view the drawing does not jump.
+#[test]
+fn zoom_holds_the_views_center() {
+    let mut s = Screen::sized(420, 320);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    for _ in 0..4 {
+        r.zoom_press(0); // big enough to pan
+    }
+    state.set_pan_x(40.);
+    state.set_pan_y(30.);
+    r.shown();
+    let (cw, ch) = (f64::from(state.get_canvas_width()), f64::from(state.get_canvas_height()));
+    // The drawing's place under the canvas center, in graph units (the drawing is larger than the canvas, so it starts at 0).
+    let place = |state: &RoutingState| {
+        let scale = f64::from(state.get_scale());
+        ((f64::from(state.get_pan_x()) + cw / 2.) / scale, (f64::from(state.get_pan_y()) + ch / 2.) / scale)
+    };
+    let before = place(&state);
+    r.zoom_press(0);
+    let after = place(&state);
+    assert!((after.0 - before.0).abs() < 0.5 && (after.1 - before.1).abs() < 0.5, "the center place held: {before:?} -> {after:?}");
+}
+
+// The zoom bar floats over the canvas's top-right, outside the scrolling view; nothing a touch could want is hidden
+// under it, so no drawn box's rectangle sits under the bar at the fit view (the whole graph visible, pan 0).
+#[test]
+fn the_zoom_bar_covers_no_box_at_fit() {
+    let mut s = Screen::sized(1280, 720);
+    let mut r = routing_screen(&mut s, &graph());
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    r.zoom_press(2); // Fit: the whole graph visible, centered, pan 0
+    let t = ui.global::<crate::Theme>();
+    let bar_w = 3. * f64::from(t.get_touch()) + 2. * f64::from(t.get_gap()); // three buttons and the gaps between
+    let touch = f64::from(t.get_touch());
+    let (cx, cy) = (f64::from(state.get_canvas_x()), f64::from(state.get_canvas_y()));
+    let cw = f64::from(state.get_canvas_width());
+    let bx = cx + cw - bar_w; // on a canvas wider than the bar it sits at the right edge
+    for b in state.get_boxes().iter() {
+        let (x0, y0) = (cx + f64::from(b.x), cy + f64::from(b.y));
+        let (x1, y1) = (x0 + f64::from(b.w), y0 + f64::from(b.h));
+        let under = x0 < bx + bar_w && x1 > bx && y0 < cy + touch && y1 > cy;
+        assert!(!under, "{} sits under the zoom bar ({x0},{y0} to {x1},{y1}; bar at {bx} to {})", b.name, bx + bar_w);
+    }
+}
+
 // Connect audio to... lists every node that takes audio, the output once (and not for notes), by part; choosing one is
 // `graph.connect` and a commit; notes likewise for what takes notes; nothing takes it, a disabled line says so.
 #[test]

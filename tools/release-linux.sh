@@ -31,14 +31,17 @@ echo "Oscairn $version ($commit)"
 
 rm -rf "$build"
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON \
-	-DOSCAIRN_SOURCE_COMMIT="$commit"
-cmake --build "$build" --target oscairn_standalone oscairn-sign ${OSCAIRN_BUILD_JOBS:+-j "$OSCAIRN_BUILD_JOBS"}
+	-DOSCAIRN_UI=ON -DOSCAIRN_SOURCE_COMMIT="$commit"
+cmake --build "$build" --target oscairn_standalone oscairn_ui oscairn-sign ${OSCAIRN_BUILD_JOBS:+-j "$OSCAIRN_BUILD_JOBS"}
 
 # The build leaves the program with everything it looks for beside it (the engine, the worker and
-# scan helpers, plugins/, themes/, Apps/): that folder is bin/, and the app finds the rest from there.
+# scan helpers, oscairn-ui, plugins/, themes/, Apps/): that folder is bin/, and the app finds the rest from there.
 stage=$build/stage
 root=$stage/$folder
 mkdir -p "$root/bin"
+# The Rust UI is the app's interface (docs/rust-ui.md), the Rust CLAP host is linked into the engine and
+# the worker (core/CMakeLists.txt, OSCAIRN_CLAP_HOST): a tarball without oscairn-ui is not the product.
+[ -x "$build/hosts/standalone/oscairn_standalone_artefacts/Release/oscairn-ui" ] || fail "the build left no oscairn-ui"
 cp -R "$build/hosts/standalone/oscairn_standalone_artefacts/Release/." "$root/bin/"
 find "$root/bin" -type f | while read -r file; do
 	file -b "$file" | grep -q '^ELF' || continue

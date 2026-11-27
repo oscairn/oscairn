@@ -10,7 +10,7 @@ boots into Oscairn), device profiles ([RFC 0024](0024-device-profiles.md)) and r
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. A read-only system partition, with the user's data on its own (#203)
-- [ ] 2. Signed A/B updates, falling back to the previous system if the new one does not start
+- [ ] 2. Signed A/B updates, falling back to the previous system if the new one does not start (#217 install methods and #220 user content: [the section below](#install-methods-and-user-content); #218, #264)
 - [ ] 3. Factory reset that keeps or clears the user's data, as asked (#205)
 - [ ] 4. Boot time measured and reduced to each product's target (#207)
 - [ ] 5. Safe power loss: no corrupted data, checked by cutting power in tests (#209)
@@ -103,6 +103,48 @@ For battery products (RFC 0024's `power`): plugins that sleep (CLAP sleep) and P
 rest let the cores slow down; the screen dims; a warning before the battery runs out leaves time
 to save. Never at the cost of a missed audio deadline: the cores reserved for audio keep their
 speed while anything sounds.
+
+## Install methods and user content
+
+Added 2026-11-27 for #217 and #220. What exists or is decided is stated; the rest is marked open.
+
+### What a profile says
+
+A device profile (RFC 0024) has an `install` block with four fields, all required when the block
+is there; a profile without it states nothing (`hosts/standalone/Profile.h`, `Profile::Install`):
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `method` | `desktop`, `app-and-boot-hook`, `image` | How Oscairn gets onto the device |
+| `update` | `none`, `bundle-swap`, `ab` | How it is updated |
+| `systems` | `1`, `2` | How many systems the device holds at once; `ab` needs 2 |
+| `userData` | `with-system`, `separate` | Whether the user's content lives inside what an update replaces, or apart from it |
+
+- **`desktop`:** the app on a computer, installed by the user (an installer is #292, not built).
+  The data folder is the platform's, outside the app: `separate`. Oscairn does not update
+  itself: `none`. The desktop profile says `desktop`, `none`, 1, `separate`.
+- **`app-and-boot-hook`:** an app with a userland of its own that runs beside the product's own
+  system, started by a line the owner adds to the product's start script, ahead of its own. The
+  FANTOM's, the first and so far the only one: its profile says `app-and-boot-hook`,
+  `bundle-swap`, 2, `with-system`. Its install and update, as they are done today, are in
+  [docs/fantom-0.md](../fantom-0.md#installing-and-updating-oscairn).
+- **`image`:** a whole system image written to the device, which is the product's system
+  (the images in `os/`). Not yet in a profile: the QEMU and EVK images exist, but nothing
+  updates them and their data folder is on the one root file system, so their profiles will say
+  `image`, `none`, 1, `with-system` when a step needs them to.
+- **`bundle-swap`:** a new system unpacked beside the running one, switched to, and the old one
+  deleted once the new one is confirmed. It needs room for two, which is what `systems` states.
+  Not atomic and not signed: the link is switched after the new one ran under a timer, and the
+  steps are by hand.
+- **`ab`:** the signed A/B update above (Updates). Decided, not built (#218); it waits on the
+  package format and signing (#264), which are the owner's.
+
+Open: a device installed through debug pins or another flashing path (the issue named it): no
+such device is in the lineup yet, so no value for it; it is added to `method` with the first
+device that needs it, with the steps of its install written down as the FANTOM's are. Also open:
+whether `systems` should say how much room (a size) rather than how many, once a device has too
+little for a whole second copy; and whether a client shows the block (Settings' About page could;
+not now).
 
 ## Open questions
 

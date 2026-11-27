@@ -723,12 +723,18 @@ foreach(rest IN ITEMS disabled all 0)
     set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
 endforeach()
 
+# A sanitizer slows rendering several times over: a full 512-frame block of 128 Basic Synth voices
+# in a worker passed 50 ms in a local ThreadSanitizer build.
+set(worker_budget 50000)
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(worker_budget 500000)
+endif()
 # RFC 0045: the beat and the harmony go to the plugins that asked for them, in a worker.
 add_executable(oscairn-worker-timing-events-test engine/tests/worker_timing_events.cpp)
 target_link_libraries(oscairn-worker-timing-events-test PRIVATE oscairn_engine oscairn_clap_headers)
 add_dependencies(oscairn-worker-timing-events-test oscairn-follower-fixture)
 add_test(NAME worker-timing-events COMMAND oscairn-worker-timing-events-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-follower-fixture>)
-set_tests_properties(worker-timing-events PROPERTIES TIMEOUT 60)
+set_tests_properties(worker-timing-events PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_BUDGET_US=${worker_budget}") # it counts events, not time: a slow block is not a failure
 # RFC 0045: a worker that answered nothing for a while is serviced less often.
 add_executable(oscairn-worker-service-test engine/tests/worker_service.cpp)
 target_link_libraries(oscairn-worker-service-test PRIVATE oscairn_engine)
@@ -765,12 +771,6 @@ set(worker_tests
     "parallel-render|oscairn-parallel-render-test|$<TARGET_FILE:oscairn_transpose>|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>"
     "voice-extension|oscairn-voice-extension-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn-voice-fixture>"
     "shared-engine|oscairn-shared-engine-test|$<TARGET_FILE:oscairn_basic_synth>")
-# A sanitizer slows rendering several times over: a full 512-frame block of 128 Basic Synth voices
-# in a worker passed 50 ms in a local ThreadSanitizer build.
-set(worker_budget 50000)
-if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
-    set(worker_budget 500000)
-endif()
 foreach(entry IN LISTS worker_tests)
     string(REPLACE "|" ";" parts "${entry}")
     list(POP_FRONT parts name)

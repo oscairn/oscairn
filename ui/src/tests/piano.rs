@@ -185,6 +185,186 @@ fn the_shell_sends_its_notes_and_closes_it() {
     assert!(!ui.global::<PianoState>().get_open());
 }
 
+/// The note number of the keyboard's first key, from the range it shows ("C3–C5": 48).
+fn range_low(ui: &Shell) -> i64 {
+    let range = ui.global::<PianoState>().get_range().to_string();
+    let first = range.split('–').next().unwrap_or("");
+    let octave: i64 = first.chars().skip(1).take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(3);
+    (octave + 1) * 12
+}
+
+fn cursor_key(ui: &Shell) -> Option<usize> {
+    ui.global::<PianoState>().get_keys().iter().position(|k| k.cursor)
+}
+
+fn cursor_control(ui: &Shell) -> Option<usize> {
+    ui.global::<PianoState>().get_controls().iter().position(|c| c.cursor)
+}
+
+// The no-touch walk: from Home by panel moves only, through the Performance tile, Play and the part to
+// the playing keyboard, then every stop its models declare is a dial stop and pressing it has its real
+// effect — a key sounds with the part's input (notes.send, the note the range and the position give),
+// Octave down/up and the octave knob move the range, Fixed and Sustain light their controls, Close is
+// back on the Part screen. The cursor first lands on middle C, so the walk sweeps back to the first
+// key and then forward through every key and the header buttons.
+#[test]
+fn piano_walked_from_home_by_panel_moves_only() {
+    let graph = super::part::part_graph();
+    let mut f = Fixture::on("piano-walk", None, false); // the computer's profile offers the playing keyboard
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    let settle = |f: &mut Fixture| {
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            let method = r["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "graph.get" => graph.clone(),
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "library.query" => json!({"items": [], "total": 0}),
+                "library.libraries" => json!({"libraries": []}),
+                "session.status" => json!({"midiInputs": [], "midiOutputs": [], "failures": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "edit.history" | "edit.undo" | "edit.redo" => json!({"undo": "", "redo": ""}),
+                "window.info" => json!({"available": false}),
+                "presets.list" => json!({"presets": []}),
+                "record.get" => json!({"recording": 0, "retro": {"seconds": 30}, "takes": []}),
+                "parts.meters" => json!({"meters": []}),
+                _ => json!({}),
+            };
+            f.reply(&r, json!({"result": result}));
+        }
+    };
+    settle(&mut f);
+    // Panel moves only, from Home: the cursor onto the Performance tile, confirmed, opens Play.
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &str, by: i64| {
+        *total.entry(key.into()).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move", 0); // the first read is only a baseline
+    settle(&mut f);
+    nav(&mut f, "move", 1); // the cursor onto the Performance tile
+    settle(&mut f);
+    nav(&mut f, "confirm", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 3, "the Performance tile opens Play");
+    // Play → the first part, pressed, opens the Part screen.
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "confirm:1", 1);
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 4, "the press on a part opens the Part screen");
+    // The Part screen: the dial down the rows, page to page, until the Keyboard row is under the cursor, pressed.
+    let keyboard_row = |ui: &Shell| ui.global::<crate::PartState>().get_rows().iter().position(|r| r.label == "Keyboard");
+    let row_cursor = |ui: &Shell| ui.global::<crate::PartState>().get_rows().iter().position(|r| r.cursor);
+    let mut moves = 0;
+    nav(&mut f, "move", 1); // show the cursor on the first row
+    settle(&mut f);
+    while row_cursor(&ui) != keyboard_row(&ui) {
+        nav(&mut f, "move", 1);
+        settle(&mut f);
+        moves += 1;
+        assert!(moves < 400, "the dial never reached the Keyboard row");
+    }
+    nav(&mut f, "confirm", 1);
+    assert!(ui.global::<PianoState>().get_open(), "the Keyboard row opens the playing keyboard");
+    // What the screen offers, from its own models: the keys and the header buttons.
+    let (keys_n, controls_n) = {
+        let s = ui.global::<PianoState>();
+        (s.get_keys().iter().count(), s.get_controls().iter().count())
+    };
+    assert!(keys_n > 0 && controls_n > 0, "the keyboard declares keys and controls");
+    let declared = keys_n + controls_n;
+    // A note as the engine reads it: (on, key, velocity), velocity only on a note on; the built-in keys add no input.
+    let notes = |f: &mut Fixture| -> Vec<serde_json::Value> {
+        let mut out = vec![];
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(12)) {
+            if r["method"] == "notes.send" {
+                out.push(r["params"].clone());
+            } else {
+                f.reply(&r, json!({"result": {}}));
+            }
+        }
+        out
+    };
+    // The cursor first lands on a key of its own (middle C); sweep back to the first key, pressing each.
+    nav(&mut f, "move:1", 1);
+    settle(&mut f);
+    let mut stop = Vec::new(); // the stops pressed: keys 0..keys_n, then the controls
+    let expected = range_low(&ui);
+    let mut previous: Option<i64> = None;
+    let start = cursor_key(&ui).expect("the first move puts the cursor on a key");
+    for k in (0..start).rev() {
+        nav(&mut f, "move:1", -1);
+        assert_eq!(cursor_key(&ui), Some(k), "the dial reached key {k}");
+        nav(&mut f, "confirm", 1);
+        let note = notes(&mut f);
+        let n = note.last().expect("a key press notes with the key's input");
+        assert_eq!(n["on"], json!(true), "key {k}: the press plays a note");
+        assert_eq!(n["key"].as_i64(), Some(expected + k as i64), "key {k}: the note is the range's");
+        assert_eq!(n["velocity"].as_f64(), Some(0.8), "key {k}: the built-in key, not Fixed, plays at 0.8");
+        assert!(n["input"].is_null(), "key {k}: the built-in keys send no input");
+        if let Some(p) = previous {
+            assert_eq!(note[0]["on"], json!(false), "key {k}: the press lets the previous note {p} go");
+            assert_eq!(note[0]["key"].as_i64(), Some(p), "key {k}: the released note is the previous one");
+        }
+        assert!(keys(&ui)[k].held, "key {k}: the key is shown held");
+        previous = Some(expected + k as i64);
+        stop.push(("key", k));
+    }
+    // Forward through every key from the first, pressing each.
+    for k in 1..keys_n {
+        nav(&mut f, "move:1", 1);
+        assert_eq!(cursor_key(&ui), Some(k), "the dial reached key {k}");
+        nav(&mut f, "confirm", 1);
+        let note = notes(&mut f);
+        let n = note.last().expect("a key press notes with the key's input");
+        assert_eq!(n["on"], json!(true), "key {k}: the press plays a note");
+        assert_eq!(n["key"].as_i64(), Some(expected + k as i64), "key {k}: the note is the range's");
+        assert_eq!(n["velocity"].as_f64(), Some(0.8), "key {k}: the built-in key plays at 0.8");
+        assert!(n["input"].is_null(), "key {k}: the built-in keys send no input");
+        assert_eq!(note[0]["on"], json!(false), "key {k}: the press lets the previous note go");
+        assert_eq!(note[0]["key"].as_i64(), Some(expected + (k - 1) as i64), "key {k}: the released note is the previous one");
+        assert!(keys(&ui)[k].held, "key {k}: the key is shown held");
+        stop.push(("key", k));
+    }
+    // The octave knob (the left knob, pane 0): a move shifts the range; the cursor stays on the keys.
+    nav(&mut f, "move:0", 1);
+    assert_eq!(range_low(&ui), expected + 12, "the octave knob moves an octave up");
+    nav(&mut f, "move:0", -1);
+    assert_eq!(range_low(&ui), expected, "the octave knob moves back down");
+    // On to the header buttons and pressing each: Octave down, Octave up, Fixed, Sustain, Close.
+    for c in 0..controls_n {
+        nav(&mut f, "move:1", 1);
+        assert_eq!(cursor_control(&ui), Some(c), "the dial reached the {c}. control");
+        let (label, was_on) = {
+            let s = ui.global::<PianoState>();
+            let ctl = s.get_controls().iter().nth(c).expect("the control is declared");
+            (ctl.label.to_string(), ctl.on)
+        };
+        nav(&mut f, "confirm", 1);
+        let _ = notes(&mut f);
+        match label.as_str() {
+            "−" => assert_eq!(range_low(&ui), expected - 12, "Octave down lowers the range"),
+            "+" => assert_eq!(range_low(&ui), expected, "Octave up restores it"),
+            "Fixed" | "Sustain" => {
+                let on = ui.global::<PianoState>().get_controls().iter().nth(c).unwrap().on;
+                assert!(on && !was_on, "{label}: the control turns on");
+            }
+            _ => {
+                assert!(!ui.global::<PianoState>().get_open(), "Close ends the keyboard");
+                assert_eq!(ui.get_screen(), 4, "Close is back on the Part screen");
+            }
+        }
+        stop.push(("control", c));
+        if label == "Close" {
+            break;
+        }
+    }
+    // Every stop the screen declared was reached: the keys then the controls, nothing hard-coded.
+    let distinct: std::collections::HashSet<_> = stop.iter().collect();
+    assert_eq!(distinct.len(), declared, "the walk reached {stop:?}: the screen declares {declared} stops");
+}
+
 #[test]
 fn piano_draws_in_every_theme() {
     let mut s = Screen::new();

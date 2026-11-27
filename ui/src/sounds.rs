@@ -705,3 +705,160 @@ impl Screen {
         self.show();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Screen with just the fields the pure functions read, the browser never touching a window.
+    fn empty() -> Screen {
+        Screen {
+            b: Browser::detached(),
+            graph: Value::Null,
+            id: 1,
+            mode: Mode::List,
+            items: vec![],
+            total: 0,
+            tags: vec![],
+            tag_colors: vec![],
+            hidden: vec![],
+            picked: String::new(),
+            compact: false,
+            libraries: vec![],
+            search: String::new(),
+            favorites: false,
+            recent: false,
+            source: String::new(),
+            chosen: vec![],
+            auditioning: String::new(),
+            asking: None,
+            out: vec![],
+        }
+    }
+
+    fn sound(id: &str, tags: &[&str], description: &str) -> Value {
+        json!({"id": id, "tags": tags, "description": description})
+    }
+
+    // A Sound's detail: the tags and the description, "Locked" for a library's, "Does not fit this
+    // device" when the engine says so, "Auditioning" while it is tried, a star when it is a favorite.
+    #[test]
+    fn detail_plain_cases() {
+        let s = empty();
+        assert_eq!(s.detail(&sound("s1", &["keys", "warm"], "Soft")), "keys  ·  warm   Soft");
+        assert_eq!(s.detail(&sound("s1", &["keys"], "")), "keys", "no description: no dangling separator");
+        assert_eq!(s.detail(&sound("s1", &[], "Soft")), "Soft", "a description alone, without a leading separator");
+        assert_eq!(s.detail(&sound("s1", &[], "")), "");
+    }
+
+    #[test]
+    fn detail_marked_parts_come_first_in_the_ordered_way() {
+        let mut s = empty();
+        s.auditioning = "s1".into();
+        let mut v = sound("s1", &["pad"], "Hum");
+        v["library"] = json!("friend");
+        v["unfit"] = json!("needs 3 GB");
+        v["favorite"] = json!(true);
+        // The marked parts are said first (Auditioning, unfit, Locked), the star last; nothing is missing.
+        assert_eq!(s.detail(&v), "Auditioning  ·  Does not fit this device  ·  Locked  ·  pad   Hum  ★");
+        let mut c = empty();
+        c.auditioning = "other".into();
+        assert_eq!(c.detail(&v), "Does not fit this device  ·  Locked  ·  pad   Hum  ★", "the auditioning id not matched: no Auditioning");
+    }
+
+    #[test]
+    fn detail_odd_fields_never_panic() {
+        let s = empty();
+        let odd = json!({"id": "s1", "tags": "keys", "description": 3, "favorite": "true", "library": 5, "unfit": false});
+        assert_eq!(s.detail(&odd), "", "a string tags, a number description: neither shown");
+        let mixed = json!({"id": "s1", "tags": ["keys", 3, null, {"t": 1}], "description": "In", "favorite": true});
+        assert_eq!(s.detail(&mixed), "keys   In  ★", "only the string tags survive");
+        assert_eq!(s.detail(&Value::Null), "");
+    }
+
+    // The tags to choose from: the chosen first, then the most used, the engine's order kept among equals.
+    #[test]
+    fn tag_list_chosen_first_then_most_used() {
+        let mut s = empty();
+        s.tags = vec![("keys".into(), 5), ("warm".into(), 1), ("pad".into(), 3)];
+        s.chosen = vec!["warm".into()];
+        let list = s.tag_list();
+        let names: Vec<&str> = list.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(names, ["warm", "keys", "pad"], "the chosen first, then by count descending");
+        let mut t = empty();
+        t.tags = vec![("a".into(), 2), ("b".into(), 2), ("c".into(), 1)];
+        let list = t.tag_list();
+        let st: Vec<&str> = list.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(st, ["a", "b", "c"], "equal counts keep the engine's order (stable)");
+        assert!(empty().tag_list().is_empty());
+    }
+
+    // The Libraries filter: Everything and My own are offered before each installed library, whose
+    // items count shows; an id the installed list no longer has names itself.
+    #[test]
+    fn sources_and_their_names() {
+        let s = empty();
+        let mut s = s;
+        s.libraries = vec![("factory".into(), "Factory".into(), 42), ("friend".into(), "Friend".into(), 7)];
+        assert_eq!(s.source_name(""), "Everything");
+        assert_eq!(s.source_name("mine"), "My own");
+        assert_eq!(s.source_name("factory"), "Factory");
+        assert_eq!(s.source_name("gone"), "gone", "an unknown id names itself");
+        let srcs = s.sources();
+        assert_eq!(srcs[0], (String::new(), "Everything".into(), None));
+        assert_eq!(srcs[1], ("mine".into(), "My own".into(), None));
+        assert_eq!(srcs[2], ("factory".into(), "Factory".into(), Some(42)));
+    }
+
+    #[test]
+    fn filters_text_none_and_on() {
+        assert_eq!(empty().filters_text(), "none");
+        let mut s = empty();
+        s.recent = true;
+        s.source = "factory".into();
+        s.chosen = vec!["warm".into()];
+        s.libraries = vec![("factory".into(), "Factory".into(), 42)];
+        s.favorites = true;
+        assert_eq!(s.filters_text(), "Favorites, Recent, Factory, warm");
+    }
+
+    #[test]
+    fn narrowed_when_anything_filters() {
+        let s = empty();
+        assert!(!s.narrowed(), "no filter: nothing narrows");
+        let mut text = empty();
+        text.search = "pad".into();
+        assert!(text.narrowed());
+        let mut mine = empty();
+        mine.source = "mine".into();
+        assert!(mine.narrowed(), "even the user's own is a narrowing");
+    }
+
+    // The query asks for kind `sound` and the narrowing flags it has, each field only when it is on.
+    #[test]
+    fn query_carries_the_narrowing() {
+        let mut s = empty();
+        s.query();
+        assert_eq!(s.out.pop().unwrap().2, json!({"kind": "sound", "limit": 1000}), "no filters: just the kind and the limit");
+        let mut s = empty();
+        s.search = "pad".into();
+        s.favorites = true;
+        s.recent = true;
+        s.source = "factory".into();
+        s.chosen = vec!["warm".into()];
+        s.libraries = vec![("factory".into(), "Factory".into(), 42)];
+        s.query();
+        let params = s.out.pop().unwrap().2;
+        assert_eq!(params["kind"], "sound");
+        assert_eq!(params["limit"], 1000);
+        assert_eq!(params, json!({"kind": "sound", "limit": 1000, "text": "pad", "tags": ["warm"], "favorites": true, "recent": true, "source": "factory"}));
+    }
+
+    #[test]
+    fn tag_color_is_the_users_or_empty() {
+        let mut s = empty();
+        s.tag_colors = vec![("warm".into(), "#46a758".into())];
+        assert_eq!(s.tag_color("warm"), "#46a758");
+        assert_eq!(s.tag_color("pad"), "", "an uncolored tag has no color");
+    }
+}

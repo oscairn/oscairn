@@ -189,6 +189,33 @@ int main(int argc, char** argv)
     const auto five = estimateWith("five", "{\"version\":5,\"plugins\":{" + entry("\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":68947968,\"samples\":10000") + "}}");
     check(five.measured && std::abs(five.cpu - .3) < 1e-9 && five.memory != 68947968, "version 5: the CPU stands, the memory not: " + std::to_string(five.cpu) + ", " + std::to_string(five.memory));
 
+    // RFC 0025, a plugin update: a version with no record of its own is priced from the newest older version's (`earlier`), as
+    // before anything is played, in a saved Performance too; its own record then wins; an older version never borrows from a newer one.
+    {
+        const auto at = key.find('@') + 1, end = key.find_first_of(" #", at);
+        auto versioned = [&](const std::string& version) { return key.substr(0, at) + version + key.substr(end); };
+        const std::string figures = "\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000,\"samples\":10000";
+        const std::string other = "\"cpu\":0.1,\"rest\":0.02,\"voice\":0.01,\"voices\":3,\"memory\":2000,\"samples\":10000";
+        auto saved = [&](const std::string& name, const std::string& plugins) {
+            const auto home = root / name;
+            write(home, "{\"version\":6,\"plugins\":{" + plugins + "}}");
+            ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
+            const auto dir = root / (name + "-performance");
+            { Session s(rate, frames); const auto node = s.add("a", argv[3], "org.oscairn.test.voices"); const auto part = s.addPart("A"); s.insertIntoPart(part, 0, node); s.commit(); s.savePerformance(dir.string()); }
+            Session s(rate, frames);
+            s.setBudget({.9, 0});
+            return s.estimate(dir.string()).plugins.at(0);
+        };
+        const auto borrowed = saved("older", "\"" + versioned("0.0.1") + "\":{" + figures + "}");
+        check(borrowed.earlier && std::abs(borrowed.cpu - .3) < 1e-9 && borrowed.memory == 1000, "an update is priced from the older version's figures: " + std::to_string(borrowed.cpu) + ", " + std::to_string(borrowed.memory));
+        const auto newest = saved("two-older", "\"" + versioned("0.0.1") + "\":{" + other + "},\"" + versioned("0.0.2") + "\":{" + figures + "}");
+        check(newest.earlier && newest.memory == 1000, "from the newest older version: " + std::to_string(newest.memory));
+        const auto own = saved("own", "\"" + versioned("0.0.1") + "\":{" + other + "},\"" + key + "\":{" + figures + "}");
+        check(own.measured && !own.earlier && own.memory == 1000, "its own record wins: " + std::to_string(own.memory));
+        const auto never = saved("newer", "\"" + versioned("99.0") + "\":{" + figures + "}");
+        check(!never.measured && !never.earlier && std::abs(never.cpu - .02) < 1e-9, "an older version does not borrow from a newer one: " + std::to_string(never.cpu));
+    }
+
     // A Performance refused for a figure that is possible but spoiled (70% where a plugin costs 1%), over
     // a 50% budget, opens once the figures are forgotten (budget.forget); one with no figures at all is allowed.
     {

@@ -1291,7 +1291,7 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   `cpu` the share of the audio thread's time the plugins may take (0 checks nothing), `memory` in
   bytes (0 or absent: not checked). `budget.estimate` takes an optional `{directory}` (absent: the
   open Performance) and returns `{cpu,memory,fits,seamless,fades,budget,plugins,longest,cores,uncertain}`, each plugin with
-  `name`, `plugin`, `cpu`, `memory` and `measured`. CPU is checked per core (RFC 0025's
+  `name`, `plugin`, `cpu`, `memory`, `measured` and `earlier`. `earlier`: a plugin version with no record of its own is priced from the newest older version's records of the same plugin (merged as one version's are), its saved sounds' links to that version's figures followed too; such a plugin shows `earlier` true and `measured` false, until the new version plays and its own record replaces them (an older version never borrows from a newer one). CPU is checked per core (RFC 0025's
   [model](rfcs/0025-resource-budgets.md#the-cpu-model-per-core)): `cpu`, the total, must fit the budget's share of each of `cores`
   audio cores, and `longest`, the costliest part's chain (its plugins one after another in a block), the budget's share of one block;
   `uncertain`: it would not fit, but only by figures from too few blocks, by plugins not yet measured, or by more than its plugins cost at rest (RFC 0025: CPU refuses only past the rest), so it counts as fitting and opening it adds a notice. For the open Performance, `fits` counts it

@@ -4,6 +4,7 @@
 // (its share of each block's time, its memory) and kept in the data folder, so a Performance can
 // be checked against the device's budget before it loads.
 #include "oscairn/session.h"
+#include "oscairn/assets.h"
 #include "oscairn/library.h"
 #include "oscairn/package.h"
 #include "oscairn/sound_context.h"
@@ -102,6 +103,10 @@ namespace oscairn
             return n;
         }
 
+        // A key's plugin id with the '@' ("<id>@") and its version ("<id>@<version>[ <digest>][#<declared>]").
+        std::string idOf(const std::string& key) { return key.substr(0, key.find('@') + 1); }
+        std::string versionOf(const std::string& key) { const auto rest = key.substr(std::min(key.size(), key.find('@') + 1)); return rest.substr(0, rest.find_first_of(" #")); }
+
         // A plugin never measured here (its key "<id>@<version>..."): its memory what it declared
         // through oscairn.memory when it last activated here (`declared`), else its package's
         // estimate for this platform, kept beside its build in the store (estimate.json, RFC 0025
@@ -172,6 +177,16 @@ namespace oscairn
             auto median = [](std::vector<double> v) { if(v.empty()) return 0.0; std::nth_element(v.begin(), v.begin() + (v.size() - 1) / 2, v.end()); return v[(v.size() - 1) / 2]; };
             m->cpu = median(cpu); m->rest = median(rest); m->voice = median(voice); m->voices = uint32_t(median(voices));
         }
+        if(m || key.find('@') == std::string::npos) return m;
+        // No record of this version (RFC 0025): the newest OLDER version's of the same plugin, merged the same way, marked `earlier`
+        // until this version has a record of its own. Never a newer one's. shortcut: a key with a declaration borrows the older
+        // version's merge over all its declarations, not its same declaration; refine if a plugin's declarations differ by version.
+        const auto id = idOf(key), mine = versionOf(key);
+        std::string best;
+        for(auto it = measured_.lower_bound(id); it != measured_.end() && it->first.compare(0, id.size(), id) == 0; ++it)
+            if(const auto v = versionOf(it->first); assets::older(v, mine) && (best.empty() || assets::older(best, v))) best = v;
+        if(best.empty()) return m;
+        if(m = measurementFor(id + best)) m->earlier = true;
         return m;
     }
 
@@ -180,11 +195,12 @@ namespace oscairn
         const auto found = measurementFor(key);
         if(!found) return declaredCost(key, name, plugin, path, 0);
         const auto& m = *found;
+        auto mark = [&](Control::Cost c) { c.earlier = m.earlier; return c; };
         // Its CPU forgotten, or none sampled yet: the guess, with the memory as measured.
         if(m.cpu <= 0 && m.rest <= 0 && m.voice <= 0)
         {
             const auto guess = declaredCost(key, name, plugin, path, m.declared);
-            return {name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0, {}, true, guess.rest};
+            return mark({name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0, {}, true, guess.rest});
         }
         // The busiest block seen wears off while the sound is not played (it falls only while an instance plays it: measure), halving
         // each week unused, never below what its voices were measured to cost: one stacked test's figure does not live on for good.
@@ -193,7 +209,7 @@ namespace oscairn
             busiest = std::max(m.rest + m.voice * m.voices, m.cpu * std::exp2(-double(today - m.day) / 7));
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : busiest;
         // Its memory not measured (only an instance playing one sound records it): the guess, not 0.
-        return {name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks, m.rest > 0 ? std::min(m.rest, cpu) : cpu}; // rest not measured: all of it
+        return mark({name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks, m.rest > 0 ? std::min(m.rest, cpu) : cpu}); // rest not measured: all of it
     }
 
     // Memory: the larger of the measurement and the declaration (RFC 0025: never the plugin's word
@@ -1009,10 +1025,16 @@ namespace oscairn
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
             const auto measuredKey = id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest);
             // Its own sound's figures where its saved state was measured here (it opened from that state: states_), else the build's.
+            // A version with no record of its own follows the link to an older version's key (its figures borrowed).
             auto own = measuredKey;
-            if(const auto s = states_.find(stateDigest(fs::path(directory) / "nodes" / key)); s != states_.end() && measured_.count(s->second) && s->second.compare(0, measuredKey.size(), measuredKey) == 0 && s->second.size() > measuredKey.size() && (s->second[measuredKey.size()] == '#' || s->second[measuredKey.size()] == ' '))
-                own = s->second;
+            if(const auto s = states_.find(stateDigest(fs::path(directory) / "nodes" / key)); s != states_.end() && measured_.count(s->second))
+            {
+                const auto sameVersion = s->second.compare(0, measuredKey.size(), measuredKey) == 0 && s->second.size() > measuredKey.size() && (s->second[measuredKey.size()] == '#' || s->second[measuredKey.size()] == ' ');
+                const auto now = measurementFor(measuredKey);
+                if(sameVersion || (now && now->earlier && idOf(s->second) == id + "@" && assets::older(versionOf(s->second), text(detail::member(plugin, "version"))))) own = s->second;
+            }
             coming.push_back(costOf(own, text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0, text(detail::member(plugin, "pathHint"))));
+            if(own.compare(0, measuredKey.size(), measuredKey) != 0) coming.back().earlier = true; // its sound's figures from an older version
             if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
             const auto engine = text(detail::member(e->value, "engine"));
             const auto* sound = detail::member(e->value, "sound");

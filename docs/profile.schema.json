@@ -976,6 +976,18 @@
       "type": "boolean",
       "description": "Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn (docs/fantom-0.md): Settings' About row asks the engine about it. Absent: no (the FANTOM-07's says yes)"
     },
+    "install": {
+      "type": "object",
+      "description": "RFC 0028's install block. Absent: not stated",
+      "required": ["method", "update", "systems", "userData"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "enum": ["desktop", "app-and-boot-hook", "image"], "description": "How Oscairn gets onto the device: a desktop app, an app and a boot hook ahead of the stock system's own (the FANTOM's), or a whole image" },
+        "update": { "enum": ["none", "bundle-swap", "ab"], "description": "How it is updated: not by itself, a new bundle unpacked beside the running one and switched to, or signed A/B (ab needs systems 2)" },
+        "systems": { "enum": [1, 2], "description": "How many systems the device holds at once" },
+        "userData": { "enum": ["with-system", "separate"], "description": "Where the user's content lives: inside what an update replaces, or apart from it" }
+      }
+    },
     "estimated": {
       "type": "array",
       "items": {
@@ -1352,6 +1364,11 @@
             {
               "required": [
                 "onScreenKeyboard"
+              ]
+            },
+            {
+              "required": [
+                "install"
               ]
             }
           ]

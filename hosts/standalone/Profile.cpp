@@ -105,13 +105,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated", "rolandNextBoot"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated", "rolandNextBoot", "install"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "install"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -397,6 +397,16 @@ namespace oscairn::standalone
         if(root.hasProperty("onScreenKeyboard")) p.onScreenKeyboard = flag(root, "onScreenKeyboard");
         else p.onScreenKeyboard = std::none_of(p.controls.begin(), p.controls.end(), [](const Control& c) { return c.kind == "keys" && c.role == "notes"; });
         p.rolandNextBoot = flag(root, "rolandNextBoot");
+        if(const auto v = root.getProperty("install"); !v.isVoid())
+        {
+            const auto& o = object(v, "install"); fields(o, {"method", "update", "systems", "userData"}, "install");
+            p.install = {text(o, "method"), text(o, "update"), text(o, "userData"), count(o, "systems", 2)};
+            require(juce::StringArray{"desktop", "app-and-boot-hook", "image"}.contains(juce::String(p.install.method)), "install.method is desktop, app-and-boot-hook or image");
+            require(juce::StringArray{"none", "bundle-swap", "ab"}.contains(juce::String(p.install.update)), "install.update is none, bundle-swap or ab");
+            require(juce::StringArray{"with-system", "separate"}.contains(juce::String(p.install.userData)), "install.userData is with-system or separate");
+            require(p.install.systems >= 1, "install.systems is 1 or 2");
+            require(p.install.update != "ab" || p.install.systems == 2, "install.update ab needs room for two systems (install.systems 2)");
+        }
         if(root.hasProperty("alwaysAvailable"))
         {
             p.alwaysAvailable = names(root, "alwaysAvailable");

@@ -972,6 +972,22 @@ namespace oscairn
         // Performance, std::logic_error while a take recording reads them.
         virtual void recordRetro( double seconds, const std::vector<RecordTap>& taps = {} ) = 0;
         virtual double recordRetroSeconds() const = 0;
+        // The capture buffer as a setting (issue #19): the retroactive buffer's length, one of the
+        // choices captureBufferChoices() allows (Off 0, 10, 15, 30, 60 or up to the device's
+        // maximum 120 seconds), saved in the engine's config so an engine restart keeps it.
+        // setCaptureBufferPolicy gives the device default and maximum (0: 120); the default only
+        // answers, it never arms the rings until setCaptureBuffer is called. setCaptureBuffer
+        // saves a choice and arms its rings: std::invalid_argument for a value that is not a
+        // choice or is past the maximum, std::length_error when they do not fit the memory
+        // budget, std::logic_error while a take recording reads them. captureBufferBytes(seconds)
+        // is what the rings cost at this sample rate and channel count; with Off it is 0.
+        virtual void setCaptureBuffer( double seconds ) = 0;
+        virtual void setCaptureBufferPolicy( double defaultSeconds, double maxSeconds ) = 0;
+        virtual double captureBuffer() const = 0;
+        virtual double captureBufferDefault() const = 0;
+        virtual double captureBufferMax() const = 0;
+        virtual std::vector<double> captureBufferChoices() const = 0;
+        virtual uint64_t captureBufferBytes( double seconds ) = 0;
         // A closed take: deleted with its folder; renamed (its folder, keeping the time it starts
         // with); played back into the outputs from its first audio file, after the taps, so no
         // take records it (0 stops). std::invalid_argument for no such take, std::logic_error

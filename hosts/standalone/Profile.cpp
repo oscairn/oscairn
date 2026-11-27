@@ -123,11 +123,11 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("compute"); !v.isVoid())
         {
-            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "deadlineSlack", "pluginHosts", "ownHost", "captureSeconds", "availableMemory", "workers", "workerExtraBlock", "engineAudioCores", "workerAudioCores"}, "compute");
+            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "deadlineSlack", "pluginHosts", "ownHost", "captureSeconds", "captureBufferMax", "availableMemory", "workers", "workerExtraBlock", "engineAudioCores", "workerAudioCores"}, "compute");
             p.compute = {count(o, "cores", 1024), count(o, "realtimeCores", 1024), count(o, "memory", 1 << 24), count(o, "storage", 1 << 30),
                          count(o, "osMemory", 1 << 24), count(o, "performanceMemory", 1 << 24), numbers(o, "audioThreadCores", 63),
                          count(o, "workerAllowance", 1'000'000), count(o, "workerSpin", 1'000'000), flag(o, "workerDeadline"), count(o, "deadlineSlack", 1'000'000), count(o, "pluginHosts", 64), names(o, "ownHost"),
-                         o.hasProperty("captureSeconds") ? count(o, "captureSeconds", 3600) : -1, count(o, "availableMemory", 1 << 24)};
+                         o.hasProperty("captureSeconds") ? count(o, "captureSeconds", 3600) : -1, o.hasProperty("captureBufferMax") ? count(o, "captureBufferMax", 3600) : 0, count(o, "availableMemory", 1 << 24)};
             p.compute.workers = text(o, "workers", false);
             require(p.compute.workers.empty() || p.compute.workers == "plugin" || p.compute.workers == "chain" || p.compute.workers == "pool", "workers is plugin, chain or pool");
             p.compute.workerExtraBlock = text(o, "workerExtraBlock", false);

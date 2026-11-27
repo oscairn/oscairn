@@ -777,6 +777,35 @@ namespace oscairn
                 fields(p,{});const auto a=c.audition();
                 return "{\"id\":"+quote(a.id)+",\"kind\":"+quote(a.kind)+",\"part\":"+std::to_string(a.part)+'}';
             }
+            // RFC 0020's capture as a setting (issue #19): capture.policy gives the device's
+            // default and maximum; capture.buffer with `seconds` saves a choice (Off 0, 10, 15,
+            // 30, 60 or up to the maximum) and arms its rings, without one answers the choice
+            // saved in the engine's config and the memory each choice costs at this sample rate
+            // and channel count.
+            if(method=="capture.policy") {
+                fields(p,{"default","max"});
+                c.setCaptureBufferPolicy(number(member(p,"default")),number(member(p,"max")));
+                return R"({"accepted":true})";
+            }
+            if(method=="capture.buffer") {
+                if(member(p,"seconds")) {
+                    fields(p,{"seconds"});
+                    const double seconds=number(member(p,"seconds"));
+                    try{c.setCaptureBuffer(seconds);}
+                    catch(const std::length_error& e){throw Failure{-32007,e.what(),R"({"reason":"memory"})"};}
+                    catch(const std::invalid_argument& e){throw Failure{-32602,e.what(),R"({"reason":"invalid"})"};} // before logic_error: it derives from it
+                    catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
+                    return "{\"accepted\":true,\"seconds\":"+encode(seconds)+",\"memory\":"+std::to_string(c.captureBufferBytes(seconds))+'}';
+                }
+                fields(p,{});
+                std::string choices,memory;
+                for(const double s : c.captureBufferChoices()){
+                    if(!choices.empty()){choices+=',';memory+=',';}
+                    choices+="{\"seconds\":"+encode(s)+",\"memory\":"+std::to_string(c.captureBufferBytes(s))+'}';
+                    memory+="\""+encode(s)+"\":"+std::to_string(c.captureBufferBytes(s));
+                }
+                return "{\"seconds\":"+encode(c.captureBuffer())+",\"default\":"+encode(c.captureBufferDefault())+",\"max\":"+encode(c.captureBufferMax())+",\"choices\":["+choices+"],\"memory\":{"+memory+"}}";
+            }
             // RFC 0020: recording.
             if(method=="record.start" || method=="record.retro") {
                 if(method=="record.start")fields(p,{"taps","name","from","until","keepGoing"});else fields(p,{"seconds","taps"});
@@ -825,6 +854,10 @@ namespace oscairn
                     }
                 }
                 if(member(p,"keepGoing"))when.keepGoing=boolean(member(p,"keepGoing"));
+                // A capture from the past reads the retroactive rings; with the buffer Off (issue
+                // #19) there are none, so the capture is refused with the reason it is off.
+                if(when.from==When::From::SecondsAgo && c.recordRetroSeconds()==0)
+                    throw Failure{-32007,"the capture buffer is off; set capture.buffer to a length first",R"({"reason":"off"})"};
                 try{return "{\"take\":"+std::to_string(c.recordStart(taps,member(p,"name")?std::string(string(member(p,"name"))):std::string(),when))+'}';}
                 catch(const std::out_of_range& e){throw refused(e,"retro");}
                 catch(const std::invalid_argument& e){throw refused(e,"unknownTap");}

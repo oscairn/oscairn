@@ -1276,6 +1276,19 @@ namespace oscairn
     }
     void RemoteControl::recordRetro(double seconds,const std::vector<RecordTap>& taps){impl_->call("record.retro","{\"seconds\":"+encode(seconds)+",\"taps\":"+tapList(taps)+'}',30000);}
     double RemoteControl::recordRetroSeconds() const{auto d=impl_->call("record.get");return number(field(field(field(d.get(),"result"),"retro"),"seconds"));}
+    void RemoteControl::setCaptureBuffer(double seconds){impl_->call("capture.buffer","{\"seconds\":"+encode(seconds)+'}');}
+    void RemoteControl::setCaptureBufferPolicy(double defaultSeconds,double maxSeconds){impl_->call("capture.policy","{\"default\":"+encode(defaultSeconds)+",\"max\":"+encode(maxSeconds)+'}');}
+    double RemoteControl::captureBuffer() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"seconds"));}
+    double RemoteControl::captureBufferDefault() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"default"));}
+    double RemoteControl::captureBufferMax() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"max"));}
+    std::vector<double> RemoteControl::captureBufferChoices() const
+    {
+        std::vector<double> out;
+        auto d=impl_->call("capture.buffer","{}");
+        for(auto v:array(field(field(d.get(),"result"),"choices"))) out.push_back(number(field(v,"seconds")));
+        return out;
+    }
+    uint64_t RemoteControl::captureBufferBytes(double seconds){auto d=impl_->call("capture.buffer","{}");auto m=field(field(d.get(),"result"),"memory");return static_cast<uint64_t>(integer(field(m,encode(seconds))));}
     void RemoteControl::recordDelete(uint32_t take){impl_->call("record.delete","{\"take\":"+std::to_string(take)+'}',30000);}
     void RemoteControl::recordRename(uint32_t take,const std::string& name){impl_->call("record.rename","{\"take\":"+std::to_string(take)+",\"name\":"+quote(name)+'}',30000);}
     void RemoteControl::recordPlay(uint32_t take){impl_->call("record.play","{\"take\":"+std::to_string(take)+'}',30000);}

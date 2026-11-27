@@ -283,6 +283,13 @@ namespace oscairn
         std::vector<Take> recordTakes() const override;
         void recordRetro( double seconds, const std::vector<RecordTap>& taps = {} ) override;
         double recordRetroSeconds() const override { return recorder_.retroSeconds(); }
+        void setCaptureBuffer( double seconds ) override;
+        void setCaptureBufferPolicy( double defaultSeconds, double maxSeconds ) override { captureBufferDefault_ = defaultSeconds; captureBufferMax_ = maxSeconds; }
+        double captureBuffer() const override { return captureBuffer_; }
+        double captureBufferDefault() const override { return captureBufferDefault_; }
+        double captureBufferMax() const override { return captureBufferMax_; }
+        std::vector<double> captureBufferChoices() const override;
+        uint64_t captureBufferBytes( double seconds ) override;
         void recordDelete( uint32_t take ) override;
         void recordRename( uint32_t take, const std::string& name ) override;
         void recordPlay( uint32_t take ) override;
@@ -725,6 +732,10 @@ namespace oscairn
 
         double sampleRate_;
         uint32_t maxFrames_;
+        // The capture buffer as a setting (issue #19), saved in the engine's config: the chosen
+        // length (0: Off), the device default and maximum, and the discrete choices (Off or up to
+        // the maximum; the buffer's memory at the current sample rate per choice in the answer).
+        double captureBuffer_ = 30, captureBufferDefault_ = 30, captureBufferMax_ = 120;
         AudioPause pause_; // see setSampleRate
         assets::Store assets_; // outlives the graph whose plugins resolve through it
         Graph graph_;

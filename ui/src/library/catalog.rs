@@ -674,4 +674,142 @@ mod tests {
         assert!(q.message.starts_with("Fuzz 1.0 in this package"), "{}", q.message);
         let _ = json!({});
     }
+
+    #[test]
+    fn versions_handle_empty_words_and_unicode() {
+        assert!(!older("", ""), "equally empty");
+        assert!(!older("1.2.0\u{e9}", "1.2.1"), "a word at that position ranks after the number");
+        assert!(older("1.2.1", "1.2.0\u{e9}"), "and so the numbered side is older");
+        assert!(older("1.10", "1.2\u{e9}"), "a number is before a word, whatever the number's size");
+    }
+
+    #[test]
+    fn why_not_says_incompatible_then_a_withdrawal_then_nothing_installable() {
+        assert_eq!(why_not(&Version::default()), "no version it can install");
+        let mut v = Version { withdrawn: Some(Withdrawn { repository: "R".into(), reason: String::new(), ..Default::default() }), ..Default::default() };
+        assert_eq!(why_not(&v), "no version it can install", "a withdrawal with no reason says nothing");
+        v.withdrawn = Some(Withdrawn { repository: "Repo".into(), reason: "a key was stolen".into(), date: "2026-11-01".into() });
+        assert_eq!(why_not(&v), "withdrawn by Repo: a key was stolen");
+        v.incompatible = "it needs a system update: Oscairn 9 or later".into();
+        assert_eq!(why_not(&v), "it needs a system update: Oscairn 9 or later", "incompatible is said before the withdrawal");
+    }
+
+    #[test]
+    fn a_package_with_no_versions_is_not_offered() {
+        let l = listing(vec![package("a", "A", vec![]), package("b", "B", vec![version("1.0")])]);
+        let all = offers(&l, &BTreeMap::new(), &BTreeMap::new());
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].package.id, "b");
+        // Offers are read in repository order, then sorted by lower-cased name.
+        let l = listing(vec![package("b", "Bee", vec![version("1.0")]), package("a", "Ant", vec![version("1.0")])]);
+        let all = offers(&l, &BTreeMap::new(), &BTreeMap::new());
+        assert_eq!(all.iter().map(|o| o.package.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[test]
+    fn what_an_offer_holds_is_told_by_type_and_count() {
+        let mut v = version("1.0");
+        v.types = vec![("oscairn.sound".into(), 2), ("clap".into(), 0)];
+        let o = &offers(&listing(vec![package("a", "A", vec![v])]), &BTreeMap::new(), &BTreeMap::new())[0];
+        assert!(o.holds("sound"));
+        assert!(!o.holds("plugin"), "a clap with none in it is not held");
+        let mut v = version("1.0");
+        v.types = vec![("lv2".into(), 3)];
+        let o = &offers(&listing(vec![package("a", "A", vec![v])]), &BTreeMap::new(), &BTreeMap::new())[0];
+        assert!(o.holds("plugin"));
+        assert!(!o.holds("performance"));
+        assert!(!o.holds("sound"), "an lv2 plugin is not a sound");
+        // None of a type: it is not held.
+        let o = &offers(&listing(vec![package("a", "A", vec![Version { types: vec![("oscairn.performance".into(), 0)], ..Default::default() }])]), &BTreeMap::new(), &BTreeMap::new())[0];
+        assert!(!o.holds("performance"));
+    }
+
+    #[test]
+    fn a_packages_title_is_its_name_or_its_id() {
+        let id = Offer { package: Package { id: "org.oscairn.x".into(), name: String::new(), ..Default::default() }, ..Default::default() };
+        assert_eq!(id.title(), "org.oscairn.x", "with no name, the id is the title");
+        let named = Offer { package: Package { id: "org.oscairn.x".into(), name: "X".into(), ..Default::default() }, ..Default::default() };
+        assert_eq!(named.title(), "X");
+    }
+
+    #[test]
+    fn downloads_are_the_versions_archives_or_none() {
+        let l = listing(vec![package("a", "A", vec![Version { version: "1.0".into(), ..Default::default() }])]);
+        let o = &offers(&l, &BTreeMap::new(), &BTreeMap::new())[0];
+        assert!(downloads(o).is_empty(), "no builds, nothing to download");
+        // A platform of "" is named all platforms in the row.
+        let mut v = version("1.0");
+        v.exports = vec![(String::new(), "https://r/a".into())];
+        let o = &offers(&listing(vec![package("a", "A", vec![v])]), &BTreeMap::new(), &BTreeMap::new())[0];
+        assert_eq!(downloads(o), vec![("All platforms".to_string(), "https://r/a".to_string())]);
+    }
+
+    #[test]
+    fn withdrawn_saying_is_empty_unless_installed_and_withdrawn_with_a_reason() {
+        assert_eq!(withdrawn_saying(&Offer::default()), "");
+        let o = Offer { record: Installed { version: "1.0".into(), withdrawn: Some(Withdrawn { repository: "R".into(), reason: String::new(), ..Default::default() }), ..Default::default() }, ..Default::default() };
+        assert_eq!(withdrawn_saying(&o), "", "no reason, nothing said");
+        let o = Offer { package: package("a", "A", vec![]), record: Installed { version: "1.0".into(), withdrawn: Some(Withdrawn { repository: "R".into(), reason: "bad".into(), date: String::new() }), ..Default::default() }, ..Default::default() };
+        assert_eq!(withdrawn_saying(&o), "A 1.0 was withdrawn by R: bad");
+    }
+
+    #[test]
+    fn a_package_json_missing_or_wrong_typed_fields_defaults() {
+        let p = Package::from_json(&json!({}));
+        assert_eq!(p.id, "");
+        assert_eq!(p.publisher_key, "");
+        assert!(p.tags.is_empty());
+        assert!(p.versions.is_empty());
+        // A wrong-typed field is defaulted and ignored, never a panic.
+        let p = Package::from_json(&json!({ "id": 5, "name": ["not a string"], "summary": true, "publisherKey": 9, "tags": "not a list", "versions": "not a list" }));
+        assert_eq!(p.id, "");
+        assert_eq!(p.summary, "", "a true summary is not read as a string");
+        assert!(p.tags.is_empty());
+        assert!(p.versions.is_empty());
+    }
+
+    #[test]
+    fn a_version_json_defaults_sizes_archives_and_a_withdrawal() {
+        let p = Package::from_json(&json!({ "versions": [{ "size": "big", "installed": true, "withdrawn": "later", "dependencies": 4, "exports": 3, "types": ["not an object"] }] }));
+        let v = &p.versions[0];
+        assert_eq!(v.size, 0, "a string size is not read");
+        assert_eq!(v.installed, 0, "a true installed is not read");
+        assert_eq!(v.withdrawn, None, "a withdrawn that is a string is not a withdrawal");
+        assert!(v.dependencies.is_empty());
+        assert!(v.exports.is_empty());
+        assert!(v.types.is_empty());
+        // A whole version is read with everything it can carry.
+        let p = Package::from_json(&json!({ "versions": [{ "version": "2.0", "yanked": "a regression", "incompatible": "needs a system update", "sha256": "deadbeef", "size": 2048, "installed": 1024, "dependencies": [{ "id": "base", "version": "1.1" }], "exports": [{ "platform": "", "address": "https://r/a" }], "withdrawn": { "repository": "Somewhere", "reason": "a key was stolen", "date": "2026-11-01" } }] }));
+        let v = &p.versions[0];
+        assert_eq!(v.yanked, "a regression");
+        assert_eq!(v.size, 2048);
+        assert_eq!(v.dependencies, vec![("base".to_string(), "1.1".to_string())]);
+        assert_eq!(v.exports, vec![(String::new(), "https://r/a".to_string())]);
+        assert_eq!(v.withdrawn.as_ref().unwrap().reason, "a key was stolen");
+    }
+
+    #[test]
+    fn an_installed_json_defaults_everything_not_read() {
+        let i = Installed::from_json(&json!({ "id": "a", "version": "1.0", "kind": "plugin" }));
+        assert_eq!((i.id.as_str(), i.version.as_str(), i.kind.as_str()), ("a", "1.0", "plugin"));
+        assert!(!i.other_build && !i.dependency, "absent booleans are false");
+        assert!(i.signers.is_empty());
+        assert_eq!(i.withdrawn, None);
+        // A wrong-typed boolean is false; a present withdrawal is read.
+        let i = Installed::from_json(&json!({ "otherBuild": "yes", "dependency": 1, "withdrawn": { "repository": "R", "reason": "why", "date": "d" } }));
+        assert!(!i.other_build, "a string is not the true boolean");
+        assert!(!i.dependency, "a number is not the true boolean");
+        assert_eq!(i.withdrawn.as_ref().unwrap().reason, "why");
+    }
+
+    #[test]
+    fn a_withdrawn_json_needs_an_object() {
+        assert_eq!(Withdrawn::from_json(&json!("a string")), None);
+        assert_eq!(Withdrawn::from_json(&json!(7)), None);
+        assert_eq!(Withdrawn::from_json(&Value::Null), None);
+        let w = Withdrawn::from_json(&json!({ "repository": "R" })).unwrap();
+        assert_eq!((w.reason.as_str(), w.date.as_str()), ("", ""));
+        let w = Withdrawn::from_json(&json!({ "repository": 5, "reason": true, "date": 9 })).unwrap();
+        assert_eq!((w.repository.as_str(), w.reason.as_str(), w.date.as_str()), ("", "", ""));
+    }
 }

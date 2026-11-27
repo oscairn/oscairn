@@ -6,7 +6,9 @@ scan helper, bundled plugins, the Setlist and Settings apps, the themes and the
 [preinstalled packages](#preinstalled-packages)), an `Applications` link to drag it to, and
 `Licenses/`; and one tarball for each Linux CPU, `oscairn-<version>-linux-x86_64.tar.gz` and
 `oscairn-<version>-linux-arm64.tar.gz` ([below](#the-linux-tarball)), each with the
-[preinstalled packages](#preinstalled-packages).
+[preinstalled packages](#preinstalled-packages), and the FANTOM-0's bundle
+([below](#the-fantom-0-bundle)); the [release workflow](#run-the-release-workflow) builds them, with a
+SHA-256 sums file for each.
 
 ## The version
 
@@ -23,7 +25,7 @@ any other build says it is a development build.
 ## Cut a release
 
 1. On `main`, with CI green, set the version and commit it.
-2. Tag that commit and push the tag:
+2. Tag that commit and push the tag (the pipeline never creates a tag):
 
    ```sh
    git tag v0.1.0-alpha.1
@@ -31,17 +33,72 @@ any other build says it is a development build.
    ```
 
    The tag must be `v` and the version, or the workflow stops.
-3. [The Release workflow](../.github/workflows/release.yml) runs `tools/release-macos.sh` on
-   `macos-15`, and `tools/release-linux.sh` on `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm`
-   (arm64). Each keeps its file as a workflow artifact and attaches it to a **draft** release
-   for the tag (marked a pre-release when the version has a label), with notes generated from
-   the commits since the last release; whichever job comes first creates the draft.
-4. Download the dmg and the tarballs from the draft, try them on machines that have never built
-   Oscairn (below), edit the notes, and publish the draft by hand. Nothing publishes it
-   automatically.
+3. Run [the Release workflow](../.github/workflows/release.yml) with `publish` on and that tag
+   ([below](#run-the-release-workflow)). It builds the tag's own commit, and attaches the files and
+   their sums to a **draft** release for the tag (marked a pre-release when the version has a label),
+   with notes generated from the commits since the last release; nothing publishes it.
+4. Download the files from the draft, try them on machines that have never built Oscairn (below),
+   edit the notes, and publish the draft by hand.
 
-The workflow can also be run by hand (Actions, Release, Run workflow) from any branch: it then
-builds the files as artifacts only, with no release.
+## Run the release workflow
+
+The workflow starts by hand only: Actions, Release, Run workflow, from the branch to take the workflow
+file from (or `gh workflow run release.yml --ref <branch> -f targets=... -f publish=false`). Its inputs:
+
+| Input | Meaning |
+| --- | --- |
+| `targets` | A comma list of `macos-arm64`, `linux-arm64`, `linux-x86_64`, `fantom-0`, or `all` (the default). `windows` is a later target and stops the run with an error saying so; so does any other name |
+| `publish` | Off by default: the files are workflow artifacts only (kept 90 days). On: after every chosen target built, they are attached to the draft release of `tag`, which is made if it does not exist |
+| `tag` | With `publish`: an existing tag, `v` and the version. The jobs then build that tag's commit instead of the branch's |
+
+A target not in the list is not run; the others run in parallel, and one failing does not stop
+the rest (but a publish waits for all, and does nothing if one failed). For one target, for
+several, and for all:
+
+```sh
+gh workflow run release.yml -f targets=linux-arm64
+gh workflow run release.yml -f targets=linux-arm64,linux-x86_64
+gh workflow run release.yml -f targets=all
+gh workflow run release.yml -f targets=all -f publish=true -f tag=v0.1.0-alpha.1
+```
+
+Each job ends with `SHA256SUMS-<target>.txt` beside its files, in the artifact `oscairn-<target>`
+(`oscairn-macos-arm64-unsigned` for the dmg, which says so because it is signed ad hoc, not with a
+Developer ID, and not notarized: the step that imports the signing secrets is not written yet,
+[below](#signing-and-notarization)). A missing secret never fails a job.
+
+| Target | Runner | Makes | Time |
+| --- | --- | --- | --- |
+| `macos-arm64` | `macos-15` | `Oscairn-<version>-macos-arm64.dmg` (`tools/release-macos.sh`) | not measured |
+| `linux-arm64` | `ubuntu-24.04-arm` | `oscairn-<version>-linux-arm64.tar.gz` (`tools/release-linux.sh`) | not measured |
+| `linux-x86_64` | `ubuntu-24.04` | `oscairn-<version>-linux-x86_64.tar.gz` | not measured |
+| `fantom-0` | `ubuntu-24.04-arm`, or the larger runner the repository variable `OSCAIRN_FANTOM_RUNNER` names | `oscairn-<version>-fantom-0-bundle.tar.gz`, the USB-install bundle ([below](#the-fantom-0-bundle)) | cold: unknown, hours |
+
+Not built yet: Windows, the OTA upgrade package of the FANTOM-0 (issue 219: its step in the job says
+so and makes no file), signing and notarization.
+
+## The FANTOM-0 bundle
+
+The `fantom-0` job runs `os/fantom-bundle.sh` ([the bundle](fantom-0.md#running-in-a-chroot-on-rolands-linux)):
+Buildroot 2026.08.1 in the builder container (`os/docker/Dockerfile`, built on the runner each time),
+in a folder (`OSCAIRN_OS_VOLUME` as a path, in place of the Docker volume `os/build.sh` uses by default).
+The result is the root filesystem tarball, the one copied to the unit by USB memory and unpacked there.
+
+What is realistic, and what is not known:
+
+- The maintainer's cold build is "an hour or more" on a many-core Mac; a GitHub runner has four cores, and the
+  build has never been run on one. A cold run may not fit the six hours a job may take. The job
+  therefore stops the build at 5 h 35 min, saves the downloads and ccache to the Actions cache even then, and the next
+  run starts from them: the first run may fail by design, and its re-run is the one to expect to finish.
+  Only `dl/` and `ccache/` are kept (3 GB on the maintainer's machine); Buildroot's own toolchain (GCC)
+  is built again each run. To skip the cold run, seed the cache from a build made elsewhere: a tarball of
+  `dl/` and `ccache/` from the maintainer's builder volume, saved under a key that starts with
+  `fantom-0-buildroot-`.
+- Disk: the output folder was 15 GB on the maintainer's machine, with 1.6 GB of downloads. The job removes the
+  runner's .NET, Android and Haskell toolchains first; if the runner still runs out, name a larger runner in
+  `OSCAIRN_FANTOM_RUNNER` (repository Settings, Variables).
+- The job uses an arm64 runner because the builder container and the bundle have only been built on arm64.
+- Nothing in this job, or in its cache handling, has been run on GitHub yet. The first run is its test.
 
 ## The first run
 
@@ -96,7 +153,7 @@ The tarball unpacks to one folder, `oscairn-<version>-linux-<arch>/`, that runs 
 is put:
 
 ```
-bin/Oscairn, oscairn-engine, oscairn-plugin-worker, oscairn-plugin-scan
+bin/Oscairn, oscairn-engine, oscairn-plugin-worker, oscairn-plugin-scan, oscairn-ui
 bin/plugins/       the bundled plugins (.clap)
 bin/themes/        the built-in themes
 bin/Apps/          the Setlist and Settings apps
@@ -104,6 +161,10 @@ share/applications/oscairn.desktop, share/icons/hicolor/1024x1024/apps/oscairn.p
 Licenses/          as in the dmg
 LICENSE, README.txt  (README.txt names the packages it needs to run)
 ```
+
+`oscairn-ui` is the Rust UI, which the app starts as its interface ([Rust UI](rust-ui.md)); the script builds it
+(`-DOSCAIRN_UI=ON`) and fails when it is not beside the app. The Rust CLAP host is linked into
+`oscairn-engine` and `oscairn-plugin-worker`, so it is not a file of its own.
 
 This is the layout the build leaves beside the program, and the one the app looks in first
 (`hosts/standalone/Main.cpp`, `Theme.cpp`, `AudioEngine.cpp`): it finds all of it from its own
@@ -119,8 +180,8 @@ where the engine looks beside the programs (`hosts/audio/PreinstalledFolder.h`),
 `tools/preinstalled.txt` needs a build for both Linux CPUs, or the release fails ("has no build
 for linux-x86_64").
 
-Not made: an AppImage, a .deb or a Flatpak, a 32-bit or Wayland-native build, and checksums
-(the dmg has none either).
+Not made: an AppImage, a .deb or a Flatpak, a 32-bit or Wayland-native build. The workflow's
+job writes the sums ([above](#run-the-release-workflow)); the script does not.
 
 Try one as the macOS first run above: unpacked in a scratch folder, with `HOME`,
 `OSCAIRN_DATA_HOME` and `OSCAIRN_RUNTIME_DIR` set to folders under it, and
@@ -167,7 +228,8 @@ Once there is an Apple Developer account:
 | `OSCAIRN_NOTARY_PROFILE` | A profile saved with `xcrun notarytool store-credentials`. With an identity, the dmg is signed, notarized and stapled |
 
 In the workflow these need the certificate imported into a temporary keychain and the
-notary credentials stored from repository secrets first; that step is not written yet.
+notary credentials stored from repository secrets first; that step is not written yet (the
+owner holds the secrets), so the workflow's dmg is always the ad hoc signed one, named `-unsigned`.
 Neither path has been tried.
 
 ## Licenses

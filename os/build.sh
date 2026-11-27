@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds an Oscairn OS image with Buildroot, in a Linux container (Docker). The build
 # lives in the Docker volume "oscairn-os" (OSCAIRN_OS_VOLUME names another, to keep builds
-# apart); the first build takes an hour or more.
+# apart, or a path, /…, to build in that folder); the first build takes an hour or more.
 #
 #   os/build.sh [defconfig] [make targets...]     default: oscairn_qemu_aarch64_defconfig
 #   os/build.sh test [--no-display]               boot the QEMU image and check Oscairn starts
@@ -18,7 +18,7 @@ repo=$(cd "$here/.." && pwd)
 
 docker build -q -t oscairn-os-builder "$here/docker" > /dev/null
 volume=${OSCAIRN_OS_VOLUME:-oscairn-os}
-docker volume create "$volume" > /dev/null
+case $volume in /*) mkdir -p "$volume" ;; *) docker volume create "$volume" > /dev/null ;; esac # a path is a folder the CI caches
 mkdir -p "$repo/build-os"
 run() {
 	docker run --rm -v "$volume":/work -v "$repo":/src:ro -v "$repo/build-os":/out -e HOME=/tmp oscairn-os-builder \

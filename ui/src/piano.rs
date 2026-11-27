@@ -403,3 +403,164 @@ impl Piano {
         self.zones.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A keyboard with no window: `show` sees the weak `ui` never upgrade and stops early, so the
+    /// pure parts (how a note, a velocity or a zone is worked out) are put under test alone.
+    fn piano(input: &str) -> Piano {
+        Piano {
+            ui: slint::Weak::default(),
+            model: Rc::new(VecModel::default()),
+            bands: Rc::new(VecModel::default()),
+            controls: Rc::new(VecModel::default()),
+            input: input.into(),
+            octave: 0,
+            fixed: false,
+            sustain: false,
+            held: BTreeSet::new(),
+            typed: HashMap::new(),
+            sustained: BTreeSet::new(),
+            lit: vec![],
+            zones: vec![],
+            inputs: vec![],
+            graph: Value::Null,
+            cursor: None,
+            tap: None,
+            out: vec![],
+        }
+    }
+
+    /// The key the last `notes.send` for a `true` note put down at.
+    fn sent_note(p: &Piano) -> u64 {
+        p.out.last().unwrap().1["key"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn lowest_keeps_the_octave_inside_the_playable_range() {
+        let mut p = piano("");
+        assert_eq!(p.lowest(), 48, "octave 0 starts on C3");
+        p.octave = 4;
+        assert_eq!(p.lowest(), 96, "four octaves up");
+        p.octave = -4;
+        assert_eq!(p.lowest(), 0, "four octaves down");
+        p.octave = 8;
+        assert_eq!(p.lowest(), 103, "more than four octaves up clamps so the last key is under 128");
+        assert_eq!((p.lowest() as i64 + KEYS as i64 - 1), 127, "the top key is the 128th, note 127");
+        p.octave = -8;
+        assert_eq!(p.lowest(), 0, "more than four octaves down clamps to 0");
+    }
+
+    #[test]
+    fn velocity_is_fixed_or_drops_soft_and_loud_touches() {
+        let mut p = piano("");
+        assert_eq!(p.velocity(Some(0.5)), 0.5, "a plain touch plays where it is");
+        assert_eq!(p.velocity(Some(0.)), 0.1, "a touch at the very top is not silent");
+        assert_eq!(p.velocity(Some(2.)), 1., "a touch past the bottom is capped at full");
+        assert_eq!(p.velocity(Some(-1.)), 0.1, "a touch past the top drops to the quietest");
+        assert_eq!(p.velocity(None), 0.8, "a typed key and the cursor are 0.8");
+        p.fixed = true;
+        assert_eq!(p.velocity(Some(0.)), FIXED, "Fixed ignores where it is touched");
+        assert_eq!(p.velocity(None), FIXED, "Fixed ignores a typed key too");
+        assert_eq!(FIXED, 100. / 127., "Fixed is 100 of 127");
+    }
+
+    #[test]
+    fn typed_accepts_only_one_known_key_and_folds_case() {
+        let mut p = piano("");
+        assert!(p.typed("a", true), "the a key is the keyboard's");
+        assert!(p.typed("A", true), "a capital plays the same key");
+        assert!(p.typed("p", true), "p is a key");
+        assert!(p.typed(";", true), "the semicolon is a key");
+        assert!(!p.typed("1", true), "a digit is not a key");
+        assert!(!p.typed("ab", true), "two characters are not one key");
+        assert!(!p.typed("", true), "empty is no key");
+        assert!(!p.typed("é", true), "a unicode letter is not a key");
+    }
+
+    #[test]
+    fn typed_key_notes_follow_the_octave_and_clamp_to_the_ends() {
+        let at = |p: &mut Piano, key: &str, octave: i32| {
+            p.out.clear();
+            p.typed.clear();
+            p.held.clear();
+            p.octave = octave;
+            assert!(p.typed(key, true), "{key} is a key at octave {octave}");
+            sent_note(p)
+        };
+        let mut p = piano("");
+        assert_eq!(at(&mut p, "a", 0), 60, "a at octave 0 is middle C");
+        assert_eq!(at(&mut p, "a", 4), 108, "a four octaves up");
+        assert_eq!(at(&mut p, "a", 8), 127, "past the top clamps to the last key");
+        assert_eq!(at(&mut p, "a", -8), 0, "past the bottom clamps to the first key");
+        assert_eq!(at(&mut p, ";", 4), 108 + 16, "the last typing key stays inside the octave");
+    }
+
+    #[test]
+    fn source_is_built_in_for_an_empty_input_and_finds_a_named_device() {
+        let mut p = piano("");
+        assert_eq!(p.source(), Some(0), "the built-in keys are input 0");
+        p.input = "Roland".into();
+        p.inputs = vec![json!({"name": "Other", "source": 7}), json!({"name": "Roland", "source": 3})];
+        assert_eq!(p.source(), Some(3), "a named input finds its source");
+        p.input = "Missing".into();
+        assert_eq!(p.source(), None, "a named input that is gone has no source");
+    }
+
+    #[test]
+    fn plays_keeps_or_skips_a_part_by_its_device_rules() {
+        let mut p = piano("");
+        p.inputs = vec![
+            json!({"name": "Roland", "source": 3, "kind": "usb", "port": 2}),
+            json!({"name": "Midi", "source": 5, "kind": "port", "port": 1}),
+            json!({"name": "net1", "source": 9, "kind": "network", "port": 0}),
+        ];
+        assert!(p.plays(&json!([])), "no rules plays everything");
+        assert!(p.plays(&json!([{"kind": "all"}])), "all plays anything");
+        assert!(p.plays(&json!([{"kind": "builtIn"}])), "builtIn plays the built-in keys");
+        p.input = "Roland".into();
+        assert!(!p.plays(&json!([{"kind": "builtIn"}])), "builtIn does not play a plugged device");
+        assert!(p.plays(&json!([{"kind": "external"}])), "external plays any plugged device");
+        assert!(p.plays(&json!([{"kind": "usb"}])), "usb plays the usb device");
+        assert!(!p.plays(&json!([{"kind": "port", "port": 2}])), "a port rule does not play a usb device");
+        p.input = "Midi".into();
+        assert!(p.plays(&json!([{"kind": "port", "port": 1}])), "the device on the matching port");
+        assert!(!p.plays(&json!([{"kind": "port", "port": 2}])), "another port does not");
+        p.input = "Roland".into();
+        assert!(p.plays(&json!([{"kind": "usbNamed", "pattern": "roland", "match": "contains"}])), "contains matches by name, any case");
+        assert!(p.plays(&json!([{"kind": "usbNamed", "pattern": "Roland"}])), "the exact name matches");
+        assert!(!p.plays(&json!([{"kind": "nonsense"}])), "an unknown kind plays nothing");
+        p.input = "net1".into();
+        assert!(p.plays(&json!([{"kind": "network", "pattern": ""}])), "an unnamed network rule plays any network");
+        assert!(p.plays(&json!([{"kind": "network", "pattern": "net1"}])), "the network name");
+        assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "net1"}])), "usbNamed skips a network");
+        p.input = "Missing".into();
+        assert!(!p.plays(&json!([{"kind": "external"}])), "a plugged device that is gone plays no external rule");
+    }
+
+    #[test]
+    fn zones_keep_the_notes_parts_the_input_plays() {
+        let mut p = piano("");
+        p.graph = json!({
+            "parts": [
+                {"name": "Keys", "input": {"kind": "notes", "zones": [{"keys": [60, 72]}], "devices": []}},
+                {"name": "Drum", "input": {"kind": "midi", "zones": [{"keys": [0, 127]}]}},
+                {"name": "Only 3", "input": {"kind": "notes", "zones": [{"keys": [3, 4]}], "devices": [{"kind": "builtIn"}]}}
+            ]
+        });
+        p.zones();
+        assert!(p.zone_names().iter().all(|(n, _, _)| n != "Drum"), "a midi part has no note zone");
+        assert_eq!(p.zone_names(), [("Keys".to_string(), 60, 72), ("Only 3".to_string(), 3, 4)], "the notes parts the input plays");
+    }
+
+    #[test]
+    fn zones_default_a_part_without_a_zone_to_the_whole_range() {
+        let mut p = piano("");
+        p.graph = json!({"parts": [{"name": "No zones", "input": {"kind": "notes"}}]});
+        p.zones();
+        assert_eq!(p.zone_names(), [("No zones".to_string(), 0, 127)], "a missing zone reads as the whole keyboard");
+    }
+}

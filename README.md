@@ -30,11 +30,10 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   [header](core/clap-ext/include/oscairn-clap/sound-contexts.h) any plugin can implement), so
   third-party instruments can be built to do it too. Oscairn's own Basic Synth and Delay do, and
   so do Oscairn FM, VA and the Sampler from [the package repository](#the-package-repository)
-  (the deprecated Legacy Sampler does too, but is no longer bundled: build it from
-  [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) to install it by hand). A third-party plugin without it still switches instantly, through a
+  A third-party plugin without it still switches instantly, through a
   spare instance per prepared sound, each with its own memory.
 
-  How many sounds one instance holds is the plugin's to say: the Basic Synth and the Legacy Sampler
+  How many sounds one instance holds is the plugin's to say: the Basic Synth and the test sampler
   have eight slots (one is the default sound), fixed so that switching and playing never
   allocate memory on the audio thread; the pool for other plugins also has eight. This limit
   is per instance, not per Performance. Parts whose plugin can share an instance play one
@@ -382,8 +381,7 @@ has run on a KICK ([running on a KICK](docs/kick.md)).
   [sampler](https://github.com/oscairn/sampler), [va](https://github.com/oscairn/va) and
   [arpeggiator](https://github.com/oscairn/arpeggiator); the package list is
   [`tools/preinstalled.txt`](tools/preinstalled.txt) and the packages repository. The sample pack format's reader is
-  [samplepack](https://github.com/oscairn/samplepack), which this build fetches. The
-  [legacy sampler](https://github.com/oscairn/legacy-sampler) is archived.
+  [samplepack](https://github.com/oscairn/samplepack), which this build fetches.
 
 ## Contributing
 

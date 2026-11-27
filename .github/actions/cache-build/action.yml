@@ -22,7 +22,7 @@ inputs:
     required: true
   ccache-size:
     description: ccache's size limit for this job (CCACHE_MAXSIZE)
-    default: 1G
+    default: 300M
   rust:
     description: 'true: also cache cargo (the Rust release must be installed already)'
     default: 'false'

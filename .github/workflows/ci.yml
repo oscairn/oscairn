@@ -57,7 +57,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: ci-build-and-test
           variant: release
-          ccache-size: 1G
+          ccache-size: 300M
 
       - name: Configure
         run: >
@@ -152,7 +152,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: ci-standalone-launch
           variant: release-standalone
-          ccache-size: 2G
+          ccache-size: 500M
 
       - name: Configure
         run: cmake -S . -B build-standalone -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON
@@ -193,7 +193,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: ci-thread-sanitizer
           variant: debug-tsan
-          ccache-size: 1G
+          ccache-size: 500M
 
       - name: Configure
         run: >
@@ -237,7 +237,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: ci-cpp-reference-host
           variant: release-cpp-host
-          ccache-size: 1G
+          ccache-size: 300M
 
       - name: Configure
         run: cmake -S . -B build-cpp-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_CLAP_HOST=cpp

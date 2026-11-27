@@ -392,6 +392,10 @@ int main(int argc, char** argv) {
     check(transportRender(), "first playing block"); before = h.statistics().blocks;
     transport.song_pos_beats += static_cast<clap_beattime>(128. / 48000 * 90 / 60 * CLAP_BEATTIME_FACTOR);
     check(transportRender() && h.statistics().blocks == before, "normal beat progression does not wake idle instrument");
+    // Ten blocks its caller left it uncalled (a worker resting), told with rested(): the block after is where playing on puts it.
+    h.rested(10 * 128, 10);
+    transport.song_pos_beats += static_cast<clap_beattime>(11 * 128. / 48000 * 90 / 60 * CLAP_BEATTIME_FACTOR);
+    check(transportRender() && h.statistics().blocks == before, "playing on through rested blocks does not wake idle instrument");
     auto missing = catalog.plugins[0]; missing.id = "missing.id";
     check(!h.load(missing, 48000, 128), "do not substitute another descriptor for missing saved ID");
     second.unload(); h.unload();

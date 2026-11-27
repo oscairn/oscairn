@@ -160,6 +160,10 @@ impl TransportWatch {
     pub fn reset(&mut self) {
         self.observed = false;
     }
+    /// Blocks its plugin slept through uncalled (rested): the next block is expected that much further on.
+    pub fn skipped(&mut self, frames: u32) {
+        self.previous_frames = self.previous_frames.wrapping_add(frames);
+    }
 }
 
 // ---- The handle and the threads' split of the Host ----
@@ -2506,6 +2510,7 @@ pub fn restful(s: &Host) -> bool {
 pub fn rested(s: &Host, frames: u32, blocks: u32) {
     s.steady_time.set(s.steady_time.get() + i64::from(frames));
     s.idle_blocks.fetch_add(blocks.into(), SeqCst);
+    s.transport.with(|t| t.skipped(frames));
 }
 /// # Safety
 /// mirror outlives its setting, or is null.

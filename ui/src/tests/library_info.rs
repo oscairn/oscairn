@@ -12,8 +12,9 @@ use crate::LibraryState;
 fn to_the_panel_button(ui: &Shell) {
     shell::act(Action::Move { pane: None, by: -1 });
     assert_eq!(ui.global::<LibraryState>().get_page_cursor(), 0, "the first tab");
-    // Three tabs, the box, the sidebar view's button, compact, the panel's.
-    shell::act(Action::Move { pane: None, by: 6 });
+    // The tabs, the box, the sidebar view's button, compact, the panel's.
+    let stops = ui.global::<LibraryState>().get_pages().row_count() as i32 + 3;
+    shell::act(Action::Move { pane: None, by: stops });
     assert!(ui.global::<LibraryState>().get_info_cursor(), "the panel's button has the cursor");
 }
 
@@ -43,7 +44,7 @@ fn the_button_shows_the_panel_in_the_sidebars_place() {
     lib_png(&s, "lib-C-info");
     // Hidden again: the sidebar is back.
     shell::act(Action::Move { pane: None, by: -1 });
-    shell::act(Action::Move { pane: None, by: 6 });
+    shell::act(Action::Move { pane: None, by: lib.get_pages().row_count() as i32 + 3 });
     shell::act(Action::Confirm(None));
     s.serve();
     assert!(!lib.get_info_on() && lib.get_side_total() > 0);

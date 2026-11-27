@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Add to setlist (LibraryPane.cpp `send`, Setlist.cpp `SetlistPane::add`): a Performance becomes the last slot of
 //! the page the setlist is on, in the setlist the Setlist app has open. The JUCE Library asks the Setlist app's
-//! process to do it (`apps.request`); the Rust shell has no such process and its Setlist does not edit, so the slot
+//! process to do it (`apps.request`); the Rust shell has no such process, so the slot
 //! is added in the setlist document itself: `setlists.get`, then `setlists.save` with the one slot more.
 //!
 //! Which setlist and which page are the Setlist app's own state file (`AppData/oscairn.setlist/state.json`: the
@@ -12,7 +12,7 @@ use super::*;
 use std::path::PathBuf;
 
 /// The most slots a setlist holds (docs/setlist-format.md).
-const MAX_SLOTS: usize = 1000;
+pub(crate) const MAX_SLOTS: usize = 1000;
 
 /// A Performance on its way into a setlist.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,7 +40,7 @@ pub fn read_state(file: &std::path::Path) -> Option<(String, Option<usize>)> {
 }
 
 /// A new setlist's document, as `setlists.save` takes one (docs/setlist-format.md).
-fn new_document(name: &str) -> Value {
+pub(crate) fn new_document(name: &str) -> Value {
     json!({"format": "oscairn.setlist", "version": 2,
         "info": {"id": "", "name": name, "description": "", "tags": [], "color": "", "revision": "", "parent": "", "hash": "", "origin": null},
         "display": {"mode": "list", "columns": 4, "rows": 3}, "pages": [{"name": "Page 1", "slots": []}]})

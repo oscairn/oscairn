@@ -71,7 +71,7 @@ fn the_librarys_tabs_are_the_search_boxs_height_and_line_up_with_it_and_the_side
             let what = format!("{} at {scale}: tabs {tabs:?}, search {search:?}, sidebar at {side}", theme.id);
             let folder = ui.global::<crate::Theme>().get_tabs() == crate::TabStyle::Folder;
             // Segmented: the track is the row, the selected tab lifted out of it inside; folder: a box for each tab.
-            if tabs.len() != if folder { 3 } else { 1 } {
+            if tabs.len() != if folder { 2 } else { 1 } {
                 wrong.push(format!("{what}: {} boxes", tabs.len()));
             }
             if tabs.iter().any(|t| t.2.abs_diff(search.2) > 1 || t.3.abs_diff(search.3) > 1) {

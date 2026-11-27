@@ -434,5 +434,7 @@ Branch `ui-owner-fixes-2` (2026-11-17, on `ui-owner-fixes` d605b767): the owner'
 
 ## To do (the owner, 2026-11-17)
 
-- [ ] Setlist management (rename, tags, color, duplicate, export, delete) moves from the Library's Setlists tab into the Setlist app;
-  then the Library drops that tab.
+- [x] Setlist management moves from the Library's Setlists tab into the Setlist app (issue #41, branch `setlist-manage`): the top bar's Manage
+  (`src/setlist/manage.rs`): Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete), Slots (add a
+  Performance, add an empty slot, up, down, remove); the Library drops the tab (two kinds). Not moved: exporting one setlist (the Library's
+  Libraries... menu still exports the library with the setlists chosen), a setlist's description. tests/setlist_manage.rs.

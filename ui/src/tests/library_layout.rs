@@ -117,7 +117,7 @@ fn the_sidebar_is_reached_and_chosen_by_the_panel_alone() {
     shell::act(Action::Move { pane: None, by: -1 });
     assert_eq!(ui.global::<LibraryState>().get_page_cursor(), 0, "the Performances tab");
     assert!(rows(&ui).iter().all(|r| !r.cursor));
-    shell::act(Action::Move { pane: None, by: 3 });
+    shell::act(Action::Move { pane: None, by: ui.global::<LibraryState>().get_pages().row_count() as i32 });
     assert!(ui.global::<LibraryState>().get_search_cursor(), "the search box");
     shell::act(Action::Arrow { dx: 0, dy: 1 });
     assert!(!ui.global::<LibraryState>().get_search_cursor());
@@ -133,7 +133,7 @@ fn search_is_reached_typed_and_cleared() {
     shell::set_text_on_screen(false);
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Move { pane: None, by: -1 });
-    shell::act(Action::Move { pane: None, by: 3 });
+    shell::act(Action::Move { pane: None, by: ui.global::<LibraryState>().get_pages().row_count() as i32 });
     assert!(ui.global::<LibraryState>().get_search_cursor());
     shell::act(Action::Confirm(None));
     assert!(ui.global::<KeyboardState>().get_open());
@@ -166,8 +166,7 @@ fn each_kind_has_the_sidebar() {
     let mut s = scene("layout-kinds", 10);
     let ui = s.ui();
     s.e.items.extend((0..8).map(|i| super::library_fake::stored("sound", &format!("s{i}"), &format!("Soft Felt {i}")).tags(&["keys", ["warm", "bright"][i % 2]])));
-    s.e.items.extend((0..3).map(|i| super::library_fake::stored("setlist", &format!("l{i}"), &format!("Friday Set {i}")).tags(&["live"])));
-    for (page, name) in [(0, "performances"), (1, "sounds"), (2, "setlists")] {
+    for (page, name) in [(0, "performances"), (1, "sounds")] {
         ui.global::<LibraryState>().invoke_show_page(page);
         s.serve();
         s.f.screen.frame();
@@ -175,7 +174,7 @@ fn each_kind_has_the_sidebar() {
         let labels = side_labels(&ui);
         assert_eq!(labels[..4], ["Favorites", "Recent", "Libraries", "All"], "{name}");
         assert!(ui.global::<LibraryState>().get_side_total() > 7, "{name}: libraries and tags after the first view: {}", ui.global::<LibraryState>().get_side_total());
-        assert_eq!(ui.global::<LibraryState>().get_pages().row_count(), 3);
+        assert_eq!(ui.global::<LibraryState>().get_pages().row_count(), 2);
         lib_png(&s, &format!("lib-B-{name}"));
     }
 }
@@ -217,7 +216,7 @@ fn the_whole_library_screen_by_panel_moves() {
     let mut s = tagged("walk");
     let ui = s.ui();
     let lib = ui.global::<LibraryState>();
-    assert_eq!(lib.get_pages().row_count(), 3, "the kinds are three tabs");
+    assert_eq!(lib.get_pages().row_count(), 2, "the kinds are two tabs");
     eprintln!("WALK: {} rows a view, {} sidebar lines in all", ui.global::<PartState>().get_rows_per_view(), lib.get_side_total());
     // The first move shows the cursor on the first row of the list.
     shell::act(Action::Move { pane: None, by: 1 });
@@ -225,9 +224,9 @@ fn the_whole_library_screen_by_panel_moves() {
     // Up out of the first row: the tabs. Walk each kind, each its own list asked again.
     shell::act(Action::Move { pane: None, by: -1 });
     assert_eq!(lib.get_page_cursor(), 0, "up out of the first row: the Performances tab");
-    for (page, kind) in [(1i32, "sound"), (2, "setlist"), (0, "performance")] {
+    for (page, kind) in [(1i32, "sound"), (0, "performance")] {
         // The cursor stays on the tabs after a press: step along them.
-        for _ in 0..3 {
+        for _ in 0..2 {
             if lib.get_page_cursor() == page {
                 break;
             }
@@ -243,7 +242,7 @@ fn the_whole_library_screen_by_panel_moves() {
     // On along the row under the bar to the search box: a press asks for the text on the keyboard, what is typed
     // narrows the list, and the cross (the stop after the box, once there is text) takes it away.
     shell::set_text_on_screen(false);
-    shell::act(Action::Move { pane: None, by: 3 });
+    shell::act(Action::Move { pane: None, by: lib.get_pages().row_count() as i32 });
     assert!(lib.get_search_cursor(), "the search box is the next stop along the row");
     s.e.calls.clear();
     shell::act(Action::Confirm(None));

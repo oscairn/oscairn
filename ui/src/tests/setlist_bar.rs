@@ -12,12 +12,12 @@ use std::time::Duration;
 const COLORS: [&str; 12] = ["", "#ffe082", "#3366cc", "", "", "#1a237e", "#e5484d", "", "", "", "#2e7d32", ""];
 
 /// A song's name: short ones, and a long one fourth.
-fn song(i: usize) -> String {
+pub(super) fn song(i: usize) -> String {
     if i == 3 { "Somebody's Watching Me (Extended)".into() } else { format!("Song {i}") }
 }
 
 /// A setlist of `banks` banks of `per` slots each (the ninth of a bank a placeholder; `grid4`: four rows of four), as `setlists.get` answers it.
-fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json::Value {
+pub(super) fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json::Value {
     let pages: Vec<_> = (0..banks)
         .map(|b| {
             let slots: Vec<_> = (0..per).map(|i| json!({"id": if i == 8 { String::new() } else { format!("p{}", b * per + i) }, "name": song(b * per + i), "color": COLORS[i % 12], "label": ""})).collect();
@@ -29,12 +29,12 @@ fn doc(id: &str, name: &str, mode: &str, banks: usize, per: usize) -> serde_json
 
 /// The Setlist shown on a fake engine with `sets` setlists, the first one read (`banks` banks of `per` slots), the
 /// connection quiet. The engine's answers are `library.query`'s and `setlists.get`'s (docs/control-protocol.md).
-fn on_setlist(name: &str, sets: usize, mode: &str, banks: usize, per: usize) -> Fixture {
+pub(super) fn on_setlist(name: &str, sets: usize, mode: &str, banks: usize, per: usize) -> Fixture {
     on_setlist_doc(name, sets, doc(&format!("{name}-1"), "Night 1", mode, banks, per))
 }
 
 /// The same with the setlist read given.
-fn on_setlist_doc(name: &str, sets: usize, setlist: serde_json::Value) -> Fixture {
+pub(super) fn on_setlist_doc(name: &str, sets: usize, setlist: serde_json::Value) -> Fixture {
     let mut f = Fixture::new(name);
     f.engine.answer(); // session.hello
     f.pump();
@@ -47,25 +47,25 @@ fn on_setlist_doc(name: &str, sets: usize, setlist: serde_json::Value) -> Fixtur
 }
 
 /// Whatever the shell still asks answered `{}` until it asks no more.
-fn quiet(f: &mut Fixture) {
+pub(super) fn quiet(f: &mut Fixture) {
     while let Some(r) = f.engine.try_request(Duration::from_millis(60)) {
         f.reply(&r, json!({"result": {}}));
     }
 }
 
-fn menu(f: &Fixture) -> MenuState<'_> {
+pub(super) fn menu(f: &Fixture) -> MenuState<'_> {
     f.screen.ui.global::<MenuState>()
 }
 
-fn state(f: &Fixture) -> SetlistState<'_> {
+pub(super) fn state(f: &Fixture) -> SetlistState<'_> {
     f.screen.ui.global::<SetlistState>()
 }
 
-fn stops(f: &Fixture) -> Vec<crate::BarStop> {
+pub(super) fn stops(f: &Fixture) -> Vec<crate::BarStop> {
     f.screen.ui.global::<SetlistState>().get_bar().iter().collect()
 }
 
-fn slots(f: &Fixture) -> Vec<crate::SlotData> {
+pub(super) fn slots(f: &Fixture) -> Vec<crate::SlotData> {
     f.screen.ui.global::<SetlistState>().get_slots().iter().collect()
 }
 
@@ -73,7 +73,7 @@ fn playing(f: &Fixture) -> Vec<i32> {
     slots(f).iter().filter(|s| s.playing).map(|s| s.number).collect()
 }
 
-fn asks_nothing(f: &mut Fixture, what: &str) {
+pub(super) fn asks_nothing(f: &mut Fixture, what: &str) {
     assert!(f.engine.try_request(Duration::from_millis(80)).is_none(), "{what} asked the engine for something");
 }
 

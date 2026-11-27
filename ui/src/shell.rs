@@ -1487,7 +1487,8 @@ impl App {
     /// The screen's own action `i` of the bar.
     fn run_tool(&mut self, i: usize) {
         match self.screen {
-            Screen::Setlist => self.go(Screen::Play),
+            Screen::Setlist if i == 0 => self.go(Screen::Play),
+            Screen::Setlist => self.on_setlist(setlist::Screen::manage_menu),
             Screen::Routing => self.on_routing(|r| r.tap_tool(i as i32)),
             Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
             Screen::Params => self.params_act(|p| p.search_tap()),
@@ -1663,6 +1664,12 @@ impl App {
             if let Some((_, m)) = self.menu.as_mut() {
                 m.start(at);
             }
+        }
+        if let Some((title, text)) = self.setlist.prompt.take() {
+            self.open_keyboard(Screen::Setlist, &title, &text);
+        }
+        if let Some((title, message, choices)) = self.setlist.take_notice() {
+            self.open_notice(Screen::Setlist, &title, &message, &choices.iter().map(String::as_str).collect::<Vec<_>>());
         }
         // What it says (why a slot did not open) goes where the bar's actions say theirs, on the screens that step it.
         if let Some(text) = self.setlist.said.take().filter(|_| matches!(self.screen, Screen::Setlist | Screen::Play)) {
@@ -2219,6 +2226,8 @@ impl App {
             (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
             (Screen::Library, Some(text)) => self.on_library(|p| p.entered(&text)),
             (Screen::Library, None) => self.on_library(library::Screen::not_entered),
+            (Screen::Setlist, Some(text)) => self.on_setlist(|s| s.entered(&text)),
+            (Screen::Setlist, None) => self.on_setlist(setlist::Screen::not_entered),
             (Screen::Settings, Some(text)) => self.on_settings(|p| p.entered(&text)),
             (Screen::Settings, None) => self.on_settings(settings_app::Screen::not_entered),
             (Screen::Params, Some(text)) => self.on_params(|p| p.entered(&text)),

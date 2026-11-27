@@ -84,7 +84,7 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
     assert_eq!(actions, ["Audition", "Options", "Install...", "Libraries...", "Record", "Capture"], "Undo, Redo and Save are the Performance app's");
-    assert_eq!(tabs(&ui), ["Performances", "Sounds", "Setlists"]);
+    assert_eq!(tabs(&ui), ["Performances", "Sounds"]);
     assert_eq!(labels(&ui)[0], "Untitled");
     assert_eq!(ui.global::<crate::LibraryState>().get_side_rows().row_data(0).unwrap().label.as_str(), "Favorites", "the sidebar is at the left");
     // Back goes Home; the screen's state is dropped with it.

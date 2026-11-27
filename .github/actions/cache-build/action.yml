@@ -1,0 +1,153 @@
+name: Build caches
+description: >
+  The compiler cache (ccache) and the Rust caches (cargo's downloads and the build folder's cargo target
+  folders) of one job, docs/releasing.md "The build caches". Run it with phase restore after the job's tools
+  are installed (the Rust release, ccache) and before configuring, and with phase save at the end of the job.
+  Nothing here changes what a build makes: ccache keys each object on the compiler, its flags and the source it
+  reads, cargo on its own fingerprints, and every cache key names the job, the OS, the compiler or Rust release
+  and the build's variant, so a sanitizer job never shares one with another job.
+
+inputs:
+  phase:
+    description: restore, or save
+    required: true
+  enabled:
+    description: 'false: use no cache at all (the workflow_dispatch input "cache", or the repository variable OSCAIRN_CI_CACHE=off)'
+    default: 'true'
+  name:
+    description: The job's name in the keys (one per job; a sanitizer job its own)
+    required: true
+  variant:
+    description: What else changes the objects, in the key (build type and sanitizer)
+    required: true
+  ccache-size:
+    description: ccache's size limit for this job (CCACHE_MAXSIZE)
+    default: 1G
+  rust:
+    description: 'true: also cache cargo (the Rust release must be installed already)'
+    default: 'false'
+  build-dir:
+    description: The CMake build folder, whose cargo target folders are cached
+    default: build
+
+runs:
+  using: composite
+  steps:
+    - name: Choose the cache keys
+      if: inputs.enabled == 'true' && inputs.phase == 'restore'
+      shell: bash
+      run: |
+        set -eu
+        os="$RUNNER_OS-$RUNNER_ARCH"
+        # The compiler as the build will find it (cc for C, c++ for C++, which CMake takes by default).
+        cxx=$(c++ --version | sed -n 1p | tr -c 'A-Za-z0-9.\n' _ | cut -c1-90)
+        prefix="ccache-${{ inputs.name }}-$os-$cxx-${{ inputs.variant }}-"
+        {
+          echo "OSCAIRN_CCACHE_PREFIX=$prefix"
+          echo "OSCAIRN_CCACHE_KEY=${prefix}${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "CCACHE_DIR=$HOME/.ccache"
+          echo "CCACHE_MAXSIZE=${{ inputs.ccache-size }}"
+          # The compiler's own bytes, not its date, tell ccache that it is the same compiler.
+          echo "CCACHE_COMPILERCHECK=content"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          echo "CMAKE_OBJC_COMPILER_LAUNCHER=ccache"
+          echo "CMAKE_OBJCXX_COMPILER_LAUNCHER=ccache"
+        } >> "$GITHUB_ENV"
+        if [ "${{ inputs.rust }}" = true ]; then
+          version=$(sed -n 's/^set(OSCAIRN_RUST_VERSION \([0-9.]*\))$/\1/p' CMakeLists.txt)
+          rustc=$(rustup run "$version" rustc -vV | sed -n -e 's/^commit-hash: \(.\{12\}\).*/\1/p' -e 's/^host: //p' | tr '\n' - )
+          # The target folders also depend on the crates the lock files name; any change is a new key, so
+          # a changed lock starts from nothing instead of from an older folder that keeps growing.
+          locks="${{ hashFiles('ui/Cargo.lock', 'ui/Cargo.toml', 'ui/vendor/**', 'core/Cargo.lock', 'core/**/Cargo.toml', 'core/clap-host/rust/vendor/**') }}"
+          echo "OSCAIRN_CARGO_PREFIX=cargo-${{ inputs.name }}-$os-" >> "$GITHUB_ENV"
+          echo "OSCAIRN_CARGO_KEY=cargo-${{ inputs.name }}-$os-${version}-${rustc}${{ inputs.variant }}-$locks" >> "$GITHUB_ENV"
+        fi
+        mkdir -p "$HOME/.ccache"
+        ccache --version | sed -n 1p
+
+    - name: Restore ccache
+      id: ccache
+      if: inputs.enabled == 'true' && inputs.phase == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.ccache
+        key: ${{ env.OSCAIRN_CCACHE_KEY }}
+        restore-keys: ${{ env.OSCAIRN_CCACHE_PREFIX }}
+
+    - name: Restore cargo
+      id: cargo
+      if: inputs.enabled == 'true' && inputs.phase == 'restore' && inputs.rust == 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ${{ inputs.build-dir }}/ui-cargo
+          ${{ inputs.build-dir }}/engine-core-cargo
+          ${{ inputs.build-dir }}/samplepack-cargo
+        key: ${{ env.OSCAIRN_CARGO_KEY }}
+
+    - name: Remember what was restored
+      if: inputs.enabled == 'true' && inputs.phase == 'restore'
+      shell: bash
+      run: |
+        echo "OSCAIRN_CCACHE_RESTORED=${{ steps.ccache.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
+        echo "OSCAIRN_CARGO_HIT=${{ steps.cargo.outputs.cache-hit }}" >> "$GITHUB_ENV"
+        ccache --zero-stats
+
+    # Saving ----------------------------------------------------------------------------------------
+    # Main saves after every run, and the older entry of the same job is deleted, so the repository holds one
+    # generation of each (GitHub's limit is 10 GB, then the least recently used go first). Another branch
+    # saves only when it restored nothing (a first run with no cache of main's to start from); a pull request
+    # of a branch with main's cache never fills the repository's room.
+    - name: Cache sizes
+      if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled()
+      shell: bash
+      run: |
+        ccache -s || true
+        {
+          echo "### Cache sizes (${{ inputs.name }})"
+          echo "ccache: restored \`${OSCAIRN_CCACHE_RESTORED:-nothing}\`, now $(du -sh "$CCACHE_DIR" | cut -f1) on disk"
+          if [ "${{ inputs.rust }}" = true ]; then
+            echo "cargo: hit \`${OSCAIRN_CARGO_HIT:-}\`, $(du -sch ~/.cargo/registry/index ~/.cargo/registry/cache ~/.cargo/git/db '${{ inputs.build-dir }}'/*-cargo 2>/dev/null | tail -1 | cut -f1) on disk"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Save ccache
+      id: save-ccache
+      if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled() && (github.ref == 'refs/heads/main' || env.OSCAIRN_CCACHE_RESTORED == '')
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.ccache
+        key: ${{ env.OSCAIRN_CCACHE_KEY }}
+
+    - name: Save cargo
+      id: save-cargo
+      if: inputs.enabled == 'true' && inputs.phase == 'save' && inputs.rust == 'true' && !cancelled() && env.OSCAIRN_CARGO_HIT != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ${{ inputs.build-dir }}/ui-cargo
+          ${{ inputs.build-dir }}/engine-core-cargo
+          ${{ inputs.build-dir }}/samplepack-cargo
+        key: ${{ env.OSCAIRN_CARGO_KEY }}
+
+    - name: Delete this job's older entries
+      if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled() && (steps.save-ccache.outcome == 'success' || steps.save-cargo.outcome == 'success')
+      shell: bash
+      continue-on-error: true # a token without actions: write (a pull request from a fork) cannot delete; the limit's own eviction then does it
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        drop() { # the entries of this ref under the prefix, but the one just saved
+          NEWKEY="$2" gh cache list --ref "$GITHUB_REF" --key "$1" --limit 100 --json id,key --jq '.[] | select(.key != env.NEWKEY) | .id' | xargs -r -n1 gh cache delete
+        }
+        [ "${{ steps.save-ccache.outcome }}" = success ] && drop "$OSCAIRN_CCACHE_PREFIX" "$OSCAIRN_CCACHE_KEY"
+        [ "${{ steps.save-cargo.outcome }}" = success ] && drop "$OSCAIRN_CARGO_PREFIX" "$OSCAIRN_CARGO_KEY"
+        true

@@ -81,13 +81,6 @@ authoritative.
 
 ## Sample decoding
 
-- **libsndfile:** Erik de Castro Lopo and the libsndfile contributors
-  ([project](https://libsndfile.github.io/libsndfile/), LGPL-2.1-or-later). The Oscairn
-  Legacy Sampler links it dynamically to decode WAV samples; it is an external build dependency,
-  not vendored source. Retain its notices in any distributed binary/image. The Legacy Sampler
-  itself (AGPL-3.0-or-later) is in its own repository,
-  [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler), which Oscairn builds at a pinned
-  commit for its tests only; neither is in the desktop app or the OS image.
 - **samplepack:** the Oscairn contributors ([oscairn/samplepack](https://github.com/oscairn/samplepack),
   MIT). The reader of Oscairn Sample Packs (`.osp`) and waveforms (`.owf`), with its FLAC subset
   decoder, in Rust behind a C interface; built from its source at the commit the top-level

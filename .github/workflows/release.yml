@@ -109,7 +109,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: release-${{ matrix.target }}
           variant: release-standalone-ui
-          ccache-size: 1G
+          ccache-size: 300M
           rust: ${{ matrix.kind == 'linux' }}
           build-dir: build-release
 

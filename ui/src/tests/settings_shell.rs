@@ -637,11 +637,14 @@ fn signing_keys_page_is_a_no_touch_walk() {
         s.f.pump();
         s.serve();
     };
-    // From Home the dial alone: five moves out of the first read's baseline put the cursor on the Settings
-    // tile, a press opens the Rust app.
-    nav(&mut s, "move", 0); // the first read: a baseline
-    for _ in 0..5 {
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (the one named so) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !s.ui().global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
         nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
     }
     nav(&mut s, "confirm", 1);
     s.serve();
@@ -819,4 +822,116 @@ fn audio_page_is_a_no_touch_walk() {
             s.serve();
         }
     }
+}
+
+
+// A no-touch walk of the Package repositories page: from Home by the panel's moves alone, then every row the
+// page's own model shows (never a hard-coded count) is walked by the dial and pressed to its real effect — a
+// repository's row turns its switch, the engine's `packages.enableRepository` naming that address, and the Add
+// row's press opens the keyboard, the address typed, the listing read and kept: `packages.list`, the job polled,
+// `packages.addRepository`, and the new repository listed.
+#[test]
+fn package_repositories_page_is_a_no_touch_walk() {
+    let oscairn = "https://packages.oscairn.org";
+    let friend = "https://packages.friend.org";
+    let more = "https://packages.more.org";
+    let key = "33".repeat(32);
+    let mut e = Fake::new();
+    e.repos = vec![
+        super::settings_fake::Repo {
+            address: oscairn.into(),
+            name: "Oscairn".into(),
+            key: "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into(),
+            origin: "official".into(),
+            enabled: true,
+        },
+        super::settings_fake::Repo { address: friend.into(), name: "Friend Sounds".into(), key: key.clone(), origin: "user".into(), enabled: true },
+    ];
+    e.sources = vec![(more.into(), super::settings_fake::Reads::Done("More Sounds".into(), key.clone()))];
+    e.trusted.push(key.clone());
+    let mut s = Shelf::with("w17-repos-walk", e);
+    shell::set_text_on_screen(false);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (the one named so) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !s.ui().global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().get_screen(), 14, "the Settings tile opens the Rust app");
+    // Up to the page rail (not the top bar), along to the Package repositories tab, a press shows it.
+    nav(&mut s, "move", -1);
+    nav(&mut s, "move", -1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+    let (tab, last) = {
+        let ui = s.ui();
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        (pages.iter().position(|p| p == "Package repositories").expect("a Package repositories tab") as i32, pages.len() as i32 - 1)
+    };
+    let mut tries = 0;
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() != tab {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries <= tab as usize + 1, "the rail reaches the Package repositories tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().global::<crate::SettingsState>().get_page(), tab, "a press shows the Package repositories page");
+    assert_eq!(title(&s.ui()), "Settings › Package repositories");
+    // Down past the last tab leaves the rail for the list, the cursor on its first row.
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() < last {
+        nav(&mut s, "move", 1);
+    }
+    nav(&mut s, "move", 1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() < 0, "down past the last tab leaves for the list");
+    // The page's own rows, the walk counted from them: each repository's switch pressed, then the Add row's press.
+    let n = rows(&s.ui()).len();
+    assert!(n >= 3, "the page shows a row per repository and the Add row: {n}");
+    for step in 0..n {
+        if step > 0 {
+            nav(&mut s, "move", 1);
+        }
+        let ui = s.ui();
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        if rows(&ui)[step].switch {
+            let want = s.e.repos[step].address.clone();
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert_eq!(s.e.called("packages.enableRepository").last(), Some(&json!({"address": want, "enabled": false})), "a press turns repository {step} off");
+            assert_eq!(rows(&s.ui())[step].value, "Off", "the switch is now Off");
+        } else {
+            assert_eq!(rows(&ui)[step].label, "Add a repository", "the last row adds one");
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert!(s.ui().global::<crate::KeyboardState>().get_open(), "the Add row's press opens the keyboard");
+        }
+    }
+    // The address is typed on the keyboard; Return asks packages.list, the listing read and polled, the
+    // repository added and listed.
+    let before = rows(&s.ui()).len();
+    for ch in more.chars() {
+        assert!(shell::key(&ch.to_string()));
+    }
+    assert!(shell::key(&slint::SharedString::from(slint::platform::Key::Return)));
+    s.serve();
+    assert_eq!(s.e.called("packages.list"), [json!({"source": more})]);
+    assert_eq!(s.e.called("packages.addRepository").last(), Some(&json!({"address": more, "key": key, "name": "More Sounds"})), "the repository the listing kept is added");
+    let ui = s.ui();
+    assert!(rows(&ui).iter().any(|r| r.label == "More Sounds"), "the new repository is listed: {:?}", labels(&ui));
+    assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one repository added");
+    assert_eq!(value_of(&ui, "More Sounds"), "On", "the added repository is on");
 }

@@ -1109,12 +1109,16 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // ports has the node's sounds prepared beside its own; the node takes it over at the cue. Not in an
     // audition, which takes over nothing set aside.
     std::vector<std::unique_ptr<Beside>> beside;
+    // A free instance (nothing sounds through it) holding one of this Performance's node states is left to that node's
+    // take, which keeps it with a reset: its sounds prepared beside would load all their samples again (issue 9).
+    std::set<std::string> sources;for(auto node:nodes)sources.insert(source(text(field(node,"key"))));
+    auto keeps=[&](const std::shared_ptr<PluginHost>& h){return std::any_of(free.begin(),free.end(),[&](const Free& f){return f.host==h && sources.count(f.loaded.source);});};
     // leading: as take's.
     auto claim=[&](V node,V plugin,const std::string& key,uint64_t room,bool leading)->std::optional<NodeId>{
         if(keepInstances_)return std::nullopt;
         std::optional<Want> w;
         for(const auto& [n,name]:nodes_){
-            const auto loaded=loaded_.find(n);if(loaded==loaded_.end() || std::find(taken.begin(),taken.end(),n)!=taken.end())continue;
+            const auto loaded=loaded_.find(n);if(loaded==loaded_.end() || std::find(taken.begin(),taken.end(),n)!=taken.end() || keeps(graph_.node(n).host))continue;
             const auto host=graph_.node(n).host;const auto& h=*host;
             if(!h.preparesSnapshots() || !h.failure().empty() || h.effectResources() || (leading && SoundContext::busParameter(h)!=CLAP_INVALID_ID))continue;
             if(!w && !(w=want(plugin)))return std::nullopt;
@@ -1122,10 +1126,12 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             try{checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());}catch(const std::exception&){continue;}
             auto b=std::make_unique<Beside>();b->was=n;b->host=host;
             for(const auto& c:h.soundContexts())if(c.id)b->old.push_back(c.id);
-            try{b->selected=inRoom(*b->host,room,[&]{return b->host->prepareSnapshot((root/"nodes"/key).string());});}
+            try{Clock c{stats.beside};b->selected=inRoom(*b->host,room,[&]{return b->host->prepareSnapshot((root/"nodes"/key).string());});}
             catch(const std::exception& e){std::fprintf(stderr,"oscairn: %s: its sounds not prepared beside %s's: %s\n",text(field(node,"name")).c_str(),name.c_str(),e.what());continue;}
             for(const auto& c:h.soundContexts())if(c.id && std::find(b->old.begin(),b->old.end(),c.id)==b->old.end())b->fresh.push_back(c.id);
-            b->now=next->add(host);origins[b->now]={loaded->second.build,{}}; // not its snapshot byte for byte: never skips a load
+            // Its state then need not be the snapshot byte for byte (its sounds in other slots): a later take compares it
+            // before it skips a load, so it is given the state once more and kept after that.
+            b->now=next->add(host);origins[b->now]={loaded->second.build,source(key)};
             for(auto& f:free)if(f.host==host)f.host.reset(); // neither kept warm nor taken over twice
             taken.push_back(n);beside.push_back(std::move(b));
             return beside.back()->now;}
@@ -1184,7 +1190,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             if(engaged.count(e.get()) || SoundContext::room(*e)<group[key])continue;
             std::set<uint32_t> before;for(const auto& c:e->host->soundContexts())before.insert(c.id);
             std::array<uint32_t,16> selected;
-            try{selected=inRoom(*e->host,room,[&]{return e->host->prepareSnapshot((root/"nodes"/key/"engine").string());});}catch(const std::exception&){continue;}
+            try{Clock c{stats.beside};selected=inRoom(*e->host,room,[&]{return e->host->prepareSnapshot((root/"nodes"/key/"engine").string());});}catch(const std::exception&){continue;}
             for(const auto& c:e->host->soundContexts())if(!before.count(c.id))onPlaying.sounds.push_back({e->host,c.id});
             claimedEngines[key]={e,selected};engaged.insert(e.get());return true;}
         return false;};
@@ -1256,7 +1262,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 if(const auto w=want(plugin))for(const auto& e:engines)if(same(*w,*e->host,Loaded{e->build,{}}) && (joined=joinEngine(e,root/"nodes"/key,false,room)))break;
                 if(!joined){const auto playingNow=playingEngines(plugin);const auto mine=adopted.find(kind(plugin));
                     for(const auto& e:playingNow)
-                        if((mine!=adopted.end()?mine->second==e.get():!engaged.count(e.get()) && SoundContext::room(*e)>=rest) && (joined=joinEngine(e,root/"nodes"/key,true,room))){
+                        if((mine!=adopted.end()?mine->second==e.get():!engaged.count(e.get()) && SoundContext::room(*e)>=rest) && (joined=[&]{Clock c{stats.beside};return joinEngine(e,root/"nodes"/key,true,room);}())){
                             adopted[kind(plugin)]=e.get();engaged.insert(e.get());onPlaying.contexts.push_back(joined);onPlaying.sounds.push_back({e->host,joined->own()});++reused;break;}}
                 first=!joined && kinds[kind(plugin)]>1;}
             if(siblings){if(!definitions.contains(engine) || text(field(definitions.at(engine),"engine"))!=engine || !ids.contains(engine))bad("missing shared engine root");

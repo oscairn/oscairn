@@ -1790,9 +1790,9 @@ on the display; `--engine-only` the engine alone.
 
    The FANTOM's device defaults live in the profile now (`fantom-07.json`'s `compute`, issue 8),
    so a fresh bundle has them with no hand-set `etc/default`: `compute.workerExtraBlock` puts the
-   Analog and the Sampler in RFC 0045's extra block (`org.oscairn.analog,org.oscairn.sampler`;
-   arpeggiated Analog patches overlap about 8 voices at about 2 ms per block, until its faster
-   oscillator ships), and `compute.workerSpin` 0 sleeps on workers at once.
+   Sampler alone in RFC 0045's extra block (`org.oscairn.sampler`; VA is left out: 24 rounds on
+   the unit with it in showed no gain and added about 2.7 ms of latency on VA parts, issue 318),
+   and `compute.workerSpin` 0 sleeps on workers at once.
    `engine-args.py` writes them to the bundle's `etc/default/oscairn-engine` from the profile.
    To switch the extra block off, start with `OSCAIRN_WORKER_EXTRA_BLOCK=none ./oscairn-fantom-start`
    (any value naming no plugin works; an empty one does not, since an empty value counts as

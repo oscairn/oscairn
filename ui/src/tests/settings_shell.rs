@@ -491,9 +491,11 @@ fn installed_and_available_reachable_from_home_by_panel_moves() {
         let want = pages.iter().position(|p| p == want).expect("the rail names the page") as i32;
         let mut tries = 0;
         while ui.global::<crate::SettingsState>().get_page_cursor() != want {
-            nav(s, "move", 1);
+            // The rail enters on the page shown; a page before it needs a step back, then forward onto it.
+            let step = if ui.global::<crate::SettingsState>().get_page_cursor() > want { -1 } else { 1 };
+            nav(s, "move", step);
             tries += 1;
-            assert!(tries <= 9, "the rail reaches the page");
+            assert!(tries <= 20, "the rail reaches the page");
         }
         nav(s, "confirm", 1);
         s.serve();
@@ -934,4 +936,170 @@ fn package_repositories_page_is_a_no_touch_walk() {
     assert!(rows(&ui).iter().any(|r| r.label == "More Sounds"), "the new repository is listed: {:?}", labels(&ui));
     assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one repository added");
     assert_eq!(value_of(&ui, "More Sounds"), "On", "the added repository is on");
+}
+
+// W19: the Settings Appearance and Top bar pages, reached from Home by the panel's moves alone (no touch), every
+// action each offers pressed to its real effect, counted from the screen's own rows (never hard-coded). Appearance:
+// a press on each theme row writes appearance.txt with its id and shows the theme at once; the bar's Install...
+// opens the file chooser, where choosing a theme.json installs it (a new row) and shows it. Top bar: a press on
+// the CPU and RAM rows opens their choice, choosing one writes top-bar.json and moves the shell's meters at once.
+// Nothing is reached by touch.
+#[test]
+fn appearance_and_top_bar_reachable_from_home_by_panel_moves() {
+    // A theme of the player's own, listed on the Appearance page, and another whose folder is the Install chooser's
+    // source (kept out of the installed list until it is installed; a folder named after its id).
+    let mut s = Shelf::with("w19-appearance-topbar", Fake::new());
+    installed_theme(&s.config, "evening-glass", "Evening Glass", |d| d["spacing"] = json!(1.3));
+    installed_theme(&s.config, "amber", "Amber", |_| {});
+    std::fs::rename(s.config.join("themes/amber"), s.config.join("amber")).unwrap();
+    shell::settings_files_dir(s.config.join("amber"));
+    let ui = s.ui();
+    tall(&ui);
+    let id_of = |name: &str| -> &'static str {
+        match name {
+            "Oscairn Block" => "oscairn-block",
+            "Oscairn Classic" => "oscairn-classic",
+            "Oscairn Dark" => "oscairn-dark",
+            "Oscairn Light" => "oscairn-light",
+            "Evening Glass" => "evening-glass",
+            _ => panic!("a theme the test does not know: {name}"),
+        }
+    };
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": json!(total.clone())}})));
+        s.f.pump();
+        s.serve();
+    };
+    // Up out of the whole list to the page rail, then along it to the page `want` (found in the screen's own get_pages
+    // by name) and a press shows it; past the last tab the list has the cursor again. Entered on the list.
+    let to_page = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), want: &str| {
+        while ui.global::<crate::SettingsState>().get_page_cursor() < 0 {
+            nav(s, "move", -1);
+        }
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        let want = pages.iter().position(|p| p == want).expect("the rail names the page") as i32;
+        let mut tries = 0;
+        while ui.global::<crate::SettingsState>().get_page_cursor() != want {
+            // The rail enters on the page shown; a page before it needs a step back, then forward onto it.
+            let step = if ui.global::<crate::SettingsState>().get_page_cursor() > want { -1 } else { 1 };
+            nav(s, "move", step);
+            tries += 1;
+            assert!(tries <= 20, "the rail reaches the page");
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+        assert_eq!(ui.global::<crate::SettingsState>().get_page(), want, "a press shows the page");
+        while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+            nav(s, "move", 1);
+        }
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the list's first row has the cursor");
+    };
+    // A bar tool stop: enter the top bar's actions from the list (pane 2), walk to the action `label` of the page by
+    // name in the screen's own get_actions, and press.
+    let bar_tool = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), label: &str| {
+        let at = ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == label).expect("the bar action the test wants") as i32;
+        nav(s, "move:2", 1); // the bar, at its first stop (Back)
+        for _ in 0..=at {
+            nav(s, "move", 1);
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+    };
+    // A move past the bar's last stop puts the cursor back on the screen's list (the bar had it).
+    let drop_bar = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64)| {
+        nav(s, "move", 30);
+        s.serve();
+    };
+    // Home → the Settings tile → the Rust app (the page it opens on is Appearance); the first move shows the list's
+    // first row.
+    nav(&mut s, "move", 0); // the first read is only a baseline
+    let mut tries = 0;
+    while !ui.global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1); // onto the Settings tile
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    assert_eq!(title(&ui), "Settings › Appearance");
+    nav(&mut s, "move", 1);
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the list's first row has the cursor");
+    // Appearance: every theme the page's own rows show is reached by the dial, and a press on each writes
+    // appearance.txt with its id and shows the theme at once. The count is the screen's own.
+    let n = rows(&ui).len();
+    assert!(n >= 5, "the built-in themes and the player's own are listed: {n}");
+    for i in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(i), "the dial reached the theme row {i}");
+        let theme = rows(&ui)[i].label.to_string();
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert_eq!(std::fs::read_to_string(s.config.join("appearance.txt")).unwrap(), id_of(&theme), "choosing {theme} wrote appearance.txt");
+        assert_eq!(ui.global::<crate::Theme>().get_id(), id_of(&theme), "{theme} is shown at once");
+        assert_eq!(value_of(&ui, &theme), "In use", "{theme} is the row's in-use one");
+        if i + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+    // The rail to the Top bar page.
+    to_page(&mut s, &mut nav, "Top bar");
+    assert_eq!(title(&ui), "Settings › Top bar");
+    assert_eq!(labels(&ui), ["CPU", "RAM"]);
+    assert!(ui.global::<crate::Bar>().get_cpu_bar() && ui.global::<crate::Bar>().get_cpu_percent(), "CPU starts Bar and percent");
+    // The CPU row: a press opens its choice, choosing Bar writes top-bar.json and the shell shows Bar at once.
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the dial reached CPU");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert!(ui.global::<MenuState>().get_open(), "a press on CPU opens its choice");
+    nav(&mut s, "move", 1); // to Bar
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(std::fs::read_to_string(s.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"bar\"}\n", "choosing Bar wrote top-bar.json");
+    assert!(ui.global::<crate::Bar>().get_cpu_bar() && !ui.global::<crate::Bar>().get_cpu_percent(), "the bar shows Bar now");
+    assert_eq!(value_of(&ui, "CPU"), "Bar ›");
+    // The RAM row: the dial reaches it and a press opens its choice; choosing Hidden writes it and the shell hides the
+    // RAM meter at once.
+    nav(&mut s, "move", 1);
+    s.serve();
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(1), "the dial reached RAM");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert!(ui.global::<MenuState>().get_open(), "a press on RAM opens its choice");
+    let mut tries = 0;
+    while !ui.global::<MenuState>().get_rows().iter().any(|r| r.cursor && r.label == "Hidden") {
+        nav(&mut s, "move", 1); // along the choice to Hidden
+        tries += 1;
+        assert!(tries < 8, "the dial reaches Hidden");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(std::fs::read_to_string(s.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"bar\",\"ram\":\"none\"}\n", "choosing Hidden wrote it");
+    assert!(!ui.global::<crate::Bar>().get_ram_bar() && !ui.global::<crate::Bar>().get_ram_percent(), "RAM Hidden now");
+    assert_eq!(value_of(&ui, "RAM"), "Hidden ›");
+    // The rail to the Appearance page, for the Install... tool.
+    to_page(&mut s, &mut nav, "Appearance");
+    assert_eq!(title(&ui), "Settings › Appearance");
+    // The bar's Install... opens the file chooser (the path gains a level); the chooser's own theme.json, when pressed,
+    // installs the source theme as a new row and shows it.
+    let was = rows(&ui).len();
+    bar_tool(&mut s, &mut nav, "Install...");
+    assert_eq!(title(&ui), "Settings › Appearance › Install a theme", "the chooser is over the page");
+    assert_eq!(rows(&ui)[0].label, "‹ Up", "the chooser lists the files");
+    drop_bar(&mut s, &mut nav);
+    let target = labels(&ui).iter().position(|l| l == "theme.json").expect("the chooser lists theme.json");
+    assert!(target >= 1, "Up, then the source's theme.json: {:?}", labels(&ui));
+    for _ in 0..target {
+        nav(&mut s, "move", 1);
+        s.serve();
+    }
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(target), "the dial reaches theme.json");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(title(&ui), "Settings › Appearance", "the chooser closed");
+    assert_eq!(std::fs::read_to_string(s.config.join("appearance.txt")).unwrap(), "amber", "the installed theme is shown");
+    assert_eq!(value_of(&ui, "Amber"), "In use");
+    assert_eq!(rows(&ui).len(), was + 1, "the pages own count grew by the one theme installed: {:?}", labels(&ui));
 }

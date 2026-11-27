@@ -7,9 +7,15 @@
 # stand-in /proc, waits for mi078 and its hold on the panel, starts warm, stays while the engine
 # runs, stops what it started when it ends unasked (never starting mi078), and after
 # oscairn-fantom-stop waits on the holder.
-#   fantom_start.sh SCRIPTS_DIR
+#   fantom_start.sh SCRIPTS_DIR [boot|supervisor|start]
+# The slow sections run alone for a part (a ctest entry each, each under its time limit); without one, all of them.
 set -u
 scripts=$1
+part=${2:-all}
+want() { [ "$part" = all ] || [ "$part" = "$1" ]; }
+# Waits (to 5 s) for a stand-in boot script, a child here, to end; false if it has not.
+until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
+roland='go.sh runs /home/root/mi078'
 fail=0
 check() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1"; fail=1; fi; }
 
@@ -249,8 +255,8 @@ check "boot, TEMPO up, no roland-first: Oscairn at once (oscairn-fantom-start --
 # The rest of the boot checks are the takeover's: roland-first kept in the boot folder.
 : > "$OSCAIRN_BOOT_DIR/roland-first"
 mkdir -p "$OSCAIRN_BOOT_RUN"
+if want boot; then
 boot() { out=$(OSCAIRN_BOOT_RELEASE=2 OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
-roland='go.sh runs /home/root/mi078'
 boot 0
 check "boot, TEMPO held: Roland's application" "[ $status = 3 ] && echo \"\$out\" | grep -q 'TEMPO was held' && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
 check "boot logs to its folder outside the bundle" "grep -q 'TEMPO was held' '$OSCAIRN_BOOT_DIR/boot.log'"
@@ -299,7 +305,9 @@ kill $holder
 sleep 0.3
 boot 0
 check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 3 ] && echo \"\$out\" | grep -q '$roland' && ! echo \"\$out\" | grep -q 'still holds'"
+fi
 
+if want supervisor; then
 # The decision for real (not --dry-run) in a stand-in bundle whose systemd-run, start and stop
 # only log (the start plays Roland's application stopped and the engine started), and go.sh's
 # line around it.
@@ -364,7 +372,6 @@ check "go.sh: exit 0 once Oscairn ran starts nothing" "[ -z \"\$(gosh '$fb/zero'
 # --takeover for real on the stand-in /proc: mi078 as pid 500, its hold on the panel a link.
 mi078() { mkdir -p "$fb/proc/500/fd" && echo mi078 > "$fb/proc/500/comm"; [ -z "${1:-}" ] || ln -sf "$OSCAIRN_PANEL_DEVICE" "$fb/proc/500/fd/3"; }
 tk() { rm -f "$fb/b/ran"; : > "$fb/dir/attempt"; OSCAIRN_KEY_HELD="sh -c 'exit ${1:-1}'" OSCAIRN_PROC="$fb/proc" OSCAIRN_BOOT_DIR="$fb/dir" OSCAIRN_BOOT_RUN="$fb/run" OSCAIRN_BOOT_RESTARTS=0 OSCAIRN_BOOT_LIMIT=1 OSCAIRN_BOOT_POLL=0.1 OSCAIRN_TAKEOVER_SETTLE=0 OSCAIRN_TAKEOVER_WAIT=${2:-5} "$fb/b/oscairn-fantom-boot" --takeover > "$fb/tk.out" 2>&1; }
-until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
 fresh; tk & watcher=$!
 sleep 0.5; mi078; sleep 1.5
 check "takeover: waits while mi078 does not hold the panel" "kill -0 $watcher && [ ! -e '$fb/b/ran' ]"
@@ -453,8 +460,10 @@ OSCAIRN_PROC="$fb/proc" "$fb/b/oscairn-fantom-restart" > /dev/null 2>&1; sleep 0
 check "oscairn-fantom-restart with the UI running: engine and UI back, not counted" "kill -0 $watcher && [ -d '$fb/proc/4242' ] && [ -d '$fb/proc/4244' ] && ! grep -q 'starting Oscairn again' '$fb/sv.out'"
 endsv
 rm -f "$fb/b/with-ui"
+fi
 
-# Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
+if want boot; then
+# Step 4,the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
 fake=$bundle/fakeproc
 running() { mkdir -p "$fake/$2" && echo "$1" > "$fake/$2/comm"; }
 gone() { rm -rf "$fake/$1"; }
@@ -485,7 +494,9 @@ check "and ends once the holder has gone too" "until_done $watcher && grep -q 'n
 rm -f "$bundle/var/oscairn/run/stopped"
 out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1)
 check "the stop marks itself on purpose (dry: says so)" "echo \"\$out\" | grep -q 'would mark the stop as on purpose' && [ ! -e '$bundle/var/oscairn/run/stopped' ]"
+fi
 
+if want start; then
 # A start for real, in the stand-in bundle on a stand-in /proc (the panel holder and a display
 # already there) and an empty /sys: start-chroot.sh plays the app, which makes its engine's socket
 # and ends with status 3 once $bundle/crash exists, and the control request.
@@ -603,4 +614,5 @@ check "the handover: X before the app, X gone before the Rust UI, the rule off f
 check "the keeper waited on the X server serving (0.5 s in the stand-in), not a fixed time" "[ \$(lapms 'X ready') -ge 500 ] && [ \$(lapms 'X ready') -lt 3000 ]"
 check "each phase logged with milliseconds, in order" "[ \"\$(sed -n 's/.*timing \\([A-Za-z]* [A-Za-z]*\\).*/\\1/p' '$klog' | tr '\\n' ',')\" = 'handover requested,X ready,app started,app exited,X gone,shell started,' ]"
 check "the X server waited for to end (its 0.3 s), not given up on" "[ \$(( \$(lapms 'X gone') - \$(lapms 'app exited') )) -ge 280 ]"
+fi
 exit $fail

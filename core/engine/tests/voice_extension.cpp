@@ -20,6 +20,7 @@
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
 #include "AllocationGuard.h"
+#include "../../test-support/relaxed.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -105,6 +106,7 @@ int main(int argc,char** argv){try{
     // On a real-time thread, as the engine renders: on another a loaded machine holds blocks up,
     // which the budget counts as the voices' cost, and gives up whole notes for.
     std::exception_ptr error;
+    for(int attempt=1;;++attempt){error=nullptr;
     std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{
         ::setenv("OSCAIRN_FIXTURE_VOICE_US","60",1);::setenv("OSCAIRN_FIXTURE_LAYERS","4",1);::setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
         Graph g(48000,frames);const auto s=g.add(argv[2]);
@@ -128,6 +130,8 @@ int main(int argc,char** argv){try{
         // none of its notes is faded or choked from outside.
         check(g.sounding(s)==8 && given.hardChokes==0,"the host gave up none of its notes: "+std::to_string(g.sounding(s))+" held");
     }catch(...){error=std::current_exception();}}).join();
+    // Relaxed (a shared runner, a sanitizer: CI saw 7 of 8 notes and 1) a stall counts as the voices' cost and gives notes up: measured again, up to three times.
+    if(!error||!oscairn::test::relaxed()||attempt>=3)break;}
     if(error)std::rethrow_exception(error);
     std::puts("ok: one pool's policy across sounds, and elements given up before notes");
     return 0;

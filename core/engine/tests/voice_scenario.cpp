@@ -155,7 +155,9 @@ int main(int argc,char** argv){try{
             s.fewestPiano==0 || s.fewestLead==0?"yes":"no",(unsigned long long)s.heldOff,(unsigned long long)s.pianoLost,(unsigned long long)s.leadLost);
         // Always: no part silent, every plugin kept to its caps.
         check(s.fewestPiano>=1 && s.fewestLead>=1,std::string(name(m))+", "+what+": no part silent");
-        check(s.mismatch==0,std::string(name(m))+", "+what+": every plugin kept to its caps");
+        // A worker that lost blocks has its caps late (CI: mismatches only beside 4, 11 or more lost blocks), so only with none lost.
+        if(s.pianoLost+s.leadLost==0)check(s.mismatch==0,std::string(name(m))+", "+what+": every plugin kept to its caps");
+        else std::printf("%s, %s: every plugin kept to its caps: the machine lost blocks: not checked\n",name(m),what);
         return s;};
     // A claim a slow machine could fail by itself (its own lost blocks reach the guard's rules), checked only when the
     // guard counted no lost block and gave nothing up for the callback's time on the part it is about (developer guide,

@@ -342,8 +342,15 @@ struct Plugin {
                 auto& s = get(p); s.main(); if (s.active) ++threadErrors;
                 // One slow load, for hosts' reply timeouts: when the file named here exists, it is removed and the load takes 6 s.
                 if (const char* once = std::getenv("KICK_FIXTURE_SLOW_LOAD_ONCE")) if (std::remove(once) == 0) std::this_thread::sleep_for(std::chrono::seconds(6));
-                // Refuses every load while the file named here exists, for tests of what a host does with a refused state.
-                if (const char* refuse = std::getenv("KICK_FIXTURE_REFUSE_STATE")) if (std::filesystem::exists(refuse)) return false;
+                // Refuses every load while the file named here exists, for tests of what a host does with a refused state. A file
+                // holding a number refuses that many loads, then removes itself: a test that must not race a restarting worker's
+                // retries (a host gives up after a few within a minute) lets it take the state on its own.
+                if (const char* refuse = std::getenv("KICK_FIXTURE_REFUSE_STATE")) if (std::filesystem::exists(refuse))
+                {
+                    int left = 0; { std::ifstream f(refuse); f >> left; }
+                    if (left == 1) std::filesystem::remove(refuse); else if (left > 1) { std::ofstream f(refuse, std::ios::trunc); f << left - 1; }
+                    return false;
+                }
                 double value = 0;
                 if (in->read(in, &value, sizeof(value)) != sizeof(value) || !std::isfinite(value)) return false;
                 // After the gain, optionally a sound asset ("library\0path"), which must resolve, as a

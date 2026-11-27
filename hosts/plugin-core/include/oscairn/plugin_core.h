@@ -81,7 +81,9 @@ namespace oscairn::plugin
         Instance(const Instance&) = delete;
         Instance& operator=(const Instance&) = delete;
 
-        void activate(double sampleRate); // the plugins are activated again at a new rate, keeping their state
+        // The plugins are activated again at a new rate, keeping their state. Returns when active, except while
+        // a pick or restore is loading: then at once, and process() plays silence (false) until the load is done.
+        void activate(double sampleRate);
         void deactivate();
         // Audio thread: no locks, no allocation. False for a block it could not play (frames 0 or past
         // maxFrames, no main bus, or not active), which then is silence where there is a bus to write.

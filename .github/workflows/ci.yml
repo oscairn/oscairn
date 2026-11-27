@@ -121,7 +121,7 @@ jobs:
       - name: Build
         run: cmake --build build-standalone
       - name: Test
-        run: ctest --test-dir build-standalone -R "^desktop-launch$" --output-on-failure  # the others click a real window or time real audio, which a shared runner cannot do
+        run: ctest --test-dir build-standalone -R "^(desktop-launch|plugin-clap)$" --output-on-failure  # plugin-clap: the DAW plugin's bundle opened as a host does; the others click a real window or time real audio, which a shared runner cannot do
 
   thread-sanitizer:
     runs-on: ubuntu-24.04
@@ -168,4 +168,4 @@ jobs:
       - name: Build
         run: cmake --build build-cpp-host
       - name: Test
-        run: ctest --test-dir build-cpp-host -R "clap-host|kick-clap|worker|plugin-hosts|control-|engine-|graph-|pressure-|memory" --output-on-failure
+        run: ctest --test-dir build-cpp-host -R "clap-host|kick-clap|worker|plugin-hosts|plugin-clap|control-|engine-|graph-|pressure-|memory" --output-on-failure

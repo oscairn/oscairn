@@ -190,6 +190,8 @@ watch() {
 			[ -n "$(named oscairn-panel-h)" ] || { say "stopped on purpose and the panel holder is gone: nothing left to keep"; exit 0; }
 			[ "$quiet" = held ] || say "Oscairn was stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs"
 			quiet=held
+		elif [ -n "$(named Oscairn)$(named oscairn-engine)" ]; then
+			: # a start by hand ended between the checks above: its engine is up, and it released the lock after
 		else
 			restart "the app and its engine ended without oscairn-fantom-stop"
 			quiet="" lockfrom=""

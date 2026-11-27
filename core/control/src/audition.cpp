@@ -24,6 +24,7 @@ namespace oscairn
         else
         {
             // This Performance stays loaded while the other plays: both must fit (RFC 0025).
+            // shortcut: the estimate counts once an open instance a node would keep as it is (issue 330), which an audition never does; auditioning the open Performance itself undercounts, count it whole if that is ever offered.
             if(budget_.cpu > 0)
                 if(const auto e = estimate(found.path); e.fits && !e.seamless)
                     throw std::runtime_error("auditioning " + found.name + " needs room for it and the open Performance together, more than this device allows");

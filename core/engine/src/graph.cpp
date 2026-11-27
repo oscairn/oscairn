@@ -280,6 +280,13 @@ namespace oscairn
     void Graph::fadeRoutes(const std::set<NodeId>& nodes,const std::set<NodeId>& ringing,uint8_t slot) {
         for(auto& r:audioRoutes_)if(r.to.node==graphOutput && (r.from.port==ringOutPort ? ringing.count(r.from.node)!=0 : nodes.count(r.from.node)!=0))r.live[0]=slot;
     }
+    void Graph::fadeFrom(const std::set<NodeId>& nodes,uint8_t slot) {
+        for(auto& r:audioRoutes_)if(nodes.count(r.from.node) && !nodes.count(r.to.node) && std::find(r.live.begin(),r.live.end(),slot)==r.live.end()){
+            auto at=std::find(r.live.begin(),r.live.end(),uint8_t(0));
+            if(at==r.live.end()){at=r.live.end()-1;r.gain*=liveGain(*at);}
+            *at=slot;}
+    }
+    void Graph::unfade(uint8_t slot) { for(auto& r:audioRoutes_)for(auto& x:r.live)if(x==slot)x=0; }
     void Graph::dropRingOut(NodeId node,bool older) { std::erase_if(audioRoutes_,[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort && (!older || r.from.channel>=2);}); }
     size_t Graph::ringOutRoutes(NodeId node) const { return size_t(std::count_if(audioRoutes_.begin(),audioRoutes_.end(),[&](const auto& r){return r.from.node==node && r.from.port==ringOutPort;})); }
     void Graph::publishReplacement(Graph& next,const std::function<void()>& onPublish) {

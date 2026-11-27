@@ -163,7 +163,10 @@ namespace oscairn
             // at ring-out's time limits (limitEnded), and at a fade's end (fadeEnded). All but a panic's and a fade's end come
             // with a notice (the fade's when it begins). A plugin reset for a block its worker did not render (a control
             // operation holding it) is engine.timing's workers' controlSilences.
-            struct RingOut { uint64_t cut = 0, faded = 0, chokedOlder = 0, partial = 0, panicEnded = 0, limitEnded = 0, fadeEnded = 0; bool operator==(const RingOut&) const = default; };
+            // Issue 330's steps, by plugin: sounding instances the next Performance kept as they were, their notes going on (kept),
+            // silent ones let go so that it fits (releasedSilent), and sounding ones faded out in 150 ms and let go for it, the
+            // rest ringing on (releasedFaded, said). A cut fades in 150 ms too.
+            struct RingOut { uint64_t cut = 0, faded = 0, chokedOlder = 0, partial = 0, panicEnded = 0, limitEnded = 0, fadeEnded = 0, kept = 0, releasedSilent = 0, releasedFaded = 0; bool operator==(const RingOut&) const = default; };
             RingOut ringOut;
         };
         virtual SessionStatus sessionStatus() const = 0;

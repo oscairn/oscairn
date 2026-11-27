@@ -515,6 +515,17 @@ printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default
 rm -rf "${bundle:?}/var" "${bundle:?}/ran"
 log=$bundle/var/oscairn/log/oscairn-fantom.log
 wait_for() { i=0; until grep -q "$1" "$log" 2>/dev/null || [ $i -ge $2 ]; do sleep 0.5; i=$((i + 1)); done; }
+# User content (issue 220): the data folder is inside the bundle, root/.local/share/oscairn (HOME=/root in the chroot).
+# Nothing the start, the stop or the restart path does may delete or overwrite a file in it.
+data=$bundle/root/.local/share/oscairn
+mkdir -p "$data/Performances/p1" "$data/Libraries/l1" "$data/recordings" "$data/library"
+echo performance > "$data/Performances/p1/performance.json"; echo library > "$data/Libraries/l1/item"; echo take > "$data/recordings/take.wav"
+echo '{"trust":1}' > "$data/trust.json"; echo '{"last":"p1"}' > "$data/library/last.json"; echo '{"measured":1}' > "$data/measurements.json"
+# Every name and content (sums), and with them each file's inode and modification time (snap): a rewrite or a replacement shows.
+sums() { ( cd "$1" && find . | sort && find . -type f -exec cksum {} + | sort ); }
+mtimes() { ( cd "$1" && find . -type f -exec stat -c '%n %Y' {} + | sort ); }
+snap() { sums "$1"; ( cd "$1" && find . -type f -exec stat -c '%i' {} + | sort ); mtimes "$1"; }
+before=$(snap "$data") content=$(sums "$data") times=$(mtimes "$data")
 out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-start" 2>&1); status=$?
 check "a start for real: the app runs and its engine answers" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the app runs (pid'"
 check "the tickgen pids reset before the app started, its output logged" "[ \"\$(grep -e tickgen-reset -e 'app started' '$bundle/ran' | head -n 2 | tr '\\n' ' ')\" = 'tickgen-reset app started ' ] && grep -q 'tickgen stand-in: reset' '$log'"
@@ -534,6 +545,20 @@ check "a failing tickgen reset is logged and the start goes on" "[ $status = 0 ]
 : > "$bundle/crash"
 wait_for 'its engine is not running' 20
 check "the app ended with its engine: not started again" "[ $status = 0 ] && grep -q 'the app ended (status 3) and its engine is not running: not started again' '$log' && [ \$(grep -c 'app started' '$bundle/ran') = 1 ]"
+check "start, a crash loop, a stop and a start again left the bundle's data folder untouched" "[ \"\$(snap '$data')\" = \"\$before\" ]"
+# The install as it is done by hand (docs/fantom-0.md): a new bundle unpacked beside the running one, the data folder
+# copied (cp -a) and compared (diff -rq), the swap, the old bundle deleted. The new bundle's start sees the same content.
+new=$bundle/new-bundle
+mkdir -p "$new/root/.local/share" "$new/etc"
+cp "$scripts/oscairn-fantom-start" "$scripts/oscairn-fantom-stop" "$bundle/start-chroot.sh" "$bundle/stop-chroot.sh" "$new/"
+cp -r "$bundle/etc/default" "$new/etc/"
+cp -a "$data" "$new/root/.local/share/oscairn"
+check "the copied data folder is identical" "diff -rq '$data' '$new/root/.local/share/oscairn'"
+out=$("$new/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "the new bundle's start over it changes nothing in it or in the old one" "[ $status = 0 ] && [ \"\$(sums '$new/root/.local/share/oscairn')\" = \"\$content\" ] && [ \"\$(mtimes '$new/root/.local/share/oscairn')\" = \"\$times\" ] && [ \"\$(snap '$data')\" = \"\$before\" ]"
+rm -rf "$bundle/root"
+check "the old bundle's data deleted, the new bundle still holds all of it" "[ \"\$(sums '$new/root/.local/share/oscairn')\" = \"\$content\" ]"
+rm -rf "$new"
 # The handover (keep_ui) on a stand-in bundle and /proc: the Rust UI ends with status 3, the X
 # server (a stand-in, serving only after 0.5 s) starts, the app runs once it serves, the X server
 # is signaled the moment the app ends, and the Rust UI starts only after it is gone, with the

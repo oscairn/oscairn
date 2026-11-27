@@ -16,6 +16,7 @@
 #include "AllocationGuard.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -262,6 +263,14 @@ namespace
         blocks(s, 2);
         s.savePerformance(file.string());
     }
+    // A CPU budget no change reaches and a memory budget whose ceiling is `bytes`: the ceiling is the budget less the worker
+    // program's code where plugins run in workers (memoryCeiling; Linux counts it, macOS does not), read from the estimate.
+    void allow(Session& s, uint64_t bytes)
+    {
+        const uint64_t big = uint64_t(1) << 40;
+        s.setBudget({64, big});
+        s.setBudget({64, bytes + (big - s.estimate("").budget.memory)});
+    }
     struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
     {
@@ -378,6 +387,314 @@ namespace
         for(int i = 0; i < int(48000 * 31 / frames) && s.leaving(); ++i) blocks(s, 1);
         report("real: C -> A (A's instruments kept warm)", load(s, p[0]));
     }
+    // Issue 330's steps (control-performance-switch-steps, OSCAIRN_SWITCH_STEPS): on their own, the rest of this one is long enough.
+    void issue330(char** argv, const fs::path& tempPath, const fs::path& samples)
+    {
+        // With a build of the Sampler (OSCAIRN_SWITCH_SAMPLER) and a folder holding sine.osp (OSCAIRN_SWITCH_SAMPLES): FANTOM k6's
+        // "again" series as on the unit, five Sampler parts each through a Delay; A, A four more times, a synth through a Delay,
+        // then A: the return takes A's instances kept warm back holding A's state, as many as a series without the repeats.
+        if(const char* sampler = std::getenv("OSCAIRN_SWITCH_SAMPLER"); sampler && *sampler)
+        {
+            const char* pack = std::getenv("OSCAIRN_SWITCH_SAMPLES");
+            if(!pack || !*pack) throw std::runtime_error("OSCAIRN_SWITCH_SAMPLES names the folder holding sine.osp");
+            const auto a = tempPath / "real-a", organ = tempPath / "real-organ";
+            ::unsetenv("OSCAIRN_SHARING"); // parts apart, as on the unit, saved so too
+            {
+                Session s(48000, frames);
+                const auto folder = s.registerAssetFolder(pack);
+                for(int i = 0; i < 5; ++i)
+                {
+                    const auto n = s.add("sampler " + std::to_string(i), sampler), fx = s.add("delay " + std::to_string(i), argv[3]);
+                    const auto part = s.addPart("Layer " + std::to_string(i)); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx); s.commit();
+                    check(s.setParameter(fx, 1, .2 + .02 * i) && s.setParameter(fx, 2, .3) && s.setParameter(fx, 3, .3), "delay settings");
+                    const std::string sound = "oscairn-sampler-sound/0\nsample sine.osp\nelement ampeg_decay1=127 ampeg_decay2=127 ampeg_release=" + std::to_string(40 + 5 * i) +
+                        "\nregion key=0-127 root=" + std::to_string(48 + i) + " element=0 sample=0 loop=0-44100\n";
+                    check(s.selectSound(n, s.prepareSound(n, "Layer " + std::to_string(i), {}, {}, {}, sound, folder.library, folder.directory)), "a Sampler sound");
+                }
+                blocks(s, 2); s.savePerformance(a.string());
+            }
+            // The other: a synth through a Delay, and one Sampler part of a sound of its own (# Organ has one).
+            {
+                Session s(48000, frames);
+                const auto folder = s.registerAssetFolder(pack);
+                const auto n = s.add("organ sampler", sampler), fx = s.add("organ delay", argv[3]), synth = s.add("organ synth", argv[1]);
+                const auto part = s.addPart("Organ"); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx);
+                const auto lead = s.addPart("Lead"); s.insertIntoPart(lead, 0, synth); s.commit();
+                const std::string sound = "oscairn-sampler-sound/0\nsample sine.osp\nelement ampeg_release=90\nregion key=0-127 root=60 element=0 sample=0 loop=0-44100\n";
+                check(s.selectSound(n, s.prepareSound(n, "Organ", {}, {}, {}, sound, folder.library, folder.directory)), "the other's Sampler sound");
+                blocks(s, 2); s.savePerformance(organ.string());
+            }
+            auto series = [&](int repeats) {
+                Session t(48000, frames);
+                load(t, a); quiet(t);
+                for(int i = 0; i < repeats; ++i) { const auto w = load(t, a); report(("real: A again " + std::to_string(i + 1)).c_str(), w); quiet(t); }
+                load(t, organ); quiet(t); quiet(t);
+                const auto w = load(t, a); report(repeats ? "real: back to A after repeats" : "real: back to A", w);
+                return w;
+            };
+            const auto plain = series(0), repeated = series(4);
+            check(repeated.kept == plain.kept && repeated.loaded == plain.loaded, "real Sampler: back to A after kept repeats keeps as many as with none: " + std::to_string(repeated.kept) + " against " + std::to_string(plain.kept));
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
+        }
+    // Issue 330, the owner's rule (2026-11-27): the new Performance loads; the last one's held notes ring on only as far as
+    // that allows. The memory budget lets the incoming Performance fit alone and not beside the whole of the last, so before
+    // these the change cut every held note (about 1 ms on the FANTOM). Each Session renders on a thread of its own, as on a
+    // device, at about 2.7 times its pace, so a fade made in the load is heard in the blocks; the fixture instrument sounds
+    // its gain as a constant while a key is down, so each part's level reads straight off the output.
+    {
+        struct Live
+        {
+            Session s{48000, frames};
+            std::vector<float> left = std::vector<float>(size_t(frames) * 30000); // every block's left channel, in order
+            std::atomic<size_t> block{0}; std::atomic<bool> done{false};
+            std::thread audio;
+            Live()
+            {
+                audio = std::thread([this] {
+                    std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()};
+                    auto next = std::chrono::steady_clock::now();
+                    while(!done)
+                    {
+                        s.process(out, frames);
+                        const auto b = block.load(std::memory_order_relaxed);
+                        if((b + 1) * frames <= left.size()) std::copy(l.begin(), l.end(), left.begin() + std::ptrdiff_t(b * frames));
+                        block.store(b + 1, std::memory_order_release);
+                        next += std::chrono::microseconds(1000); std::this_thread::sleep_until(next);
+                    }
+                });
+            }
+            ~Live() { done = true; audio.join(); }
+            void serve(size_t n) { const auto until = block.load() + n; while(block.load(std::memory_order_acquire) < until) { s.service(); std::this_thread::sleep_for(std::chrono::milliseconds(3)); } }
+            float at(size_t b, size_t f = 0) const { return left[b * frames + f]; }
+            bool said(const std::string& text) { for(const auto& n : s.sessionStatus().notices) if(n.find(text) != std::string::npos) return true; return false; }
+            bool has(const std::string& name) { for(const auto& [id, n] : s.graphState().names) if(n == name) return true; return false; }
+            uint64_t memoryOf(size_t i) { return s.estimate("").plugins.at(i).memory; }
+        };
+        // From the first block at or after `from` whose first sample is not `was`, to the first after it at `now` throughout:
+        // how many samples lay between the two, the largest step from one sample to the next, and whether it reached `now`.
+        struct Transition { size_t between = 0; float step = 0; bool reached = false; };
+        auto transition = [](const Live& l, size_t from, size_t to, float was, float now) {
+            Transition t; const float span = std::abs(was - now), lo = std::min(was, now) + .02f * span, hi = std::max(was, now) - .02f * span;
+            float last = l.at(from);
+            for(size_t i = from * frames; i < to * frames; ++i)
+            {
+                const float v = l.left[i];
+                t.step = std::max(t.step, std::abs(v - last)); last = v;
+                if(v > lo && v < hi) ++t.between;
+                if(std::abs(v - now) < 1e-5f) t.reached = true; else if(t.reached && std::abs(v - now) >= 1e-5f) t.reached = false;
+            }
+            return t;
+        };
+        const auto incoming = tempPath / "steps-incoming"; ringing(incoming, 1, argv[1], argv[3], .5); // a synth through a Delay, nothing held in it
+
+        // A silent instance holding the node's state is taken over as before issue 330: its state saved and compared with the file,
+        // then reset (or given the state again where they differ), never kept unseen. FANTOM k8: a Sampler loaded fresh saves a state
+        // that differs from its file until it is given it again; kept as it was through the direct repeats, it still differed when
+        // its warm instance was taken back after another Performance, so the return loaded every state again (kept 0, where main
+        // kept 3 to 4). Only a sounding instance, which cannot be saved without a reset in a worker, is kept unseen.
+        {
+            const auto same = tempPath / "steps-silent-same"; single(same, argv[4], .3);
+            Session t(48000, frames);
+            load(t, same); quiet(t);
+            const auto w = load(t, same); report("steps: the same Performance again, silent", w);
+            check(w.reused == 1 && w.loaded == 0 && w.open.save > 0 && t.sessionStatus().ringOut.kept == 0, "steps, silent: the instance taken over and compared with its file, not kept unseen: " +
+                  std::to_string(w.open.save) + " ms saving, " + std::to_string(t.sessionStatus().ringOut.kept) + " kept unseen");
+        }
+        // Back to a Performance after one other, nothing held (FANTOM k6's "again"): A, A again (kept as it is), B, then A. What A
+        // left warm at A -> B (or B took over) holds A's state as on main: the return keeps as many as it does with no repeat first.
+        // A memory budget everything fits in, as on the device.
+        {
+            const auto a = tempPath / "steps-back-a", b = tempPath / "steps-back-b", c = tempPath / "steps-back-c", d = tempPath / "steps-back-d";
+            ringing(a, 0, argv[1], argv[3], .5); ringing(b, 1, argv[1], argv[3], .5); other(c, argv[2], samples); sampled(d, argv[2], argv[3], samples, false);
+            auto back = [&](const fs::path& x, const fs::path& y, bool repeat, bool budget) {
+                Session t(48000, frames);
+                if(budget) allow(t, uint64_t(1) << 36);
+                load(t, x); quiet(t);
+                if(repeat) { load(t, x); quiet(t); }
+                load(t, y); quiet(t);
+                const auto w = load(t, x); std::printf("steps, back: %s%s %s -> %s -> %s: kept %llu beside %llu loaded %llu\n", budget ? "budget, " : "", repeat ? "repeat," : "", x.filename().c_str(), y.filename().c_str(), x.filename().c_str(), (unsigned long long)w.kept, (unsigned long long)w.beside, (unsigned long long)w.loaded);
+                return w;
+            };
+            for(const auto& [x, y] : std::vector<std::pair<fs::path, fs::path>>{{a, b}, {c, a}, {d, a}, {a, c}})
+                for(const bool budget : {false, true})
+                {
+                    const auto plain = back(x, y, false, budget), repeated = back(x, y, true, budget);
+                    check(repeated.kept == plain.kept && repeated.beside == plain.beside && repeated.loaded == plain.loaded, "steps, back to A: a repeat kept as it is first changes nothing at the return: " +
+                          std::to_string(repeated.kept) + " kept, " + std::to_string(repeated.beside) + " beside against " + std::to_string(plain.kept) + ", " + std::to_string(plain.beside));
+                }
+        }
+        // Short of CPU alone, the silent ones are not let go: carried over and kept warm as before issue 330, so a return to the
+        // last Performance takes them back holding its state (FANTOM k6: every silent one let go left nothing warm, kept 0 on the
+        // return). Only what sounds may go. Four instruments, a key held on the first; a CPU budget the incoming synth fits with
+        // one of them beside it, not with all four; no memory budget.
+        {
+            ::setenv("OSCAIRN_AUDIO_CORES", "1", 1);
+            const auto four = tempPath / "steps-cpu-four"; many(four, 0, argv[4], 4);
+            Session t(48000, frames);
+            load(t, four); quiet(t);
+            t.note(true, 1, .8); blocks(t, 20);
+            t.setBudget({64}); t.forgetMeasurements();
+            const auto next = t.estimate(incoming.string()); const double one = t.estimate("").plugins.at(0).cpu;
+            t.setBudget({next.cpu + 1.5 * one}); t.forgetMeasurements();
+            const auto e = t.estimate(incoming.string());
+            check(e.fits && !e.seamless && e.fades, "steps, CPU alone: beside all four it does not fit, the memory is there");
+            load(t, incoming);
+            { Audio x; bool rang = true; for(int i = 0; i < 20; ++i) { x.run(t); rang = rang && x.l[0] == .2f; } check(rang, "steps, CPU alone: the held note rings on, not faded"); }
+            const auto r = t.sessionStatus().ringOut;
+            check(r.releasedSilent == 0 && r.faded == 0 && r.cut == 0, "steps, CPU alone: nothing silent let go, no fade: " + std::to_string(r.releasedSilent) + " let go");
+            t.note(false, 1, 0); quiet(t); quiet(t);
+            t.setBudget({});
+            const auto w = load(t, four); report("steps: back after CPU alone", w);
+            check(w.kept == 4 && w.loaded == 0, "steps, CPU alone: the return takes all four back holding their state: " + std::to_string(w.kept));
+            ::setenv("OSCAIRN_AUDIO_CORES", "3", 1);
+        }
+        // A, an instance that came by claim (its sounds prepared beside, RFC 0021, as the FANTOM's TSO Samplers come from ST
+        // Final): it holds the node's sound in another slot, the plugin showing that sound's values once it plays it. The next
+        // load of the same Performance, a key held, keeps it as it is, as it keeps one that opened from the file.
+        {
+            const auto from = tempPath / "steps-claim-a", to = tempPath / "steps-claim-b";
+            ringing(from, 0, argv[1], argv[3], .5); ringing(to, 2, argv[1], argv[3], .5);
+            Live l; l.serve(4);
+            load(l.s, from); l.serve(1200);
+            const auto claimed = load(l.s, to); l.serve(1200);
+            check(claimed.beside == 1, "steps, a claimed instance: B's synth sound prepared beside A's: " + std::to_string(claimed.beside));
+            l.s.controller(64, 127); l.s.note(true, 60, .8); l.serve(20); l.s.note(false, 60, 0); l.serve(20);
+            const auto w = load(l.s, to); report("steps: B -> B, B's synth claimed from A, pedaled", w); l.serve(40);
+            const auto r = l.s.sessionStatus().ringOut;
+            check(w.kept >= 1 && w.beside == 0 && r.kept == 1 && r.chokedOlder == 0, "steps, a claimed instance: kept as it is at the next load of its state, nothing beside it: " +
+                  std::to_string(w.kept) + " kept, " + std::to_string(w.beside) + " beside, " + std::to_string(r.kept) + " counted");
+            check(l.at(l.block.load() - 2) != 0, "steps, a claimed instance: the pedaled note rings on");
+            const auto again = load(l.s, to); l.serve(40);
+            check(again.beside == 0 && l.s.sessionStatus().ringOut.chokedOlder == 0 && !l.said("two Performances ago"), "steps, a claimed instance: and again, nothing choked");
+            l.s.controller(64, 0);
+        }
+        // The notice of a tail's chain given up means something audible: an instrument of the last Performance whose sounds the next
+        // one prepares beside its own while it is silent, its effect let go for want of room, gives up nothing to hear (FANTOM k5:
+        // the notice on every switch with a chord held elsewhere). Two parts apart, each a synth through a Delay; a key held on the
+        // first; beside both the incoming pair does not fit, beside the first it does.
+        {
+            ::unsetenv("OSCAIRN_SHARING");
+            auto pair = [&](const fs::path& file, int variant) {
+                Session s(48000, frames);
+                for(int i = 0; i < 2; ++i)
+                {
+                    const auto n = s.add("synth " + std::to_string(i), argv[1]), fx = s.add("delay " + std::to_string(i), argv[3]);
+                    PartInput keys; keys.zones = {NoteZone{uint8_t(64 * i), uint8_t(64 * i + 63)}};
+                    const auto part = s.addPart("Part " + std::to_string(i), keys); s.insertIntoPart(part, 0, n); s.insertIntoPart(part, 1, fx); s.commit();
+                    check(s.setParameter(fx, 1, .25) && s.setParameter(fx, 2, .5) && s.setParameter(fx, 3, .6), "delay settings");
+                    check(s.selectSound(n, s.prepareSound(n, "Pair " + std::to_string(variant) + std::to_string(i), {{1, .3 + .2 * variant + .1 * i}, {4, double(i)}})), "select a sound");
+                }
+                blocks(s, 2); s.savePerformance(file.string());
+            };
+            const auto a = tempPath / "steps-chain-a", b = tempPath / "steps-chain-b"; pair(a, 0); pair(b, 1);
+            Live l; l.serve(4);
+            load(l.s, a); l.serve(1200);
+            l.s.note(true, 30, .8); l.serve(20);
+            l.s.setBudget({64}); l.s.forgetMeasurements();
+            uint64_t first = 0; for(const auto& c : l.s.estimate("").plugins) if(c.name == "synth 0" || c.name == "delay 0") first += c.memory;
+            const auto next = l.s.estimate(b.string()).memory;
+            allow(l.s, next + first + first / 4); l.s.forgetMeasurements();
+            check(!l.s.estimate(b.string()).seamless, "steps, a silent chain: beside both it does not fit");
+            const auto before = l.s.sessionStatus().ringOut;
+            load(l.s, b); l.serve(40);
+            const auto r = l.s.sessionStatus().ringOut;
+            check(r.releasedSilent > before.releasedSilent && r.partial == before.partial && !l.said("without part of their chain") && l.at(l.block.load() - 2) != 0,
+                  "steps, a silent chain: the silent part let go says nothing, the held note rings on: " + std::to_string(r.partial - before.partial) + " partial");
+            l.s.note(false, 30, 0); l.s.setBudget({});
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
+        }
+
+        // A: the same Performance loaded again with a key held. Its instrument holds that state already and nothing changed it,
+        // so it is kept as it is: nothing is loaded beside it (one copy in memory, where two do not fit), it is not reset, and
+        // the held note plays on through the change and ends when its key comes up.
+        {
+            const auto same = tempPath / "steps-same"; single(same, argv[4], .3);
+            Live l; l.serve(4);
+            load(l.s, same); l.serve(20);
+            l.s.note(true, 60, .8); l.serve(20);
+            l.s.setBudget({64}); l.s.forgetMeasurements();
+            allow(l.s, l.s.estimate("").memory + l.s.estimate(same.string()).memory - 1); l.s.forgetMeasurements();
+            const auto e = l.s.estimate(same.string());
+            check(e.fits && e.seamless, "steps, the same Performance again: one copy fits, the instance it keeps counted once: seamless " + std::to_string(e.seamless));
+            const auto from = l.block.load();
+            const auto w = load(l.s, same); report("steps: the same Performance again, a key held", w);
+            l.serve(40);
+            check(w.kept == 1 && w.reused == 1 && w.beside == 0 && w.loaded == 0 && l.s.leaving() == 0, "steps, the same Performance again: its instance kept as it is, nothing loaded or prepared beside it, nothing left ringing out: " +
+                  std::to_string(w.kept) + " kept, " + std::to_string(w.beside) + " beside, " + std::to_string(w.loaded) + " loaded");
+            bool even = true; for(size_t b = from; b < l.block.load() - 1; ++b) for(size_t f = 0; f < frames; ++f) even = even && l.at(b, f) == .3f;
+            check(even, "steps, the same Performance again: the held note plays on through the change, every sample at its level");
+            check(!l.said("could not ring out") && l.s.sessionStatus().ringOut.cut == 0 && l.s.sessionStatus().ringOut.kept == 1, "steps, the same Performance again: no cut, no notice, counted as kept: " + std::to_string(l.s.sessionStatus().ringOut.kept));
+            l.s.note(false, 60, 0); l.serve(10);
+            check(l.at(l.block.load() - 2, frames - 1) == 0, "steps, the same Performance again: the key's release reaches the instance kept");
+            l.s.setBudget({});
+        }
+        // B: four instruments, one key held on the first. Beside all four it does not fit, beside the one sounding it does: the
+        // three silent ones go, the held note rings on, and nothing is said.
+        {
+            const auto four = tempPath / "steps-four"; many(four, 0, argv[4], 4);
+            Live l; l.serve(4);
+            load(l.s, four); l.serve(1200); // three seconds of silence: free
+            l.s.note(true, 1, .8); l.serve(20);
+            l.s.setBudget({64}); l.s.forgetMeasurements();
+            const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
+            allow(l.s, next + one + one / 2); l.s.forgetMeasurements();
+            check(!l.s.estimate(incoming.string()).seamless, "steps, silent ones: beside all four it does not fit");
+            const auto from = l.block.load();
+            load(l.s, incoming); l.serve(40);
+            check(l.has("synth"), "steps, silent ones: the new Performance loaded");
+            bool rang = true; for(size_t b = from; b < l.block.load() - 1; ++b) rang = rang && l.at(b) == .2f;
+            check(rang, "steps, silent ones: the held note rings on through the change: " + std::to_string(l.at(l.block.load() - 2)));
+            const auto r = l.s.sessionStatus().ringOut;
+            check(!l.said("could not ring out") && r.cut == 0 && r.releasedSilent == 3 && r.releasedFaded == 0 && l.s.leaving() == 1, "steps, silent ones: the three silent ones let go, said nowhere, the sounding one ringing out: " +
+                  std::to_string(r.releasedSilent) + " let go, " + std::to_string(l.s.leaving()) + " ringing");
+            l.s.note(false, 1, 0); l.s.setBudget({});
+        }
+        // B and C: two instruments both held, the first with three keys, the second with one. Beside both it does not fit, beside
+        // the first it does: the second (fewer notes) fades out in 150 ms and goes, the first rings on, and a notice says so.
+        {
+            const auto two = tempPath / "steps-two"; many(two, 0, argv[4], 2);
+            Live l; l.serve(4);
+            load(l.s, two); l.serve(1200); // three seconds of silence: free
+            for(const int key : {0, 1, 2}) l.s.note(true, key, .8);
+            l.s.note(true, 4, .8); l.serve(20);
+            l.s.setBudget({64}); l.s.forgetMeasurements();
+            const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
+            allow(l.s, next + one + one / 2); l.s.forgetMeasurements();
+            const auto from = l.block.load();
+            const float both = l.at(from - 1);
+            load(l.s, incoming); l.serve(60);
+            check(l.has("synth"), "steps, partly: the new Performance loaded");
+            const auto t = transition(l, from, l.block.load() - 1, both, .2f);
+            std::printf("steps, partly: %.3f to %.3f, %zu samples between, the largest step %.5f\n", both, .2, t.between, t.step);
+            check(std::abs(both - .41f) < 1e-5f, "steps, partly: both held before the change: " + std::to_string(both));
+            check(t.reached, "steps, partly: the first, with more notes held, rings on at its level");
+            check(t.between >= 20 * frames && t.step <= .05f * .21f, "steps, partly: the second faded out, not cut: " + std::to_string(t.between) + " samples between, a step of " + std::to_string(t.step));
+            const auto r = l.s.sessionStatus().ringOut;
+            check(l.said("faded out in 150 ms") && l.said("instrument 1") && r.releasedFaded == 1 && r.cut == 0, "steps, partly: the notice names the one faded out, counted: " + std::to_string(r.releasedFaded));
+            for(const int key : {0, 1, 2, 4}) l.s.note(false, key, 0);
+            l.s.setBudget({});
+        }
+        // C: one instrument held, and it does not fit beside even that: the whole of it goes, faded out in 150 ms (a cut of
+        // about 1 ms before), said; the new Performance loads.
+        {
+            const auto lone = tempPath / "steps-lone"; many(lone, 0, argv[4], 1);
+            Live l; l.serve(4);
+            load(l.s, lone); l.serve(1200); // three seconds of silence: free
+            l.s.note(true, 1, .8); l.serve(20);
+            l.s.setBudget({64}); l.s.forgetMeasurements();
+            const auto one = l.memoryOf(0), next = l.s.estimate(incoming.string()).memory;
+            allow(l.s, next + one / 2); l.s.forgetMeasurements();
+            const auto from = l.block.load();
+            load(l.s, incoming); l.serve(60);
+            check(l.has("synth"), "steps, a cut: the new Performance loaded");
+            const auto t = transition(l, from, l.block.load() - 1, .2f, 0);
+            std::printf("steps, a cut: %zu samples between, the largest step %.5f\n", t.between, t.step);
+            check(t.reached && t.between >= 20 * frames && t.step <= .05f * .2f, "steps, a cut: faded out, not cut: " + std::to_string(t.between) + " samples between, a step of " + std::to_string(t.step));
+            check(l.said("could not ring out") && l.said("faded out in 150 ms") && l.s.sessionStatus().ringOut.cut == 1, "steps, a cut: said, and counted as a cut");
+            l.s.note(false, 1, 0); l.s.setBudget({});
+        }
+    }
+    }
 }
 
 int main(int argc, char** argv)
@@ -398,6 +715,15 @@ int main(int argc, char** argv)
         const auto a = temp.path / "a", b = temp.path / "b", c = temp.path / "c";
         shared(a, 0, argv[1], argv[3], argv[4]); shared(b, 1, argv[1], argv[3], argv[4]); other(c, argv[2], samples);
 
+        if(std::getenv("OSCAIRN_SWITCH_STEPS"))
+        {
+            ::setenv("OSCAIRN_AUDIO_CORES", "3", 1); // the FANTOM-07's, as the fit rule's cases above run
+            { std::vector<float> wave(4 * 48000); for(size_t f = 0; f < wave.size(); ++f) wave[f] = float(.3 * ((f * 3) % 200) / 200.0 - .15); writeWavFile(samples / "long.wav", wave, 1, 48000); }
+            issue330(argv, temp.path, samples);
+            if(failures) return 1;
+            std::printf("ok: issue 330's steps\n");
+            return 0;
+        }
         // RFC 0045: residents cost nothing but memory, and give it back. Y's instrument (a copy of the
         // plugin's build, replaced later) and C's four Samplers kept warm while G plays, paced as a device's
         // callback; their workers use next to no CPU. Then the system's available memory (a /proc/meminfo
@@ -524,8 +850,9 @@ int main(int argc, char** argv)
         compare(s, a, "cut B -> A"); quiet(s);
         // A cut takes over the instance a held note sounds through too: the reused instance carries
         // nothing over (voices, held notes, state), so B then sounds as B opened fresh. Then back to A.
+        // B fits alone and beside nothing of A (issue 330: what does fit beside it rings on, below).
         s.note(true, 40, 1); blocks(s, 10);
-        s.setBudget({64, s.estimate("").memory + s.estimate(b.string()).memory - 1});
+        s.setBudget({64, 0}); allow(s, s.estimate(b.string()).memory);
         check(!s.estimate(b.string()).seamless, "A -> B cuts");
         w = load(s, b); report("A -> B, a cut, a note held", w);
         check(w.reused == 8 && w.loaded == 0 && s.leaving() == 0, "a cut takes over the sounding instance too, nothing rings out");
@@ -802,7 +1129,8 @@ int main(int argc, char** argv)
             compare(t, again, "again: J -> J, silent"); quiet(t);
             t.note(true, 60, .8); blocks(t, 10);
             w = load(t, again); report("again: J -> J, a note held", w);
-            check(w.beside == 1 && w.loaded == 0 && w.open.beside > 0, "loaded again, a note held: the synth given its sound beside, to ring out, timed as beside");
+            // Issue 330: nothing changed it since it opened from this state, so the synth is kept as it is, sounding: no sound beside, no reset.
+            check(w.beside == 0 && w.loaded == 0 && w.kept == 1 && w.open.beside == 0, "loaded again, a note held: the synth kept as it is, nothing beside it");
             {
                 Audio audio; bool rang = false; for(int i = 0; i < 20; ++i) { audio.run(t); rang = rang || audio.sounding(); }
                 check(rang, "again: the held note plays on through the change");
@@ -1231,6 +1559,9 @@ int main(int argc, char** argv)
         // notice. A: twice as many plain instruments as audio cores, one holding a note; B: a synth through a Delay.
         // With `stall`, the control thread ticks once in the fade and next well past its end (held up): the gain still
         // ramps to 0 across a block before A's plugins go, not a cut from where the last tick left it.
+        // One audio core: with three, the incoming synth's chain sets the per-block budget, and beside it the outgoing instruments
+        // fit in part, so issue 330's steps let some go and the rest ring on, never reaching the whole fade.
+        ::setenv("OSCAIRN_AUDIO_CORES", "1", 1);
         for(const bool stall : {false, true})
         {
             const std::string how = stall ? "fade, the control thread held up: " : "fade: ";
@@ -1242,7 +1573,9 @@ int main(int argc, char** argv)
                 many(heavy, 0, argv[4], 2 * cores); ringing(light, 1, argv[1], argv[3], .5);
                 Session t(48000, frames);
                 load(t, heavy); quiet(t);
-                t.controller(64, 127); t.note(true, 1, .8); blocks(t, 20);
+                // A key held on every instrument: none of them is silent, so none goes first (issue 330), and beside even one it does not fit.
+                t.controller(64, 127); for(uint32_t i = 0; i < 2 * cores; ++i) t.note(true, uint8_t(3 * i + 1), .8);
+                blocks(t, 20);
                 t.setBudget({64}); t.forgetMeasurements();
                 const auto open = t.estimate(""), next = t.estimate(light.string());
                 const double budget = std::max(next.longest, next.cpu / cores) * 1.05; // B alone fits; with A's total, not
@@ -1275,11 +1608,14 @@ int main(int argc, char** argv)
                 blocks(t, 4);
                 check(!t.leaving(), how + "A's plugins gone once faded");
                 check(t.sessionStatus().ringOut.fadeEnded > 0 && t.sessionStatus().ringOut.limitEnded == 0, how + "session.status counts what the fade's end took: " + std::to_string(t.sessionStatus().ringOut.fadeEnded));
-                t.note(false, 1, 0); t.controller(64, 0); t.setBudget({});
+                for(uint32_t i = 0; i < 2 * cores; ++i) t.note(false, uint8_t(3 * i + 1), 0);
+                t.controller(64, 0); t.setBudget({});
                 compare(t, light, (how + "then B as a fresh load").c_str());
             }
             else std::printf("fade: %u audio cores, more parts than the fixture's keyboard holds: not checked\n", cores);
         }
+        ::setenv("OSCAIRN_AUDIO_CORES", "3", 1);
+
         ::unsetenv("OSCAIRN_AUDIO_CORES");
 
         // A panic while edits are staged is taken then: kept for the next tick without them, it ended the tail of a change

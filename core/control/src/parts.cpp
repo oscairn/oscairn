@@ -383,7 +383,7 @@ namespace oscairn
         std::erase_if(panSlots_, [&](const auto& s) { return !faderSlots_.count(s.first); });
         std::erase_if(sendSlots_, [&](const auto& s) {
             return std::none_of(parts_.begin(), parts_.end(), [&](const Part& p) { return p.id == s.first.first && std::any_of(p.sends.begin(), p.sends.end(), [&](const Send& x) { return x.bus == s.first.second; }); }); });
-        std::set<uint8_t> used{retiringSlot}; // the last Performance's fade (fade())
+        std::set<uint8_t> used{retiringSlot,releaseSlot}; // the last Performance's fade (fade()), and what a change lets go (fadeOut())
         for(const auto& [part, slot] : faderSlots_) used.insert(slot);
         for(const auto& [part, slots] : panSlots_) used.insert(slots.begin(), slots.end());
         for(const auto& [send, slot] : sendSlots_) used.insert(slot);

@@ -527,9 +527,23 @@ namespace oscairn
         static bool sharesParts() noexcept;
         // How a Performance not open opens: its estimate, whether its parts share instances (sharesParts, or apart they would not fit
         // the memory and shared they would), and the notice that says it fell back.
-        struct Sharing { Estimate estimate; bool share = false; std::string notice; };
-        Sharing sharing(const std::string& directory);
-        Estimate estimate(const std::string& directory, bool share);
+        // Issue 330, how a change to it gives up the open Performance (and what still rings out of the last): kept, nodes whose
+        // instance one of its nodes keeps as it is (holding); released, nodes let go before it loads so that it fits beside the
+        // rest, the silent first, then the least missed of those sounding; cut: none fits beside it, all of them go. Only for
+        // openPerformance; an estimate alone counts every node but the kept.
+        // fits: it rings out beside what is left (released may be empty: short of CPU alone, the silent stay); memory: short of memory.
+        struct Steps { std::set<NodeId> kept, released; bool cut = false, fits = false, memory = false; };
+        struct Sharing { Estimate estimate; bool share = false; std::string notice; Steps steps; };
+        Sharing sharing(const std::string& directory, bool steps = false);
+        Estimate estimate(const std::string& directory, bool share, Steps* steps = nullptr);
+        // Issue 330 (A): an open node whose instance holds the saved state of node `key` of the Performance in `root` (opened from it,
+        // or from a state of the same bytes), of plugin `id` `version`, changed by nothing since, and not in `skip`: that node keeps
+        // it as it is while it sounds (no save, load or reset, so a held note goes on; a silent one is taken over, compared); 0: none.
+        NodeId holding(const std::filesystem::path& root, const std::string& key, const std::string& id, const std::string& version, const std::set<NodeId>& skip) const;
+        // Those of `kept` that no outgoing node not kept plays into while it sounds: a tail ringing out through its own chain
+        // needs that chain carried over (Graph::ringOut), so a node it feeds is not kept for the next one.
+        std::set<NodeId> unfed(std::set<NodeId> kept) const;
+        std::set<NodeId> edited_; // open nodes edited in their plugin's own editor (a gesture) since the Performance opened (holding)
         bool memoryFits(const Estimate& e) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
@@ -850,12 +864,16 @@ namespace oscairn
             std::vector<std::string> momentary;   // its switches on only while held (`physicalControls`)
             bool polyAftertouch = true;           // its `input.aftertouch` is poly (the default, so too when left out)
             std::map<NodeId,std::string> states;  // each node's saved state (stateDigest), with a budget
+            std::vector<std::pair<NodeId,NodeId>> held; // the playing graph's nodes whose instance its node keeps as it is (holding), and that node
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.
         struct Free { NodeId node = 0; std::shared_ptr<PluginHost> host; Loaded loaded; bool keep = false; std::chrono::steady_clock::time_point idle{}; }; // keep: a playing one to keep warm, not take, unless it holds the node's state; idle: since when it was kept warm
-        std::vector<Free> freeInstances(bool all) const; // all: every one that could be (a cut cuts them anyway)
-        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming, const Sharing& sharing); // read with what it may take over; incoming: its memory estimate
+        std::vector<Free> freeInstances(bool all, const std::set<NodeId>& except = {}) const; // all: every one that could be (a cut cuts them anyway); except: sound as if silent (let go)
+        // The outgoing nodes sounding in the last three seconds, but those in `except`, and every one they reach by audio or notes.
+        std::set<NodeId> busyNodes(const std::set<NodeId>& except = {}) const;
+        // released: the open Performance's nodes let go for it (Steps), taken over where they can be and none kept warm.
+        std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming, const Sharing& sharing, const std::set<NodeId>& released = {}, bool forMemory = false); // read with what it may take over; incoming: its memory estimate; forMemory: released for want of memory
         void keepWarm(NodeId node);                       // ringOut: a node rung out kept loaded, or removed
         uint64_t warmMemory() const;
         // RFC 0045: instances kept warm let go, those `which` picks: one in a worker is destroyed on a
@@ -893,7 +911,13 @@ namespace oscairn
         static constexpr size_t warmLimit = 32; // without memory classes; with them, memory bounds them (evictOpportunistic)
         bool keepInstances_ = false;                      // an audition opening a Performance: take over nothing set aside
         std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free, const Sharing& sharing);
-        void open(Prepared& prepared, bool seamless, bool fades = false);
+        void open(Prepared& prepared, bool seamless, bool fades = false, const std::set<NodeId>& released = {}); // released: not carried over
+        // Issue 330 (C): the ways out of `nodes` into the rest of the playing graph fade from 1 to 0 over fadeSeconds on this live
+        // gain, from the control thread before a change reads its plugins (blocking it that long), so those it lets go while they
+        // sound end without a click and their instances can be taken over. unfade: a load that failed gives them their ways back.
+        static constexpr uint8_t releaseSlot = 254;
+        void fadeOut(const std::set<NodeId>& nodes);
+        void unfade();
         // A change over the CPU budget with the memory there (Estimate::fades): the last Performance is carried over as in a
         // seamless change, its ways to the outputs on this live gain, which service() takes from 1 to 0 over fadeSeconds;
         // then what rings out of it goes at once (endRinging_), its retiring sounds choked (RFC 0021, 2026-11-19).

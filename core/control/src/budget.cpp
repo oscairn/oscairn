@@ -23,6 +23,7 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <tuple>
 #ifdef __linux__
 #include <cerrno>
 #include <cstring>
@@ -927,35 +928,37 @@ namespace oscairn
     // so stacked Sampler parts are not held to one core's time. Each instance loads its samples again (the kernel's file cache is
     // all they share), so a Performance whose parts apart would not fit the memory and shared would opens shared, said: a
     // Performance must load.
-    Session::Sharing Session::sharing(const std::string& directory)
+    Session::Sharing Session::sharing(const std::string& directory, bool steps)
     {
         Sharing s;
         s.share = sharesParts();
-        s.estimate = estimate(directory, s.share);
+        s.estimate = estimate(directory, s.share, steps ? &s.steps : nullptr);
         if(s.share || directory.empty() || budget_.cpu <= 0 || memoryFits(s.estimate)) return s;
-        auto shared = estimate(directory, true);
+        Steps sharedSteps;
+        auto shared = estimate(directory, true, steps ? &sharedSteps : nullptr);
         if(!memoryFits(shared)) return s;
         s.notice = "its parts of one plugin share an instance: each in an instance of its own it needs " + std::to_string((s.estimate.memory + recorder_.committedBytes()) >> 20) +
                    " MiB of memory where this device allows " + std::to_string(memoryCeiling() >> 20) + ", so stacked parts share one instance's voices";
-        s.estimate = std::move(shared); s.share = true;
+        s.estimate = std::move(shared); s.share = true; s.steps = std::move(sharedSteps);
         return s;
     }
 
     Control::Estimate Session::estimate(const std::string& directory) { return sharing(directory).estimate; }
 
-    Control::Estimate Session::estimate(const std::string& directory, bool share)
+    Control::Estimate Session::estimate(const std::string& directory, bool share, Steps* steps)
     {
         if(budget_.cpu > 0) loadMeasurements();
         // What plays now: this Performance's plugins, and any still ringing out from the last.
         std::vector<Cost> open, ringing;
         std::vector<Cost> playing; // the open Performance as it would ring out: by the voices sounding now
+        std::vector<NodeId> playingNodes; // playing's, each its node
         for(const auto& [node, name] : nodes_)
         {
             open.push_back(nodeCost(graph_, node, name, noteLimit(node)));
-            playing.push_back(ringingCost(graph_, node, name));
+            playing.push_back(ringingCost(graph_, node, name)); playingNodes.push_back(node);
             for(const auto& p : parts_) if(nodesOf(p).count(node)) { open.back().part = playing.back().part = "part " + std::to_string(p.id); break; }
         }
-        for(const auto node : leaving_) if(graph_.contains(node)) { ringing.push_back(ringingCost(graph_, node)); playing.push_back(ringing.back()); }
+        for(const auto node : leaving_) if(graph_.contains(node)) { ringing.push_back(ringingCost(graph_, node)); playing.push_back(ringing.back()); playingNodes.push_back(node); }
         Feeds feeds; // each part's buses: the one it plays through, and those it sends to
         for(const auto& p : parts_)
         {
@@ -1018,6 +1021,14 @@ namespace oscairn
         std::map<std::string, uint32_t> formed; // per plugin build: the nodes that form instances on their own so far
         std::map<std::string, uint32_t> further; // per instance: its nodes past the first so far
         std::vector<Cost> coming;
+        // Issue 330 (A): open nodes whose instance one of its nodes keeps as it is (holding, as read finds them): counted once, on its side.
+        std::set<NodeId> kept; std::error_code noRoot;
+        const auto root = fs::canonical(directory, noRoot);
+        auto kindOf = [&](const json_value_s* plugin) { return text(detail::member(plugin, "id")) + '\n' + text(detail::member(plugin, "version")) + '\n' + text(detail::member(plugin, "pathHint")); };
+        std::map<std::string, uint32_t> kinds; // the nodes of each plugin that may form groups on their own (read's)
+        for(const auto& [key, node] : definitions)
+            if(text(detail::member(node, "engine")) == key && engines[key] == 1 && !offMain.count(key))
+                if(const auto* sound = detail::member(node, "sound"); !sound || sound->type == json_type_null) ++kinds[kindOf(detail::member(node, "plugin"))];
         for(auto* e = static_cast<const json_array_s*>(nodes->payload)->start; e; e = e->next)
         {
             const auto* plugin = detail::member(e->value, "plugin");
@@ -1049,7 +1060,76 @@ namespace oscairn
             }
             // A further part (furtherPart).
             if(shares && seen) if(const auto x = furtherPart(seen, ++further[instance], seen->declared)) coming.back().memory = *x;
+            if(!noRoot && engine == key && engines[engine] == 1 && (!sound || sound->type == json_type_null))
+                if(const auto n = holding(root, key, id, text(detail::member(plugin, "version")), kept))
+                    if(!share || offMain.count(key) || kinds[kindOf(plugin)] < 2 || SoundContext::busParameter(graph_.host(n)) == CLAP_INVALID_ID) kept.insert(n); // else it forms a group of its kind (read's)
         }
-        return estimateOf(coming, playing, its, feeds);
+        kept = unfed(kept);
+        // Beside the open Performance but the nodes in `gone`.
+        auto beside = [&](const std::set<NodeId>& gone) {
+            std::vector<Cost> p;
+            for(size_t i = 0; i < playing.size(); ++i) if(!gone.count(playingNodes[i])) p.push_back(playing[i]);
+            return estimateOf(coming, p, its, feeds);
+        };
+        const auto e = beside(kept);
+        if(!steps || budget_.cpu <= 0) return e;
+        steps->kept = kept;
+        if(!e.fits || e.seamless) return e;
+        // Issue 330 (B), the owner's rule (2026-11-27): it loads; the last one's held notes ring on only as far as they let it. First
+        // the nodes the last one plays nothing through go (busyNodes' free ones), then those sounding, the least missed first (an
+        // earlier change's tail, then by the notes held or pedaled through it, the larger in memory first among equals) with the
+        // nodes they alone keep busy, until it fits beside what is left; none fitting, a cut (or for CPU alone a fade, fades).
+        std::set<NodeId> outgoing(playingNodes.begin(), playingNodes.end());
+        for(const auto n : kept) outgoing.erase(n);
+        const auto quiet = uint64_t(sampleRate_ * 3);
+        std::set<NodeId> sounding, fed;
+        for(const auto n : outgoing) if(!graph_.silent(n, quiet)) sounding.insert(n);
+        const auto t = graph_.describe();
+        for(const auto& r : t.audioRoutes) if(sounding.count(r.from.node) && sounding.count(r.to.node) && r.from.node != r.to.node) fed.insert(r.to.node);
+        for(const auto& x : t.notes) if(sounding.count(x.first) && sounding.count(x.second) && x.first != x.second) fed.insert(x.second);
+        // What may be given up on its own: an instrument, or a node no other sounding one plays into; the rest goes with what feeds it.
+        std::vector<NodeId> order; std::set<NodeId> others(kept);
+        std::map<NodeId, std::tuple<bool, uint32_t, int64_t>> loss;
+        for(const auto n : sounding)
+        {
+            if(fed.count(n) && !graph_.host(n).noteInputPorts()) { others.insert(n); continue; }
+            const auto voices = graph_.sounding(n);
+            loss[n] = {!leaving_.count(n), voices == UINT32_MAX ? 0 : voices, -int64_t(nodeCost(graph_, n).memory)};
+            order.push_back(n);
+        }
+        std::sort(order.begin(), order.end(), [&](NodeId a, NodeId b) { return loss[a] < loss[b]; });
+        // The silent ones, the largest first. Short of memory, they go only as many as it needs (FANTOM k6: letting every one go
+        // left nothing warm for a return). Short of CPU alone (fades), none goes: they cost their rest, carried over as the fade
+        // carried them, and stay to be kept warm; only what sounds is given up.
+        const auto free = busyNodes(others);
+        std::vector<NodeId> silent;
+        for(const auto n : outgoing) if(!free.count(n)) silent.push_back(n);
+        std::stable_sort(silent.begin(), silent.end(), [&](NodeId a, NodeId b) { return nodeCost(graph_, a).memory > nodeCost(graph_, b).memory; });
+        steps->memory = !e.fades;
+        std::set<NodeId> given; // those of `order` given up so far
+        for(size_t i = 0;; ++i)
+        {
+            std::set<NodeId> except(others); except.insert(given.begin(), given.end());
+            const auto busy = busyNodes(except);
+            std::set<NodeId> lost; // sounding, given up with `given`
+            size_t idle = 0;
+            for(const auto n : outgoing) if(!busy.count(n)) { ++idle; if(std::find(silent.begin(), silent.end(), n) == silent.end()) lost.insert(n); }
+            if(idle == outgoing.size()) break; // nothing left to ring out: a cut
+            std::set<NodeId> gone(kept); gone.insert(lost.begin(), lost.end());
+            if(!steps->memory)
+            {
+                gone.insert(silent.begin(), silent.end());
+                if(beside(gone).seamless) { steps->released = lost; steps->fits = true; return e; }
+            }
+            else for(size_t k = 0; k <= silent.size(); ++k)
+            {
+                if(k) gone.insert(silent[k - 1]);
+                if(beside(gone).seamless) { steps->released = lost; steps->released.insert(silent.begin(), silent.begin() + std::ptrdiff_t(k)); steps->fits = true; return e; }
+            }
+            if(i == order.size()) break;
+            given.insert(order[i]);
+        }
+        steps->cut = !e.fades;
+        return e;
     }
 }

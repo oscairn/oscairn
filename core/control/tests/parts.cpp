@@ -1772,11 +1772,14 @@ namespace
         fs::create_directories(root / "budget-fresh");
         Session u(48000, frames);
         u.setBudget({.03, 0});
-        u.loadPerformance((root / "budget-one").string());
+        // Its instrument's gain moved after each open: an instance changed since, which a change to the same Performance does not keep as it is
+        // (issue 330: one unchanged counts once, and these would all be seamless).
+        auto edit = [&] { const auto n = u.graphState().names.begin()->first; u.setParameter(n, 7, u.parameter(n, 7) > .5 ? .4 : .6); };
+        u.loadPerformance((root / "budget-one").string()); edit();
         auto e = u.estimate((root / "budget-one").string());
         check(e.fits && !e.seamless && e.fades, "it fits alone, not beside itself in CPU, with the memory there: it fades");
         check(u.preparePerformance((root / "budget-one").string()), "so it is prepared ahead beside it");
-        u.loadPerformance((root / "budget-one").string());
+        u.loadPerformance((root / "budget-one").string()); edit();
         check(u.leaving() == 1, "and the last one is carried over, fading");
         { Audio x; for(int i = 0; i < int(48000 * .2 / frames); ++i) x.run(u); }
         check(u.leaving() == 0, "and gone once faded");
@@ -1784,7 +1787,7 @@ namespace
         e = u.estimate((root / "budget-one").string());
         check(e.fits && !e.seamless && !e.fades, "past the memory beside itself: no fade");
         check(!u.preparePerformance((root / "budget-one").string()), "nor is it prepared ahead beside it");
-        u.loadPerformance((root / "budget-one").string());
+        u.loadPerformance((root / "budget-one").string()); edit();
         check(u.leaving() == 0, "so the change is a cut");
         u.setBudget({.05, 0});
         check(u.preparePerformance((root / "budget-one").string()), "with room for both, it is prepared ahead");
@@ -2058,6 +2061,10 @@ namespace
         check(m.reserved == 30 * MiB && m.share == 75 * MiB, "reserved: the system and the always-available apps, running or not; the committed share what is left less the margin");
         s.loadPerformance(a);
         check(s.memoryState().committed == 18 * MiB, "the open Performance committed, at its plugins' declarations: " + std::to_string(s.memoryState().committed));
+        // A's and B's nodes save the same state (the memory effect at .5): unchanged, an open one's instance would be kept as it is for
+        // the other's (issue 330) and counted once. Moved and put back after each open (an edit all the same), each counts on its own.
+        auto touch = [&] { const auto n = s.graphState().names.begin()->first; s.setParameter(n, 7, .49); s.setParameter(n, 7, .5); };
+        touch();
         // Fill: C fits alone (61.6 of 75) but not beside A (79.6), so it is prepared to cut, as opportunistic data.
         check(!s.preparePerformance(c), "C will cut");
         m = s.memoryState();
@@ -2081,7 +2088,7 @@ namespace
         std::string why;
         try { s.loadPerformance(c); } catch(const std::exception& e) { why = e.what(); }
         check(why.find("closing oscairn.groovebox (10 MiB) and sound-editor (9 MiB) and sequencer (8 MiB) would free enough") != std::string::npos, "a Performance past the share names the apps to close: " + why);
-        s.loadPerformance(b);
+        s.loadPerformance(b); touch();
         check(s.leaving() == 2 && s.memoryState().committed == 27 * MiB, "the committed Performance loads, A rings out, both committed");
         // Offered: a launch refused only because of the committed next entry.
         s.appClosed("oscairn.groovebox"); s.appClosed("sound-editor"); s.appClosed("sequencer");

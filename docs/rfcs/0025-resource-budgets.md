@@ -321,7 +321,24 @@ never write the user's data folder.
   out in 150 ms (`Estimate::fades`, `budget.estimate`'s `fades`). Past the memory, the change is a cut; the
   desktop says so after opening it. When a fade or a cut ended a note held, pedaled or heard in the last tenth
   of a second, `session.status`'s notices say "the last Performance's notes could not ring out" and why, so it
-  is never silent. A Performance past the memory beside the open one is not prepared
+  is never silent.
+  **Given up in steps** (issue 330, the owner's rule of 2026-11-27: the new Performance loads; the last one's
+  held notes ring on, but never at the price of the new one not loading). An incoming node whose saved state an
+  open instance holds as it is (opened from it, or from a state of the same bytes, and changed by nothing since)
+  keeps that instance while it sounds (a silent one is taken over as before, its state compared with the file), so it counts once: the same Performance loaded again with a pedaled
+  chord needs one copy in memory, not two (TSO Carol Bells at about 230 MB, twice past the FANTOM's 420 MB).
+  When the two still do not fit together, the load (`Session::estimate` with `Steps`) lets go of the outgoing
+  plugins in order until the incoming one fits beside what is left: first, short of memory, those making no
+  sound (silent three seconds or asleep, nothing sounding feeding them), the largest first and only as many as
+  it needs, so the rest are kept warm for a return (short of CPU alone none of them goes); then those sounding,
+  least missed first (an earlier
+  change's tail, then the fewest notes held or pedaled through them, then the most memory), with what they
+  alone keep busy; each faded out over 150 ms on a live gain of its own, from the control thread, before the
+  incoming plugins load, so their instances are taken over as a cut's are and need no more memory than a cut
+  did, and said in a notice. Only when it fits beside none of it does the whole go, faded the same way (the
+  cut was about 1 ms from full level to digital silence on the FANTOM). A Performance is refused only when it
+  does not fit by itself. `session.status`'s `ringOut` counts `kept`, `releasedSilent` and `releasedFaded` by
+  plugin beside `cut`. A Performance past the memory beside the open one is not prepared
   ahead (RFC 0021): `preparePerformance` returns false, and the Setlist app says it will open
   when cued.
 

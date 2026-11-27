@@ -174,6 +174,11 @@ namespace oscairn
         /// The routes to the outputs from `nodes` (frozen by carryOver, so naming no live gain) and from the ring-out
         /// channels of `ringing` name live gain `slot`: a Performance change fading the last one's tail (Session::fade).
         void fadeRoutes( const std::set<NodeId>& nodes, const std::set<NodeId>& ringing, uint8_t slot );
+        /// The routes from `nodes` to a node not among them or to the outputs name live gain `slot` too (in a free place, else
+        /// the last's gain frozen into the route's): a change letting them go fades them before it reads (issue 330). At commit().
+        void fadeFrom( const std::set<NodeId>& nodes, uint8_t slot );
+        /// No route names live gain `slot` any longer. At commit().
+        void unfade( uint8_t slot );
         size_t ringOutRoutes( NodeId node ) const; // the routes ringOut made from `node` and not dropped
         /// A replacement prepared ahead keeps its node IDs: nodes added here meanwhile take later ones.
         void reserveIds( const Graph& prepared ) { nextId_ = std::max( nextId_, prepared.nextId_ ); }

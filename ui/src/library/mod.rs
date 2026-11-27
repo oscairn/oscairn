@@ -1232,3 +1232,153 @@ impl Screen {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh library screen on a headless window (the tests' own folders, never the user's): `Screen::new`
+    /// needs a `Shell` (for its weak reference), which `crate::tests::Screen::new` builds.
+    fn screen() -> (crate::tests::Screen, Screen) {
+        let t = crate::tests::Screen::new();
+        let s = Screen::new(&t.ui);
+        (t, s)
+    }
+
+    /// The long requests the musician waits on, and the short ones that return at once.
+    #[test]
+    fn waits_names_the_long_requests_only() {
+        for r in [
+            Request::Open(open::Step::Prepare), Request::Open(open::Step::Load), Request::Open(open::Step::Estimate),
+            Request::Open(open::Step::Save), Request::Audition(open::Aud::Start), Request::Audition(open::Aud::Stop(true)),
+            Request::Do(Do::NewPart("Piano".into())),
+            Request::Job(jobs::Job { kind: jobs::Kind::Install, method: "library.install", params: json!({}) }),
+        ] {
+            assert!(Screen::waits(&r), "{r:?}");
+        }
+        for r in [
+            Request::Query(0), Request::Libraries, Request::Plugins, Request::Setup, Request::Open(open::Step::Info),
+            Request::Audition(open::Aud::Get),
+            Request::Setlist(setlist::Step::Find(setlist::Add { id: "a".into(), name: "A".into(), current: None })),
+            Request::Lib(libraries::Req::Folders),
+            Request::Pkg(catalog_flow::Req::Installed(0)), Request::Do(Do::Favorite), Request::Do(Do::Edit("x".into())),
+            Request::Do(Do::Copy("x".into(), true)), Request::Do(Do::Delete("x".into())), Request::Do(Do::Tag),
+        ] {
+            assert!(!Screen::waits(&r), "{r:?}");
+        }
+    }
+
+    /// `library.query`'s answer: an empty list, a `total` of the wrong type, an item without an id, a tag
+    /// counted as a string, and a `tagColors`/`hiddenTags` that are not arrays or hold non-strings: none panic,
+    /// and each odd field is shown as best it can be.
+    #[test]
+    fn listed_survives_odd_answers() {
+        let (_ui, mut s) = screen();
+        // A `total` of the wrong type is not read: the list shows the items it was given.
+        let odd: Value = json!({"total":"seven","tags":[],"tagColors":{},"hiddenTags":7});
+        assert!(!s.reply(Request::Query(0), Ok(odd)));
+        assert_eq!((s.items.len(), s.total, s.tags.len(), s.tag_colors.len(), s.hidden.len()), (0, 0, 0, 0, 0));
+
+        // An item without an id is not listed. A tag without a string name is dropped,
+        // a count of the wrong type reads as 0.
+        let odd: Value = json!({"items":[{}, {"id":"x"}],"total":2,
+            "tags":[{"tag":"soft","count":3},{"count":1},{"tag":5}],
+            "tagColors":[{"tag":"hard","color":"#111"},{"color":"#222"}],
+            "hiddenTags":["slow", 4]});
+        s.reply(Request::Query(0), Ok(odd));
+        assert_eq!(s.items.len(), 1); // {} no id dropped
+        assert_eq!(s.items[0].id, "x");
+        assert_eq!((s.tags.len(), s.hidden.len()), (1, 1));
+        assert_eq!((s.tags[0].0.as_str(), s.tags[0].1), ("soft", 3));
+        // The entry without a `tag` is dropped; the one with it is kept.
+        assert_eq!(s.tag_colors.len(), 1);
+        assert_eq!((s.tag_colors[0].0.as_str(), s.tag_colors[0].1.as_str()), ("hard", "#111"));
+    }
+
+    /// Unicode and very long text in an answer come through whole.
+    #[test]
+    fn listed_keeps_unicode_and_long_text() {
+        let (_ui, mut s) = screen();
+        let long = "x".repeat(5000);
+        let values: Value = serde_json::json!({"items": [{"id": "é", "name": "Préset Ω", "tags": ["мф"], "favorite": true}],
+            "total": 1, "tags": [], "tagColors": [], "hiddenTags": [long.clone()]});
+        s.reply(Request::Query(0), Ok(values));
+        assert_eq!(s.items[0].name, "Préset Ω");
+        assert_eq!(s.items[0].tags, ["мф"]);
+        let hidden: Vec<String> = s.hidden.clone();
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0], long);
+    }
+
+    /// `packages.preinstalled`: while it runs a re-read is asked in a second and the line says so; when it stops the
+    /// error is the line, and a fresh stop asks nothing.
+    #[test]
+    fn setup_read_running_asks_again_and_stopped_shows_the_error() {
+        let (_ui, mut s) = screen();
+        s.setup_read(Ok(json!({"state": "running"})));
+        assert_eq!(s.setup, "Setting up the instruments that come with Oscairn…");
+        assert_eq!(s.out.len(), 1);
+        let send = &s.out[0];
+        assert_eq!(send.after, Some(Duration::from_secs(1)));
+        assert!(matches!(send.request, Request::Setup));
+
+        let (_ui, mut s) = screen();
+        s.setup_read(Ok(json!({"state": "stopped", "error": "disk full"})));
+        assert_eq!(s.setup, "disk full");
+        assert!(s.out.is_empty());
+
+        let (_ui, mut s) = screen();
+        s.setup_read(Err(Error { code: -1, message: "unplugged".into() }));
+        assert_eq!(s.setup, "");
+        assert!(s.out.is_empty());
+    }
+
+    /// `packages.installed` counts only `"kind":"plugin"` packages; a non-array answer or an error counts nothing.
+    #[test]
+    fn plugins_count_only_plugin_packages() {
+        let (_ui, mut s) = screen();
+        s.reply(Request::Plugins, Ok(json!({"packages": [
+            {"kind": "plugin"}, {"kind": "sound"}, {"kind": "plugin"}, {"kind": ""},
+        ]})));
+        assert_eq!(s.plugins(), 2);
+        let (_ui, mut s) = screen();
+        s.reply(Request::Plugins, Ok(json!({"packages": 3})));
+        assert_eq!(s.plugins(), 0);
+        s.reply(Request::Plugins, Err(Error { code: -1, message: "off".into() }));
+        assert_eq!(s.plugins(), 0);
+    }
+
+    /// The row's value: tags joined with the dot, and "Locked" and "Auditioning" said before the rest, in that order.
+    #[test]
+    fn detail_says_the_library_and_an_audition_first() {
+        let (_ui, mut s) = screen();
+        let item = |tags: Vec<String>, id: &str, library: &str| Item { id: id.into(), tags, library: library.into(), ..Default::default() };
+        assert_eq!(s.detail(&item(vec![], "", "")), "");
+        assert_eq!(s.detail(&item(vec!["a".into(), "b".into()], "", "")), "a  ·  b");
+        assert_eq!(s.detail(&item(vec![], "", "official")), "Locked");
+        assert_eq!(s.detail(&item(vec!["a".into()], "", "official")), "Locked  ·  a");
+        // Not being tried: the library's lock is said, and nothing is "Auditioning".
+        assert_eq!(s.detail(&item(vec![], "try1", "official")), "Locked");
+        s.auditioning = Auditioning { id: "try1".into(), ..Default::default() };
+        assert_eq!(s.detail(&item(vec![], "try1", "")), "Auditioning");
+        assert_eq!(s.detail(&item(vec!["a".into()], "try1", "")), "Auditioning  ·  a");
+        assert_eq!(s.detail(&item(vec!["a".into()], "try1", "official")), "Auditioning  ·  Locked  ·  a");
+        // Another item is not the one being tried.
+        assert_eq!(s.detail(&item(vec!["a".into()], "other", "")), "a");
+    }
+
+    /// The bar's path: the kind, and "Untitled" for an edit of a Performance never named.
+    #[test]
+    fn path_names_untitled_edits() {
+        let (_ui, mut s) = screen();
+        assert_eq!(s.path(), ["Library", "Performances"]);
+        s.mode = Mode::Edit(Draft {
+            id: "p1".into(), name: String::new(), description: String::new(), tags: String::new(), color: String::new(),
+        });
+        assert_eq!(s.path().last().map(String::as_str), Some("Edit Untitled"));
+        s.mode = Mode::Edit(Draft {
+            id: "p2".into(), name: "Mine".into(), description: String::new(), tags: String::new(), color: String::new(),
+        });
+        assert_eq!(s.path().last().map(String::as_str), Some("Edit Mine"));
+    }
+}

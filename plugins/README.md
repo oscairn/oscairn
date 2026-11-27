@@ -26,7 +26,7 @@ part of the MIT plugin SDK beside the extension headers.
 ## Legacy Sampler sounds
 
 The Oscairn Legacy Sampler (`org.oscairn.legacy-sampler`, `oscairn-legacy-sampler.clap`) was the
-Oscairn Sampler until 2026-11-06, and is deprecated in favor of the sfizz-based Oscairn Sampler
+Oscairn Sampler until 2026-11-06, and is deprecated in favor of the Oscairn Sampler
 (`org.oscairn.sampler`). It moved to [its own repository](https://github.com/oscairn/legacy-sampler) on 2026-10-31, with its history; what it plays
 and its limits are in its README. Oscairn no longer bundles or installs it, in the desktop app or
 the OS image. To use it, build [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) and put

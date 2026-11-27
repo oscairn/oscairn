@@ -222,7 +222,7 @@ folder, hidden ones aside:
 
 ```sh
 oscairn-sign asset-package --key author.key --license GPL-3.0-or-later --license-file NOTICE \
-    --license-file AUTHORS Factory.olib org.oscairn.analog-factory 1.9.0 "Analog factory content" factory/
+    --license-file AUTHORS Factory.olib org.oscairn.fm-cartridges 1.9.0 "Factory content" factory/
 ```
 
 Installing one keeps each file once, by its SHA-256, in the asset store (`assets/store/<sha256>`
@@ -401,7 +401,7 @@ A converter writing libraries that use published, signed packages:
 
 Specified 2026-11-11 ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-starter-library)),
 for the starter library of Performances that comes with Oscairn and any library whose items use FM,
-Analog or another published plugin; widened 2026-11-14 to every kind, so that a plugin package can
+the VA or another published plugin; widened 2026-11-14 to every kind, so that a plugin package can
 need a types package (the Sampler needs `org.oscairn.sample-types`), a sample package the types package,
 and a Performance pack a sample package. **Built 2026-11-14:** reading, installing from a
 repository, recording and removal, below; `repository` is read and not used yet (a dependency comes
@@ -416,7 +416,7 @@ and types packages alike, each by package ID and the least version:
   "assets": [],
   "packages": [
     {"id": "org.oscairn.fm", "version": "0.4.8"},
-    {"id": "org.oscairn.analog-factory", "version": "1.0.0",
+    {"id": "org.oscairn.fm-cartridges", "version": "1.0.0",
      "repository": {"address": "https://packages.oscairn.org", "key": "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841"}}
   ]
 }

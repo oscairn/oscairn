@@ -11,7 +11,7 @@ is opened.
 Through the control API (oscairn-web-rpc-test): the official repository is known and its root key
 trusted from the start, for repositories only, and its publisher's key for plugins, apps and
 content (another source is refused until its root key is trusted, naming the key); it lists its
-packages. Analog, FM and the effects install with no yes, their signer shown as trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
+packages. VA, FM and the effects install with no yes, their signer shown as trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
 here again and checked by its hash) holds it. Then each instrument, in the engine's process and in
 a worker, lists its factory presets, plays one for a held note offline (oscairn-installed-play),
 and must sound and stay finite.
@@ -32,7 +32,9 @@ from pathlib import Path
 ROOT_KEY = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'
 PUBLISHER_KEY = 'db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69'
 # Each instrument, its asset library and how many presets it lists, every one from that library.
-INSTRUMENTS = {'org.oscairn.analog': ('org.oscairn.analog-factory', 641), 'org.oscairn.fm': ('org.oscairn.fm-cartridges', 1056)}
+INSTRUMENTS = {'org.oscairn.fm': ('org.oscairn.fm-cartridges', 1056)}
+# The VA ships no asset library: it is installed and checked in the store, not played here.
+VA = 'org.oscairn.va'
 EFFECTS = 'org.oscairn.effects'
 
 build = Path(sys.argv[1]).resolve()
@@ -93,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             check([(k['key'], k['scope']) for k in keys] == [(PUBLISHER_KEY, ['apps', 'content', 'plugins']), (ROOT_KEY, ['repositories'])],
                   f'and trusts only its publisher key and its root key, built in: {keys}')
         else:
-            for method, params in (('packages.list', {'source': source}), ('packages.install', {'source': source, 'id': 'org.oscairn.analog'})):
+            for method, params in (('packages.list', {'source': source}), ('packages.install', {'source': source, 'id': VA})):
                 state = job(method, params)
                 check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and key_id(ROOT_KEY) in state['error'] and state['rootKey'] == ROOT_KEY,
                       f'{method} before trusting the root is refused, naming its key: ' + state['error'])
@@ -102,13 +104,13 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
         listing = job('packages.list', {'source': source})
         offered = {x['id']: x for x in listing['packages']}
         check(listing['state'] == 'done' and listing['repository'] == 'org.oscairn.main', f"once trusted, it lists {len(offered)} packages at serial {listing['serial']}: {listing['error']}")
-        for wanted in [*INSTRUMENTS, *(a for a, _ in INSTRUMENTS.values()), EFFECTS]:
+        for wanted in [VA, *INSTRUMENTS, *(a for a, _ in INSTRUMENTS.values()), EFFECTS]:
             x = offered.get(wanted)
             check(x is not None and x['license'] and x['publisherKey'] == key_id(PUBLISHER_KEY) and any(not v['incompatible'] for v in x['versions']),
                   f"{wanted} {x['versions'][0]['version'] if x else ''} is offered, installable here, by {key_id(PUBLISHER_KEY)}, under {x['license'] if x else '?'}")
 
         # 2. The official publisher is trusted out of the box: its code installs with no yes, each signer trusted.
-        for package in (*INSTRUMENTS, EFFECTS):
+        for package in (VA, *INSTRUMENTS, EFFECTS):
             state = job('packages.install', {'source': source, 'id': package})
             codes = state['installed']['code']
             check(state['state'] == 'done' and codes and all(c['status'] == 'trusted' and c['keyName'] == 'Oscairn' for c in codes),
@@ -121,7 +123,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             builds = list(folder.glob('*/*.clap'))
             check(builds and all(b.stat().st_size > 0 for b in builds) and any((folder / 'Licenses').iterdir()),
                   f"{x['name']} {x['version']} is in the store ({x['bytes']} bytes, {', '.join(x['platforms'])}) with {len(list((folder / 'Licenses').iterdir()))} license files")
-        check(all(i in plugins for i in INSTRUMENTS) and any(i.startswith(EFFECTS + '.') for i in plugins), 'plugins.list has Analog, FM and the effects')
+        check(all(i in plugins for i in (VA, *INSTRUMENTS)) and any(i.startswith(EFFECTS + '.') for i in plugins), 'plugins.list has VA, FM and the effects')
         root = json.loads(fetch(source + '/repository.json'))
         index = json.loads(gzip.decompress(fetch(source + '/' + root['index']['path'])))
         for library, _ in INSTRUMENTS.values():

@@ -21,8 +21,8 @@ namespace oscairn::standalone
                 result.instrument = node.plugin.name;
             }
         result.sounds = control.sounds(result.node);
-        // Both prepare an SFZ patch whose samples resolve through oscairn.assets (the sfizz-based Oscairn Sampler since 0.5.0).
-        if(result.pluginId == "org.oscairn.sampler" || result.pluginId == "org.oscairn.legacy-sampler")
+        // The Sampler prepares an SFZ patch whose samples resolve through oscairn.assets.
+        if(result.pluginId == "org.oscairn.sampler")
             result.importsSamples = true;
         else if(result.sounds.capacity)
         {

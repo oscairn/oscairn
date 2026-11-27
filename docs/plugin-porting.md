@@ -470,8 +470,8 @@ yet):
 | Plugin | Locations | Load key |
 | --- | --- | --- |
 | Oscairn Organ (setBfree) | Inside the plugin: the 55 programs | The program number, `0` to `54` |
-| Oscairn Analog (Surge) | Files: the factory and user patch folders, type `fxp` | None: each file is one patch |
-| Oscairn FM (Dexed) | Files: the cartridge folders, type `syx` | The voice in the cartridge, `0` to `31`, each named from the cartridge |
+| Oscairn Analog (retired; Surge-based) | Files: the factory and user patch folders, type `fxp` | None: each file is one patch |
+| Oscairn FM | Files: the cartridge folders, type `syx` | The voice in the cartridge, `0` to `31`, each named from the cartridge |
 
 What a Sound saves is the plugin's own state (for native contexts, the snapshot of every prepared
 patch), never a reference to the preset, so it opens when the preset is gone.
@@ -668,7 +668,7 @@ bool uiSeconds(const clap_plugin_t *p, clap_id id, double value, double *seconds
 const oscairn_plugin_ui_t uiExt{uiParamHint, nullptr, uiSeconds}; // OSCAIRN_EXT_UI is now "oscairn.ui/draft-5"
 ```
 
-**An AWM2 element** (the sfizz-based Oscairn Sampler, once its elements are parameters; it has
+**An AWM2 element** (the Oscairn Sampler, once its elements are parameters; it has
 only Output bus and the Assign Switches today): every element n (1 to 8) in one view, index n,
 so each element's page draws its envelope and one map of all the elements' zones, its own in the
 accent. With element n's parameters on page `Element n`:

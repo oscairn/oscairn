@@ -874,7 +874,7 @@ sustain follows the channel across switches. `accepted` means queued, not applie
 
 `sfz` goes only to native engines that define patch text, together with the asset `library`
 holding its files and the patch's `directory` inside that library (empty for the root): the
-Oscairn Legacy Sampler takes an SFZ patch whose `sample=` paths are relative to that folder and may
+A sampler takes an SFZ patch whose `sample=` paths are relative to that folder and may
 use `../` without leaving the library. The engine resolves and reads those files on its
 control thread; a rejected patch returns `-32005` with the plugin's diagnostic, such as
 `line 2: unsupported opcode pan`. The whole request must fit the 64 KiB message limit.
@@ -1068,7 +1068,7 @@ that instance has no free sound, channel or bus, the node goes on another instan
 this Performance shares that has room, else on a new one (the spill), the first node of an engine
 of its own. Only a plugin with native sound contexts, their snapshot, oscairn.sound-snapshots'
 draft 4 (one sound saved on its own, a sound's values) and a stepped parameter with oscairn.ui's
-`outputBus` role (the Basic Synth's Output bus; not the Legacy Sampler, which has one output) can share;
+`outputBus` role (the Basic Synth's Output bus; not a sampler with one output) can share;
 others return -32004. `graph.get` lists each such node's `shared`: `engine`, the engine's first
 node, and its `channel` and `bus`; a saved Performance keeps them
 ([format](performance-format.md)). Undo takes a share back like any added node; one that made

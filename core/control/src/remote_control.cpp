@@ -587,6 +587,7 @@ namespace oscairn
         const auto o=field(r,"open");t.open.name=string(field(o,"name"));
         for(auto [key,to]:{std::pair{"reused",&t.open.reused},{"loaded",&t.open.loaded},{"kept",&t.open.kept}})*to=uint64_t(integer(field(o,key)));
         for(auto [key,to]:{std::pair{"total",&t.open.total},{"read",&t.open.read},{"load",&t.open.load},{"restore",&t.open.restore},{"reset",&t.open.reset},{"save",&t.open.save},{"beside",&t.open.beside},{"publish",&t.open.publish}})*to=number(field(o,key));
+        if(detail::member(o,"callbackMax"))for(auto [key,to]:{std::pair{"read",&t.open.callbackRead},{"publish",&t.open.callbackPublish},{"after",&t.open.callbackAfter}})*to=number(field(field(o,"callbackMax"),key));
         return t;
     }
     void RemoteControl::forgetMeasurements() { impl_->call("budget.forget","{}"); }

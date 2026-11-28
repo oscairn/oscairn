@@ -624,12 +624,20 @@ namespace oscairn
         for(const auto& w : warm_) instance(*w.host, false, std::chrono::duration<double>(now - w.idle).count());
         if(const char* cores = std::getenv("OSCAIRN_AUDIO_THREAD_CORES")) t.cores = cores;
         t.open = lastOpen_;
+        t.open.callbackRead = phaseMaxNs_[0].load(std::memory_order_relaxed) / 1e3; t.open.callbackPublish = phaseMaxNs_[1].load(std::memory_order_relaxed) / 1e3; t.open.callbackAfter = phaseMaxNs_[2].load(std::memory_order_relaxed) / 1e3;
         return t;
     }
 
     void Session::blockTimes(int64_t start, int64_t end, int64_t period) noexcept
     {
         callbackTiming_.record(end - start, start);
+        if(const auto phase = openPhase_.load(std::memory_order_acquire); phase >= 1 && phase <= 3)
+        {
+            auto& most = phaseMaxNs_[phase - 1];
+            if(end - start > most.load(std::memory_order_relaxed)) most.store(end - start, std::memory_order_relaxed);
+            if(phase == 3 && ++afterBlocks_ >= BlockTiming::warmupBlocks) { uint32_t was = 3; openPhase_.compare_exchange_strong(was, 0, std::memory_order_acq_rel); }
+            else if(phase != 3) afterBlocks_ = 0;
+        }
         if(audioStarted_.load(std::memory_order_acquire)) { audioStarted_.store(false, std::memory_order_relaxed); lastStart_ = 0; }
         if(lastStart_) latenessTiming_.record(start - (lastStart_ + period), start);
         lastStart_ = start;

@@ -660,6 +660,53 @@ namespace
             check(l.at(l.block.load() - 2, frames - 1) == 0, "steps, the same Performance again: the key's release reaches the instance kept");
             l.s.setBudget({});
         }
+        // Issue 340: the same Performance again with a key held, a synth through a Delay (an engine offering effect contexts). The
+        // synth was kept as it is, but the Delay loaded afresh beside the old one ringing out: on the FANTOM eight new effect workers
+        // and a second set of tails at every pedaled reload, the callback near its deadline and now and then a late or silent block.
+        // Now the Delay is kept too: rendered block by block on this thread, the reload changes not one sample against no reload at
+        // all (no click, no tail doubled or restarted). The file saved again (its stamp moved, its wiring might differ) keeps
+        // nothing, as before.
+        {
+            const auto fx = tempPath / "steps-same-fx"; ringing(fx, 0, argv[1], argv[3], .5);
+            auto run = [&](int reload, Switch* w, size_t* leaving) {
+                Session t(48000, frames);
+                load(t, fx); blocks(t, 20);
+                t.note(true, 60, .8); blocks(t, 40);
+                if(reload == 2) { std::error_code e; fs::last_write_time(fx / "performance.json", fs::last_write_time(fx / "performance.json") + std::chrono::seconds(2), e); }
+                if(reload) { *w = load(t, fx); *leaving = t.leaving(); }
+                std::vector<float> out; Audio a;
+                for(int i = 0; i < 300; ++i) { a.run(t); out.insert(out.end(), a.l.begin(), a.l.end()); if(i == 100) t.note(false, 60, 0); }
+                return out;
+            };
+            Switch w, again; size_t leaving = 0, leavingAgain = 0;
+            const auto plain = run(0, nullptr, nullptr), reloaded = run(1, &w, &leaving);
+            report("steps: the same Performance again, a key held, through a Delay", w);
+            size_t differ = 0; for(size_t i = 0; i < plain.size(); ++i) differ += plain[i] != reloaded[i];
+            check(w.kept == 2 && w.loaded == 0 && leaving == 0, "steps, kept effects: the synth and its Delay kept as they are, nothing loaded, nothing ringing out beside: " +
+                  std::to_string(w.kept) + " kept, " + std::to_string(w.loaded) + " loaded, " + std::to_string(leaving) + " ringing out");
+            check(differ == 0, "steps, kept effects: every sample as with no reload: " + std::to_string(differ) + " of " + std::to_string(plain.size()) + " differ");
+            run(2, &again, &leavingAgain);
+            check(again.kept == 0 && leavingAgain >= 1, "steps, kept effects: the file saved again keeps nothing unseen (as before): what sounded rings out beside new instances: " +
+                  std::to_string(again.kept) + " kept, " + std::to_string(leavingAgain) + " ringing out");
+        }
+        // Issue 340: engine.timing's open gives the callback's longest block in each phase of the load (the FANTOM's longest callback of a
+        // pedaled reload fell in the publish). A thread paced as a device's callback reports each block's time as the test sets it: 100 us
+        // while the load runs, 900 once it returned for longer than the 512 blocks the "after" phase lasts, then 2000.
+        {
+            const auto same = tempPath / "steps-phases", eight = tempPath / "steps-phases-eight"; single(same, argv[4], .3); many(eight, 1, argv[4], 8); // eight to load: a read of some blocks
+            std::atomic<int64_t> took{100'000};
+            Live l; std::atomic<bool> stop{false};
+            std::thread clock([&] { int64_t at = 0; size_t seen = 0; while(!stop) { for(const auto b = l.block.load(); seen < b; ++seen) { l.s.blockTimes(at, at + took.load(), 2'666'667); at += 2'666'667; } std::this_thread::sleep_for(std::chrono::microseconds(200)); } });
+            l.serve(4); load(l.s, same); l.serve(600);
+            load(l.s, eight); took = 900'000; l.serve(600);
+            const auto o = l.s.engineTiming(false).open;
+            took = 2'000'000; l.serve(100);
+            const auto later = l.s.engineTiming(false).open;
+            stop = true; clock.join();
+            std::printf("steps, callback by phase: read %.0f, publish %.0f, after %.0f us; 100 blocks on, after %.0f us\n", o.callbackRead, o.callbackPublish, o.callbackAfter, later.callbackAfter);
+            check(o.callbackRead == 100 && o.callbackPublish <= 100 && o.callbackAfter == 900, "steps, callback by phase: each phase its own longest block: read " + std::to_string(o.callbackRead) + ", after " + std::to_string(o.callbackAfter));
+            check(later.callbackAfter == 900 && later.callbackRead == 100, "steps, callback by phase: after ends with its 512 blocks: " + std::to_string(later.callbackAfter));
+        }
         // B: four instruments, one key held on the first. Beside all four it does not fit, beside the one sounding it does: the
         // three silent ones go, the held note rings on, and nothing is said.
         {

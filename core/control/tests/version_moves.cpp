@@ -64,6 +64,8 @@ namespace
         check(run(sign + " plugin-package --license MIT --key " + shell(temp / "author.key") + (claim ? " --opens-state-from " + id + " 1" : std::string()) + " " + shell(archive) +
                   " clap " + id + " " + version + " Synth " + platform() + "=" + shell(build)) == 0, "the package is packed");
         s.installArchive(archive.string(), false, {}, true);
+        // A claim counts only under a key the trust store trusts for plugins, as the publisher's would be.
+        if(claim) for(const auto& p : s.installedPlugins()) if(p.version == version && !p.claimKey.empty()) s.setTrustedKey({"", p.claimKey, "Author", {"plugins"}});
     }
     fs::path stored(const std::string& version) { return fs::path(std::getenv("OSCAIRN_DATA_HOME")) / "Plugins" / "clap" / (id + "@" + version) / platform() / "Synth.clap"; }
     struct Saved { std::string performance, sound; };
@@ -120,11 +122,11 @@ int main(int argc, char** argv)
         Session s(rate, frames);
         install(s, fixture, "1", false);
         install(s, v2, "2", true);
-        const auto a = save(s, "Alpha"), b = save(s, "Beta");
+        const auto a = save(s, "Alpha"), b = save(s, "Beta"), spare = save(s, "Spare");
         const auto before = tree(pathOf(s, a.performance));
         // The plan: every item using version 1, the claim, nothing changed.
         auto plan = wait(s, s.planVersionMove(v1, "2", {.all = true}));
-        check(plan.state == "done" && plan.items.size() == 4 && status(plan, a.performance) == "movable" && status(plan, a.sound) == "movable" && item(plan, a.performance)->nodes == 1,
+        check(plan.state == "done" && plan.items.size() == 6 && status(plan, a.performance) == "movable" && status(plan, a.sound) == "movable" && item(plan, a.performance)->nodes == 1,
               "the plan lists each item using version 1 as movable: " + status(plan, a.performance) + ", " + status(plan, a.sound) + ", " + std::to_string(plan.items.size()) + " items");
         check(plan.claim && plan.claim->opensStateFrom == "1" && plan.move.empty(), "with the publisher's claim");
         check(tree(pathOf(s, a.performance)) == before && !fs::exists(fs::path(std::getenv("OSCAIRN_DATA_HOME")) / "Moves"), "the plan changes nothing");
@@ -143,12 +145,17 @@ int main(int argc, char** argv)
         s.loadPerformanceFromLibrary(a.performance);
         const auto node = s.graphState().topology.nodes.at(0);
         check(s.sessionStatus().failures.empty() && node.plugin.version == "2" && std::abs(s.parameter(node.id, 7) - .8) < 1e-9, "the item opens with version 2, its setting kept");
+        // The open Performance's own item is not moved: saving it would write the old versions over the move.
+        auto open = wait(s, s.moveVersions(v1, "2", {a.performance}));
+        check(status(open, a.performance).find("is the open Performance") != std::string::npos && open.move.empty(), "the open Performance's item is refused: " + status(open, a.performance));
+        s.loadPerformanceFromLibrary(spare.performance);
         // Undo puts it back exactly; then one saved since the move is left.
         const auto undone = s.undoVersionMove(moved.move);
         check(undone.size() == 2 && !undone[0].savedSince && !undone[1].savedSince && tree(pathOf(s, a.performance)) == before && s.versionMoves().empty(), "undo restores the items exactly");
         moved = wait(s, s.moveVersions(v1, "2", {a.performance, b.performance}));
         s.loadPerformanceFromLibrary(a.performance);
         s.savePerformanceToLibrary("Alpha");
+        s.loadPerformanceFromLibrary(spare.performance);
         const auto partly = s.undoVersionMove(moved.move);
         check(partly.size() == 2 && std::count_if(partly.begin(), partly.end(), [&](const auto& u) { return u.id == a.performance && u.savedSince; }) == 1 &&
                   slurp(pathOf(s, a.performance) / "performance.json").find("\"version\":\"2\",\"pathHint\"") != std::string::npos &&
@@ -237,6 +244,19 @@ int main(int argc, char** argv)
         s.setParameter(n1, 7, .8); s.setParameter(n2, 7, .3); s.service();
         const auto version = [&](NodeId n) { for(const auto& x : s.graphState().topology.nodes) if(x.id == n) return x.plugin.version; return std::string(); };
         check(s.sessionStatus().mixedVersions.empty(), "one version: no mix");
+        // All or none: the second node refusing its state as it is replaced (the 6th state load: two checks a node, then
+        // the replacements) puts the first back too, and leaves no step of its own.
+        {
+            const auto nth = temp / "refuse-nth";
+            std::ofstream(nth) << "6";
+            ::setenv("KICK_FIXTURE_REFUSE_NTH", nth.c_str(), 1);
+            const auto history = s.history().undo;
+            const auto why = refusal([&] { s.useVersion(v1, "2"); });
+            ::unsetenv("KICK_FIXTURE_REFUSE_NTH");
+            s.service();
+            check(!why.empty() && version(n1) == "1" && version(n2) == "1" && std::abs(s.parameter(n1, 7) - .8) < 1e-9 && std::abs(s.parameter(n2, 7) - .3) < 1e-9 && s.history().undo == history,
+                  "a replacement failing puts back every node as it was, with no step: " + why + "; " + version(n1) + version(n2));
+        }
         const auto used = s.useVersion(v1, "2", {n1});
         s.service();
         const auto mixed = s.sessionStatus().mixedVersions;

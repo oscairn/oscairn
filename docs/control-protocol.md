@@ -1480,22 +1480,24 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   store recorded it or one from a library archive). `opensStateFrom` and `soundChanges` are the
   publisher's claim kept at install ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim):
   the oldest version whose saved state this one opens, and what may sound different) and
-  `claimKey` the public key that signed it; each null when none. `kept`: marked with
-  `plugins.keep`; `newest`: the newest version of that plugin installed, never offered for
-  removal; `keptBy`: what keeps this version installed
-  ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#what-keeps-a-version)), each
-  `{kind,name}`: `item` (a library item using it, by name), `open` (the open Performance plays it),
-  `outside` (a Performance saved outside the library uses it, by folder; read while the folder is
-  there), `move` (a kept move left items at it, by its date) and `kept`. The open Performance's
-  undo history and an audition's set-aside chain are not counted yet.
+  `claimKey` the public key that signed it; each null when none, and when `claimKey` signed none
+  of the version's builds in the store. `kept`: marked with `plugins.keep`; `newest`: the newest
+  version of that plugin installed, never offered for removal; `keptBy`: what keeps this version
+  installed ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#what-keeps-a-version)),
+  each `{kind,name}`: `item` (a library item using it, by name), `open` (the open Performance
+  plays it), `outside` (a Performance saved outside the library uses it, by folder), `move` (a kept
+  move left items at it, or names it as it settles, by its date), `kept`, and `unreadable` (a source
+  that could not be read: an item document unreadable or over 4 MB, a saved Performance's folder on
+  a drive that is away, an unreadable kept move; it keeps every version, as nothing says which it
+  needs). The open Performance's undo history and an audition's set-aside chain are not counted yet.
 - `plugins.keep` takes `{format,id,version,keep}` and returns `{"accepted":true}`: marks the
   version to keep (or not), in the store's `plugin.json`.
 - `plugins.removeUnused` (`{}`) returns `{plugins}`: the preview, each version nothing keeps
   (`keptBy` empty and not `newest`) as `{format,id,version,name,bytes}`. Given `remove` (a list of
-  `{format,id,version}`, from the preview), what keeps each is read again and each is removed
-  only when nothing does; each is returned with `removed` and `keptBy` (what kept it: the kinds
-  above, `newest`, or `refused` with why `plugins.remove` refused it). Nothing is removed on its
-  own, ever.
+  `{format,id,version}`, from the preview), what keeps each is read again just before each one goes,
+  and each is removed only when nothing does; each is returned with `removed` and `keptBy` (what
+  kept it: the kinds above, `newest`, or `refused` with why `plugins.remove` refused it). Refused
+  (`-32005`) while a version job runs. Nothing is removed on its own, ever.
 - `plugins.remove` takes `{format,id,version}` and optional `platform` (absent or empty: every
   build) and returns `{"accepted":true}`. A `platform` is one of those `plugins.addBuild` takes.
   It is refused while the open Performance plays the build; items that use it open with a stand-in until it is installed again.
@@ -1512,20 +1514,30 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   than `version` (`-32602` otherwise), installed with a build for this device. One version job at
   a time (`-32007`, `data.reason` `busy`), at most 10,000 items. A job, off the control thread,
   opens each node that uses the plugin at `version` with `to`'s build, each in a worker of its
-  own where workers are used, restores the node's saved state, compares its audio and note ports
-  with the document's, and reads its parameters, compared with what `version`'s build reads from
-  the same state when that build is here.
+  own (always, whatever the placement policy; with the worker's memory limit and its 30-second
+  reply timeout; refused, `-32005`, when no worker program is found), restores the node's saved
+  state, compares its audio and note ports with the document's, and reads its parameters,
+  compared with what `version`'s build reads from the same state when that build is here. The
+  open Performance's own item, and an item whose folder is outside the data folder or on another
+  drive (a move keeps the item as it was by a rename into the data folder's `Moves/`), are
+  `refused` with that reason. A job ending (the session going) kills the worker an item waits on.
 - `versions.move` takes `{plugin,to,items,withoutClaim?}` and returns `{job}`: the same check for
   the items given (the plan's), then each item that passes is rewritten in a copy: its nodes'
   state saved again as `to` writes it, each node's `plugin.version` and `pathHint` (`to`'s build
   here), the `lock` (this plugin's entries for `version` and `to` replaced by `to`'s builds in the
   store, one per platform, by digest), and a new revision with its content hash. When the job
   ends the copy takes the item's place whole, and the item as it was goes under
-  `Moves/<move>/<id>/` in the data folder with `Moves/<move>/move.json` (`{plugin,to,date,items:
-  [{id,kind,revision,path}]}`, the revision the move wrote). An item saved while the job ran is
-  left (`savedSince`). Without the publisher's claim (`plugins.list`'s `opensStateFrom`, honored
-  only when it covers `version`, both versions are dotted numbers, and the key that made it signed
-  `to`'s build here and an installed build of `version`) only one item moves, and only with
+  `Moves/<move>/<id>/` in the data folder with `Moves/<move>/move.json` (`{plugin,to,date,state,
+  items:[{id,kind,revision,path}],undoing}`, the revision the move wrote, `path` relative to the
+  data folder). The journal is written durably (file and folder synced) before the first rename
+  (`state` `swapping`), and every step is settled from the disk: a failure ends the job `failed`
+  with what was swapped recorded and the rest as it was, and an engine start settles a move or an
+  undo a crash cut short, finishing or rolling back each item, so the library always holds every
+  item, old or new. An item saved while the job ran is left (`savedSince`). Without the
+  publisher's claim (`plugins.list`'s `opensStateFrom`, honored only when it covers `version`,
+  both versions are dotted numbers, and the key that made it is, at the time of the move, trusted
+  for plugins and not revoked in the trust store and signed `to`'s build here and an installed
+  build of `version`) only one item moves, and only with
   `withoutClaim: true` (`-32602` otherwise). With `OSCAIRN_RELIABILITY` `instrument` or
   `pass-through`, refused while the transport runs (`-32005`, "Stop the transport to move
   sounds", `data.reason` `playing`). Nothing moves on its own: no install, update or open moves an item.
@@ -1791,9 +1803,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `{revision,changes}`: the open Performance's nodes playing that plugin at `version` (all of them,
   or those in `nodes`) move to the installed newer version `to`
   ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md)). Each node's state, saved
-  now, is first opened by `to`'s build apart from the graph, its audio and note ports compared and
+  now, is first opened by `to`'s build apart from the graph (in a worker of its own, as a library
+  move does, and compared with the playing build opened the same way), its audio and note ports compared and
   its parameters read; only when every node passes is each replaced by `to`'s build with that
-  state, as one edit, which `edit.undo` takes back with the old instances. `changes` lists the
+  state, as one edit, which `edit.undo` takes back with the old instances; all or none: a
+  replacement failing puts back every node already replaced, with no step. `changes` lists the
   parameters that read differently, as `versions.job` does. Refused (`-32602`) for a version not
   newer or not installed, a node not playing the plugin at `version` (a stand-in included), a node
   sharing an instance with other parts, and without the publisher's claim unless `withoutClaim`;

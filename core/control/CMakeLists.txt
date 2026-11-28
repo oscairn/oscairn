@@ -7,6 +7,8 @@ target_include_directories(oscairn_control PUBLIC include)
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSION="${PROJECT_VERSION}") # what a package's requires.oscairn is checked against (RFC 0031)
 # The release, with its pre-release label (the top-level CMakeLists.txt): what preinstalled.json records the packages that come with it under (RFC 0031).
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
+# RFC 0043: the worker a version move opens plugins in when the placement policy names none and none is beside the program.
+target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSIONS_WORKER="$<TARGET_FILE:oscairn-plugin-worker>")
 target_link_libraries(oscairn_control PUBLIC oscairn_engine PRIVATE $<$<PLATFORM_ID:Linux>:m>)
 target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 
@@ -189,6 +191,16 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
 add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn-test-sampler>)
+# The independent review's cases (RFC 0043): claims, a failed swap, crashes at each step, worker isolation.
+add_executable(oscairn-moves-review-test tests/moves_review.cpp)
+target_link_libraries(oscairn-moves-review-test PRIVATE oscairn_control)
+add_dependencies(oscairn-moves-review-test oscairn-sign)
+add_dependencies(oscairn-moves-review-test oscairn-plugin-worker kick-clap-fixture-v2 kick-clap-fixture-v2_hang kick-clap-fixture-v2_hog)
+add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-moves-review-isolation COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>
+    isolation $<TARGET_FILE:kick-clap-fixture-v2_hang> $<TARGET_FILE:kick-clap-fixture-v2_hog>)
+set_tests_properties(control-moves-review PROPERTIES TIMEOUT 300)
+set_tests_properties(control-moves-review-isolation PROPERTIES TIMEOUT 300 ENVIRONMENT "OSCAIRN_WORKER_MEMORY_MB=256")
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)
@@ -220,6 +232,8 @@ target_link_libraries(oscairn-plugin-check PRIVATE oscairn_control)
 target_compile_definitions(oscairn-plugin-check PRIVATE OSCAIRN_SAMPLE_TYPES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/types/org.oscairn.sample-types")
 # A note effect is checked for the notes it sends, an audio effect for sound.
 add_test(NAME control-plugin-check-note-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect)
+# A note effect's edit is checked by the notes it sends (here transposed a fourth), as it makes no sound.
+add_test(NAME control-plugin-check-note-effect-edit COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect --param 1=5)
 # RFC 0025's CPU estimates: a stall or a burst does not spoil them, and a spoiled one can be forgotten.
 # RFC 0025's admission per core: parallel parts spread over the cores, a chain within one block, uncertain figures allowed.
 add_executable(oscairn-admission-test tests/admission.cpp)
@@ -237,7 +251,7 @@ endif()
 # Given relative to the working folder, as a packager types it.
 add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check ./$<TARGET_FILE_NAME:oscairn_delay> org.oscairn.delay effect
     WORKING_DIRECTORY $<TARGET_FILE_DIR:oscairn_delay>)
-set_tests_properties(control-plugin-check-note-effect control-plugin-check-audio-effect PROPERTIES TIMEOUT 60)
+set_tests_properties(control-plugin-check-note-effect control-plugin-check-note-effect-edit control-plugin-check-audio-effect PROPERTIES TIMEOUT 60)
 # RFC 0043 step 5: --state-from, the machine check of a publisher's claim, on the test synth at versions 1 and 2:
 # a version 2 that reads 1's state passes; one that reads a parameter differently fails naming it; one that sounds
 # different fails without --sound-changes and passes, reporting it, with; one with other ports fails naming them.

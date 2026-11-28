@@ -67,6 +67,7 @@ namespace
     constexpr uint32_t block = 256, rate = 48000, seconds = 2;
     const AudioLayout stereoIn{{{0, "In", 2, 0}}, {{0, "Main", 2, 0}}};
     uint32_t notesOut = 0; // note ons the last render's parts sent to MIDI out
+    std::vector<std::string> notesSent; // every MIDI message the last render's parts sent out, with its block: a note effect's output
 
     // Two seconds: notes at .1 to .6 s and .8 to 1.1 s for a synth; for an effect a two-tone
     // signal that drops at .6 s and stops at 1.2 s. Interleaved stereo.
@@ -75,7 +76,7 @@ namespace
         std::vector<float> inL(block), inR(block), l(block), r(block), out;
         const float* in[2]{inL.data(), inR.data()};
         float* o[2]{l.data(), r.data()};
-        notesOut = 0;
+        notesOut = 0; notesSent.clear();
         for(uint32_t at = 0; at < rate * seconds; at += block)
         {
             std::vector<kick::clap::Event> events;
@@ -91,7 +92,13 @@ namespace
             s.service();
             if(!s.process(synth ? nullptr : in, synth ? 0 : 2, o, 2, block, events)) { check(false, "render"); return out; }
             for(uint32_t i = 0; i < block; ++i) { out.push_back(dry ? inL[i] : l[i]); out.push_back(dry ? inR[i] : r[i]); }
-            for(const auto& m : s.midiOutput()) notesOut += m.size == 3 && (m.bytes[0] & 0xF0) == 0x90 && m.bytes[2] > 0;
+            for(const auto& m : s.midiOutput())
+            {
+                notesOut += m.size == 3 && (m.bytes[0] & 0xF0) == 0x90 && m.bytes[2] > 0;
+                std::string message = std::to_string(at) + ":";
+                for(size_t k = 0; k < m.size && k < 3; ++k) message += " " + std::to_string(m.bytes[k]);
+                notesSent.push_back(message);
+            }
         }
         return out;
     }
@@ -202,9 +209,12 @@ std::vector<float> installAndOpen(const fs::path& archive, const fs::path& home,
     plays(there, noteEffect, "plays there");
     const auto store = b.installedPlugins();
     // The Sound a --sound opened from is an item of the export too: it uses the plugin as the Performance does.
-    check(store.size() == 1 && store[0].open && store[0].usedBy.size() == (inSound ? 2u : 1u), "the store says the open Performance plays it" + std::string(store.empty() ? "" : " (used by " + std::to_string(store[0].usedBy.size()) + ")"));
+    // This plugin's entry (a bundle may hold others, each listed): the open Performance plays it, the export's items use it.
+    const auto entry = std::find_if(store.begin(), store.end(), [&](const auto& p) { return p.id == node.plugin.id && p.version == node.plugin.version; });
+    check(entry != store.end() && entry->open && entry->usedBy.size() == (inSound ? 2u : 1u), "the store says the open Performance plays it" +
+          (entry == store.end() ? " (not listed among " + std::to_string(store.size()) + ")" : std::string(entry->open ? "" : " (not open)") + " (used by " + std::to_string(entry->usedBy.size()) + ")"));
     std::string platforms;
-    for(const auto& s : store.empty() ? std::vector<std::string>{} : store[0].platforms) platforms += " " + s;
+    for(const auto& s : entry == store.end() ? std::vector<std::string>{} : entry->platforms) platforms += " " + s;
     std::printf("builds in the store:%s\n", platforms.c_str());
     return there;
 }
@@ -239,17 +249,26 @@ void stateFrom(const std::string& plugin, const std::string& id, bool synth, con
         Session s(rate, block, {}, stereoIn); // a Performance of its own for each state
         midiOutput(s);
         const auto node = s.add("plugin", stored.string(), id);
-        const auto part = s.addPart("Part", synth ? PartInput{} : PartInput{PartInput::Kind::Audio, 0});
+        // A note effect makes no sound: the notes it sends are compared instead, through its part's MIDI out.
+        const bool noteEffect = isNoteEffect(s), notes = synth || noteEffect;
+        const auto part = s.addPart("Part", notes ? PartInput{} : PartInput{PartInput::Kind::Audio, 0});
         s.insertIntoPart(part, 0, node);
+        if(noteEffect) s.setPartMidiOut(part, {{{DeviceRule::Kind::All}}, 0});
         s.commit();
         for(const auto& [param, value] : set) check(s.setParameter(node, param, value), what + ": parameter " + std::to_string(param) + " set");
         render(s, synth); // edits reach the plugin at service(), which a render does
         const auto item = s.savePerformanceToLibrary(what, true);
         s.loadPerformanceFromLibrary(item);
-        const auto before = render(s, synth);
-        auto job = s.moveVersions({"clap", id, oldVersion}, version, {item}, true);
+        const auto before = render(s, notes);
+        const auto notesBefore = notesSent;
+        // Moved by a session where it is not the open Performance, as a library move of the open one is refused.
         Control::VersionJob done;
-        for(int i = 0; i < 6000 && (done = s.versionJob(job)).state == "running"; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {
+            Session mover(rate, block, {}, stereoIn);
+            auto job = mover.moveVersions({"clap", id, oldVersion}, version, {item}, true);
+            for(int i = 0; i < 6000 && (done = mover.versionJob(job)).state == "running"; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        s.libraryRescan();
         const auto moved = std::find_if(done.items.begin(), done.items.end(), [&](const auto& i) { return i.id == item; });
         if(moved == done.items.end() || moved->status != "moved") { check(false, what + ": moves to " + version + ": " + (moved == done.items.end() ? done.state : moved->status + " " + moved->reason)); continue; }
         for(const auto& c : moved->changes)
@@ -258,7 +277,14 @@ void stateFrom(const std::string& plugin, const std::string& id, bool synth, con
         if(moved->changes.empty()) check(true, what + ": opens in " + version + " with every parameter as " + oldVersion + " reads it");
         s.loadPerformanceFromLibrary(item);
         opened(s, what + ": the moved Performance opens with " + version);
-        const auto after = render(s, synth);
+        const auto after = render(s, notes);
+        if(noteEffect)
+        {
+            std::printf("%s: %zu MIDI messages out before, %zu after\n", what.c_str(), notesBefore.size(), notesSent.size());
+            if(soundChanges && notesSent != notesBefore) std::printf("  reported, not a failure: the release says what sounds different\n");
+            else check(!notesBefore.empty() && notesSent == notesBefore, what + ": sends the same notes as " + oldVersion);
+            continue;
+        }
         const double level = rms(before), off = difference(before, after);
         const double db = off == 0 ? -std::numeric_limits<double>::infinity() : 20 * std::log10(off / std::max(level, 1e-12));
         std::printf("%s: render differs by %.1f dB below the old render (rms %g, difference %g)\n", what.c_str(), db, level, off);
@@ -401,6 +427,7 @@ int main(int argc, char** argv)
                 node = a.graphState().topology.nodes.at(0).id;
             }
             const auto first = render(a, synth);
+            const auto firstNotes = notesSent;
             plays(first, noteEffect, "plays");
             // RFC 0025 step 5: what it cost here, for its plugin package's estimate on this platform.
             const auto cost = a.estimate();
@@ -411,7 +438,8 @@ int main(int argc, char** argv)
             if(!synth) check(difference(first, render(a, synth, true)) > 1e-6, "changes the signal");
             for(const auto& [param, value] : params) check(a.setParameter(node, param, value), "parameter " + std::to_string(param) + " set");
             // Edits reach the plugin at service(), which a render does: so they are in what is saved.
-            if(!params.empty()) check(difference(first, render(a, synth)) > 1e-6, "the edit changes the sound");
+            // A note effect's edit changes the notes it sends, not a sound.
+            if(!params.empty()) { const auto edited = render(a, synth); check(noteEffect ? notesSent != firstNotes : difference(first, edited) > 1e-6, noteEffect ? "the edit changes the notes it sends" : "the edit changes the sound"); }
             performance = a.savePerformanceToLibrary("Check");
             if(!juce.empty())
             {

@@ -58,7 +58,8 @@ const char* effect[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
 // The kick-clap-fixture-v2* builds are version 2 of the same plugins (RFC 0043's moves): v2 reads version 1's
 // state as it is, v2_changed reads its gain at half, v2_ports has a stereo output where version 1 has mono,
 // v2_sound plays 10% quieter with every setting the same (a sound change, oscairn-plugin-check --state-from).
-#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports) || defined(FIXTURE_v2_sound)
+// v2_hang never returns from a state load (two minutes), v2_hog takes 1 GiB in one (a version move's worker limits).
+#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports) || defined(FIXTURE_v2_sound) || defined(FIXTURE_v2_hang) || defined(FIXTURE_v2_hog)
 #define FIXTURE_VERSION "2"
 #else
 #define FIXTURE_VERSION "1"
@@ -361,6 +362,13 @@ struct Plugin {
                 // Refuses every load while the file named here exists, for tests of what a host does with a refused state. A file
                 // holding a number refuses that many loads, then removes itself: a test that must not race a restarting worker's
                 // retries (a host gives up after a few within a minute) lets it take the state on its own.
+                // Refuses only the Nth load from now while the file named here holds N (each load counts it down, in any process).
+                if (const char* nth = std::getenv("KICK_FIXTURE_REFUSE_NTH")) if (std::filesystem::exists(nth))
+                {
+                    int left = 0; { std::ifstream f(nth); f >> left; }
+                    { std::ofstream f(nth, std::ios::trunc); f << left - 1; }
+                    if (left == 1) return false;
+                }
                 if (const char* refuse = std::getenv("KICK_FIXTURE_REFUSE_STATE")) if (std::filesystem::exists(refuse))
                 {
                     int left = 0; { std::ifstream f(refuse); f >> left; }
@@ -371,6 +379,12 @@ struct Plugin {
                 if (in->read(in, &value, sizeof(value)) != sizeof(value) || !std::isfinite(value)) return false;
 #ifdef FIXTURE_v2_changed
                 value *= .5;
+#endif
+#ifdef FIXTURE_v2_hang
+                std::this_thread::sleep_for(std::chrono::seconds(120));
+#endif
+#ifdef FIXTURE_v2_hog
+                { const size_t n = size_t(1) << 30; auto* m = new char[n]; for(size_t i = 0; i < n; i += 4096) m[i] = 1; static volatile char* keep; keep = m; std::this_thread::sleep_for(std::chrono::seconds(5)); }
 #endif
                 // After the gain, optionally a sound asset ("library\0path"), which must resolve, as a
                 // sampler's state with a library reference must (RFC 0009).

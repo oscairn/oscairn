@@ -963,6 +963,7 @@ namespace oscairn
         struct VersionWork;                        // the version move job off the control thread (versions.cpp)
         std::shared_ptr<VersionWork> versionWork_; // joins its thread when it goes
         uint64_t versionJobs_ = 0;
+        void recoverVersionMoves(); // a move or undo cut short (a crash), settled from its journal: at the start
         uint64_t startVersionJob(const PluginVersion& plugin, const std::string& to, std::vector<LibraryItem> items, std::vector<std::string> unknown, bool move, bool withoutClaim);
         std::vector<Repository> deviceRepositories_; // the profile's, set by the app; control thread only
         bool hideOfficial_ = false;

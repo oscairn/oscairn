@@ -1,11 +1,11 @@
 # The Rust UI (docs/rust-ui.md): built with cargo at the release rust-toolchain.toml pins, as
 # samplepack is, into the build folder; installed as bin/oscairn-ui. A device's build
-# (OSCAIRN_ROLAND_FANTOM0) draws straight to the display (the cargo feature kms); any other, a
-# window (desktop). Cargo downloads its crates on the first build, as the JUCE options download JUCE,
+# (OSCAIRN_ROLAND_FANTOM0) or any other cross build (an OS image) draws straight to the display (the
+# cargo feature kms); a build for the computer it runs on, a window (desktop). Cargo downloads its crates on the first build, as the JUCE options download JUCE,
 # unless OSCAIRN_UI_VENDOR names a folder holding them (the device bundle's oscairn-ui-crates).
 set(OSCAIRN_UI_VENDOR "" CACHE PATH "A cargo directory source with every crate ui/Cargo.lock names; cargo then runs offline")
 set(ui_dir "${CMAKE_BINARY_DIR}/ui-cargo")
-set(ui_features --no-default-features --features $<IF:$<BOOL:${OSCAIRN_ROLAND_FANTOM0}>,kms,desktop>)
+set(ui_features --no-default-features --features $<IF:$<OR:$<BOOL:${OSCAIRN_ROLAND_FANTOM0}>,$<BOOL:${CMAKE_CROSSCOMPILING}>>,kms,desktop>)
 set(ui_options "")
 # The release and the commit the JUCE apps are built with, which the Settings app's About page says (src/settings_keys.rs).
 set(ui_env RUSTUP_AUTO_INSTALL=0 "OSCAIRN_RELEASE=${OSCAIRN_RELEASE}" "OSCAIRN_SOURCE_COMMIT=${OSCAIRN_SOURCE_COMMIT}")

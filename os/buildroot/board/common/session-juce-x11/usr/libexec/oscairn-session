@@ -1,21 +1,22 @@
 #!/bin/sh
-# The Oscairn session: an X server for the JUCE app, then the app itself, restarted if it
-# exits. Progress goes to the console; the app's output to /var/log/oscairn.log.
+# The Oscairn session: the engine, and the Rust UI (docs/rust-ui.md) on the display through
+# KMS, with no X server, as the FANTOM bundle's start script runs them. Each is restarted if it
+# exits. Progress goes to the console; the engine's output to /var/log/oscairn-engine.log, the
+# UI's to /var/log/oscairn-ui.log. The engine gets the options the profile asks for
+# (/etc/default/oscairn-engine, written from the profile when the image is built).
 #
-# Headless, when the profile has no screen or the board shows no display: the engine alone,
-# restarted if it exits, with the options the app would give it (/etc/default/oscairn-engine,
-# written from the profile when the image is built); its output to /var/log/oscairn-engine.log.
-# No X and no app, until the session restarts.
+# Headless, when the profile has no screen or the board shows no display: the engine alone.
+# No UI, until the session restarts.
 #
-# This is the only place the image depends on X11. A device UI built another way replaces
-# this script and the BR2_PACKAGE_OSCAIRN_STANDALONE option.
+# The UI runs with no --handover: a screen not yet ported to Rust (the Groovebox, Recordings)
+# says in its tile that it is not here, where the FANTOM bundle hands the display to the JUCE app.
 
 [ -f /etc/default/oscairn ] && . /etc/default/oscairn
 [ -f /etc/default/oscairn-engine ] && . /etc/default/oscairn-engine
-export DISPLAY=:0 HOME=/root
+export HOME=/root
 say() { echo "oscairn-session: $*" > /dev/console; }
 
-# The engine and its workers, started by the app, lock their memory (RFC 0025) and lock future
+# The engine and its workers lock their memory (RFC 0025) and lock future
 # mappings only under an unlimited RLIMIT_MEMLOCK; they inherit it from here.
 ulimit -l unlimited
 say "locked memory: $(ulimit -l)"
@@ -58,7 +59,7 @@ fi
 
 # A display: a DRM output with something connected (an HDMI port with no monitor is not one), or
 # a framebuffer where there is no DRM to ask. Its driver may still be loading, so wait a little.
-# Without one X may still start, but the app cannot draw and would exit in a loop.
+# Without one the UI cannot draw and would exit in a loop.
 display() {
 	if ls -d /sys/class/drm/card*-* > /dev/null 2>&1; then
 		grep -qx connected /sys/class/drm/card*-*/status 2> /dev/null
@@ -76,30 +77,18 @@ else
 	done
 	display || headless="no display (no connected DRM output or framebuffer)"
 fi
-if [ -z "$headless" ]; then
-	Xorg :0 -nolisten tcp -nocursor > /var/log/oscairn-xorg.log 2>&1 &
-	xorg=$!
-	for i in $(seq 100); do
-		[ -S /tmp/.X11-unix/X0 ] && break
-		sleep 0.1
-	done
-	sleep 1 # an X server with no screen to use exits soon after making its socket
-	if [ -S /tmp/.X11-unix/X0 ] && kill -0 "$xorg" 2> /dev/null; then
-		say "X server up"
-	else
-		headless="the X server did not start (see /var/log/oscairn-xorg.log)"
-	fi
-fi
+# A profile that asks for the JUCE app ("ui": "juce", OSCAIRN_UI) gets the Rust UI: this session
+# no longer starts the app.
+[ "${OSCAIRN_UI:-rust}" = rust ] || say "the profile asks for ui $OSCAIRN_UI; the Rust UI runs instead"
 
-if [ -n "$headless" ]; then
-	say "headless: $headless; running the engine without the app"
-	# The engine's control socket, in a directory only root can reach, as the engine requires.
-	mkdir -p /run/oscairn && chmod 700 /run/oscairn
-	export OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-desktop}"
-	# The cores the audio threads may run on (the profile's compute.audioThreadCores); the app sets it itself.
-	[ -n "${OSCAIRN_AUDIO_THREAD_CORES:-}" ] && export OSCAIRN_AUDIO_THREAD_CORES
-	# Each plugin worker's allowance per block (the profile's compute.workerAllowance); the app sets it itself.
-	[ -n "${OSCAIRN_WORKER_BUDGET_US:-}" ] && export OSCAIRN_WORKER_BUDGET_US
+# The engine's control socket, in a directory only root can reach, as the engine requires.
+mkdir -p /run/oscairn && chmod 700 /run/oscairn
+export OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-desktop}"
+# The cores the audio threads may run on (the profile's compute.audioThreadCores).
+[ -n "${OSCAIRN_AUDIO_THREAD_CORES:-}" ] && export OSCAIRN_AUDIO_THREAD_CORES
+# Each plugin worker's allowance per block (the profile's compute.workerAllowance).
+[ -n "${OSCAIRN_WORKER_BUDGET_US:-}" ] && export OSCAIRN_WORKER_BUDGET_US
+keep_engine() {
 	eval "set -- $OSCAIRN_ENGINE_ARGS"
 	while true; do
 		rm -f /run/oscairn/engine.sock
@@ -112,17 +101,29 @@ if [ -n "$headless" ]; then
 		tail -n 5 /var/log/oscairn-engine.log > /dev/console
 		sleep 2
 	done
+}
+
+if [ -n "$headless" ]; then
+	say "headless: $headless; running the engine without the UI"
+	keep_engine
 fi
 
+keep_engine &
+# Stopped (/etc/init.d/S95oscairn), its engine's keeper goes too, or it would start the engine again.
+keeper=$!
+trap 'kill $keeper 2>/dev/null; exit 0' TERM
+
+# The Rust UI on the display (Slint's KMS backend; touch and keys through libinput), against the
+# engine's socket, which it waits for. XKB_CONFIG_ROOT is for the keymap; the rotation is the
+# profile's (OSCAIRN_UI_ROTATION).
 while true; do
-	/usr/bin/Oscairn --plugins /usr/lib/clap $OSCAIRN_ARGS >> /var/log/oscairn.log 2>&1 &
+	env XKB_CONFIG_ROOT=/usr/share/X11/xkb SLINT_BACKEND=linuxkms-software SLINT_KMS_ROTATION="${OSCAIRN_UI_ROTATION:-0}" \
+		/usr/bin/oscairn-ui --profile "$OSCAIRN_PROFILE" --socket /run/oscairn/engine.sock >> /var/log/oscairn-ui.log 2>&1 &
 	pid=$!
 	sleep 5
-	kill -0 "$pid" 2>/dev/null && say "Oscairn running (pid $pid)" && grep "^oscairn:" /var/log/oscairn.log | tail -n 1 > /dev/console
-	# The audio device the engine opened: the engine is its own process with its own log.
-	cat /tmp/oscairn-*/engine-*.sock.log 2>/dev/null | grep "audio output" | tail -n 1 > /dev/console
+	kill -0 "$pid" 2>/dev/null && say "Rust UI running (pid $pid)" && grep "oscairn" /var/log/oscairn-ui.log | tail -n 1 > /dev/console
 	wait "$pid"
-	say "Oscairn exited ($?), restarting"
-	tail -n 5 /var/log/oscairn.log > /dev/console
+	say "Rust UI exited ($?), restarting"
+	tail -n 5 /var/log/oscairn-ui.log > /dev/console
 	sleep 2
 done

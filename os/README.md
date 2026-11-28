@@ -29,12 +29,16 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
   desktop app as `/usr/bin/Oscairn` (`BR2_PACKAGE_OSCAIRN_STANDALONE`, which brings the engine).
 - The session (`board/common/session-juce-x11`): at boot, `/etc/init.d/S95oscairn` starts
   `/usr/libexec/oscairn-session`, which raises the locked-memory limit (`RLIMIT_MEMLOCK`) to
-  unlimited for the engine and its workers, starts an X server and then Oscairn full screen,
-  and restarts Oscairn if it exits. Its arguments are in `/etc/default/oscairn`
-  (`--profile qemu-aarch64 --play`: the image's [device profile](../docs/rfcs/0024-device-profiles.md),
-  which fills the screen with the KICK's screen layout, starting at Home, and asks for
-  128-frame audio blocks). Logs: `/var/log/oscairn.log` and
-  `/var/log/oscairn-xorg.log`. Without a display it runs [headless](#headless).
+  unlimited for the engine and its workers, starts the engine (restarted if it exits) and the
+  Rust UI on the display through KMS, with no X server (restarted if it exits), as the FANTOM
+  bundle's start script does, but with no handover: a screen not yet ported to Rust (the
+  Groovebox, Recordings) says in its tile that it is not here. The profile is named in
+  `/etc/default/oscairn` (`--profile qemu-aarch64`: the image's
+  [device profile](../docs/rfcs/0024-device-profiles.md), which fills the screen with the KICK's
+  screen layout, starting at Home, and asks for 128-frame audio blocks; `--play` is for the JUCE
+  app, which no image starts). Logs: `/var/log/oscairn-engine.log` and
+  `/var/log/oscairn-ui.log`. The JUCE app (`/usr/bin/Oscairn`) and X.org are still built into the
+  image, unused. Without a display it runs [headless](#headless).
 - HTTPS for package repositories: Mbed TLS, libcurl built against it, `ca-certificates`, and
   the `curl` tool for development ([RFC 0039](../docs/rfcs/0039-network-security.md#progress)).
 - Sound through ALSA. The QEMU image uses the kernel's dummy sound card, which plays
@@ -50,7 +54,7 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
 ## Headless
 
 When the profile has no screen, or the board shows no display, the session runs the engine alone:
-no X and no app. A display is a DRM output whose status is `connected` (an HDMI port with no
+no UI. A display is a DRM output whose status is `connected` (an HDMI port with no
 monitor is not one), or a framebuffer where there is no DRM; the session waits up to 10 s for
 one, for its driver to load. It also goes headless when X does not start, or exits within a
 second of making its socket (as it does in QEMU with no display device). It says why once on the
@@ -72,7 +76,7 @@ A profile with no screen leaves X and the app out of the image altogether
 
 `os/build.sh test --no-display` boots the QEMU image with no display device and passes when the
 session says once that it runs headless, the engine reports running and opens its audio device,
-holds locked memory (`VmLck` above 0) under an unlimited limit, runs alone (no Oscairn or Xorg)
+holds locked memory (`VmLck` above 0) under an unlimited limit, runs alone (no oscairn-ui, Oscairn or Xorg)
 and has not restarted 30 s later, and the audio cores' checks pass without the app and X.
 Passed on 2026-11-09: the session said `headless: no display (no connected DRM output or
 framebuffer)` once, 22 s after power-on (10 of them waiting for a display); the engine opened
@@ -83,12 +87,10 @@ has run headless: whether the EVK's HDMI bridge reports no monitor as `disconnec
 
 ## Changing the UI later
 
-The JUCE app needs X11, and that is confined to two places:
-
-- the `BR2_PACKAGE_OSCAIRN_STANDALONE` option (the JUCE app and its X11, ALSA and font
-  dependencies), and
-- the `board/common/session-juce-x11` overlay with `board/common/post-build.sh` (the
-  session that starts X and the app).
+The images' UI is the Rust UI (`BR2_PACKAGE_OSCAIRN_UI`, started by the session in the
+`board/common/session-juce-x11` overlay, a name from when it started the JUCE app). The JUCE app
+needs X11, and that is confined to the `BR2_PACKAGE_OSCAIRN_STANDALONE` option (the JUCE app and
+its X11, ALSA and font dependencies), which no session starts now.
 
 A device UI built another way (for example Qt or Slint drawing directly to the display
 through DRM/KMS) is a new package and a new session overlay; the core, plugins, kernel and
@@ -113,8 +115,9 @@ everything and fills the cache, takes longer (not timed). The image builds from
 the working tree: committed files and new files git does not ignore.
 
 `os/build.sh test` boots the image (4 cores, 2 GB, a 1024 x 600 display) and passes when
-the session reports Oscairn running, the engine reports the audio device it opened, and a
-screenshot shows a picture (Home). Whether sound actually plays is what `os/build.sh record`
+the session reports the Rust UI running, it is alone (no Oscairn app, no X server) and has
+drawn its first frame (`oscairn-timing: shell first frame` in `/var/log/oscairn-ui.log`), the
+engine reports the audio device it opened, and a screenshot shows a picture (Home). Whether sound actually plays is what `os/build.sh record`
 checks.
 Results: `build-os/test` (console log and screenshots).
 
@@ -365,11 +368,11 @@ Delay offline (4 s at 48 kHz, peak 0.45).
 **What to watch on the console:** U-Boot SPL and the DDR training, then U-Boot, which should
 find `/boot/extlinux/extlinux.conf` on the card and load `Image` and the device tree; the kernel's
 log; then the session's lines: `oscairn-session: locked memory: unlimited`,
-`X server up` (or `X server did not start`), `Oscairn running (pid N)` and the engine's
+`engine running (pid N)`, `Rust UI running (pid N)` and the engine's
 `audio output` line naming the device it opened; and a login prompt (`root`, no password).
 Report what stops where, and the output of `aplay -l`,
-`dmesg | grep -i -E "sai|wm8524|sdma|dsim|adv7511|mxsfb"`, `/var/log/oscairn.log` and
-`/var/log/oscairn-xorg.log`.
+`dmesg | grep -i -E "sai|wm8524|sdma|dsim|adv7511|mxsfb"`, `/var/log/oscairn-engine.log` and
+`/var/log/oscairn-ui.log`.
 
 ## Next
 

@@ -94,8 +94,8 @@ are used here only to describe compatibility or what the documents compare with.
 > - a **library** of Performances and Sounds with tags, favorites, editing, audition, and
 >   installable or exportable [archives](docs/library-archive.md);
 > - **resource budgets** measured on the device, refusing what would not fit;
-> - a **desktop app** that starts at Home, with the Performance, Library, Setlist and
->   Groovebox apps, themes, and the panel layouts of the KICK, the Ignite, a MODX M screen and a 49-key
+> - a **desktop app** that starts at Home, with the Performance, Library and Setlist
+>   apps, themes, and the panel layouts of the KICK, the Ignite, a MODX M screen and a 49-key
 >   keyboard; and **device profiles** that make it a device's screen;
 > - a **Linux image** that boots into it, tested in QEMU ([`os/`](os/README.md)).
 >
@@ -120,7 +120,7 @@ the plugin worker use it. The plugin worker's process is C++.
 ### The desktop app
 
 Builds the app and starts it at Home: tap Performance to play and edit the open Performance,
-or the Library, Setlist or Groovebox. The first build downloads JUCE 9.0.4 and takes a
+or the Library or Setlist. The first build downloads JUCE 9.0.4 and takes a
 few minutes. Tested on macOS; the Linux build is untested so far. On Linux it needs libcurl's
 development files (Debian and Ubuntu: `libcurl4-openssl-dev`).
 
@@ -142,12 +142,12 @@ panel layouts in the View menu, or start with one:
 open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --layout kick
 ```
 
-Options: `--app performance|library|setlist|groovebox|recordings|settings|plugins` (open an app,
+Options: `--app performance|library|setlist|recordings|settings|plugins` (open an app,
 or the plugin browser, instead of Home), `--layout desktop|kick|kick-screen|ignite|keys49|modx-m-screen|file.json`,
 `--profile kick` (a device's screen: one window, full screen under any window manager, with
 everything else opening inside it, dense by design: touch-size controls with the least space
 between them, in the theme its profile names until you choose one; see [running on a
-KICK](docs/kick.md)), `--play` (start the transport at launch, so the Groovebox plays: nothing
+KICK](docs/kick.md)), `--play` (start the transport at launch, so the sequencer part plays: nothing
 plays at start without it), and `--snapshot out.png
 [--size WxH] [--play SECONDS]` to render the window to a PNG and quit (off screen: no window shows,
 and the app is never the active one or in the Dock), and `--audio null` (the
@@ -159,7 +159,7 @@ checks). Layouts are described in
 
 The UI is moving from JUCE to Rust, one screen at a time ([Rust UI](docs/rust-ui.md)). The Rust
 shell, `oscairn-ui`, is the default interface, on a device and on a computer, wherever it is built:
-screens not yet ported (the Groovebox, Recordings) hand over to the JUCE app, and `OSCAIRN_UI=juce`
+screens not yet ported (Recordings) hand over to the JUCE app, and `OSCAIRN_UI=juce`
 (or a screen's `"ui": "juce"` in a device profile) starts the JUCE app alone. To build it, add
 `-DOSCAIRN_UI=ON` (cargo downloads its crates on the first build): the desktop app then carries it
 and starts it against its own engine; or run `cd ui && cargo build` and `oscairn-ui --socket PATH`

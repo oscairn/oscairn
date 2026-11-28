@@ -6,7 +6,7 @@ a device that does not exist yet and be tried with the same engine behind it. Bu
 
 | File | Layout |
 | --- | --- |
-| `desktop.json` | The desktop app's own window (the Desktop surface): toolbar, parts list, and tabs for the part, Mixer, Routing and Controls; apps such as the Groovebox open from the Apps menu |
+| `desktop.json` | The desktop app's own window (the Desktop surface): toolbar, parts list, and tabs for the part, Mixer, Routing and Controls; apps such as the Library open from the Apps menu |
 | `kick.json` | The KICK's panel, with the geometry of chillbeast's KickEM simulator board (1024 x 600 screen); P1 to P4 play the row selected on screen; most buttons do nothing yet |
 | `kick-screen.json` | A device's screen alone, designed at the KICK's 1024 x 600 and stretching to any screen: on the device, the hardware panel supplies the controls. The KICK, the Ignite, the FANTOM-07 and the test boards show it |
 | `modx-m-screen.json` | The MODX M profile's screen alone, designed at 800 x 480 (an estimate) and stretching the same way |
@@ -76,7 +76,7 @@ Others can be opened with View > Open Layout File... or `--layout path.json`.
     ([RFC 0030](../../../docs/rfcs/0030-system-shell-launcher-and-navigation.md)). A layout with
     one of those buttons shows no icon for it in the top bar.
   - `pads`: `rows` x `cols` pads, pad 1 at the bottom-left, row by row upwards; each plays
-    what the Performance's pad map assigns it (**Pads...** on the screen edits it). With
+    what the Performance's pad map assigns it. With
     `"steps": true` they light with the sequencer's playhead.
   - `keys`: a piano keyboard of `count` keys from `note`.
   - `label`: text; `"align"` is `left` (the default), `center` or `right`.

@@ -736,7 +736,7 @@ Push. A pad's release ends the note its press started, even if the map or bank c
 between. The pad editor shows the grid, plays a pad as it is selected, and applies every
 change at once; "set all" copies a pad's channel, velocity and pressure to its bank.
 Implemented 2026-10-31 (`pads.h`, the `pads.*` control methods and the desktop's **Pads...**
-editor); a "learn" mode that takes a note from the keyboard is still to do.
+editor, since removed with the JUCE Groovebox, #358); a "learn" mode that takes a note from the keyboard is still to do.
 
 ### The control tree
 

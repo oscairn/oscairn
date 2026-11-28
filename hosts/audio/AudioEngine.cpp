@@ -173,7 +173,7 @@ namespace oscairn::host
         const auto delay = session_->add( "delay", pluginDir + "/oscairn-delay.clap" );
         // The startup Performance, in parts like any other: a Synth part the keys play (the
         // Basic Synth into the Delay), and a Groovebox part whose step sequencer plays the same
-        // synth. The nodes keep the names the Groovebox and the panel layouts bind to.
+        // synth. The nodes keep the names the panel layouts bind to.
         const auto synthPart = session_->addPart( "Synth" );
         session_->insertIntoPart( synthPart, 0, synth );
         session_->insertIntoPart( synthPart, 1, delay );

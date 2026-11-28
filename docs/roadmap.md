@@ -67,7 +67,7 @@ Goal: something new running "on the device" before anyone has the device.
   channels, mutes and lock lanes; exact bar-boundary launches, KICK controls and Performance
   save/reopen. [Listening checks remain queued](listening-tests.md);
 - [x] a desktop app (JUCE) with live audio, MIDI input, a Groovebox screen for editing the
-  pattern, and panel layouts described in data: a desktop window, the KICK's panel, and a
+  pattern (removed, #358), and panel layouts described in data: a desktop window, the KICK's panel, and a
   concept keyboard.
 - [x] `core/control`: a JUCE-free graph/transport session and initial in-process control
   interface for parameters, transport and UI notes, used by the desktop adapter; headless
@@ -250,15 +250,15 @@ Decided 2026-11-08, from what the milestone test found:
    - [x] Play, the Performance app's first view ([status](rfcs/0011-performance-ui-and-editors.md#play-status))
    - [ ] the UI in Rust, replacing the JUCE app's screens one at a time ([Rust UI](rust-ui.md)): the
      default interface since 2026-11-25, on the FANTOM bundle (a screen without `"ui"` is rust) and
-     in the desktop app (it starts `oscairn-ui` against its engine); the Groovebox and Recordings
-     still hand over to JUCE, and `OSCAIRN_UI=juce` forces the JUCE app
+     in the desktop app (it starts `oscairn-ui` against its engine); Recordings
+     still hands over to JUCE, and `OSCAIRN_UI=juce` forces the JUCE app
      - [ ] the other images (kick, ignite, imx8mm-evk, qemu-aarch64, modx-m): their
        `oscairn-session` starts the JUCE app under X and reads no `OSCAIRN_UI`
      - [ ] the desktop's window structure and the rest of [Desktop: still to do](rust-ui.md#desktop-still-to-do):
        separate windows where the JUCE app opens them, resizable and responsive; plugin editor
        windows; one app, not two processes; native scaling checked on Retina and non-Retina
        displays; menus; file dialogs; drag and drop; keyboard shortcuts; the audio and MIDI device
-       choice; multiple monitors; the Groovebox and Recordings; quitting
+       choice; multiple monitors; Recordings; quitting
    - [x] the engine thread's core (note routing, the voice budget) and the graph's audio in Rust,
      each tested bit for bit against its C++ reference (`engine-core-diff`, `engine-audio-diff`,
      `engine-run-diff`); the reference deleted once the Rust core had run on the keyboard, its outputs

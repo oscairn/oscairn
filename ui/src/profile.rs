@@ -109,7 +109,7 @@ mod tests {
         assert_eq!((p.id.as_str(), p.on_device, p.theme.as_str(), p.frame_rate()), ("fantom-07", true, "oscairn-block", 30));
         assert_eq!((p.memory, p.top_bar), (992 << 20, MeterSettings { cpu: Show::Both, ram: Show::Both }));
         assert_eq!((p.roland_next_boot, Profile::load(None).unwrap().roland_next_boot), (true, false), "only the FANTOM-07's profile offers Roland's system at the next boot");
-        assert_eq!((p.apps.len(), p.apps[3].as_str(), p.panel_map.as_str()), (5, "oscairn.setlist", "fantom-07.json"));
+        assert_eq!((p.apps.len(), p.apps[2].as_str(), p.panel_map.as_str()), (4, "oscairn.setlist", "fantom-07.json"));
         assert_eq!(Profile::load(None).unwrap().frame_rate(), 0); // a computer: no cap
         assert!(Profile::load(Some("no-such-profile")).is_err());
     }

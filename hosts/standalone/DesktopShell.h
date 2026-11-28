@@ -23,25 +23,6 @@ namespace oscairn::standalone
     bool touchSized(InputMode);
     juce::String inputModeName(InputMode);
 
-    /// The Groovebox app: the step sequencer's screen with its transport above it, in a window
-    /// of its own. Apps are separate from the sound editor; Play and Stop belong to the app.
-    class SequencerPane : public juce::Component, private juce::Timer
-    {
-    public:
-        explicit SequencerPane(Engine& engine, bool transport = true); // transport: Play, Stop and clock on screen
-        void refresh();
-        juce::Button& clockOut() { return clockOut_; }
-        void paint(juce::Graphics& g) override { g.fillAll(ink(Ink::Background)); } // opaque: over a panel's own screen
-        void resized() override;
-    private:
-        void timerCallback() override { refresh(); }
-        Engine& engine_;
-        juce::TextButton play_{"Play"}, stop_{"Stop"};
-        juce::ToggleButton sync_{"Follow MIDI clock"};
-        juce::TextButton clockOut_; // the MIDI outputs clock goes to (RFC 0012 step 2)
-        Screen screen_;
-    };
-
     /// The Desktop surface (RFC 0019): the desktop app's own window rather than a device's
     /// panel. A toolbar with the tempo, scenes and undo; Play (RFC 0011) under it, first; and
     /// Edit's: the parts and buses down the left with their meters, and tabs for the selected

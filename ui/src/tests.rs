@@ -362,7 +362,7 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 42, "within half a second of the last: not shown");
     let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
-    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances · 1 Sound", "Songs in order, for the stage", "Patterns and steps", "No audio device (--audio null)"]);
+    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances · 1 Sound", "Songs in order, for the stage", "No audio device (--audio null)"]);
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
@@ -503,7 +503,7 @@ fn home_moves_by_keys_panel_and_touch() {
     f.reopened();
     let s = &mut f.screen;
     let names: Vec<String> = s.ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
-    assert_eq!(names, ["Performance", "Library", "Setlist", "Groovebox", "Settings"]);
+    assert_eq!(names, ["Performance", "Library", "Setlist", "Settings"]);
     s.frame();
     s.save("home");
     assert_eq!(s.frame(), None, "at rest");
@@ -533,17 +533,11 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!((s.ui.get_screen(), title(&s.ui).as_str(), s.ui.global::<Bar>().get_home_button(), s.ui.global::<Bar>().get_back()), (1, "Setlist", true, true));
     assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
     assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
-    s.ui.global::<HomeState>().invoke_tapped(3); // Groovebox: a JUCE screen
-    assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")));
     let file = std::env::temp_dir().join(format!("oscairn-ui-handover-{}", std::process::id()));
-    shell::write_handover(&file, shell::handover().unwrap()).unwrap();
+    shell::write_handover(&file, "recordings").unwrap();
     let written = std::fs::read_to_string(&file).unwrap();
     let _ = std::fs::remove_file(&file);
-    assert_eq!(written, "groovebox\n", "a whole line, as the start script reads it");
-    s.frame();
-    s.save("home-opening-groovebox");
-    shell::act(Action::Move { pane: None, by: 1 });
-    assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
+    assert_eq!(written, "recordings\n", "a whole line, as the start script reads it");
 }
 
 // Home walked with panel moves only (no touch): every action it offers reached and held to a real
@@ -552,9 +546,8 @@ fn home_moves_by_keys_panel_and_touch() {
 // Record `record.start` with no parameters, Capture `record.start` naming the Performance and the
 // seconds the buffer keeps. Then every tile the screen's own tiles model declares: the cursor
 // moves to it and Confirm opens the screen at that tile (Performance → Play, Setlist, the Rust
-// Library and Settings, and the Groovebox last because it hands the display over), each Rust
-// tile left back on Home by Cancel (EXIT is Back in one step), the Groovebox leaving the shell
-// handing the display to the JUCE app. Nothing switches until the press.
+// Library and Settings), each tile left back on Home by Cancel (EXIT is Back in one step).
+// Nothing switches until the press.
 #[test]
 fn home_walked_with_panel_moves_only() {
     let mut f = Fixture::new("home-walk");
@@ -627,12 +620,11 @@ fn home_walked_with_panel_moves_only() {
     nav(&mut f, "move:2", 5); // past the last stop: the cursor gives the bar back to the screen
     assert!(f.screen.ui.get_screen() == 0 && !ui.global::<crate::Theme>().get_bar_cursor(), "past the last stop the bar's cursor is gone and Home has it");
     // Every tile the screen's own tiles model declares, reached and confirmed; the Rust ones left
-    // back on Home, the Groovebox last (it hands the display over to the JUCE app).
+    // back on Home.
     let tiles: Vec<String> = ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
     let n = tiles.len();
     assert!(n > 0, "the screen declares its tiles");
-    let rust: Vec<usize> = (0..n).filter(|&i| tiles[i] != "Groovebox").collect();
-    for i in rust.iter().copied().chain(std::iter::once(tiles.iter().position(|t| t == "Groovebox").expect("the profile offers the Groovebox"))) {
+    for (i, tile) in tiles.iter().enumerate() {
         assert_eq!(f.screen.ui.get_screen(), 0, "the cursor is back on Home before the next tile");
         nav(&mut f, "move:0", 1); // the first move shows the cursor on the first tile
         if i > 0 {
@@ -641,22 +633,17 @@ fn home_walked_with_panel_moves_only() {
         assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 1, "one cursor, on the tile it moved to");
         nav(&mut f, "confirm", 1);
         settle(&mut f);
-        if tiles[i] == "Groovebox" {
-            assert_eq!((f.screen.ui.get_screen(), f.screen.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")), "the Groovebox tile hands the display over to the JUCE app");
-            assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 0, "a tap or a press drops the cursor");
-            continue;
-        }
-        let expect = match tiles[i].as_str() {
+        let expect = match tile.as_str() {
             "Performance" => 3,
             "Library" => 13,
             "Setlist" => 1,
             "Settings" => 14,
-            _ => panic!("a Home tile the walk does not know: {}", tiles[i]),
+            _ => panic!("a Home tile the walk does not know: {}", tile),
         };
-        assert_eq!(f.screen.ui.get_screen(), expect, "the {} tile opens its screen", tiles[i]);
+        assert_eq!(f.screen.ui.get_screen(), expect, "the {} tile opens its screen", tile);
         nav(&mut f, "cancel", 1); // EXIT is Back, in one step from anywhere on a screen
         settle(&mut f);
-        assert_eq!(f.screen.ui.get_screen(), 0, "back on Home from {}", tiles[i]);
+        assert_eq!(f.screen.ui.get_screen(), 0, "back on Home from {}", tile);
     }
 }
 

@@ -38,7 +38,7 @@ namespace oscairn::standalone
         p.screens.push_back(s);
         p.reliability = "desktop";
         p.install = {"desktop", "none", "separate", 1};
-        p.apps = {"oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.recordings", "oscairn.settings"};
+        p.apps = {"oscairn.performance", "oscairn.library", "oscairn.setlist", "oscairn.recordings", "oscairn.settings"};
         p.alwaysAvailable = {"oscairn.performance", "oscairn.library"};
         return p;
     }

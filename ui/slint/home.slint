@@ -27,12 +27,11 @@ export component Home inherits Rectangle {
     property <length> icon: Theme.icon;
     property <length> line: 18px;
     property <length> gap: Theme.gap-between(Theme.gap);
-    // As home.rs's APPS: Performance, Library, Setlist, Groovebox, Recordings, Settings.
+    // As home.rs's APPS: Performance, Library, Setlist, Recordings, Settings.
     property <[image]> icons: [
         @image-url("../../hosts/standalone/icons/piano.svg"),
         @image-url("../../hosts/standalone/icons/library-big.svg"),
         @image-url("../../hosts/standalone/icons/list-music.svg"),
-        @image-url("../../hosts/standalone/icons/layout-grid.svg"),
         @image-url("../../hosts/standalone/icons/audio-lines.svg"),
         @image-url("../../hosts/standalone/icons/settings.svg"),
     ];

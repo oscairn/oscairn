@@ -29,7 +29,11 @@ namespace oscairn
         struct Build { std::string platform, path, sha256; std::vector<signing::Signature> signatures = {}; double cpu = 0; uint64_t memory = 0; };
         // absent: the platforms whose builds the manifest lists and the archive leaves out, as an
         // archive made for one device may (RFC 0031); those builds are not in `builds`.
-        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; std::vector<std::string> absent = {}; };
+        // opensStateFrom and soundChanges: the publisher's claim (RFC 0043), empty for none: the
+        // oldest version of the same format and ID whose saved state this one opens (both dotted
+        // numbers, opensStateFrom not newer), and what may sound different from those (at most
+        // 1,000 bytes; empty: the same sound). Signed by library.sig only.
+        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; std::vector<std::string> absent = {}; std::string opensStateFrom = {}, soundChanges = {}; };
         std::string id, name;
         // "library"; "performance" or "sound" for an exported item; "plugin" for a plugin package,
         // which holds plugin builds and no items; "asset" for an asset package, which holds an
@@ -74,6 +78,9 @@ namespace oscairn
     // A platform plugin builds are kept for: linux-arm64, linux-x86_64, macos-arm64, macos-x86_64
     // or windows-x86_64. It names a folder in the plugin store, so nothing else is accepted.
     bool knownPlatform(const std::string& name);
+    // A version a publisher's claim may name (RFC 0043): one to four dot-separated numbers, such
+    // as "0.4.6", compared numerically (assets::older); a CLAP version may be any text.
+    bool dottedVersion(const std::string& version);
     // A plugin's folder in the plugin store and in archives, "<id>@<version>" with characters other
     // than letters, digits, '.', '-', '@' and '_' made '_'.
     std::string pluginFolderName(const std::string& id, const std::string& version);

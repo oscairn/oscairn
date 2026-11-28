@@ -661,8 +661,10 @@ namespace oscairn
     }
     std::vector<Control::InstalledPlugin> RemoteControl::installedPlugins() {
         auto d=impl_->call("plugins.list","{}",30000);std::vector<InstalledPlugin> out;
+        auto orEmpty=[](V v){return v->type==json_type_null?std::string():string(v);};
         for(auto x:array(field(field(d.get(),"result"),"plugins")))
-            out.push_back({string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),strings(field(x,"platforms")),uint64_t(integer(field(x,"bytes"))),strings(field(x,"usedBy")),boolean(field(x,"open")),string(field(x,"license"))});
+            out.push_back({string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),strings(field(x,"platforms")),uint64_t(integer(field(x,"bytes"))),strings(field(x,"usedBy")),boolean(field(x,"open")),string(field(x,"license")),
+                           orEmpty(field(x,"opensStateFrom")),orEmpty(field(x,"soundChanges")),orEmpty(field(x,"claimKey"))});
         return out;
     }
     void RemoteControl::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& platform) {

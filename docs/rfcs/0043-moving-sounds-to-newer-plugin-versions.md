@@ -1,7 +1,6 @@
 # RFC 0043: Moving sounds to newer plugin versions, and removing unused ones
 
-Status: proposed, 2026-11-11, from the owner's request of that day. Design only: nothing here is
-built. Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
+Status: proposed, 2026-11-11, from the owner's request of that day; being built (Progress below). Builds on packages, locks and installed content ([RFC 0006](0006-packages-and-portability.md)),
 sound assets' retention roots ([RFC 0009](0009-sound-assets-and-dependencies.md)), plugin workers
 ([RFC 0010](0010-plugin-worker-isolation.md)), the library and audition
 ([RFC 0021](0021-sounds-performances-and-library.md)), resource budgets
@@ -20,8 +19,14 @@ index, the offer at a stand-in) and points here.
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. The publisher's claim, `opensStateFrom` and `soundChanges`: written by `oscairn-sign`,
+- [x] 1. The publisher's claim, `opensStateFrom` and `soundChanges`: written by `oscairn-sign`,
       read from archives, carried into the index, kept in the plugin store, shown by `plugins.list` (#177)
+      (built 2026-11-27: the manifest fields and their checks in `readPackage`, `oscairn-sign
+      plugin-package --opens-state-from` and `--sound-changes`, the index builder's per-version
+      `plugins` with `opensStateFrom`, `plugin.json`'s `opensStateFrom`, `soundChanges` and
+      `claimKey`, kept only from an archive signed whole by a key that signed the plugin's builds,
+      and `plugins.list`'s three fields; `newest` and `keptBy` are step 6's. The fork's
+      `oscairn-release.json` schema in oscairn/packages is not changed here)
 - [ ] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
       `stateSavedBy` (#179)
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line (#179)

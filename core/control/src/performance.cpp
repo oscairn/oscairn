@@ -189,6 +189,14 @@ std::map<std::string,fs::path> storedBuilds(const std::string& format,const std:
     }
     return out;
 }
+// Whether `key` signed a build of this version that is in the store: its <bundle>.sig there, which an install fills only
+// with signatures it verified over that build (RFC 0043: a claim counts only under a key that signed what is installed).
+bool storedSignedBy(const std::string& format,const std::string& id,const std::string& version,const std::string& key){
+    if(key.empty())return false;
+    for(const auto& [forPlatform,build]:storedBuilds(format,id,version))
+        try{for(const auto& s:signing::readSignatures(build.string()+".sig"))if(s.key==key)return true;}catch(const std::exception&){}
+    return false;
+}
 fs::path storedPlugin(const std::string& format,const std::string& id,const std::string& version){
     const auto builds=storedBuilds(format,id,version);const auto here=builds.find(platform());
     return here==builds.end()?fs::path():here->second;
@@ -203,7 +211,9 @@ fs::path bundledPlugin(const fs::path& folder,const std::string& format,const st
     return {};
 }
 // A store entry's plugin.json: the plugin's format, ID, version and name, as the folder's name
-// cannot say them exactly, and its plugin package's license. Empty ID when it cannot be read.
+// cannot say them exactly, its plugin package's license, and its publisher's claim (RFC 0043:
+// opensStateFrom, soundChanges and the key that signed them, claimKey), kept from a verified
+// archive. Empty ID when it cannot be read.
 Control::InstalledPlugin storedIdentity(const fs::path& folder){
     Control::InstalledPlugin p;
     try{
@@ -211,12 +221,21 @@ Control::InstalledPlugin storedIdentity(const fs::path& folder){
         const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
         if(!doc)return p;
         p.format=text(field(doc.get(),"format"));p.id=text(field(doc.get(),"id"));p.version=text(field(doc.get(),"version"));p.name=text(field(doc.get(),"name"));p.license=text(field(doc.get(),"license"));
+        if(const V from=member(doc.get(),"opensStateFrom");from && from->type==json_type_string){
+            p.opensStateFrom=text(from);p.claimKey=text(field(doc.get(),"claimKey"));
+            if(const V changes=member(doc.get(),"soundChanges");changes && changes->type==json_type_string)p.soundChanges=text(changes);}
     }catch(const std::exception&){p.id.clear();}
     return p;
 }
 std::string storedName(const std::string& format,const std::string& id,const std::string& version){
     const auto p=storedIdentity(storeFolder(format,id,version));
     return p.id==id && !p.name.empty()?p.name:id;
+}
+// plugin.json, as storedIdentity reads it.
+void writeIdentity(const fs::path& folder,const Control::InstalledPlugin& p){
+    const auto claim=p.opensStateFrom.empty()?std::string():",\"opensStateFrom\":"+quote(p.opensStateFrom)+(p.soundChanges.empty()?"":",\"soundChanges\":"+quote(p.soundChanges))+",\"claimKey\":"+quote(p.claimKey);
+    const auto identity="{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+",\"name\":"+quote(p.name)+",\"license\":"+quote(p.license)+claim+"}\n";
+    state_files::write(folder/"plugin.json",identity.data(),identity.size());
 }
 // A file or folder moved by a rename where it can be, else copied: an install's unpacked folder is
 // in the data folder, so its items and builds normally move without a second copy.
@@ -231,9 +250,11 @@ void moveInto(const fs::path& from,const fs::path& to){
 void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false,std::string license={},double cpu=0,uint64_t memory=0){
     const auto folder=storeFolder(format,id,version);
     fs::create_directories(folder);
-    if(license.empty())license=storedIdentity(folder).license;
-    const auto identity="{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+",\"name\":"+quote(name)+",\"license\":"+quote(license)+"}\n";
-    state_files::write(folder/"plugin.json",identity.data(),identity.size());
+    auto identity=storedIdentity(folder); // its license and claim, recorded before, stay
+    if(identity.id!=id || identity.version!=version || identity.format!=format)identity=Control::InstalledPlugin{};
+    identity.format=format;identity.id=id;identity.version=version;identity.name=name;
+    if(!license.empty())identity.license=license;
+    writeIdentity(folder,identity);
     const auto partial=folder/("."+forPlatform+".partial");
     std::error_code e;fs::remove_all(partial,e);fs::create_directories(partial);
     if(move)moveInto(build,partial/build.filename());else fs::copy(build,partial/build.filename(),fs::copy_options::recursive);
@@ -2626,9 +2647,22 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 const bool later=std::any_of(p.plugins.begin(),p.plugins.end(),[&](const auto& q){return &q>&plugin && std::any_of(q.builds.begin(),q.builds.end(),[&](const auto& b){return b.path==build.path;});});
                 storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string(),build.cpu,build.memory);
             }
+            // The publisher's claim (RFC 0043), kept only from an archive signed whole by a key that
+            // also signed this plugin's builds in it and a build that is in the store now (one already
+            // there from another signer is kept, so its claim may not be); it replaces one recorded
+            // before only under the same key.
+            std::error_code e;
+            const bool claimed=!plugin.opensStateFrom.empty() && !p.signature.key.empty() &&
+                std::any_of(plugin.builds.begin(),plugin.builds.end(),[&](const auto& b){return std::any_of(b.signatures.begin(),b.signatures.end(),[&](const auto& s){return s.key==p.signature.key;});}) &&
+                storedSignedBy(plugin.format,plugin.id,plugin.version,p.signature.key);
+            if(claimed && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
+                auto identity=storedIdentity(storeFolder(plugin.format,plugin.id,plugin.version));
+                if(!identity.claimKey.empty() && identity.claimKey!=p.signature.key)out.notes.push_back(plugin.name+" "+plugin.version+" has a claim recorded under another key; this archive's was not kept");
+                else{identity.opensStateFrom=plugin.opensStateFrom;identity.soundChanges=plugin.soundChanges;identity.claimKey=p.signature.key;
+                     writeIdentity(storeFolder(plugin.format,plugin.id,plugin.version),identity);}
+            }
             // A plugin package's license texts and notices stay beside its plugins' builds, and the
             // asset libraries it needs in assets.tsv ("id<TAB>version"): a root they stay installed for.
-            std::error_code e;
             if(pluginPackage && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
                 std::string needs;for(const auto& d:p.assetDependencies)needs+=d.id+'\t'+d.version+'\n';
                 const auto list=storeFolder(plugin.format,plugin.id,plugin.version)/"assets.tsv";
@@ -2995,6 +3029,7 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
             if(!entry.is_directory() || leaf.front()=='.')continue;
             auto p=storedIdentity(entry.path());
             if(p.id.empty() || p.format!=format || storeFolder(p.format,p.id,p.version)!=entry.path())continue;
+            if(!p.claimKey.empty() && !storedSignedBy(p.format,p.id,p.version,p.claimKey)){p.opensStateFrom.clear();p.soundChanges.clear();p.claimKey.clear();} // a claim no stored build's signer made is shown as none
             for(const auto& [forPlatform,build]:storedBuilds(p.format,p.id,p.version)){
                 p.platforms.push_back(forPlatform);
                 if(fs::is_regular_file(build,e))p.bytes+=fs::file_size(build,e);

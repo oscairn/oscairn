@@ -1130,6 +1130,20 @@ What changes for the plugin:
   on that platform: a device that has not measured your plugin itself counts it at this,
   not at the default of 2% of the audio time and its memory guess, when it checks what fits. Installing
   a Performance or Sound that will not fit says so, and the library marks it.
+  A release that opens the sounds saved with your earlier versions says so with
+  `--opens-state-from <id> <oldest-version>`, and what may sound different with
+  `--sound-changes <id> "<text>"` (plain American English, at most 1,000 bytes, such as
+  "Notes no longer stick when a chord is released during the glide."; leave it out when nothing
+  sounds different) ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)).
+  This is a promise, for a state saved by any version from `<oldest-version>` up to this one:
+  it loads, the audio and note ports are the same, every parameter keeps its ID, value and
+  meaning, nothing the state holds is dropped, and it sounds the same except as
+  `--sound-changes` says. Only make it when all of that holds; a fix that changes a parameter's
+  range or meaning, or drops a port, starts a new `<oldest-version>` at this release. Both
+  versions must be dotted numbers (`0.4.6`, at most four parts). The claim is signed by the
+  archive's signature only, so pack with `--key`, the same key that signed the builds: a device
+  keeps it from no other archive (`plugins.list` shows it as `opensStateFrom`). Nothing moves
+  on its own: the claim lets a musician move their sounds to the new version on purpose.
   Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),
   named by your plugin package with `--asset-dependency <library-id> <least-version>`: the
   Catalog lists it under Content, and one installed only because your package needed it says

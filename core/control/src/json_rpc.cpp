@@ -1028,12 +1028,14 @@ namespace oscairn
             // The plugin store (RFC 0006).
             if(method=="plugins.list") {
                 fields(p,{});std::vector<std::string> out;
+                auto orNull=[](const std::string& s){return s.empty()?std::string("null"):quote(s);};
                 for(const auto& x:c.installedPlugins()){
                     std::vector<std::string> platforms,used;
                     for(const auto& s:x.platforms)platforms.push_back(quote(s));
                     for(const auto& s:x.usedBy)used.push_back(quote(s));
                     out.push_back("{\"format\":"+quote(x.format)+",\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"name\":"+quote(x.name)+",\"platforms\":"+join(platforms)+
-                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+'}');
+                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+
+                                  ",\"opensStateFrom\":"+orNull(x.opensStateFrom)+",\"soundChanges\":"+orNull(x.soundChanges)+",\"claimKey\":"+orNull(x.claimKey)+'}');
                 }
                 return "{\"plugins\":"+join(out)+'}';
             }

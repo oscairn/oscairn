@@ -691,6 +691,11 @@ are in `details/`, fetched when a package's page opens.
   manifest's hash, which is the identity a lock records (RFC 0006's package identity).
 - **`types`:** how many items of each type the package holds, by RFC 0023 type ID, and its
   plugins and apps by format, so a search by type needs no download.
+- **`plugins`** (written by the template's index builder since 2026-11-27, not read by the
+  device yet): each plugin the version holds, `{format,id,version,platforms}`, with
+  `opensStateFrom` when its manifest makes the publisher's claim
+  ([RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim));
+  [below](#the-index-must-say-which-plugins-a-version-holds).
 - **`platforms`:** download and installed size per platform, apart from what every platform
   shares (`common`). A device shows its own platform's figures only.
 - **`estimates`:** memory and CPU per device profile where measured (RFC 0025 step 5), from
@@ -1169,7 +1174,9 @@ Read in the code on 2026-11-11:
 
 ### The index must say which plugins a version holds
 
-**It does not today.** The index builder writes each version's `types`, counts of items by type
+**Written since 2026-11-27 (RFC 0043 step 1):** each version's `plugins` as below, with
+`opensStateFrom`; the device does not read it yet, and the builder's new checks below are not
+built. As it was read before that: the index builder wrote each version's `types`, counts of items by type
 and plugins by format, and `platforms` for the version as a whole (`facts()` in
 `tools/package-repository/template/scripts/build-index.py`); the device reads the same
 (`repository::Version` in `core/control/include/oscairn/repository.h`). A package's ID is not its

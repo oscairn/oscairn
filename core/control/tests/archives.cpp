@@ -571,6 +571,45 @@ int main(int argc, char** argv)
             check(p.libraries().empty() && !fs::exists(temp.path / "p" / "Libraries" / read.id), "asked as a library, it is not one");
             p.add("synth", (folders[0] / "Synth.clap").string(), "org.kick.test.synth"); p.commit();
             check(p.sessionStatus().failures.empty() && p.graphState().topology.nodes.size() == 1, "the installed build plays");
+            check(listed[0].opensStateFrom.empty() && listed[0].claimKey.empty(), "a package without a claim records none");
+        }
+        // RFC 0043: the publisher's claim to open older versions' state survives packing and install,
+        // kept only from an archive signed whole by a key that signed the plugin's builds.
+        {
+            const auto author = temp.path / "author.key";
+            const auto build = temp.path / "c-build" / "Synth.clap";
+            fs::create_directories(build.parent_path());
+            fs::copy_file(fixture, build);
+            check(run(tool + " build " + shell(author) + " clap org.kick.test.synth " + shell(version) + " " + platform() + " " + shell(build)).first == 0, "the build is signed");
+            const auto otherKey = temp.path / "claim-other.key";
+            check(run(tool + " key " + shell(otherKey)).first == 0, "another key is made");
+            const auto pack = [&](const fs::path& to, const std::string& options) {
+                return run(tool + " plugin-package --license MIT " + options + " --opens-state-from org.kick.test.synth 0.5 --sound-changes org.kick.test.synth 'Notes no longer stick.' " +
+                           shell(to) + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(build) + " 2>&1");
+            };
+            const auto claimed = temp.path / "Claimed.olib", unsignedClaim = temp.path / "UnsignedClaim.olib", otherClaim = temp.path / "OtherClaim.olib";
+            check(pack(claimed, "--key " + shell(author)).first == 0 && pack(unsignedClaim, "").first == 0 && pack(otherClaim, "--key " + shell(otherKey)).first == 0, "packed with a claim");
+            const auto read = readPackage(claimed, {});
+            check(read.plugins.at(0).opensStateFrom == "0.5" && read.plugins[0].soundChanges == "Notes no longer stick.", "the manifest carries the claim");
+            const auto newer = run(tool + " plugin-package --license MIT --opens-state-from org.kick.test.synth 9 " + shell(temp.path / "Newer.olib") + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(build) + " 2>&1");
+            check(newer.first != 0 && newer.second.find("newer than its version") != std::string::npos && !fs::exists(temp.path / "Newer.olib"), "a claim newer than the version is refused: " + newer.second);
+            const auto installedClaim = [&](const fs::path& home, const fs::path& archive) {
+                device(home);
+                Session c(48000, 64);
+                c.installArchive(archive.string(), true, {}, true);
+                const auto listed = c.installedPlugins();
+                return listed.size() == 1 ? listed[0] : Control::InstalledPlugin{};
+            };
+            const auto kept = installedClaim(temp.path / "c1", claimed);
+            check(kept.opensStateFrom == "0.5" && kept.soundChanges == "Notes no longer stick." && kept.claimKey == authorKey, "installed, plugins.list shows the claim and its key");
+            check(installedClaim(temp.path / "c2", unsignedClaim).opensStateFrom.empty(), "a claim in an unsigned archive is not kept");
+            check(installedClaim(temp.path / "c3", otherClaim).opensStateFrom.empty(), "a claim signed by a key that did not sign the builds is not kept");
+            {
+                device(temp.path / "c1");
+                Session c(48000, 64);
+                c.addPluginBuild("clap", "org.kick.test.synth", version, other, build.string());
+                check(c.installedPlugins().at(0).opensStateFrom == "0.5", "adding another platform's build keeps the claim");
+            }
         }
         // Device E (RFC 0025 step 5): a plugin package declares its build's estimate, as
         // oscairn-plugin-check measures it; a device that has not measured the plugin counts it at

@@ -398,6 +398,10 @@ def read_release(path, root, publishers, tool, cache, problems):
         # The packages it needs, as RFC 0031's index names them: the asset libraries and packages its archive names.
         "requires": {**r.get("requires", {}), **({"packages": needs + needs_packages} if needs or needs_packages else {})},
         "types": types,
+        # Each plugin it holds and its platforms (RFC 0031), with its publisher's claim to open older
+        # versions' state (RFC 0043) when it makes one; oscairn-sign verify checked the claim's form.
+        "plugins": [{"format": p["format"], "id": p["id"], "version": p["version"], "platforms": sorted({b["platform"] for b in p["builds"]}),
+                     **({"opensStateFrom": p["opensStateFrom"]} if "opensStateFrom" in p else {})} for p in contents["plugins"]],
         "platforms": {},
         "common": {"size": 0, "installed": 0},
         "estimates": {},

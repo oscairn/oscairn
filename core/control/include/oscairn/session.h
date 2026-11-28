@@ -107,6 +107,7 @@ namespace oscairn
         std::vector<VersionMove> versionMoves() override;
         std::vector<VersionUndone> undoVersionMove(const std::string& move) override;
         void forgetVersionMove(const std::string& move) override;
+        VersionUsed useVersion(const PluginVersion& plugin, const std::string& to, const std::vector<NodeId>& nodes = {}, bool withoutClaim = false) override;
         void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) override;
         void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) override;
         uint64_t listRepository(const std::string& source) override;

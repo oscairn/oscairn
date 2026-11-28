@@ -225,6 +225,45 @@ int main(int argc, char** argv)
         auto moved = wait(s, s.moveVersions(v1, "2", {a.performance}, true));
         check(status(moved, a.performance) == "moved", "one item moves with withoutClaim: " + status(moved, a.performance));
     }
+    // The open Performance (step 3): one node moved makes a mix, all moved none; edit.undo puts version 1 back with its state.
+    {
+        home("e");
+        Session s(rate, frames);
+        install(s, fixture, "1", false);
+        install(s, v2, "2", true);
+        const auto n1 = s.add("one", stored("1").string(), id), n2 = s.add("two", stored("1").string(), id);
+        const auto p1 = s.addPart("One"), p2 = s.addPart("Two");
+        s.insertIntoPart(p1, 0, n1); s.insertIntoPart(p2, 0, n2); s.commit();
+        s.setParameter(n1, 7, .8); s.setParameter(n2, 7, .3); s.service();
+        const auto version = [&](NodeId n) { for(const auto& x : s.graphState().topology.nodes) if(x.id == n) return x.plugin.version; return std::string(); };
+        check(s.sessionStatus().mixedVersions.empty(), "one version: no mix");
+        const auto used = s.useVersion(v1, "2", {n1});
+        s.service();
+        const auto mixed = s.sessionStatus().mixedVersions;
+        check(version(n1) == "2" && version(n2) == "1" && used.changes.empty() && mixed.size() == 1 && mixed[0].id == id && mixed[0].versions == std::vector<std::string>{"1", "2"},
+              "one node moved: two versions loaded, said in mixedVersions: " + version(n1) + " " + version(n2) + ", " + std::to_string(used.changes.size()) + " changes" + (used.changes.empty() ? std::string() : " (" + used.changes[0].name + " " + std::to_string(used.changes[0].param) + " " + (used.changes[0].before ? std::to_string(*used.changes[0].before) : "-") + " -> " + (used.changes[0].after ? std::to_string(*used.changes[0].after) : "-") + ")") + ", " + std::to_string(mixed.size()) + " mixed" +
+                  (mixed.empty() ? std::string() : " " + mixed[0].id + " " + std::to_string(mixed[0].versions.size())));
+        check(std::abs(s.parameter(n1, 7) - .8) < 1e-9 && s.sessionStatus().failures.empty(), "its setting kept");
+        s.useVersion(v1, "2");
+        s.service();
+        check(version(n2) == "2" && s.sessionStatus().mixedVersions.empty() && std::abs(s.parameter(n2, 7) - .3) < 1e-9, "all moved: one version, settings kept");
+        check(s.undo() && version(n2) == "1" && version(n1) == "2", "edit.undo puts version 1 back");
+        s.service();
+        check(std::abs(s.parameter(n2, 7) - .3) < 1e-9, "with its state");
+        check(refusal([&] { s.useVersion(v1, "2", {n1}); }).find("does not play") != std::string::npos, "a node at another version is refused");
+    }
+    // The open Performance without the claim: only with withoutClaim; other ports refused before anything changes.
+    {
+        home("f");
+        Session s(rate, frames);
+        install(s, fixture, "1", false);
+        install(s, ports, "2", false);
+        const auto n = s.add("one", stored("1").string(), id);
+        const auto p = s.addPart("One"); s.insertIntoPart(p, 0, n); s.commit();
+        const auto version = [&] { return s.graphState().topology.nodes.at(0).plugin.version; };
+        check(refusal([&] { s.useVersion(v1, "2"); }).find("does not say it opens") != std::string::npos, "without the claim, refused");
+        check(refusal([&] { s.useVersion(v1, "2", {}, true); }).find("ports are not the same") != std::string::npos && version() == "1", "other ports: refused, nothing changed");
+    }
     std::printf("%s\n", failures ? "FAILED" : "PASSED");
     return failures ? 1 : 0;
 }

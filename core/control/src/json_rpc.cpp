@@ -235,7 +235,7 @@ namespace oscairn
             auto channels=[](const auto& list){std::vector<std::string> result;for(const auto& ch:list)result.push_back("{\"deviceChannel\":"+std::to_string(ch.deviceChannel)+",\"name\":"+quote(ch.name)+",\"available\":"+(ch.available?"true":"false")+'}');return join(result);};
             return "{\"audioReady\":"+std::string(s.audioReady?"true":"false")+",\"audioInputs\":"+channels(s.audioInputs)+",\"audioOutputs\":"+channels(s.audioOutputs)+",\"audioDevice\":" + quote(s.audioDevice) + ",\"midiInputs\":" + endpoints(s.midiInputs) + ",\"midiOutputs\":" + endpoints(s.midiOutputs) +
                 ",\"sampleRate\":" + encode(s.sampleRate) + ",\"bufferSize\":" + std::to_string(s.bufferSize) +
-                ",\"cpuLoad\":" + encode(s.cpuLoad) + ",\"deadlineMisses\":" + std::to_string(s.deadlineMisses) + ",\"lateBlocks\":" + std::to_string(s.lateBlocks) + ",\"silentBlocks\":" + std::to_string(s.silentBlocks) + ",\"badOutputBlocks\":" + std::to_string(s.badOutputBlocks) + ",\"audioUnderruns\":" + std::to_string(s.audioUnderruns) + ",\"audioDeviceList\":" + std::to_string(s.audioDeviceList) + ",\"midiPortList\":" + std::to_string(s.midiPortList) + ",\"refusedLoads\":" + std::to_string(s.refusedLoads) + ",\"refusal\":" + quote(s.refusal) + ",\"ringOut\":{\"cut\":" + std::to_string(s.ringOut.cut) + ",\"faded\":" + std::to_string(s.ringOut.faded) + ",\"chokedOlder\":" + std::to_string(s.ringOut.chokedOlder) + ",\"partial\":" + std::to_string(s.ringOut.partial) + ",\"panicEnded\":" + std::to_string(s.ringOut.panicEnded) + ",\"limitEnded\":" + std::to_string(s.ringOut.limitEnded) + ",\"fadeEnded\":" + std::to_string(s.ringOut.fadeEnded) + ",\"kept\":" + std::to_string(s.ringOut.kept) + ",\"releasedSilent\":" + std::to_string(s.ringOut.releasedSilent) + ",\"releasedFaded\":" + std::to_string(s.ringOut.releasedFaded) + "}" + ",\"graphEventDrops\":" + std::to_string(s.graphEventDrops) + ",\"midiEventDrops\":" + std::to_string(s.midiEventDrops) +
+                ",\"cpuLoad\":" + encode(s.cpuLoad) + ",\"deadlineMisses\":" + std::to_string(s.deadlineMisses) + ",\"lateBlocks\":" + std::to_string(s.lateBlocks) + ",\"silentBlocks\":" + std::to_string(s.silentBlocks) + ",\"badOutputBlocks\":" + std::to_string(s.badOutputBlocks) + ",\"audioUnderruns\":" + std::to_string(s.audioUnderruns) + ",\"audioDeviceList\":" + std::to_string(s.audioDeviceList) + ",\"midiPortList\":" + std::to_string(s.midiPortList) + ",\"refusedLoads\":" + std::to_string(s.refusedLoads) + ",\"refusal\":" + quote(s.refusal) + ",\"mixedVersions\":" + [&] { std::vector<std::string> m; for(const auto& x : s.mixedVersions) { std::vector<std::string> v; for(const auto& y : x.versions) v.push_back(quote(y)); m.push_back("{\"format\":" + quote(x.format) + ",\"id\":" + quote(x.id) + ",\"versions\":" + join(v) + '}'); } return join(m); }() + ",\"ringOut\":{\"cut\":" + std::to_string(s.ringOut.cut) + ",\"faded\":" + std::to_string(s.ringOut.faded) + ",\"chokedOlder\":" + std::to_string(s.ringOut.chokedOlder) + ",\"partial\":" + std::to_string(s.ringOut.partial) + ",\"panicEnded\":" + std::to_string(s.ringOut.panicEnded) + ",\"limitEnded\":" + std::to_string(s.ringOut.limitEnded) + ",\"fadeEnded\":" + std::to_string(s.ringOut.fadeEnded) + ",\"kept\":" + std::to_string(s.ringOut.kept) + ",\"releasedSilent\":" + std::to_string(s.ringOut.releasedSilent) + ",\"releasedFaded\":" + std::to_string(s.ringOut.releasedFaded) + "}" + ",\"graphEventDrops\":" + std::to_string(s.graphEventDrops) + ",\"midiEventDrops\":" + std::to_string(s.midiEventDrops) +
                 ",\"failures\":" + [&]{ std::vector<std::string> f; for(const auto& x : s.failures) f.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"reason\":" + quote(x.reason) + '}'); return join(f); }() +
                 ",\"notices\":" + [&]{ std::vector<std::string> n; for(const auto& x : s.notices) n.push_back(quote(x)); return join(n); }() +
                 ",\"workers\":" + [&]{ std::vector<std::string> w; for(const auto& x : s.workers) w.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"cpu\":" + encode(x.cpu) + ",\"memory\":" + std::to_string(x.memory) + ",\"block\":" + encode(x.block) + ",\"blockMax\":" + encode(x.blockMax) + ",\"allowance\":" + encode(x.allowance) + ",\"late\":" + std::to_string(x.late) + ",\"silent\":" + std::to_string(x.silent) + '}'); return join(w); }() +
@@ -554,7 +554,7 @@ namespace oscairn
                 {"edit.undo",Edit},{"edit.redo",Edit},{"edit.history",Edit},
                 {"parts.add",Edit},{"parts.remove",Edit},{"parts.insert",Edit},{"parts.removeNode",Edit},{"parts.move",Edit},{"parts.addSplit",Edit},{"parts.removeSplit",Edit},
                 {"parts.addLane",Edit},{"parts.removeLane",Edit},{"parts.lane",Edit},{"parts.input",Edit},{"parts.output",Edit},{"parts.send",Edit},{"parts.level",Edit},
-                {"parts.name",Edit},{"parts.solo",Edit},{"parts.pan",Edit},{"parts.midiOut",Edit},{"parts.saveSound",Edit},{"parts.loadSound",Edit},{"parts.fromSound",Edit},
+                {"parts.name",Edit},{"parts.useVersion",Edit},{"parts.solo",Edit},{"parts.pan",Edit},{"parts.midiOut",Edit},{"parts.saveSound",Edit},{"parts.loadSound",Edit},{"parts.fromSound",Edit},
                 {"wires.connect",Edit},{"wires.disconnect",Edit},{"wires.enable",Edit},{"wires.mix",Edit},{"wires.zones",Edit},
                 {"scenes.add",Edit},{"scenes.store",Edit},{"scenes.remove",Edit},{"scenes.name",Edit},{"scenes.scope",Edit},{"scenes.transition",Edit},{"scenes.untouched",Edit},
                 {"controls.add",Edit},{"controls.remove",Edit},{"controls.name",Edit},{"controls.targets",Edit},{"controls.source",Edit},
@@ -1041,6 +1041,21 @@ namespace oscairn
                 }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
                 catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
                 catch(const std::exception& e){throw Failure{-32005,e.what(),move && std::string(e.what()).rfind("Stop the transport",0)==0?R"({"reason":"playing"})":"null"};}
+            }
+            if(method=="parts.useVersion") {
+                fields(p,{"plugin","to","nodes","withoutClaim"});
+                const auto plugin=member(p,"plugin");fields(plugin,{"format","id","version"});
+                const Control::PluginVersion from{std::string(string(member(plugin,"format"))),std::string(string(member(plugin,"id"))),std::string(string(member(plugin,"version")))};
+                std::vector<NodeId> nodes;
+                if(member(p,"nodes"))for(auto v:array(member(p,"nodes"),256,0))nodes.push_back(node(c,v));
+                Control::VersionUsed used;
+                try{used=c.useVersion(from,std::string(string(member(p,"to"))),nodes,member(p,"withoutClaim") && boolean(member(p,"withoutClaim")));}
+                catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                auto value=[](const std::optional<double>& v){return v?encode(*v):std::string("null");};
+                std::vector<std::string> changes;
+                for(const auto& x:used.changes)changes.push_back("{\"node\":"+quote(x.node)+",\"param\":"+std::to_string(x.param)+",\"name\":"+quote(x.name)+",\"before\":"+value(x.before)+",\"after\":"+value(x.after)+'}');
+                return "{\"revision\":"+std::to_string(used.revision)+",\"changes\":"+join(changes)+'}';
             }
             if(method=="versions.job") {
                 fields(p,{"job"});

@@ -512,4 +512,71 @@ namespace oscairn
         readMove(move); // refuses one that is not there
         fs::remove_all(movesFolder() / move);
     }
+
+    Control::VersionUsed Session::useVersion(const PluginVersion& plugin, const std::string& to, const std::vector<NodeId>& asked, bool withoutClaim)
+    {
+        if(staged_) throw std::invalid_argument("Finish pending graph edits before moving plugins to another version");
+        if(!assets::older(plugin.version, to)) throw std::invalid_argument("only a newer version than " + plugin.version + " can be used; going back is undoing the edit");
+        const auto builds = storedBuilds(plugin.format, plugin.id, to);
+        if(!builds.count(platform())) throw std::invalid_argument(plugin.id + " " + to + " is not installed here");
+        const auto build = builds.at(platform());
+        if(!withoutClaim && !claimFor(plugin, to)) throw std::invalid_argument(plugin.id + " " + to + " does not say it opens sounds saved with " + plugin.version + ": use it without the claim");
+        // The nodes: those asked, else every node playing the plugin at that version (a stand-in plays nothing).
+        auto playing = [&](NodeId n) {
+            const auto& h = graph_.host(n);
+            const std::string format = fs::path(h.descriptor().path).extension() == ".lv2" ? "lv2" : "clap";
+            return format == plugin.format && h.descriptor().id == plugin.id && h.descriptor().version == plugin.version && h.failure().empty();
+        };
+        std::vector<NodeId> nodes;
+        for(const auto n : asked)
+        {
+            if(!nodes_.count(n)) throw std::invalid_argument("Unknown node");
+            if(!playing(n)) throw std::invalid_argument(nodes_.at(n) + " does not play " + plugin.id + " " + plugin.version);
+            nodes.push_back(n);
+        }
+        if(asked.empty()) for(const auto& [n, name] : nodes_) if(playing(n)) nodes.push_back(n);
+        if(nodes.empty()) throw std::invalid_argument("the open Performance does not play " + plugin.id + " " + plugin.version);
+        // Each node's state, saved now, opened by the new build before anything changes.
+        Target t; t.plugin = plugin; t.to = to; t.rate = sampleRate_; t.frames = maxFrames_;
+        state_files::TemporaryDirectory saved(dataHome());
+        VersionUsed out;
+        for(const auto n : nodes)
+        {
+            auto& h = graph_.host(n);
+            const auto& name = nodes_.at(n);
+            if(dynamic_cast<const SoundContext*>(&h)) throw std::invalid_argument(name + " shares an instance with other parts; move the Performance from the library instead");
+            const auto dir = saved.path / std::to_string(n);
+            h.saveSnapshot(dir.string());
+            auto fresh = oscairn::open(build, plugin.id, to, t, assets_);
+            auto same = [](const std::vector<kick::clap::Port>& a, const std::vector<kick::clap::Port>& b) {
+                return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const auto& x, const auto& y) { return x.id == y.id && x.channels == y.channels && x.flags == y.flags; });
+            };
+            if(!same(h.inputPorts(), fresh->inputPorts()) || !same(h.outputPorts(), fresh->outputPorts()) || h.noteInputPorts() != fresh->noteInputPorts() || h.noteOutputPorts() != fresh->noteOutputPorts())
+                throw std::runtime_error(name + ": its audio or note ports are not the same in " + to);
+            try { fresh->loadSnapshot(dir.string()); }
+            catch(const std::exception& e) { throw std::runtime_error(name + ": its state does not open in " + to + " (" + e.what() + ")"); }
+            // Compared with what the build playing now reads from the same state apart from the graph, as a library move
+            // compares them: the playing host's own values hold what it was last told, not what a read-only parameter reads.
+            auto now = oscairn::open(h.descriptor().path, plugin.id, plugin.version, t, assets_);
+            now->loadSnapshot(dir.string());
+            const auto before = values(*now), after = values(*fresh);
+            now.reset();
+            for(const auto& [id, v] : before)
+            {
+                const auto a = after.find(id);
+                if(a == after.end()) out.changes.push_back({name, v.first, id, v.second, std::nullopt});
+                else if(std::abs(a->second.second - v.second) > 1e-9) out.changes.push_back({name, v.first, id, v.second, a->second.second});
+            }
+            for(const auto& [id, v] : after) if(!before.count(id)) out.changes.push_back({name, v.first, id, std::nullopt, v.second});
+        }
+        // Then each replaced by the new build with that state: one step, the old instances held by it for undo.
+        for(const auto n : nodes)
+        {
+            replace(n, build.string(), plugin.id);
+            graph_.host(n).loadSnapshot((saved.path / std::to_string(n)).string());
+        }
+        record();
+        out.revision = graphState().revision;
+        return out;
+    }
 }

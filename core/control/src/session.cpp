@@ -522,6 +522,15 @@ namespace oscairn
         }
         result.notices.insert(result.notices.end(), notices_.begin(), notices_.end()); // the host's (the audio device's) first
         result.refusedLoads = refusedLoads_; result.refusal = refusal_; result.ringOut = ringOut_;
+        // RFC 0043: a plugin played at two or more versions at once, each a library of its own (a stand-in plays nothing).
+        {
+            std::map<std::pair<std::string, std::string>, std::set<std::string, decltype(&assets::older)>> played;
+            for(const auto& [node, name] : nodes_)
+                if(const auto& h = graph_.host(node); h.failure().empty())
+                    played.try_emplace({std::filesystem::path(h.descriptor().path).extension() == ".lv2" ? "lv2" : "clap", h.descriptor().id}, &assets::older).first->second.insert(h.descriptor().version);
+            for(const auto& [plugin, versions] : played)
+                if(versions.size() > 1) result.mixedVersions.push_back({plugin.first, plugin.second, {versions.begin(), versions.end()}});
+        }
         for( size_t source = 0; source < maxSources; ++source )
         {
             Control::SessionStatus::HeldNotes held{ uint8_t( source ), {} };

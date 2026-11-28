@@ -25,8 +25,10 @@ OSCAIRN_CARGO ?= /opt/rust/cargo/bin/cargo
 OSCAIRN_CONF_OPTS += -DFETCHCONTENT_SOURCE_DIR_SAMPLEPACK=$(OSCAIRN_SAMPLEPACK_SRCDIR) -DSAMPLEPACK_CARGO=$(OSCAIRN_CARGO)
 # The Rust crates (samplepack, the engine core in core/engine/rust) for the target's CPU, as the C and C++
 # are built for it; release builds always (their own opt-level, whatever OSCAIRN_AUDIO_O3 says).
+# A big.LITTLE target (cortex-a76.cortex-a55) is named by its big core: rustc does not know the pair, falls back
+# to a CPU with no floating point, and passes a double in an integer register where the C++ puts it in d0.
 ifneq ($(call qstrip,$(BR2_GCC_TARGET_CPU)),)
-OSCAIRN_CONF_OPTS += -DSAMPLEPACK_RUSTFLAGS="-C;target-cpu=$(call qstrip,$(BR2_GCC_TARGET_CPU))"
+OSCAIRN_CONF_OPTS += -DSAMPLEPACK_RUSTFLAGS="-C;target-cpu=$(firstword $(subst ., ,$(call qstrip,$(BR2_GCC_TARGET_CPU))))"
 endif
 
 ifeq ($(BR2_PACKAGE_OSCAIRN_LV2),y)

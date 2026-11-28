@@ -5,9 +5,9 @@
 //! answer is taken whenever it comes. Only the socket closing ends a connection; it is then made
 //! again each second.
 //!
-//! A reader thread of its own does all the waiting; the UI thread only writes (small requests,
-//! with a write timeout) and is never blocked on the engine. `R` is what the caller wants to know
-//! about each request when its answer comes.
+//! A reader thread of its own does all the waiting and a writer thread of its own all the writing: the UI thread
+//! only queues a request and is never blocked on the engine, however many it sends or slowly the engine reads.
+//! `R` is what the caller wants to know about each request when its answer comes.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -15,6 +15,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -66,8 +67,11 @@ struct Pending<R> {
     sent: Instant,
 }
 
+/// How many requests wait to be written: a page's whole burst fits, a runaway does not grow without end.
+const QUEUE: usize = 4096;
+
 pub struct Client<R> {
-    writer: Mutex<Option<UnixStream>>,
+    writer: Mutex<Option<SyncSender<String>>>,
     pending: Mutex<HashMap<u64, Pending<R>>>,
     next: AtomicU64,
 }
@@ -89,9 +93,19 @@ impl<R: Send + 'static> Client<R> {
     fn run(&self, path: PathBuf, on_event: impl Fn(Event<R>)) {
         loop {
             match UnixStream::connect(&path).and_then(|s| s.try_clone().map(|w| (s, w))) {
-                Ok((read, write)) => {
-                    let _ = write.set_write_timeout(Some(Duration::from_millis(200)));
-                    *lock(&self.writer) = Some(write);
+                Ok((read, mut write)) => {
+                    let (queue, docs) = sync_channel::<String>(QUEUE);
+                    // A write that blocks (the engine not reading) just waits: a request cut part way would break the frame, and the
+                    // connection is only ever ended by the socket closing, or here by a write that failed.
+                    let _ = std::thread::Builder::new().name("engine-writer".into()).spawn(move || {
+                        for doc in docs {
+                            if write.write_all(doc.as_bytes()).is_err() {
+                                let _ = write.shutdown(std::net::Shutdown::Both);
+                                break;
+                            }
+                        }
+                    });
+                    *lock(&self.writer) = Some(queue);
                     let hello = self.write(0, "session.hello", json!({}));
                     let why = if hello { self.read(read, &on_event) } else { "session.hello not sent".into() };
                     *lock(&self.writer) = None;
@@ -150,7 +164,7 @@ impl<R: Send + 'static> Client<R> {
     }
 
     /// Sends a request without waiting; false when there is no connection or the engine has
-    /// stopped reading (its socket full for 200 ms), and then `request` is dropped.
+    /// stopped reading (`QUEUE` requests waiting), and then `request` is dropped.
     pub fn send(&self, request: R, method: &str, params: Value) -> bool {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         lock(&self.pending).insert(id, Pending { request, sent: Instant::now() });
@@ -163,16 +177,12 @@ impl<R: Send + 'static> Client<R> {
 
     fn write(&self, id: u64, method: &str, params: Value) -> bool {
         let doc = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string() + "\n";
-        let mut writer = lock(&self.writer);
-        let Some(w) = writer.as_mut() else { return false };
-        if w.write_all(doc.as_bytes()).is_err() {
-            // shortcut: a write timed out part way leaves a broken frame, so the connection is
-            // dropped and made again; fine for small requests, revisit for large saves.
-            let _ = w.shutdown(std::net::Shutdown::Both);
-            *writer = None;
-            return false;
+        let Some(w) = lock(&self.writer).clone() else { return false };
+        match w.try_send(doc) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => false, // the engine has stopped reading: this request is dropped, the connection is not
+            Err(TrySendError::Disconnected(_)) => false,
         }
-        true
     }
 
     /// How long the oldest request still out for which `counts` holds has been out.

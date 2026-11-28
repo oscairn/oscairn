@@ -179,7 +179,11 @@ An illustrative profile (the values are an example, not a real product's):
   ([docs/rust-ui.md](../rust-ui.md), added 2026-11-14): `frameRate`, the most frames a second it
   draws (0: no cap; absent: 30 on a device, none on a computer), and `topBar`, what its top bar's
   resource section shows: `cpu` and `ram`, each `both` (absent), `bar`, `percent` or `none`, under
-  the user's choice in Settings' Top bar page.
+  the user's choice in Settings' Top bar page. Read by the parsers and kept: the Rust UI's
+  `profile.rs` takes `screens[].topBar` into `Profile.top_bar` (a test asserts it), and the JUCE
+  app's `Profile.cpp` allows the field; the Settings' Top bar page itself starts from `both` for
+  each, the user's saved `top-bar.json` over it, so the profile's value is what the parsers keep,
+  not what that page opens with (since 2026-11-21).
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`hardware`** (optional, added 2026-11-09 with [RFC 0004](0004-hardware-services.md#step-1-status)):
   its accelerators (a DSP, an FPGA region, a dedicated sound chip, a real-time core) and the

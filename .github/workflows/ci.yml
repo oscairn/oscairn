@@ -22,8 +22,39 @@ permissions:
 # (tools/ci-ctest-shard.sh: the tests dealt out by their measured cost, tools/ci-costs/, and a check that the shards
 # are exactly the whole list); the built folder goes to the shards as an artifact (.github/actions/tree-handoff).
 jobs:
+  changes:
+    # A change that touches only Markdown, notes/, .trail/, docs/images/ or ui/ cannot change what a build or a test
+    # does (tools/ci-skippable.sh says which paths): the build jobs are skipped, and "CI result" at the end still
+    # passes, so it is the one check a branch rule can require.
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.diff.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Which paths changed
+        id: diff
+        run: |
+          tools/ci-skippable.sh --self-test
+          case "$GITHUB_EVENT_NAME" in
+            # the checkout is the pull request merged into the base's tip: its first parent is that tip
+            pull_request) base=HEAD^1 ;;
+            push) base=${{ github.event.before }} ;;
+            *) base= ;;
+          esac
+          if [ -n "$base" ] && git diff --name-only "$base" HEAD > changed.txt 2> /dev/null; then
+            cat changed.txt
+            tools/ci-skippable.sh < changed.txt | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "no base to compare with: everything runs"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: build (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -196,6 +227,8 @@ jobs:
     # The desktop app (JUCE) is otherwise never built; this builds it and runs the desktop-launch
     # test, which starts the real executable. macOS only: a headless Linux run needs xvfb. Its
     # engine runs on the null audio device (--audio null), so the runner needs no audio hardware.
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -232,6 +265,8 @@ jobs:
 
   thread-sanitizer-build:
     name: thread-sanitizer build
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -322,6 +357,8 @@ jobs:
     # The Rust CLAP host is the default and the jobs above build it; this builds the C++ reference host
     # (-DOSCAIRN_CLAP_HOST=cpp) and runs the tests that go through the engine, the worker and the host.
     name: cpp-reference-host build
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -383,3 +420,21 @@ jobs:
 
       - name: Test
         run: tools/ci-ctest-shard.sh build-cpp-host 2 ${{ matrix.shard }} "" tools/ci-costs/release.txt "clap-host|kick-clap|worker|plugin-hosts|plugin-clap|control-|engine-|graph-|pressure-|memory"
+
+  result:
+    # Passes when every job above passed or was skipped for a change that cannot matter to it; fails if one failed,
+    # was cancelled or never ran for another reason. The one name a branch rule requires.
+    name: CI result
+    if: always()
+    needs: [changes, build, build-and-test, standalone-launch, thread-sanitizer-build, thread-sanitizer, cpp-reference-host-build, cpp-reference-host]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BUILD: ${{ needs.changes.outputs.build }}
+        run: |
+          echo "$NEEDS" | grep '"result"'
+          if echo "$NEEDS" | grep -q '"result": "\(failure\|cancelled\)"'; then echo "a job failed or was cancelled" >&2; exit 1; fi
+          # skipped is right only for a change that skips the builds
+          if [ "$BUILD" = true ] && echo "$NEEDS" | grep -q '"result": "skipped"'; then echo "a job was skipped though the change builds" >&2; exit 1; fi

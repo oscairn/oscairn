@@ -411,6 +411,23 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
     assert_eq!(r["method"], "memory.state");
 }
 
+// Issue #26 item 4: the Settings tile's status line on Home is a plain short line (the engine's
+// rate), never the raw device text the engine reports as the audio device.
+#[test]
+fn the_settings_tiles_status_is_a_plain_line() {
+    let mut f = Fixture::new("settings-plain-line");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.serve(11, &json!({})); // the connection's setup, answered as a quiet engine would
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "hw:0,0", "sampleRate": 48000}})));
+    f.pump();
+    f.answer("record.get", json!({"takes": []})); // a first status asks for the takes and the meters
+    f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
+    f.answer("transport.get", json!({"tempo": 120, "playing": false}));
+    let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
+    assert_eq!(lines[4], "Audio: 48000 kHz", "the Settings tile's plain line: {lines:?}");
+}
+
 // Home at rest costs nothing: shown, nothing changing, ticks of the event loop ask the engine nothing and draw no
 // frame (docs/rust-ui.md: idle means zero requests and zero redraws).
 #[test]

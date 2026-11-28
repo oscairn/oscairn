@@ -125,6 +125,8 @@ struct Shown {
     ram: Meter,
     recording: Option<topbar::Recording>,
     audio_device: String,
+    /// The audio engine's rate, which Home's Settings tile's line states plainly.
+    sample_rate: u64,
     performances: Option<u64>,
     sounds: Option<u64>,
     /// The plugin packages installed, which Home's Library line counts.
@@ -885,6 +887,7 @@ impl App {
         self.show(|s| {
             s.cpu = topbar::cpu(&status);
             s.audio_device = device;
+            s.sample_rate = status["sampleRate"].as_u64().unwrap_or(0);
         });
         if std::mem::take(&mut self.state_stale) {
             self.ask(Request::Memory, "memory.state");
@@ -1121,7 +1124,7 @@ impl App {
             bar.set_ram_known(next.ram.0.is_some());
             bar.set_ram_level(level(next.ram));
         }
-        let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds, next.plugins) != (&was.performance, &was.audio_device, was.performances, was.sounds, was.plugins);
+        let lines_changed = (&next.performance, &next.audio_device, &next.sample_rate, next.performances, next.sounds, next.plugins) != (&was.performance, &was.audio_device, &was.sample_rate, was.performances, was.sounds, was.plugins);
         let named = (&next.performance, &next.scene) != (&was.performance, &was.scene); // Play's title, and the name is a stop of the bar's cursor
         self.shown = next;
         if named {
@@ -1142,7 +1145,7 @@ impl App {
                 _ => app.line.into(),
             },
             "oscairn.settings" if s.audio_device == "null" => "No audio device (--audio null)".into(),
-            "oscairn.settings" if !s.audio_device.is_empty() => s.audio_device.clone(),
+            "oscairn.settings" if s.sample_rate > 0 => format!("Audio: {} kHz", s.sample_rate),
             _ => app.line.into(),
         }
     }

@@ -411,6 +411,28 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
     assert_eq!(r["method"], "memory.state");
 }
 
+// A plugin that failed (a Performance opened with one that refused its state, #331) is named once in the bar, and a
+// status that says the same again says nothing more.
+#[test]
+fn a_failed_plugin_is_named_once_in_the_bar() {
+    let mut f = Fixture::new("failed-part");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.serve(11, &json!({}));
+    let status = |f: &mut Fixture, failures: serde_json::Value| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.1, "audioDevice": "null", "failures": failures}})));
+        f.pump();
+    };
+    let notice = |f: &Fixture| f.screen.ui.global::<Bar>().get_notice().to_string();
+    status(&mut f, json!([]));
+    assert_eq!(notice(&f), "");
+    status(&mut f, json!([{"node": 4, "name": "Rhodes", "reason": "org.kick.rhodes 1.0 refused its saved state (Plugin rejected state); its place and saved state are kept"}]));
+    assert_eq!(notice(&f), "Rhodes is silent. The Parts list says why.");
+    f.screen.ui.global::<Bar>().set_notice("".into());
+    status(&mut f, json!([{"node": 4, "name": "Rhodes", "reason": "x"}]));
+    assert_eq!(notice(&f), "", "the same failure is not said again");
+}
+
 // Home at rest costs nothing: shown, nothing changing, ticks of the event loop ask the engine nothing and draw no
 // frame (docs/rust-ui.md: idle means zero requests and zero redraws).
 #[test]

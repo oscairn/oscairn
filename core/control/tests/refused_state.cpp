@@ -2,8 +2,9 @@
 //
 // A plugin that refuses its saved state (its state load returns false) is never left playing its
 // default sound unseen (oscairn#18, part 1). The fixture refuses every load while a file exists.
-//  - A Performance whose plugin refuses its state is refused, naming the plugin and why, and the
-//    Performance that was open stays as it was.
+//  - A Performance whose plugin refuses its state opens (oscairn#331): that part is failed and silent, named with the
+//    reason in the session status and in a notice, the other parts play, a save writes the refused state back byte for
+//    byte, and opening the saved copy once the plugin takes the state plays it. At a Performance change the same.
 //  - A Sound loaded into a part likewise throws, and the part keeps what it had.
 //  - A plugin that has no saved state is not refused anything.
 //  - A worker killed while its plugin refuses the state it restarts with stays failed (a failure the
@@ -16,7 +17,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <map>
+#include <set>
 #include <string>
+#include <vector>
 #include <thread>
 #include <unistd.h>
 
@@ -36,6 +40,21 @@ namespace
     }
     bool has(Session& s, const char* name) { try { return s.hasNode(s.nodeId(name)); } catch(const std::exception&) { return false; } }
     std::string failureOf(Session& s) { std::string all; for(const auto& f : s.sessionStatus().failures) all += f.name + ": " + f.reason + "; "; return all; }
+    // Every file under a folder, by path, with its bytes.
+    std::map<std::string, std::vector<uint8_t>> filesOf(const fs::path& folder)
+    {
+        std::map<std::string, std::vector<uint8_t>> out;
+        for(const auto& f : fs::recursive_directory_iterator(folder))
+            if(f.is_regular_file()) out[fs::relative(f.path(), folder).string()] = state_files::read(f.path(), 1 << 20);
+        return out;
+    }
+    // The saved state of each node, as the bytes alone (the nodes' keys may differ between saves).
+    std::multiset<std::vector<uint8_t>> nodeStates(const fs::path& performance)
+    {
+        std::multiset<std::vector<uint8_t>> out;
+        for(const auto& [path, bytes] : filesOf(performance / "nodes")) out.insert(bytes);
+        return out;
+    }
     // Kills the engine's own worker processes, no one else's.
     void killChildren()
     {
@@ -72,15 +91,45 @@ int main(int argc, char** argv)
         const auto p = s.addPart("Bare"); s.insertIntoPart(p, 0, n); s.commit();
         s.savePerformance(plain.string());
     }
-    std::ofstream(refuse) << "x";
-    // Opening.
+    const auto both = temp.path / "both", resaved = temp.path / "resaved";
     {
         Session s(rate, frames);
-        const auto why = refusal([&] { s.loadPerformance(perf.string()); });
-        check(why.find("synth") != std::string::npos && why.find("org.kick.test.synth") != std::string::npos && why.find("Plugin rejected state") != std::string::npos,
-              "a Performance whose plugin refuses its state is refused, naming it and why: " + why);
-        check(s.sessionStatus().failures.empty() && s.sessionStatus().notices.empty(), "and leaves nothing behind");
+        const auto n = s.add("synth", fixture, "org.kick.test.synth");
+        const auto m = s.add("bare", fixture, "org.kick.test.no-state");
+        const auto p = s.addPart("Lead"); s.insertIntoPart(p, 0, n);
+        const auto q = s.addPart("Bare"); s.insertIntoPart(q, 0, m); s.commit();
+        s.setParameter(n, 7, .8); s.service();
+        s.savePerformance(both.string());
+    }
+    std::ofstream(refuse) << "x";
+    // Opening: it opens, the part whose plugin refuses is failed and named, the other plays, a save keeps the state, a reload works.
+    {
+        Session s(rate, frames);
+        const auto before = s.sessionStatus().refusedLoads;
+        const auto why = refusal([&] { s.loadPerformance(both.string()); });
+        check(why.empty(), "a Performance whose plugin refuses its state opens: " + why);
+        check(s.sessionStatus().refusedLoads == before, "and is not counted a refused load");
+        const auto failed = failureOf(s);
+        check(failed.find("synth") != std::string::npos && failed.find("org.kick.test.synth") != std::string::npos && failed.find("Plugin rejected state") != std::string::npos
+              && failed.find("bare") == std::string::npos, "the part is failed, named with the reason, and only it: " + failed);
+        const auto notices = s.sessionStatus().notices;
+        check(notices.size() == 1 && notices[0].find("synth") != std::string::npos && notices[0].find("silent") != std::string::npos, "one notice names it: " + (notices.empty() ? std::string() : notices[0]));
+        check(has(s, "synth") && has(s, "bare"), "both nodes are in the Performance");
+        float l[frames]{}, r[frames]{}; float* out[]{l, r};
+        s.service(); s.process(out, frames);
+        check(failureOf(s) == failed, "the other part plays on and the failed one stays as it was: " + failureOf(s));
+        s.savePerformance(resaved.string());
+        check(nodeStates(resaved) == nodeStates(both), "a save writes the refused state back byte for byte");
         check(refusal([&] { s.loadPerformance(plain.string()); }).empty(), "a plugin with no saved state is not refused anything");
+        std::filesystem::remove(refuse);
+        check(refusal([&] { s.loadPerformance(resaved.string()); }).empty() && failureOf(s).empty() && s.sessionStatus().notices.empty(), "the saved copy opens with nothing failed once the plugin takes the state: " + failureOf(s));
+        check(std::abs(s.parameter(s.nodeId("synth"), 7) - .8) < 1e-6, "with the state it was saved with");
+        std::ofstream(refuse) << "x";
+    }
+    // A Performance whose every plugin refuses opens with all its parts failed: nothing is lost, the player is told.
+    {
+        Session s(rate, frames);
+        check(refusal([&] { s.loadPerformance(perf.string()); }).empty() && !failureOf(s).empty(), "a Performance of one refusing plugin opens, failed: " + failureOf(s));
     }
     // A Sound into a part.
     {
@@ -95,7 +144,7 @@ int main(int argc, char** argv)
         std::ofstream(refuse) << "x";
     }
     // A Performance change: the instance the open one frees is offered to the next, whose state it refuses,
-    // and a fresh one refuses too: the change is refused and the open Performance plays on.
+    // and a fresh one refuses too: the change opens, that part failed and named.
     {
         const auto second = temp.path / "second";
         std::filesystem::remove(refuse);
@@ -106,8 +155,12 @@ int main(int argc, char** argv)
         s.loadPerformance(plain.string()); // the synth is free now, for the next to take over
         std::ofstream(refuse) << "x";
         const auto why = refusal([&] { s.loadPerformance(second.string()); });
-        check(why.find("Plugin rejected state") != std::string::npos, "a change to a Performance whose plugin refuses its state is refused: " + why);
-        check(has(s, "bare") && s.sessionStatus().failures.empty(), "and the open one plays on");
+        check(why.empty(), "a change to a Performance whose plugin refuses its state opens it: " + why);
+        check(failureOf(s).find("synth") != std::string::npos && failureOf(s).find("Plugin rejected state") != std::string::npos && has(s, "synth") && !has(s, "bare"),
+              "with that part failed and named: " + failureOf(s));
+        const auto again = temp.path / "again";
+        s.savePerformance(again.string());
+        check(nodeStates(again) == nodeStates(second), "and a save keeps its state byte for byte");
     }
     // A worker restarted with a state its plugin refuses.
     if(workers)

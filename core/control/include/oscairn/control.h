@@ -501,7 +501,13 @@ namespace oscairn
         // expression of the plugin package it came from, empty when unknown.
         // opensStateFrom, soundChanges and claimKey: its publisher's claim (RFC 0043) and the key that
         // signed it, kept from a verified archive at install; empty for none.
-        struct InstalledPlugin { std::string format, id, version, name; std::vector<std::string> platforms; uint64_t bytes = 0; std::vector<std::string> usedBy; bool open = false; std::string license, opensStateFrom = {}, soundChanges = {}, claimKey = {}; };
+        // keptBy (RFC 0043): what keeps this version installed, each {kind,name}: "item" (a library item using it, by
+        // name), "open" (the open Performance plays it), "outside" (a Performance saved outside the library uses it, by
+        // folder, read while the folder is here), "move" (a kept move left items at it, by its date) and "kept" (marked
+        // with keepPlugin). newest: the newest version of this plugin installed, never offered for removal.
+        struct KeptBy { std::string kind, name; bool operator==(const KeptBy&) const = default; };
+        struct InstalledPlugin { std::string format, id, version, name; std::vector<std::string> platforms; uint64_t bytes = 0; std::vector<std::string> usedBy; bool open = false; std::string license, opensStateFrom = {}, soundChanges = {}, claimKey = {};
+                                 bool kept = false, newest = false; std::vector<KeptBy> keptBy = {}; };
         virtual std::vector<InstalledPlugin> installedPlugins() = 0;
         // Moving library items to a newer installed version of a plugin (RFC 0043), by an explicit
         // action, never on its own. A job, off the control thread, opens each node of each item that
@@ -544,6 +550,13 @@ namespace oscairn
         // claim, only with withoutClaim. A node sharing an instance is refused.
         struct VersionUsed { uint64_t revision = 0; std::vector<VersionChange> changes; };
         virtual VersionUsed useVersion(const PluginVersion& plugin, const std::string& to, const std::vector<NodeId>& nodes = {}, bool withoutClaim = false) = 0;
+        // Removing unused plugin versions (RFC 0043), only when asked. keepPlugin marks a version to keep (or not) in
+        // the store's plugin.json. removeUnusedPlugins with nothing to remove is the preview: each version nothing
+        // keeps (keptBy empty, not the newest) and its bytes. Given versions (from the preview), each is removed only
+        // when nothing keeps it now, read again; one that something keeps is left, keptBy saying what.
+        virtual void keepPlugin(const PluginVersion& plugin, bool keep) = 0;
+        struct UnusedPlugin { std::string format, id, version, name; uint64_t bytes = 0; bool removed = false; std::vector<KeptBy> keptBy = {}; };
+        virtual std::vector<UnusedPlugin> removeUnusedPlugins(const std::vector<PluginVersion>& remove = {}) = 0;
         // Removes a plugin's builds from the store, one platform's or (empty) all. Refused while the
         // open Performance plays the build; items that use it open with a stand-in until it is back.
         virtual void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) = 0;

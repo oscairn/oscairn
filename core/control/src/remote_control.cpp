@@ -662,9 +662,10 @@ namespace oscairn
     std::vector<Control::InstalledPlugin> RemoteControl::installedPlugins() {
         auto d=impl_->call("plugins.list","{}",30000);std::vector<InstalledPlugin> out;
         auto orEmpty=[](V v){return v->type==json_type_null?std::string():string(v);};
+        auto keptBy=[](V v){std::vector<KeptBy> out;for(auto k:array(v))out.push_back({string(field(k,"kind")),string(field(k,"name"))});return out;};
         for(auto x:array(field(field(d.get(),"result"),"plugins")))
             out.push_back({string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),strings(field(x,"platforms")),uint64_t(integer(field(x,"bytes"))),strings(field(x,"usedBy")),boolean(field(x,"open")),string(field(x,"license")),
-                           orEmpty(field(x,"opensStateFrom")),orEmpty(field(x,"soundChanges")),orEmpty(field(x,"claimKey"))});
+                           orEmpty(field(x,"opensStateFrom")),orEmpty(field(x,"soundChanges")),orEmpty(field(x,"claimKey")),boolean(field(x,"kept")),boolean(field(x,"newest")),keptBy(field(x,"keptBy"))});
         return out;
     }
     uint64_t RemoteControl::planVersionMove(const PluginVersion& plugin,const std::string& to,const VersionScope& scope) {
@@ -698,6 +699,20 @@ namespace oscairn
     std::vector<Control::VersionUndone> RemoteControl::undoVersionMove(const std::string& move) {
         auto d=impl_->call("versions.undo","{\"move\":"+quote(move)+'}',120000);std::vector<VersionUndone> out;
         for(auto i:array(field(field(d.get(),"result"),"items")))out.push_back({string(field(i,"id")),boolean(field(i,"savedSince"))});
+        return out;
+    }
+    void RemoteControl::keepPlugin(const PluginVersion& plugin,bool keep) {
+        impl_->call("plugins.keep","{\"format\":"+quote(plugin.format)+",\"id\":"+quote(plugin.id)+",\"version\":"+quote(plugin.version)+",\"keep\":"+(keep?"true":"false")+'}');
+    }
+    std::vector<Control::UnusedPlugin> RemoteControl::removeUnusedPlugins(const std::vector<PluginVersion>& remove) {
+        std::string list;for(const auto& r:remove)list+=(list.empty()?"":",")+std::string("{\"format\":")+quote(r.format)+",\"id\":"+quote(r.id)+",\"version\":"+quote(r.version)+'}';
+        auto d=impl_->call("plugins.removeUnused",remove.empty()?std::string("{}"):"{\"remove\":["+list+"]}",120000);std::vector<UnusedPlugin> out;
+        for(auto x:array(field(field(d.get(),"result"),"plugins"))){
+            UnusedPlugin u{string(field(x,"format")),string(field(x,"id")),string(field(x,"version")),string(field(x,"name")),uint64_t(integer(field(x,"bytes")))};
+            if(const V removed=detail::member(x,"removed"))u.removed=boolean(removed);
+            if(const V kept=detail::member(x,"keptBy"))for(auto k:array(kept))u.keptBy.push_back({string(field(k,"kind")),string(field(k,"name"))});
+            out.push_back(std::move(u));
+        }
         return out;
     }
     void RemoteControl::forgetVersionMove(const std::string& move) { impl_->call("versions.forget","{\"move\":"+quote(move)+'}'); }

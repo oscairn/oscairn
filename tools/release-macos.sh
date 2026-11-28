@@ -34,8 +34,12 @@ else
 	rm -rf "$build"
 fi
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON \
-	-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DOSCAIRN_SOURCE_COMMIT="$commit"
-cmake --build "$build" --target oscairn_standalone oscairn-sign
+	-DOSCAIRN_UI=ON -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DOSCAIRN_SOURCE_COMMIT="$commit"
+cmake --build "$build" --target oscairn_standalone oscairn_ui oscairn-sign
+
+# The Rust UI is the app's interface (docs/rust-ui.md); the build copies it beside the app's program,
+# Contents/MacOS, where Application::startRustUi looks.
+[ -x "$build/hosts/standalone/oscairn_standalone_artefacts/Release/Oscairn.app/Contents/MacOS/oscairn-ui" ] || fail "the build left no oscairn-ui in the app"
 
 stage=$build/dmg
 app=$stage/Oscairn.app

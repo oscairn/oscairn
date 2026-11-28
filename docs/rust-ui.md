@@ -861,6 +861,9 @@ the window's own scale factor from the OS. A screen not yet ported ends the Rust
 and its name, as on a device: the JUCE window comes out on that screen, and its Home hides it and
 starts the Rust UI again. Its window closed (status 0) quits the app, asking about unsaved changes
 over the JUCE window; any other end shows the JUCE window, as before.
+`hosts/standalone/tests/desktop_rust_ui.py` (ctest `desktop-rust-ui`) runs the real app with a stub in place of `oscairn-ui`
+(`OSCAIRN_UI_PROGRAM`, which a `--snapshot` start, with no window, needs) and checks the child's arguments, the handover
+(status 3), the quit (status 0) and that the child ends with the app.
 
 The JUCE app stays reachable: `OSCAIRN_UI=juce` in the app's environment starts it as before (the
 JUCE window, no Rust UI); so does a build without `oscairn-ui` beside the app, `--in-process`,
@@ -884,8 +887,10 @@ the todo list, including window structure"); none of this is built:
 2. **Plugin editor windows**: a plugin's own GUI (`Engine::openPluginWindow`, the control's
    `showPluginWindow`, opened from the JUCE Parts view, PartsView.cpp). The Rust UI cannot open
    one yet; it must, for plugins that draw their own editors.
-3. **One app, not two processes**: the Rust UI runs as a child with its own Dock icon and menu;
-   the JUCE process holds the engine, the MIDI ports (Controllers.cpp) and the menu bar.
+3. **One app, not two processes**: the Rust UI runs as a child; the JUCE process holds the engine, the MIDI ports
+   (Controllers.cpp) and the menu bar. On macOS the child is an accessory app (main.rs, with `--handover`): no Dock
+   icon or menu bar of its own, so the Dock shows Oscairn once; it ends when its parent is gone (a one-second check).
+   Not yet tried with a window: that the Rust window takes keyboard focus, and what the menu bar shows while it does.
 4. **Native scaling verified** on a Retina and a non-Retina display, and a window moved between
    them (main.rs sets `SLINT_SCALE_FACTOR` only from a profile's screen); not yet checked.
 5. **Resizable and responsive**: every Rust screen at small and large window sizes, and its least

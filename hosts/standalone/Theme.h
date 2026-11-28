@@ -101,6 +101,7 @@ struct ThemeData {
     ThemeFont font;
     std::array<juce::Colour,9> colors{{juce::Colour(0xff15181d),juce::Colour(0xff20252d),juce::Colour(0xff2c333d),juce::Colour(0xff526070),juce::Colour(0xffedf1f5),juce::Colour(0xffa3aebb),juce::Colour(0xffffa45b),juce::Colour(0xff5ad9a4),juce::Colour(0xffff8d87)}};
     float fontScale=1,spacing=1,radius=6; // spacing scales the UI's paddings and gaps (0.6 to 1.6)
+    float scrollWidth=32; // the Rust UI's scroll bar width in design units (8 to 48); read and kept, the JUCE app draws no such bar
     ThemeStyle style;
     ThemeWires wires;
     ThemeSplash splash;

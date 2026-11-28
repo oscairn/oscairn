@@ -9,6 +9,7 @@
   },
   "fontScale": 1.0,
   "radius": 6,
+  "scrollWidth": 32,
   "colors": {
     "background": "#EEF1F5",
     "surface": "#FFFFFF",

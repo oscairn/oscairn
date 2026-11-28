@@ -4,6 +4,7 @@
 // buttons down the panel, one under the border cursor. Cancel or a tap outside closes it.
 
 import { Theme, Section, Button, Cursor } from "theme.slint";
+import { ScrollBar } from "part.slint";
 
 export global NoticeState {
     in property <bool> open;
@@ -11,6 +12,9 @@ export global NoticeState {
     in property <string> message;
     in property <[string]> choices;
     in property <int> cursor: -1;
+    // The panel's content can be taller than the view (a long message, or many choices): `bar-on` is set by the panel when a
+    // whole screen of it overflows, and its scroll bar turns it, as the shared lists' (issue #269). The panel itself scrolls.
+    in-out property <bool> bar-on: false;
     callback tapped(int);
     callback close();
 }
@@ -18,6 +22,26 @@ export global NoticeState {
 export component Notice inherits Rectangle {
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> panel-width: min(Theme.overlay-width, self.width - 2 * Theme.margin);
+    property <length> room: max(0px, root.height - 2 * Theme.margin);
+    // The whole panel's content, as laid out at the panel's full width (the bar's lane, when shown, overlays the far side): the
+    // panel is at most the room, and a notice taller than it is a scroll. `long` says the content overflowed a whole screen.
+    property <length> content-h: items.preferred-height;
+    property <bool> long: root.content-h > root.room;
+    property <length> lane: root.long ? Theme.scroll-lane : 0px;
+    // The scroll: whole screens of the content (`steps`), the screen shown (`first`), and the pixels one step moves it. The bar's
+    // thumb is one step wide, so a drag or a tap on it steps one whole screen, as the shared lists page their views.
+    property <int> steps: max(1, ceil(root.content-h / max(Theme.hair, root.room)));
+    property <length> step-px: (root.content-h - root.room) / max(1, root.steps - 1);
+    property <int> first: 0;
+    function step(page: int) {
+        let p = min(root.steps - 1, max(0, page));
+        root.first = p;
+        flick.content-y = -p * root.step-px;
+    }
+    // The bar's width as shown (the theme's lane, nothing around it), read by a test.
+    out property <length> bar-w: root.long ? Theme.scroll-lane : 0px;
+    changed long => { NoticeState.bar-on = root.long; }
+    init => { NoticeState.bar-on = root.long; }
     background: Theme.scrim;
     // A tap outside the panel closes it; one inside is the panel's own.
     TouchArea {
@@ -25,38 +49,65 @@ export component Notice inherits Rectangle {
     }
     panel := Section {
         width: root.panel-width;
-        height: min(root.height - 2 * Theme.margin, layout.preferred-height);
+        height: min(root.room, root.content-h);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
         fill: Theme.raised;
         clip: true;
         TouchArea { }
-        layout := VerticalLayout {
-            padding: Theme.pad;
-            spacing: root.gap;
-            Text {
-                text: NoticeState.title;
-                color: Theme.text;
-                font-size: Theme.body;
-                font-weight: 700;
-                wrap: word-wrap;
-            }
-            if NoticeState.message != "": Text {
-                text: NoticeState.message;
-                color: Theme.muted;
-                font-size: Theme.small;
-                wrap: word-wrap;
-            }
-            for choice[i] in NoticeState.choices: Rectangle {
-                height: Theme.touch;
-                Button {
-                    text: choice;
-                    clicked => { NoticeState.tapped(i); }
+        if root.long: bar := ScrollBar {
+            x: parent.width - Theme.scroll-lane - Theme.pad;
+            y: Theme.pad;
+            width: Theme.scroll-lane;
+            height: parent.height - 2 * Theme.pad;
+            total: root.steps;
+            first: root.first;
+            per-view: 1;
+            scrolled(page) => { root.step(page); }
+        }
+        flick := Flickable {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            content-height: root.content-h;
+            changed content-y => {
+                if (root.long) {
+                    root.first = min(root.steps - 1, max(0, round(-self.content-y / root.step-px)));
                 }
-                Cursor {
-                    shown: NoticeState.cursor == i;
-                    always: true;
-                    corner: Theme.button-radius(parent.height);
+            }
+            items := VerticalLayout {
+                y: 0px;
+                width: parent.width;
+                padding: Theme.pad;
+                // The bar's lane is kept clear of the content once the bar shows (`bar-on`, set by the `changed long` below, not
+                // bound to `long`, so the narrower content cannot loop back into it: narrower is only taller, so it stays long).
+                padding-right: Theme.pad + (NoticeState.bar-on ? Theme.scroll-lane + Theme.scroll-gap : 0px);
+                spacing: root.gap;
+                Text {
+                    text: NoticeState.title;
+                    color: Theme.text;
+                    font-size: Theme.body;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+                if NoticeState.message != "": Text {
+                    text: NoticeState.message;
+                    color: Theme.muted;
+                    font-size: Theme.small;
+                    wrap: word-wrap;
+                }
+                for choice[i] in NoticeState.choices: Rectangle {
+                    height: Theme.touch;
+                    Button {
+                        text: choice;
+                        clicked => { NoticeState.tapped(i); }
+                    }
+                    Cursor {
+                        shown: NoticeState.cursor == i;
+                        always: true;
+                        corner: Theme.button-radius(parent.height);
+                    }
                 }
             }
         }

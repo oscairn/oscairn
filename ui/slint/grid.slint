@@ -907,5 +907,5 @@ export component Grid inherits Rectangle {
     }
     property <int> per-list: GridState.list-per-view;
     property <bool> long: GridState.list-open && GridState.list.length > per-list;
-    property <length> lane: long ? Theme.scroll-lane : 0px;
+    property <length> lane: long ? Theme.scroll-lane + Theme.scroll-gap : 0px;
 }

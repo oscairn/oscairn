@@ -144,16 +144,12 @@ export global Theme {
     // How much of the width a rail may take to hold its longest label on one line (the rail is the theme's width, more only
     // for that).
     out property <float> rail-label-share: 0.16;
-    // A list's scroll bar (touch aid only): its own lane (the touch target), the visible bar (a third of the lane) and the
-    // thumb's least length.
-    in-out property <length> scroll-lane: touch;
-    in-out property <length> scroll-bar: scroll-lane / 3;
-    out property <length> scroll-thumb-min: touch;
-    // The lane begins over the row's right padding (`pad`, where no icon is: the star and the warning end a padding short of the
-    // row's edge), and the visible bar sits a small gap past the row's edge, at the list's side of its lane.
-    out property <length> scroll-overlap: pad;
+    // A list's scroll bar (touch aid only): `scroll-lane` is its width, the theme file's `scrollWidth` (set by `theme::apply`), and the
+    // bar fills exactly the lane it is given, with no margin of its own. The space around it is its container's: `scroll-gap` is
+    // what a list leaves between its rows and the bar; a list's padding or margin is the space beside the bar.
+    in-out property <length> scroll-lane: 32px;
     out property <length> scroll-gap: pad-tight;
-    out property <length> scroll-lead: scroll-overlap + scroll-gap;
+    out property <length> scroll-thumb-min: touch;
     // A finger drag on a list's rows becomes a scroll (not a tap) once it has moved this far.
     in-out property <length> scroll-drag-threshold: touch / 4;
     // Compact (the Library's): the spacing scale at its 0.7 step (ui/LIBRARY-APP.md), applied to the gaps between a list's rows and a

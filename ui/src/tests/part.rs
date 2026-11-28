@@ -617,6 +617,33 @@ fn the_devices_dialog_keeps_the_cursor_in_view_and_shows_a_scroll_bar() {
     assert!(rows(ui).iter().any(|r| r.0 == "Plays from"));
 }
 
+// Issue #26 item 8: the Part page shows the sostenuto and soft pedals' receive beside the
+// sustain's (the engine's per-part pedal receive, `input.receive`), and the Key and Scale rows.
+// None of the three pedals may be silently dropped from the list, and the Scale row must appear
+// with a part that owns a key. (Reachability without touch and the requests they send are the
+// round trips and the reachability walk above.)
+#[test]
+fn part_shows_each_pedal_receive_and_the_key_and_scale_rows() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    part_screen(&s, &part_graph(), 10);
+    // The three pedals' receive rows sit beside each other, in the file's order.
+    let labels: Vec<String> = rows(ui).iter().map(|r| r.0.clone()).collect();
+    let sustain = labels.iter().position(|l| l == "Sustain pedal").unwrap();
+    assert_eq!(&labels[sustain..sustain + 3], ["Sustain pedal", "Sostenuto pedal", "Soft pedal"]);
+    // The Key row is always there; the Scale row appears once the part owns a key.
+    assert!(rows(ui).iter().any(|r| r.0 == "Key"));
+    assert!(!rows(ui).iter().any(|r| r.0 == "Scale"), "no Scale row while it follows the Performance");
+    let mut graph = part_graph();
+    graph["parts"][0]["key"] = json!({"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10]});
+    let mut own = part_screen(&s, &graph, 10);
+    harmony(&mut own, minor(), &["Major", "Minor"]);
+    let labels: Vec<String> = rows(ui).iter().map(|r| r.0.clone()).collect();
+    let key = labels.iter().position(|l| l == "Key").unwrap();
+    let scale = labels.iter().position(|l| l == "Scale").unwrap();
+    assert!(scale > key, "the Scale row sits after the Key row");
+}
+
 // The Key and Scale rows drawn, the Key being changed: a long value ("Performance's (D Minor)") fits or elides.
 #[test]
 fn part_key_rows_are_drawn() {

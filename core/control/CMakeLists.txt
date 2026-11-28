@@ -61,7 +61,9 @@ target_compile_options(oscairn-library-scale-test PRIVATE -Wall -Wextra)
 if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
     set(library_scale_args --sanitized)
 endif()
-add_test(NAME control-library-scale COMMAND oscairn-library-scale-test ${library_scale_args})
+# A Debug build is several times slower on the 50,000 items: the full-size run with its timing gate is for
+# optimized configurations (see docs/developer-guide.md); Debug gets the same 5,000-item --small run.
+add_test(NAME control-library-scale COMMAND oscairn-library-scale-test ${library_scale_args} $<$<CONFIG:Debug>:--small>)
 set_tests_properties(control-library-scale PROPERTIES TIMEOUT 300)
 
 add_executable(oscairn-signing-test tests/signing.cpp)

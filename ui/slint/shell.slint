@@ -57,9 +57,11 @@ export component Shell inherits Window {
     out property <length> count-y: list.count-y;
     out property <length> thumb-y: list.thumb-y;
     out property <length> thumb-h: list.thumb-h;
+    out property <length> thumb-w: list.thumb-w;
     out property <length> track-h: list.track-h;
     out property <length> lane-x: list.lane-x;
     out property <length> side-track-h: library.side-track-h;
+    out property <length> notice-bar-w: overlay-notice.bar-w;
     out property <length> settings-rail: settings.rail;
     out property <length> settings-rail-need: settings.rail-need;
     out property <float> settings-rail-fit: settings.rail-fit;
@@ -183,7 +185,8 @@ export component Shell inherits Window {
         width: parent.width;
         height: parent.height - root.content-top;
     }
-    if NoticeState.open: Notice {
+    overlay-notice := Notice {
+        visible: NoticeState.open;
         y: root.content-top;
         width: parent.width;
         height: parent.height - root.content-top;

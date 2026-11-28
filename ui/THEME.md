@@ -21,6 +21,7 @@ audit made at 3a97dd63 (before the work) and, further down, what the work did.
 | `fontScale` | number | 1 | 0.8 to 1.4 | type sizes | yes (refused out of range) | `font-scale` | `Theme.small/body/button/title` everywhere; Play's Edit button width |
 | `spacing` | number | 1 | 0.6 to 1.6 | paddings and gaps (a scale) | yes (refused out of range) | `spacing` | `Theme.gap`, `margin`, `pad*`, `section_gap`, the envelope's plot top |
 | `radius` | number | 6 | 0 to 16 | corners | yes (refused out of range) | `radius` | every rounded Rectangle |
+| `scrollWidth` | number | 32 | 8 to 48 | the scroll bar's width | yes (refused out of range) | `scroll-lane` | the shared `ScrollBar` (every list and modal) |
 | `colors.background` | #RRGGBB | #15181D | required | window, wells, text on accent | yes | yes | all screens |
 | `colors.surface` | #RRGGBB | #20252D | required | cards, tiles, fields | yes | yes | all screens |
 | `colors.raised` | #RRGGBB | #2C333D | required | buttons, tracks | yes | yes | all screens |
@@ -103,8 +104,8 @@ Every property above is read by `ui/src/theme.rs` (`ThemeData::parse`, `load_fol
 the reference's `parse`, `load`, `inside`, `reload` and `defaultId`, with its words) and set on the
 window's `Theme` global by `theme::apply`: 11 colors (the nine and `warning`, `focus`), `radius`,
 `fontScale`, `spacing`, the eight `style` choices (Slint enums), the six `wires`, `splash` (its two colors, and
-its image when the theme's folder has one) and the font files. All 35 properties the reference
-stores or checks (`version`, `id`, `name`, `font` x3, `fontScale`, `spacing`, `radius`, 9 colors, 8 style, 6
+its image when the theme's folder has one) and the font files. All 36 properties the reference
+stores or checks (`version`, `id`, `name`, `font` x3, `fontScale`, `spacing`, `radius`, `scrollWidth`, 9 colors, 8 style, 6
 wires, 3 splash) are loaded and checked, and the two optional colors the reference accepts without
 storing (`warning`, `focus`) are used.
 
@@ -178,7 +179,7 @@ Checked in renders only on the Rust side (the odd themes: "Odd" spacing 1.6, "Od
   float bounds); fixed in both: the ends of a range are in it, as docs/theme.schema.json's `minimum` and
   `maximum` say.
 - A partial file is refused whole, not merged over the default (the previous Rust loader merged and
-  clamped; the reference does neither). What a file may omit is `fontScale`, `radius`,
+  clamped; the reference does neither). What a file may omit is `fontScale`, `radius`, `scrollWidth`,
   `colors.warning`, `colors.focus`, `font.bold` and `splash`.
 - Font checking is the reference's container check (`fontContainer`); not JUCE's
   `createSystemTypefaceFor` and the 'A' glyph test. A splash image is checked for its form (PNG
@@ -252,8 +253,8 @@ color goes: left, right, dot, fill), `style.depth`, `spacing` (every gap and pad
 divider were not separate tokens: they were the sections' (`Theme.gap-between`, `section-radius`, the joined line). They are now
 `Theme.list-gap`, `list-radius` and `list-divider` (and `Section.divider`), used by the shared list's rows and the Library's
 sidebar, and each follows the sections' style, so a theme looks as it did; making them keys of a theme file waits for the same
-keys in the JUCE parser (hosts/standalone/Theme.cpp). The Library's sidebar width is `Theme.sidebar-share`, the scroll bar's lane and
-bar `scroll-lane` and `scroll-bar`. Pictures of the same screens in two themes, one light with a blue accent, square and joined
+keys in the JUCE parser (hosts/standalone/Theme.cpp). The Library's sidebar width is `Theme.sidebar-share`, the scroll bar's width
+`scroll-lane` (a theme key, `scrollWidth`). Pictures of the same screens in two themes, one light with a blue accent, square and joined
 (tests/theme_pictures.rs, `blue_square_theme`: a theme as a file would define it; it becomes selectable in Settings > Appearance as
 a folder with that theme.json in the themes folder, and a built-in once it is added to hosts/standalone/themes).
 
@@ -274,14 +275,14 @@ height) and in a rounded one (`radius`), fields (half the height up to 56, else 
 chain's plugin chips and the routing boxes and their cursor (`radius`). `style.buttons` (pill, rounded) is still read, checked and
 kept, but both draw the family's corner: a pill beside the rows' and cards' corners did not read as one family. Left as they were,
 by design or as a different thing: knobs and slider thumbs, a switch's pill, the recording dot, the meters and thin tracks,
-progress lines, the scroll bar's track (a third of a lane wide: its half width, at most the radius), a mark (`mark-radius`: its
+progress lines, the scroll bar's track (the lane's width less its side margins, its corner the scaled one), a mark (`mark-radius`: its
 own style), the piano's keys (`key-radius`, Panel.cpp's), and a table cell of the grid's views (half the radius).
 Test: `radii_are_one_family` (src/tests/theme_pictures.rs) reads the corner of the strip, the search box, the info button, a
 sidebar entry and a list item as drawn, in the default theme and the blue square one.
 
-## The scroll bar sits close to the list (2026-11-17)
+## The scroll bar fills its lane (2026-11-28, issue #269)
 
-The lane stays a touch target wide (`scroll-lane`, 44) but the visible bar is drawn at the list side of it, not centered: the lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and the bar starts `Theme.scroll-gap` (a tight padding) past the row's edge (`Theme.scroll-lead` = overlap + gap, in the lane). The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the gap as drawn, in both themes.
+The bar is exactly `Theme.scroll-lane` wide, the theme file's `scrollWidth` (8 to 48, default 32, set by `theme::apply`; the JUCE parser reads and keeps it), and carries no spacing on any side: it fills the lane it is given. The space around it is its container's. A list leaves `Theme.scroll-gap` (a tight padding) between its rows and the bar (the shared list, the Library's sidebar, the menu, the dropdown, the notice); a dialog or menu has the same padding left of its rows and right of the bar; the Library's two columns are apart by the container margin only; a list at the screen's edge has the bar at the edge. The lane begins at the rows' edge plus the gap, so the bar never draws over a row or a button. Tests: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the bar's left and width as drawn, in both themes; `a_menu_and_a_notice_show_their_bar_only_when_they_overflow` (src/tests/overlays.rs).
 
 ## Compact and the sidebar's views (2026-11-17)
 

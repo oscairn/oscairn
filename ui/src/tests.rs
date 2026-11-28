@@ -1799,6 +1799,9 @@ fn applying_a_theme_sets_every_property() {
         assert_eq!((g.get_warning(), g.get_focus()), (d.warning.unwrap_or(slint::Color::from_rgb_u8(0xa7, 0x88, 0x15)), d.focus.unwrap_or(d.colors[6])), "{}", t.id);
         assert_eq!((g.get_radius(), g.get_font_scale(), g.get_spacing()), (d.radius, d.font_scale, d.spacing), "{}", t.id);
         assert_eq!((g.get_gap(), g.get_margin(), g.get_pad(), g.get_pad_wide(), g.get_pad_narrow(), g.get_pad_tight()), (4. * d.spacing, 6. * d.spacing, 10. * d.spacing, 12. * d.spacing, 8. * d.spacing, 4. * d.spacing), "{}: paddings and gaps scale", t.id);
+        // The scroll bar's width is the theme's `scrollWidth` (the bar fills it, nothing around); a list's gap to it is the tight padding.
+        assert_eq!(g.get_scroll_lane(), d.scroll_width, "{}: the scroll bar's width is the theme's", t.id);
+        assert_eq!(g.get_scroll_gap(), g.get_pad_tight(), "{}: a list's gap to its scroll bar is the tight padding", t.id);
         let st = d.style;
         assert_eq!((g.get_buttons(), g.get_edges(), g.get_depth(), g.get_sliders()), (st.buttons, st.edges, st.depth, st.sliders), "{}", t.id);
         assert_eq!((g.get_tabs(), g.get_marks(), g.get_sections(), g.get_rows()), (st.tabs, st.marks, st.sections, st.rows), "{}", t.id);

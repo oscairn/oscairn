@@ -415,30 +415,12 @@ fn count_tail(band: &[Rgb8Pixel], n: usize) -> &[Rgb8Pixel] {
     &band[band.len().saturating_sub(n)..]
 }
 
-/// Scan the bubble's row: the name's ink on the left, then a gap of at least `min` background pixels, then the count's own
-/// ink on the right (the number drawn, not hidden or overlapped by the name). `bg` is the bubble's fill. Returns a failure
-/// reason, or None when the count stands alone after a clear gap.
-fn count_keeps_its_own_room(band: &[Rgb8Pixel], bg: Rgb8Pixel, min: usize) -> Option<String> {
-    let ink = |p: &Rgb8Pixel| (p.r as i32 - bg.r as i32).abs() + (p.g as i32 - bg.g as i32).abs() + (p.b as i32 - bg.b as i32).abs() > 60;
-    let is: Vec<usize> = band.iter().enumerate().filter(|(_, p)| ink(p)).map(|(i, _)| i).collect();
-    if is.is_empty() { return Some("no text is drawn".into()); }
-    if is.len() < 2 { return Some("only one ink cluster (name or count missing)".into()); }
-    // The count is the contiguous ink cluster at the right end; the name's ink ends just before the gap to it.
-    let mut c = is.len();
-    while c > 1 && is[c - 1] == is[c - 2] + 1 { c -= 1; }
-    let count_first = is[c - 1];
-    let count_last = is[is.len() - 1];
-    let name_last = is[c - 2];
-    let gap = count_first.saturating_sub(name_last) - 1;
-    if gap < min { return Some(format!("gap {gap} < {min} (name ends {}, count starts {} in {})", name_last, count_first, band.len())); }
-    if count_last + 1 + (band.len() - count_last - 1) < 1 { unreachable!(); }
-    None
-}
 
 
 // The bubbles' drawn text (H1): a library's count is its own text after the name, a gap away, in the caption size and
-// secondary ink; a short name is drawn whole (whose last character shows), a long one is cut with an ellipsis while the
-// count still shows, and the count's own pixels follow the number. Tags show no count. At 1280x720 (scale 1.55) the same
+// secondary ink, and it yields space first — a name and a count that both fit show together (a short name is drawn
+// whole, whose last character shows); a bubble too narrow for both hides the count and draws the name whole, so the
+// count is never given room borrowed from a shortened name. Tags show no count. At 1280x720 (scale 1.55) the same
 // number of tag bubbles fit as without a count.
 #[test]
 fn a_short_library_bubble_shows_its_count_and_its_name_whole() {
@@ -467,7 +449,7 @@ fn a_short_library_bubble_shows_its_count_and_its_name_whole() {
 }
 
 #[test]
-fn a_long_library_bubble_cuts_its_name_but_keeps_the_count() {
+fn a_narrow_bubble_hides_its_count_and_shows_its_name_whole() {
     const LONG: &str = "Some Very Very Long Library Performance Name That Will Not Fit On Its Bubble At All And Has To Be Cut Down With An Ellipsis So That The Count Still Shows Clearly One";
     let s = count_bubbles("h1-long", LONG, 3);
     lib_png(&s, "h1-long-no-count");
@@ -475,21 +457,21 @@ fn a_long_library_bubble_cuts_its_name_but_keeps_the_count() {
     let lib = &ui.global::<LibraryState>();
     let rows = lib.get_side_rows();
     let at = (0..rows.row_count()).find(|&i| rows.row_data(i).map(|r| r.label == LONG).unwrap_or(false)).expect("the long library is shown");
-    assert_eq!(rows.row_data(at).unwrap().count, "3");
-    let t = ui.global::<crate::Theme>();
+    assert_eq!(rows.row_data(at).unwrap().count, "3", "a library's bubble still carries its count");
     let room = lib.get_side_room();
     let g = lib.get_side_geo().row_data(at).unwrap();
-    eprintln!("H1 long name: {} characters, bubble {} of {room}", LONG.len(), g.w);
+    eprintln!("H1 narrow name: {} characters, bubble {} of {room}", LONG.len(), g.w);
     assert!((g.w - room).abs() < 0.5, "a name too wide for the bubble fills the sidebar, not overflowing it");
-    // The count is its own text after the name, still fully drawn: the name's ink stops, then a gap of the theme's gap,
-    // then the number's ink at the right — never elided with the name. (FitText cuts the name with an ellipsis once even
-    // its smallest step does not fit; the count never borrows the room it is cut from.)
+    // The count yields first: a bubble too narrow for the name and the number together hides the count and draws the
+    // name whole. Proof: the same long name drawn without a count is pixel-identical here, because no room is borrowed
+    // from the name (under the old behaviour the count kept its room and the name was cut, so the two bubbles differed).
+    let plain = count_bubbles("h1-long0", LONG, 0);
     let band = bubble_band(&s, LONG);
-    let k = ui.window().scale_factor();
-    let bg = band[(t.get_pad() * k * 0.5) as usize];
-    if let Some(why) = count_keeps_its_own_room(&band, bg, (t.get_gap() * k) as usize) {
-        panic!("the count does not keep its own room under a long name: {why}");
-    }
+    let band0 = bubble_band(&plain, LONG);
+    assert_eq!(band.len(), band0.len(), "both bubbles fill the sidebar, the same width");
+    let diffs = band_diffs(&band, &band0);
+    eprintln!("H1 narrow: {} differing pixels against the no-count bubble of {}", diffs.len(), band.len());
+    assert!(diffs.is_empty(), "the count yields space first: the name with a count is drawn whole exactly as without one, differences at {:?} of {}", diffs.first(), band.len());
     lib_png(&s, "h1-long-library-count");
 }
 

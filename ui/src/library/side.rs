@@ -139,8 +139,8 @@ impl Screen {
                 continue;
             }
             let dot = if data.tinted { small * 0.7 + gap } else { 0. };
-            // A library's bubble also holds its count (the caption size), a gap after the name; the name is the part that
-            // gives when the whole bubble does not fit, so the count keeps its room.
+            // A library's bubble also holds its count (the caption size), a gap after the name; the count is the part that
+            // yields when the whole bubble does not fit, so it is hidden before a name is ever shortened.
             let count = if data.count.is_empty() { 0. } else { gap + text_width(&data.count, small) };
             let w = (text_width(&data.label, body) + 2. * pad + dot + count).clamp(touch, room.max(touch));
             if open && x + w > room + 0.01 {

@@ -1,0 +1,56 @@
+name: Build tree
+description: >
+  Hands a job's built CMake folder to the jobs that run its tests (CI builds each tree once and fans the tests
+  out over shards). Phase pack, at the end of the build job: the folder as one zstd tarball, uploaded as an
+  artifact of this run. Phase unpack, in a test job after the checkout: downloads it and extracts it at the same
+  path (the folder holds absolute paths of the runner's workspace, which is the same on every runner of an OS).
+
+inputs:
+  phase:
+    description: pack, or unpack
+    required: true
+  name:
+    description: The artifact's name (one per built tree)
+    required: true
+  dir:
+    description: The CMake build folder, relative to the workspace
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Pack the build folder
+      if: inputs.phase == 'pack'
+      shell: bash
+      run: |
+        set -eu
+        start=$(date +%s)
+        tar --zstd -cf "$RUNNER_TEMP/tree.tar.zst" "${{ inputs.dir }}"
+        echo "packed ${{ inputs.dir }}: $(du -sh "${{ inputs.dir }}" | cut -f1) to $(du -sh "$RUNNER_TEMP/tree.tar.zst" | cut -f1) in $(( $(date +%s) - start )) s" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the build folder
+      if: inputs.phase == 'pack'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tree-${{ inputs.name }}
+        path: ${{ runner.temp }}/tree.tar.zst
+        compression-level: 0 # already compressed
+        retention-days: 1
+        overwrite: true # a re-run of the build job
+
+    - name: Download the build folder
+      if: inputs.phase == 'unpack'
+      uses: actions/download-artifact@v4
+      with:
+        name: tree-${{ inputs.name }}
+        path: ${{ runner.temp }}/tree
+
+    - name: Unpack the build folder
+      if: inputs.phase == 'unpack'
+      shell: bash
+      run: |
+        set -eu
+        tar --zstd -xf "$RUNNER_TEMP/tree/tree.tar.zst"
+        rm -rf "$RUNNER_TEMP/tree"
+        test -f "${{ inputs.dir }}/CTestTestfile.cmake"
+        echo "unpacked ${{ inputs.dir }}: $(du -sh "${{ inputs.dir }}" | cut -f1)"

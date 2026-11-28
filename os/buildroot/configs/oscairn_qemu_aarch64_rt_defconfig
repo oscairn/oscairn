@@ -38,6 +38,8 @@ BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_MBEDTLS=y
 BR2_PACKAGE_OSCAIRN=y
 BR2_PACKAGE_OSCAIRN_STANDALONE=y
+# The Rust UI, which the session starts on the display (docs/rust-ui.md).
+BR2_PACKAGE_OSCAIRN_UI=y
 # RFC 0035: the real-time kernel, and cyclictest to measure it.
 BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL=y
 BR2_PACKAGE_RT_TESTS=y

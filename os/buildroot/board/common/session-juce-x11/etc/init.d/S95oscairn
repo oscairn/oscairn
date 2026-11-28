@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the Oscairn session at boot: the X server and the app, full screen.
+# Starts the Oscairn session at boot: the engine and the Rust UI on the display.
 
 PIDFILE=/var/run/oscairn-session.pid
 
@@ -11,15 +11,14 @@ start)
 stop)
 	printf "Stopping Oscairn: "
 	start-stop-daemon -K -p "$PIDFILE" && rm -f "$PIDFILE"
-	# The managed engine detaches from the UI's process group.
-	killall Oscairn oscairn-engine 2>/dev/null
+	# The engine is its own process, kept by a subshell of the session.
+	killall oscairn-ui oscairn-engine 2>/dev/null
 	remaining=5
-	while pidof Oscairn oscairn-engine >/dev/null 2>&1; do
+	while pidof oscairn-ui oscairn-engine >/dev/null 2>&1; do
 		if [ "$remaining" -eq 0 ]; then echo "FAIL (audio engine or UI still running)"; exit 1; fi
 		sleep 1
 		remaining=$((remaining - 1))
 	done
-	killall Xorg 2>/dev/null
 	echo "OK"
 	;;
 restart)

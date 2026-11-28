@@ -169,7 +169,7 @@ room's temperature if the board throttles.
 
 ## What to report
 
-The session logs to `/var/log/oscairn.log` (the app and engine) and `/var/log/oscairn-xorg.log`.
-Useful to know: whether the app reaches Home, the audio block size it reports, whether touch
+The session logs to `/var/log/oscairn-engine.log` and `/var/log/oscairn-ui.log` (the Rust UI).
+Useful to know: whether the UI reaches Home, the audio block size it reports, whether touch
 reaches the app, whether the demo plays without dropouts, and the `budget.estimate` the
 [control API](control-protocol.md) gives for the open Performance.

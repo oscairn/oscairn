@@ -30,11 +30,9 @@ if name == "pidof":
         result = subprocess.run(["/bin/sh", str(script), action], text=True, capture_output=True,
                                 env={**os.environ, "PATH": str(root), "STUCK": str(int(stuck))}, timeout=10)
         commands = (root / "log").read_text().splitlines()
-        assert "killall Oscairn oscairn-engine" in commands, commands
+        assert "killall oscairn-ui oscairn-engine" in commands, commands
         assert any(line.startswith("pidof ") for line in commands), commands
         assert (result.returncode != 0) == stuck, result
         assert ("OK" in result.stdout) != stuck, result.stdout
         assert not any(line.startswith("start-stop-daemon -S") for line in commands), commands
-        if not stuck:
-            assert commands[-1] == "killall Xorg", commands
 print("ok: service stop terminates and waits for detached engine; failed stop prevents restart")

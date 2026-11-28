@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Boots an Oscairn QEMU image and checks that Oscairn starts.
+"""Boots an Oscairn QEMU image and checks that Oscairn starts: the engine, and the Rust UI on the display.
 
 Runs QEMU's generic ARM64 machine with a Cortex-A76, a 1024 x 600 virtio display and the
 kernel's dummy sound card. Passes when, within the time limit:
-- the session reports that Oscairn is running;
-- Oscairn has not exited;
+- the session reports that the Rust UI is running;
+- the Rust UI has not exited, is the only UI process (no Oscairn app and no X server), and has
+  drawn its first frame (oscairn-timing: shell first frame, in /var/log/oscairn-ui.log);
 - the engine reports the audio device it opened;
 - the session raised the locked-memory limit (RLIMIT_MEMLOCK) to unlimited, for the engine
   and its workers (RFC 0025);
@@ -12,7 +13,7 @@ kernel's dummy sound card. Passes when, within the time limit:
 - where the image's profile asks for audio cores (IMAGES_DIR/kernel-args has nohz_full=, RFC 0035):
   the kernel was booted with them, the session made an isolated cpuset partition of them, the
   engine and its plugin workers and nothing else are in it, every one of their threads may run
-  only there, the engine's audio thread is SCHED_FIFO 80, the app and X are kept off the audio
+  only there, the engine's audio thread is SCHED_FIFO 80, the Rust UI is kept off the audio
   cores, no interrupt that can move is on them, and session.status, read in the guest with
   control-request.c, reports audioUnderruns.
 Whether sound actually plays is what --record checks.
@@ -24,11 +25,11 @@ QEMU writes everything it plays for that long to OUTPUT_DIR/oscairn.wav (44.1 kH
 stereo).
 
 With --no-display, the machine has no display at all, and the session must run headless: it
-says so once, starts neither X nor the app, and runs the engine alone. Passes when the session
+says so once, starts no UI, and runs the engine alone. Passes when the session
 reports the engine running within the time limit and, 30 s later, has never restarted it; the
 engine opened its audio device and holds locked memory (VmLck); the locked-memory limit is
-unlimited; no Oscairn or Xorg process runs; and the audio cores' checks above pass (without the
-app's and X's, which are not there).
+unlimited; no oscairn-ui, Oscairn or Xorg process runs; and the audio cores' checks above pass
+(without the UI's, which is not there).
 
     boot-test.py IMAGES_DIR OUTPUT_DIR [--timeout SECONDS] [--record SECONDS] [--no-display]
 """
@@ -91,7 +92,7 @@ echo "cmdline $(cat /proc/cmdline)"
 echo "partition $(cat $A/cpuset.cpus.partition) $(cat $A/cpuset.cpus.effective)"
 for p in $(cat $A/cgroup.procs); do echo "member $p $(cat /proc/$p/comm)"; done
 for p in $(pidof oscairn-engine oscairn-plugin-worker); do for t in /proc/$p/task/*; do echo "thread $(cat /proc/$p/comm) $(cat $t/comm | tr ' ' _) $(sed 's/.*) //' $t/stat | awk '{print $37, $38, $39}') $(awk '/^Cpus_allowed_list/ {print $2}' $t/status)"; done; done
-for p in $(pidof Oscairn Xorg); do echo "other $(cat /proc/$p/comm) $(awk '/^Cpus_allowed_list/ {print $2}' /proc/$p/status)"; done
+for p in $(pidof oscairn-ui); do echo "other $(cat /proc/$p/comm) $(awk '/^Cpus_allowed_list/ {print $2}' /proc/$p/status)"; done
 for i in /proc/irq/[0-9]*; do echo "irq ${i##*/} $(cat $i/effective_affinity_list 2>/dev/null) $(grep "^ *${i##*/}:" /proc/interrupts | tr -s ' ' | cut -d' ' -f7- | tr ' ' _)"; done
 """
 
@@ -119,7 +120,7 @@ def audio_cores(guest, images, out, headless=False):
     checks["workers' audio threads SCHED_FIFO 70"] = not any(t[0] == "oscairn-plugin-" for t in threads) or any(t[0] == "oscairn-plugin-" and t[3:5] == ["70", "1"] for t in threads)
     others = get("other")
     if not headless:
-        checks["the app and X off the audio cores"] = len(others) >= 2 and all(not cpu_list(o[1]) & want for o in others)
+        checks["the Rust UI off the audio cores"] = len(others) >= 1 and all(not cpu_list(o[1]) & want for o in others)
     # Per-core interrupts (the timer, and the like) cannot move; every other one must be off.
     on_audio = [i for i in get("irq") if len(i) > 1 and cpu_list(i[1]) & want and "arch_timer" not in i[-1]]
     checks["no movable interrupt on the audio cores"] = not on_audio
@@ -177,7 +178,7 @@ def main():
     try:
         guest = qemu_guest.Console(serial, log)
         running = False
-        marker = "oscairn-session: engine running" if args.no_display else "oscairn-session: Oscairn running"
+        marker = "oscairn-session: engine running" if args.no_display else "oscairn-session: Rust UI running"
         while time.time() - start < args.timeout:
             if qemu.poll() is not None:
                 print("FAIL: QEMU exited", qemu.returncode)
@@ -195,7 +196,7 @@ def main():
             print(f"engine running headless {elapsed:.0f} s after power-on")
             time.sleep(30)  # long enough for a restart loop to show
             guest.login()
-            facts = guest.run("cat /var/log/oscairn-engine.log; echo others $(pidof Oscairn Xorg); echo engines $(pidof oscairn-engine | wc -w); "
+            facts = guest.run("cat /var/log/oscairn-engine.log; echo others $(pidof oscairn-ui Oscairn Xorg); echo engines $(pidof oscairn-engine | wc -w); "
                               "grep VmLck /proc/$(pidof oscairn-engine | cut -d' ' -f1)/status")
             text = guest.text
             lines = [l.split() for l in facts.splitlines()]
@@ -207,7 +208,7 @@ def main():
                 "the locked-memory limit is unlimited": "oscairn-session: locked memory: unlimited" in text,
                 "the engine was never restarted": "engine exited" not in text and text.count("oscairn-session: engine running") == 1,
                 "one engine runs": ["engines", "1"] in lines,
-                "neither X nor the app started": ["others"] in lines and "Oscairn running" not in text and "X server up" not in text,
+                "no UI started": ["others"] in lines and "Rust UI running" not in text,
             }
             for name, ok in checks.items():
                 print(("ok: " if ok else "FAIL: ") + name)
@@ -216,18 +217,23 @@ def main():
             result = 0 if all(checks.values()) and cores else 1
             print("PASS" if result == 0 else "FAIL")
         else:
-            print(f"Oscairn running {elapsed:.0f} s after power-on")
+            print(f"Rust UI running {elapsed:.0f} s after power-on")
             time.sleep(5)
             a = screenshot(sock, args.out, "screen-1")
             guest.login()
+            # The Rust UI came up: its process runs, alone (no Oscairn app, no X server), and its log
+            # says the display showed its first frame.
+            facts = guest.run("echo ui $(pidof oscairn-ui | wc -w); echo others $(pidof Oscairn Xorg); grep -c 'oscairn-timing: shell first frame' /var/log/oscairn-ui.log")
             text = guest.text
+            flines = [l.split() for l in facts.splitlines()]
+            ui = ["ui", "1"] in flines and ["others"] in flines and any(len(l) == 1 and l[0].isdigit() and int(l[0]) > 0 for l in flines)
             lit = a.convert("L").getextrema()[1] > 64
             audio = "audio output" in text
-            exited = "Oscairn exited" in text
+            exited = "Rust UI exited" in text
             memlock = "oscairn-session: locked memory: unlimited" in text
-            print(f"screen {a.size[0]}x{a.size[1]}, has content: {lit}, audio device opened: {audio}, Oscairn exited: {exited}, locked memory unlimited: {memlock}")
+            print(f"screen {a.size[0]}x{a.size[1]}, has content: {lit}, audio device opened: {audio}, Rust UI exited: {exited}, locked memory unlimited: {memlock}, Rust UI alone and drawn: {ui}")
             cores = audio_cores(guest, args.images, args.out) if "nohz_full=" in qemu_guest.cmdline(args.images) else True
-            result = 0 if lit and audio and memlock and not exited and cores else 1
+            result = 0 if lit and audio and memlock and ui and not exited and cores else 1
             print("PASS" if result == 0 else "FAIL")
             if args.record > 0:
                 time.sleep(args.record)

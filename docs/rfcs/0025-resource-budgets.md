@@ -328,7 +328,8 @@ never write the user's data folder.
   keeps that instance while it sounds (a silent one is taken over as before, its state compared with the file), so it counts once: the same Performance loaded again with a pedaled
   chord needs one copy in memory, not two (TSO Carol Bells at about 230 MB, twice past the FANTOM's 420 MB).
   Its effects too (issue 340, 2026-11-28): an engine offering effect contexts alone in its group, opened from that very
-  file, is kept with its tail going on, where it loaded afresh beside the old one ringing out (eight new effect workers
+  file, is kept with its tail going on, sounding or silent (TSO's 11 effects behind silent parts and buses loaded anew at
+  every reload until then), where it loaded afresh beside the old one ringing out (eight new effect workers
   and a second set of tails at every pedaled TSO reload, the callback near its deadline).
   When the two still do not fit together, the load (`Session::estimate` with `Steps`) lets go of the outgoing
   plugins in order until the incoming one fits beside what is left: first, short of memory, those making no

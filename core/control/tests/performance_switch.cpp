@@ -660,6 +660,36 @@ namespace
             check(l.at(l.block.load() - 2, frames - 1) == 0, "steps, the same Performance again: the key's release reaches the instance kept");
             l.s.setBudget({});
         }
+        // Issue 340, FANTOM x1: TSO kept 8 of 19 at every pedaled reload and loaded 11 effects afresh: the chord sounds in one part only,
+        // and every effect behind a silent part, or on a bus fed by none, was silent three seconds, which holding leaves to take over, and
+        // an effect engine is never taken over. As TSO: a part held through its insert and a send to a bus, a second part silent through an
+        // insert of its own. Every effect is kept, sounding or not, and the reload changes not one sample; a reload with nothing held loads
+        // nothing either (plain TSO reloads loaded its 13 effects every time). Its -chain variant places it as the FANTOM does.
+        {
+            ::unsetenv("OSCAIRN_SHARING"); // parts apart, as on the unit
+            const auto tso = tempPath / "steps-silent-fx"; chained(tso, argv[1], {argv[3]}, {argv[3]}, .5, .4, true);
+            auto run = [&](int reload, Switch* w, size_t* leaving) {
+                Session t(48000, frames);
+                load(t, tso); quiet(t);
+                t.note(true, 30, .8); blocks(t, 40); // the lower part only; the upper one silent three seconds and more
+                if(reload) { *w = load(t, tso); *leaving = t.leaving(); }
+                std::vector<float> out; Audio a;
+                for(int i = 0; i < 300; ++i) { a.run(t); out.insert(out.end(), a.l.begin(), a.l.end()); if(i == 100) t.note(false, 30, 0); }
+                return out;
+            };
+            Switch w; size_t leaving = 0;
+            const auto plain = run(0, nullptr, nullptr), reloaded = run(1, &w, &leaving);
+            report("steps: a part held, one silent, a bus: reloaded", w);
+            size_t differ = 0; for(size_t i = 0; i < plain.size(); ++i) differ += plain[i] != reloaded[i];
+            check(w.loaded == 0 && w.reused == 5 && leaving == 0, "steps, silent effects: the silent part's insert kept with the rest, nothing loaded, nothing ringing out beside: " +
+                  std::to_string(w.reused) + " reused, " + std::to_string(w.loaded) + " loaded, " + std::to_string(leaving) + " ringing out");
+            check(differ == 0, "steps, silent effects: every sample as with no reload: " + std::to_string(differ) + " of " + std::to_string(plain.size()) + " differ");
+            Session t(48000, frames);
+            load(t, tso); quiet(t);
+            const auto again = load(t, tso);
+            check(again.loaded == 0, "steps, silent effects: a reload with nothing held loads no effect afresh: " + std::to_string(again.loaded) + " loaded");
+            ::setenv("OSCAIRN_SHARING", "memory", 1);
+        }
         // Issue 340: the same Performance again with a key held, a synth through a Delay (an engine offering effect contexts). The
         // synth was kept as it is, but the Delay loaded afresh beside the old one ringing out: on the FANTOM eight new effect workers
         // and a second set of tails at every pedaled reload, the callback near its deadline and now and then a late or silent block.
@@ -1216,8 +1246,9 @@ int main(int argc, char** argv)
             compare(t, again, "again: J -> J, silent"); quiet(t);
             t.note(true, 60, .8); blocks(t, 10);
             w = load(t, again); report("again: J -> J, a note held", w);
-            // Issue 330: nothing changed it since it opened from this state, so the synth is kept as it is, sounding: no sound beside, no reset.
-            check(w.beside == 0 && w.loaded == 0 && w.kept == 1 && w.open.beside == 0, "loaded again, a note held: the synth kept as it is, nothing beside it");
+            // Issue 330: nothing changed it since it opened from this state, so the synth is kept as it is, sounding: no sound beside, no reset;
+            // and its Delay with it (issue 340: kept at the silent reload before as well, so it holds its source still).
+            check(w.beside == 0 && w.loaded == 0 && w.kept == 2 && w.open.beside == 0, "loaded again, a note held: the synth and its Delay kept as they are, nothing beside them: " + std::to_string(w.kept) + " kept");
             {
                 Audio audio; bool rang = false; for(int i = 0; i < 20; ++i) { audio.run(t); rang = rang || audio.sounding(); }
                 check(rang, "again: the held note plays on through the change");

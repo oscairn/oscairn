@@ -463,8 +463,10 @@ if(UNIX)
         "control-native-sounds|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--sounds"
         "control-native-effects|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--effects|$<TARGET_FILE:oscairn_delay>")
 endif()
-# Issue 330's steps of a Performance switch, on their own (OSCAIRN_SWITCH_STEPS): in the engine, in workers and in plugin hosts.
-foreach(variant IN ITEMS "" "-workers" "-hosts")
+# Issue 330's steps of a Performance switch, on their own (OSCAIRN_SWITCH_STEPS): in the engine, in workers and in plugin hosts; and
+# placed as on the FANTOM-07 (issue 340): a part's chain in one worker (compute.workers chain), its instrument one block late (the
+# profile's workerExtraBlock, the Sampler there, the Basic Synth here).
+foreach(variant IN ITEMS "" "-workers" "-hosts" "-chain")
     add_test(NAME control-performance-switch-steps${variant} COMMAND oscairn-performance-switch-test
         $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-test-sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
     set(steps_env "OSCAIRN_SWITCH_STEPS=1")
@@ -473,6 +475,9 @@ foreach(variant IN ITEMS "" "-workers" "-hosts")
     endif()
     if(variant STREQUAL "-hosts")
         string(APPEND steps_env ";OSCAIRN_PLUGIN_HOSTS=3")
+    endif()
+    if(variant STREQUAL "-chain")
+        string(APPEND steps_env ";OSCAIRN_WORKERS=chain;OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.basic-synth")
     endif()
     set_tests_properties(control-performance-switch-steps${variant} PROPERTIES TIMEOUT ${switch_timeout} ENVIRONMENT "${steps_env}")
 endforeach()

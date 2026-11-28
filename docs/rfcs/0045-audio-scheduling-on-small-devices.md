@@ -1292,8 +1292,11 @@ the state save of each playing instance (RFC 0021's put-back) costing more than 
 A resident pool under a memory budget, built 2026-11-13: with memory classes the instances kept
 warm are bounded by memory (admission's room for opportunistic data), not by the count of 32,
 which remains only without them; before a Performance is read at the cue, kept instances of
-plugins it does not use go, least recently used first, until its estimate fits, and after the
-change admission's eviction takes the rest as before; a worker let go ends on a thread of its own
+plugins it does not use go, the largest first (least recently used until issue 9, 2026-11-27),
+until its new instances fit (its estimate less what it may take over: instances kept warm and the
+last one's free instances, of its plugins), and after the change admission's eviction takes the
+rest as before (a change that cut or let go for memory lets them go only as far as the room needs,
+the largest first: it had let every one go); a worker let go ends on a thread of its own
 (`Session::letGo`), never on the audio thread and without the control thread waiting for its
 exit. The FANTOM-07's profile names `osMemory` 250 and `performanceMemory` 300 MiB, about 380 MiB
 for plugin instances in use and kept warm ([the arithmetic](../fantom-0.md#what-oscairn-has)).

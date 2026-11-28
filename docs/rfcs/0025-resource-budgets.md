@@ -724,7 +724,8 @@ opportunistic data, least likely needed first:
    instance is still taken over before a new one is loaded, [RFC 0045](0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).
    With memory classes they are bounded by this room alone; the 32-instance bound applies only
    without them. Before a Performance is read at the cue, the instances kept warm of plugins it
-   does not use go, least recently used first, until its estimate fits beside what is committed;
+   does not use go, the largest first (least recently used until issue 9), until its new instances
+   (its estimate less what it may take over) fit beside what is committed;
    those it may take over stay until after the change. A worker let go ends on a thread of its
    own, so the control thread does not wait for its process to exit (2026-11-13: 11 ms for one
    fixture worker on the control thread before, 0.13 ms after, `control-performance-switch-workers`).

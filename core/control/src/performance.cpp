@@ -833,21 +833,30 @@ void Session::openPerformance(const std::string& directory) {
             cut="some of the last Performance's notes could not ring out: "+(named?names:std::string("its earlier sound"))+" faded out in "+std::to_string(int(fadeSeconds*1000))+" ms, so that this one fits "+device+" beside the rest, which rings on";}
         else if(fades){bool any=false;for(const auto n:outgoing)any=any || heard(n);
             if(any)cut="the last Performance's notes could not ring out: with them ringing beside this Performance the device's CPU would not keep up, so they faded out in "+std::to_string(int(fadeSeconds*1000))+" ms";}
+        // Its new instances: its estimate less what it may take over instead of loading (issue 9: those were counted twice, as held
+        // and again as its, which let the instances kept warm go before a switch where nothing needed their memory): instances kept
+        // warm and the last one's free ones, of its plugins, at most what it needs of each.
+        std::set<std::string> wanted;for(const auto& c:e.plugins)wanted.insert(c.plugin);
+        const auto fresh=[&]{std::map<std::string,uint64_t> need,have;for(const auto& c:e.plugins)need[c.plugin]+=c.memory;
+            for(const auto& w:warm_)have[w.host->descriptor().id]+=w.host->residentBytes();
+            // freeInstances' without its question to effect engines (a worker's request; their contexts load nothing new either)
+            const auto busy=seamless?busyNodes(released):std::set<NodeId>{};std::set<NodeId> outgoing(leaving_);for(const auto& [n,name]:nodes_)outgoing.insert(n);
+            for(const auto n:outgoing)if(const auto& h=graph_.host(n);!busy.count(n) && loaded_.count(n) && h.failure().empty())have[h.descriptor().id]+=h.residentBytes();
+            uint64_t taken=0;for(const auto& [plugin,bytes]:need)taken+=std::min(bytes,have[plugin]);return e.memory-std::min(e.memory,taken);}();
         // RFC 0045: room for its new instances before they load. Instances kept warm whose plugin it does not
-        // use go first, least recently used first; those it may take stay (evictOpportunistic after the change).
+        // use go, the largest first, as far as that needs; those it may take stay (evictOpportunistic after the change).
         if(memoryClasses()){
-            std::set<std::string> wanted;for(const auto& c:e.plugins)wanted.insert(c.plugin);
-            const auto used=reservedMemory(false)+budget_.margin+committedMemory()+e.memory;
+            const auto used=reservedMemory(false)+budget_.margin+committedMemory()+fresh;
             const auto room=used<budget_.device?budget_.device-used:0;
-            uint64_t bytes=warmMemory();
-            letGo([&](const Free& w){if(bytes<=room || wanted.count(w.host->descriptor().id))return false;bytes-=std::min(bytes,w.host->residentBytes());return true;});}
-        // And by the memory the system really has (the budget's `available`): its new instances, at its
-        // estimate less what instances kept warm of its plugins hold (it may take those), above the floor.
+            if(const auto bytes=warmMemory();bytes>room)if(const auto freed=letGoResidents(bytes-room,wanted))
+                std::fprintf(stderr,"oscairn: let go of %llu MiB of instances kept warm for the next Performance: %llu MiB kept warm, room for %llu MiB beside its %llu MiB new\n",
+                             static_cast<unsigned long long>(freed>>20),static_cast<unsigned long long>(bytes>>20),static_cast<unsigned long long>(room>>20),static_cast<unsigned long long>(fresh>>20));}
+        // And by the memory the system really has (the budget's `available`): its new instances above the floor.
         if(budget_.available)if(const auto have=systemAvailable()){
-            std::set<std::string> wanted;for(const auto& c:e.plugins)wanted.insert(c.plugin);
-            uint64_t taken=0;for(const auto& w:warm_)if(wanted.count(w.host->descriptor().id))taken+=w.host->residentBytes();
-            const auto need=budget_.available+(e.memory>taken?e.memory-taken:0);
-            if(have<need && letGoResidents(need-have,wanted))std::fprintf(stderr,"oscairn: let go of instances kept warm for the next Performance: %llu MiB available\n",static_cast<unsigned long long>(have>>20));}}
+            const auto need=budget_.available+fresh;
+            if(have<need)if(const auto freed=letGoResidents(need-have,wanted))
+                std::fprintf(stderr,"oscairn: let go of %llu MiB of instances kept warm for the next Performance: %llu MiB available, %llu MiB needed (its %llu MiB new)\n",
+                             static_cast<unsigned long long>(freed>>20),static_cast<unsigned long long>(have>>20),static_cast<unsigned long long>(need>>20),static_cast<unsigned long long>(fresh>>20));}}
     // Prepared ahead (RFC 0021), the cue only publishes it; another one prepared is let go first.
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
     if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
@@ -873,7 +882,12 @@ void Session::openPerformance(const std::string& directory) {
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
     for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();
-    if(!seamless || (shares.steps.memory && !released.empty()))letGo([](const Free&){return true;}); // it cut, or let go, for want of memory: none kept warm (RFC 0025)
+    // It cut, or let go, for want of memory (RFC 0025): instances kept warm go as far as the memory needs, the largest first (issue 9:
+    // all of them went, a VA a Performance after takes among them). Without memory classes nothing measures that: none kept warm.
+    if(!seamless || (shares.steps.memory && !released.empty())){
+        if(!memoryClasses())letGo([](const Free&){return true;});
+        else{const auto used=reservedMemory(false)+budget_.margin+committedMemory();const auto room=used<budget_.device?budget_.device-used:0;
+            if(const auto bytes=warmMemory();bytes>room)letGoResidents(bytes-room);}}
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept
     lastOpen_=stats;lastOpen_.total=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
@@ -977,12 +991,13 @@ void Session::letGo(const std::function<bool(const Free&)>& which) {
 
 uint64_t Session::letGoResidents(uint64_t bytes,const std::set<std::string>& keep) {
     const auto now=std::chrono::steady_clock::now();
-    std::vector<std::pair<double,const PluginHost*>> order;
+    // The largest first, the longest idle among equals (issue 9: as few let go as the memory needs, as issue 330's silent nodes).
+    std::vector<std::tuple<uint64_t,double,const PluginHost*>> order;
     for(const auto& w:warm_)if(!keep.count(w.host->descriptor().id))
-        order.push_back({std::chrono::duration<double>(now-w.idle).count()*double(std::max<uint64_t>(1,w.host->residentBytes())),w.host.get()});
-    std::sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+        order.push_back({w.host->residentBytes(),std::chrono::duration<double>(now-w.idle).count(),w.host.get()});
+    std::sort(order.begin(),order.end(),[](const auto& a,const auto& b){return std::tie(std::get<0>(a),std::get<1>(a))>std::tie(std::get<0>(b),std::get<1>(b));});
     std::set<const PluginHost*> chosen;uint64_t freed=0;
-    for(const auto& [score,host]:order){if(freed>=bytes)break;chosen.insert(host);freed+=host->residentBytes();}
+    for(const auto& [size,idle,host]:order){if(freed>=bytes)break;chosen.insert(host);freed+=size;}
     letGo([&](const Free& w){return chosen.count(w.host.get())!=0;});
     return freed;
 }

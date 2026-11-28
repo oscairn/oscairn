@@ -358,6 +358,13 @@ struct Plugin {
                 // Refuses every load while the file named here exists, for tests of what a host does with a refused state. A file
                 // holding a number refuses that many loads, then removes itself: a test that must not race a restarting worker's
                 // retries (a host gives up after a few within a minute) lets it take the state on its own.
+                // Refuses only the Nth load from now while the file named here holds N (each load counts it down, in any process).
+                if (const char* nth = std::getenv("KICK_FIXTURE_REFUSE_NTH")) if (std::filesystem::exists(nth))
+                {
+                    int left = 0; { std::ifstream f(nth); f >> left; }
+                    { std::ofstream f(nth, std::ios::trunc); f << left - 1; }
+                    if (left == 1) return false;
+                }
                 if (const char* refuse = std::getenv("KICK_FIXTURE_REFUSE_STATE")) if (std::filesystem::exists(refuse))
                 {
                     int left = 0; { std::ifstream f(refuse); f >> left; }

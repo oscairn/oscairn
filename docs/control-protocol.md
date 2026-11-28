@@ -1787,9 +1787,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `{revision,changes}`: the open Performance's nodes playing that plugin at `version` (all of them,
   or those in `nodes`) move to the installed newer version `to`
   ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md)). Each node's state, saved
-  now, is first opened by `to`'s build apart from the graph, its audio and note ports compared and
+  now, is first opened by `to`'s build apart from the graph (in a worker of its own, as a library
+  move does, and compared with the playing build opened the same way), its audio and note ports compared and
   its parameters read; only when every node passes is each replaced by `to`'s build with that
-  state, as one edit, which `edit.undo` takes back with the old instances. `changes` lists the
+  state, as one edit, which `edit.undo` takes back with the old instances; all or none: a
+  replacement failing puts back every node already replaced, with no step. `changes` lists the
   parameters that read differently, as `versions.job` does. Refused (`-32602`) for a version not
   newer or not installed, a node not playing the plugin at `version` (a stand-in included), a node
   sharing an instance with other parts, and without the publisher's claim unless `withoutClaim`;

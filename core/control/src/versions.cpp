@@ -754,7 +754,9 @@ namespace oscairn
         const auto builds = storedBuilds(plugin.format, plugin.id, to);
         if(!builds.count(platform())) throw std::invalid_argument(plugin.id + " " + to + " is not installed here");
         const auto build = builds.at(platform());
-        if(!withoutClaim && !claimFor(plugin, to)) throw std::invalid_argument(plugin.id + " " + to + " does not say it opens sounds saved with " + plugin.version + ": use it without the claim");
+        std::set<std::string> trusted; // the keys trusted for plugins and not revoked, now
+        for(const auto& k : trustedKeys()) if(!k.revoked && std::count(k.scope.begin(), k.scope.end(), "plugins")) trusted.insert(k.key);
+        if(!withoutClaim && !claimFor(plugin, to, trusted)) throw std::invalid_argument(plugin.id + " " + to + " does not say it opens sounds saved with " + plugin.version + ": use it without the claim");
         // The nodes: those asked, else every node playing the plugin at that version (a stand-in plays nothing).
         auto playing = [&](NodeId n) {
             const auto& h = graph_.host(n);
@@ -771,7 +773,7 @@ namespace oscairn
         if(asked.empty()) for(const auto& [n, name] : nodes_) if(playing(n)) nodes.push_back(n);
         if(nodes.empty()) throw std::invalid_argument("the open Performance does not play " + plugin.id + " " + plugin.version);
         // Each node's state, saved now, opened by the new build before anything changes.
-        Target t; t.plugin = plugin; t.to = to; t.rate = sampleRate_; t.frames = maxFrames_;
+        Target t; t.plugin = plugin; t.to = to; t.rate = sampleRate_; t.frames = maxFrames_; t.worker = isolatedWorker();
         state_files::TemporaryDirectory saved(dataHome());
         VersionUsed out;
         for(const auto n : nodes)
@@ -793,8 +795,7 @@ namespace oscairn
             // compares them: the playing host's own values hold what it was last told, not what a read-only parameter reads.
             auto now = oscairn::open(h.descriptor().path, plugin.id, plugin.version, t, assets_);
             now->loadSnapshot(dir.string());
-            const auto before = values(*now), after = values(*fresh);
-            now.reset();
+            const auto before = values(*now.host), after = values(*fresh.host);
             for(const auto& [id, v] : before)
             {
                 const auto a = after.find(id);
@@ -803,11 +804,21 @@ namespace oscairn
             }
             for(const auto& [id, v] : after) if(!before.count(id)) out.changes.push_back({name, v.first, id, std::nullopt, v.second});
         }
-        // Then each replaced by the new build with that state: one step, the old instances held by it for undo.
-        for(const auto n : nodes)
+        // Then each replaced by the new build with that state, all or none: one step, the old instances held by it for undo.
+        record(); // an edit waiting for its step comes first
+        const auto before = std::make_shared<const Model>(model()); // holds the old instances
+        try
         {
-            replace(n, build.string(), plugin.id);
-            graph_.host(n).loadSnapshot((saved.path / std::to_string(n)).string());
+            for(const auto n : nodes)
+            {
+                replace(n, build.string(), plugin.id);
+                graph_.host(n).loadSnapshot((saved.path / std::to_string(n)).string());
+            }
+        }
+        catch(...)
+        {
+            apply(model(), *before); // the nodes replaced so far get their old instances back, as they were
+            throw;
         }
         record();
         out.revision = graphState().revision;

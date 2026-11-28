@@ -244,6 +244,19 @@ int main(int argc, char** argv)
         s.setParameter(n1, 7, .8); s.setParameter(n2, 7, .3); s.service();
         const auto version = [&](NodeId n) { for(const auto& x : s.graphState().topology.nodes) if(x.id == n) return x.plugin.version; return std::string(); };
         check(s.sessionStatus().mixedVersions.empty(), "one version: no mix");
+        // All or none: the second node refusing its state as it is replaced (the 6th state load: two checks a node, then
+        // the replacements) puts the first back too, and leaves no step of its own.
+        {
+            const auto nth = temp / "refuse-nth";
+            std::ofstream(nth) << "6";
+            ::setenv("KICK_FIXTURE_REFUSE_NTH", nth.c_str(), 1);
+            const auto history = s.history().undo;
+            const auto why = refusal([&] { s.useVersion(v1, "2"); });
+            ::unsetenv("KICK_FIXTURE_REFUSE_NTH");
+            s.service();
+            check(!why.empty() && version(n1) == "1" && version(n2) == "1" && std::abs(s.parameter(n1, 7) - .8) < 1e-9 && std::abs(s.parameter(n2, 7) - .3) < 1e-9 && s.history().undo == history,
+                  "a replacement failing puts back every node as it was, with no step: " + why + "; " + version(n1) + version(n2));
+        }
         const auto used = s.useVersion(v1, "2", {n1});
         s.service();
         const auto mixed = s.sessionStatus().mixedVersions;

@@ -42,7 +42,7 @@
   "keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0", "localOff": true },
   "inputKeys": { "protocol": "linux-input", "name": "gpio-keys", "keys": { "write": 157, "menu": 139, "tempo": 152 } },
   "reliability": "instrument",
-  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
+  "apps": ["oscairn.performance", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,
   "rolandNextBoot": true,
   "install": { "method": "app-and-boot-hook", "update": "bundle-swap", "systems": 2, "userData": "with-system" },

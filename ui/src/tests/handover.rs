@@ -231,7 +231,7 @@ fn nothing_in_the_performance_app_hands_the_display_over() {
     assert!(pressed > 300, "the walk pressed {pressed}");
 }
 
-// The apps on Home that are not ported still hand over: the Groovebox (and Recordings, where a profile offers it); the
+// The apps on Home that are not ported still hand over (Recordings, where a profile offers it); the
 // Performance, the Library, the Setlist and Settings are in this shell.
 #[test]
 fn the_home_tiles_that_still_hand_over_are_the_unported_apps() {
@@ -255,7 +255,7 @@ fn the_home_tiles_that_still_hand_over_are_the_unported_apps() {
     }
     eprintln!("tiles that hand over: {handing:?} of {names:?}");
     assert!(!handing.iter().any(|n| ["Performance", "Library", "Setlist", "Settings"].contains(&n.as_str())), "{handing:?}");
-    assert_eq!(handing, ["Groovebox"], "the one app not ported is still the JUCE app's");
+    assert!(handing.is_empty(), "every app on Home is in this shell: {handing:?}");
 }
 
 // The same walk from Home's Library tile: every stop and every bar action of the Library app, the catalog and the file chooser
@@ -309,7 +309,7 @@ fn nothing_in_the_settings_app_hands_the_display_over() {
     f.pump();
     let ui = f.screen.ui.clone_strong();
     shell::settings_in_rust(true);
-    ui.global::<HomeState>().invoke_tapped(4); // the Settings tile
+    ui.global::<HomeState>().invoke_tapped(3); // the Settings tile
     settle(&mut f);
     assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust Settings");
     no_handover(&ui, "the Settings tile");

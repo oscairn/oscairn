@@ -5,7 +5,7 @@
 //
 //   oscairn-standalone [--profile NAME|path.json] [--controller path.json]... [--layout NAME|path.json] [--plugins DIR]
 //                      [--in-process | --connect SOCKET] [--play] [--input-mode automatic|mouse|touch]
-//                      [--app performance|library|setlist|groovebox|recordings|settings|plugins]
+//                      [--app performance|library|setlist|recordings|settings|plugins]
 //                      [--snapshot out.png [--size WxH] [--play SECONDS] [--view TAB]]
 //   oscairn-standalone --version
 //
@@ -33,7 +33,6 @@
 #include "Panel.h"
 #include "Profile.h"
 #include "PluginBrowser.h"
-#include "PadEditor.h"
 #include "PartsView.h"
 #include "PerformanceColors.h"
 #include "PlayView.h"
@@ -93,7 +92,7 @@ namespace oscairn::standalone
                     layouts.push_back( { file.upToLastOccurrenceOf( ".json", false, false ), juce::String::fromUTF8( data, size ) } );
             }
             // A fixed order for the menu.
-            const juce::StringArray order{ "desktop", "kick", "kick-screen", "ignite", "keys49" };
+            const juce::StringArray order{ "desktop", "kick-screen" };
             std::sort( layouts.begin(), layouts.end(), [&]( const NamedLayout& a, const NamedLayout& b ) {
                 return order.indexOf( a.name ) < order.indexOf( b.name );
             } );
@@ -173,7 +172,6 @@ namespace oscairn::standalone
             if( profile_.screen() && profile_.screen()->textOnScreen() ) setTextEntryOnScreen( true ); // no typing keyboard: text fields bring up their own
             engine_.setControllers( controlGroups( profile_ ), {} );
             engine_.openBrowser=[this]{showLibrary();};
-            engine_.openPads=[this]{showPads();};
             engine_.openParts=[this]{showParts();};
             engine_.goHome=[this]{leave();};
             engine_.onList=ListCursor::act; engine_.listsShowing=ListCursor::anyShowing; // the panel's list navigation (a device's map) reaches the lists shown
@@ -225,7 +223,6 @@ namespace oscairn::standalone
         {
             engine_.onNotOpened={};
             engine_.openBrowser={};
-            engine_.openPads={};
             engine_.openParts={};
             engine_.goHome={};
             engine_.goBack={};
@@ -240,7 +237,7 @@ namespace oscairn::standalone
 
         void show( const Layout& layout )
         {
-            pads_.reset();parts_.reset();
+            parts_.reset();
             // The last layout's Home and running apps, timers and all, once its panel lets go of them.
             if( auto* p = panel() ) p->overlay( nullptr );
             for( const auto& r : running_ ) engine_.appClosed( appId( r.name ) );
@@ -285,7 +282,6 @@ namespace oscairn::standalone
         void resized() override
         {
             DocumentWindow::resized();
-            if( pads_ && getContentComponent() ) pads_->setBounds( getContentComponent()->getBounds() );
             if( notice_ ) notice_->setBounds( getLocalBounds() );
             if( appNotice_ ) appNotice_->setBounds( getLocalBounds().reduced( 8 ).removeFromTop( desktopMode( *appNotice_ ) == 2 ? 56 : 40 ) );
             if( parts_ && parts_->getParentComponent() == this && getContentComponent() ) parts_->setBounds( getContentComponent()->getBounds() ); // a panel places its own
@@ -325,8 +321,7 @@ namespace oscairn::standalone
             {
                 // The running apps keep their state behind it (RFC 0030).
                 if( !launcher_ ) { launcher_ = std::make_unique<Launcher>( engine_, launcherApps(), barShell() ); setDesktopMode( *launcher_, 2 ); }
-                // A compact screen's own lists are its Home, until a device has its system screens.
-                p->overlay( p->layout().surface == Layout::Surface::Compact ? nullptr : launcher_.get() );
+                p->overlay( launcher_.get() );
                 switcher_.reset();
                 return;
             }
@@ -335,22 +330,20 @@ namespace oscairn::standalone
             if( shell() ) engine_.appClosed( "oscairn.performance" ); // Home replaces it
             setContentOwned( home, false );
         }
-        // An app by name, as its tile opens it (--app): performance, library, setlist, groovebox, recordings or settings; or plugins.
+        // An app by name, as its tile opens it (--app): performance, library, setlist, recordings or settings; or plugins.
         void openApp( const juce::String& name )
         {
             if( name == "performance" ) openPerformance();
             else if( name == "library" ) showLibraryApp();
             else if( name == "setlist" ) showSetlist();
-            else if( name == "groovebox" ) openGroovebox();
             else if( name == "recordings" ) showRecordings();
             else if( name == "settings" && settingsApp() ) showSettings();
             else if( name == "plugins" ) showLibrary(); // as the Plugins button opens it
-            else throw std::invalid_argument( "--app is performance, library, setlist, groovebox, recordings, settings or plugins" );
+            else throw std::invalid_argument( "--app is performance, library, setlist, recordings, settings or plugins" );
             // On the desktop those four open in windows of their own: --snapshot shows that window.
             if( !panel() )
                 snapshotView_ = name == "library" && libraryApp_ ? libraryApp_->getContentComponent()
                               : name == "plugins" && library_ ? library_->getContentComponent()
-                              : name == "groovebox" && groovebox_ ? groovebox_->getContentComponent()
                               : name == "recordings" && recordings_ ? recordings_->getContentComponent() : nullptr;
         }
         // The Performance app: playing the open Performance (Play, first) and editing it.
@@ -400,7 +393,6 @@ namespace oscairn::standalone
             if(index==5){
                 menu.addItem(8003,"Home");menu.addSeparator();
                 if(profile_.offers("oscairn.performance"))menu.addItem(8004,"Performance");
-                if(profile_.offers("oscairn.groovebox"))menu.addItem(8000,"Groovebox");
                 if(profile_.offers("oscairn.library"))menu.addItem(8001,"Library");
                 if(profile_.offers("oscairn.setlist") && appProcesses_ && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist"); // the menu is first built before the app processes
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
@@ -445,11 +437,10 @@ namespace oscairn::standalone
             if(id>=7000 && id<=7002){
                 inputMode_=InputMode(id-7000);writeInputMode(theme_.configuration(),inputMode_);if(auto* s=shell())s->setInputMode(inputMode_);
                 // Open app windows take the new sizes now, not when next resized.
-                for(auto* w:{groovebox_.get(),libraryApp_.get(),picker_.get()})
+                for(auto* w:{libraryApp_.get(),picker_.get()})
                     if(auto* content=w?w->getContentComponent():nullptr){setDesktopMode(*content,inputMode_==InputMode::Touch?2:1);content->resized();}
                 return;}
             if(id==7100 && keyboards_){keyboards_->open({});return;}
-            if(id==8000){openGroovebox();return;}
             if(id==8001){showLibraryApp();return;}
             if(id==8002){showSetlist();return;}
             if(id==8003){showHome();return;}
@@ -503,7 +494,6 @@ namespace oscairn::standalone
             setDesktopMode( *notice_, panel() || inputMode_ == InputMode::Touch ? 2 : 1 );
             addAndMakeVisible( *notice_ ); notice_->setBounds( getLocalBounds() );
         }
-        void showGroovebox(){showApp(groovebox_,"Groovebox",[this]{return new SequencerPane(engine_);},1100,760);}
         // The Recordings app (RFC 0020): the takes, kept running with its state like the others.
         void showRecordings()
         {
@@ -516,20 +506,15 @@ namespace oscairn::standalone
             showApp( recordings_, "Recordings", [this] { return new RecordingsPane( engine_, theme_.configuration() ); }, 760, 600 );
         }
         Panel* panel() const { return dynamic_cast<Panel*>( getContentComponent() ); }
-        bool layoutBinds( const std::string& bind ) const
-        {
-            return std::any_of( layout_.controls.begin(), layout_.controls.end(), [&]( const Layout::Control& c ) { return c.bind == bind; } );
-        }
-        // What the top bar's buttons do (RFC 0030): each shown only where the layout has no button
-        // for it; the running apps on a panel; Back goes Home for now (every app's top screen is
-        // one level down; going back inside an app is the app's own).
+        // What the top bar's buttons do (RFC 0030); the running apps on a panel; Back goes Home
+        // for now (every app's top screen is one level down; going back inside an app is the app's own).
         TopBar::Shell barShell()
         {
             TopBar::Shell shell;
-            if( !layoutBinds( "home" ) ) shell.home = [this] { leave(); };
-            if( !layoutBinds( "back" ) ) shell.back = [this] { leave(); };
+            shell.home = [this] { leave(); };
+            shell.back = [this] { leave(); };
             if( panel() ) shell.apps = [this] { showSwitcher(); };
-            if( !layoutBinds( "panic" ) ) shell.notesOff = [this] { engine_.allNotesOff(); };
+            shell.notesOff = [this] { engine_.allNotesOff(); };
             shell.save = [this]( bool asNew ) { saveToLibrary( asNew ); };
             shell.record = true;
             return shell;
@@ -587,8 +572,6 @@ namespace oscairn::standalone
                     [this] { showLibraryApp(); } } );
             if( profile_.offers( "oscairn.setlist" ) && appProcesses_->find( "oscairn.setlist" ) )
                 apps.push_back( { "Setlist", "list-music", [] { return juce::String( "Songs in order, for the stage" ); }, [this] { showSetlist(); } } );
-            if( profile_.offers( "oscairn.groovebox" ) )
-                apps.push_back( { "Groovebox", "layout-grid", [] { return juce::String( "Patterns and steps" ); }, [this] { openGroovebox(); } } );
             if( profile_.offers( "oscairn.recordings" ) )
                 apps.push_back( { "Recordings", "audio-lines", [this] {
                     const auto n = int( engine_.takes().size() );
@@ -634,17 +617,6 @@ namespace oscairn::standalone
                 auto place = std::make_unique<AppPlace>( *appProcesses_, "oscairn.setlist" ); auto& app = *place; openOnScreen( "Setlist", "list-music", app, std::move( place ) ); return;
             }
             appProcesses_->open( "oscairn.setlist", {}, inputMode_ == InputMode::Touch ? 2 : 1 );
-        }
-        void openGroovebox()
-        {
-            if( !admitted( "Groovebox", [this] { openGroovebox(); } ) ) return;
-            if( panel() ) // Play and Stop on the screen, unless the layout has buttons for them (a device's own come through its engine)
-            {
-                if( bringForward( "Groovebox" ) ) return;
-                const bool buttons = layoutBinds( "play-stop" ) || ( layoutBinds( "play" ) && layoutBinds( "stop" ) );
-                auto pane = std::make_unique<SequencerPane>( engine_, !buttons ); auto& app = *pane; openOnScreen( "Groovebox", "layout-grid", app, std::move( pane ) ); return;
-            }
-            showGroovebox();
         }
         // An app's window, made the first time; it keeps its state while hidden.
         void showApp(std::unique_ptr<AppWindow>& window,const juce::String& name,std::function<juce::Component*()> make,int width,int height)
@@ -794,14 +766,6 @@ namespace oscairn::standalone
             }
             if(!library_)library_=std::make_unique<LibraryWindow>(engine_,theme_,plugins_);library_->setVisible(true);library_->toFront(true);
         }
-        // The pad editor covers the panel, so it fits a device's single screen too.
-        void showPads()
-        {
-            pads_ = std::make_unique<PadEditor>( engine_ );
-            pads_->onDone = [this] { juce::MessageManager::callAsync( [safe = juce::Component::SafePointer<Window>( this )] { if( safe ) safe->pads_.reset(); } ); };
-            addAndMakeVisible( *pads_ );
-            if( getContentComponent() ) pads_->setBounds( getContentComponent()->getBounds() );
-        }
         static std::string scanner() { return executableFile().getSiblingFile( "oscairn-plugin-scan" ).getFullPathName().toStdString(); }
         void showParts()
         {
@@ -890,14 +854,13 @@ namespace oscairn::standalone
         struct RunningApp { juce::String name; const char* icon; std::unique_ptr<juce::Component> owned; juce::Component* app; std::unique_ptr<AppFrame> frame; };
         std::vector<RunningApp> running_;
         std::unique_ptr<AppSwitcher> switcher_;
-        std::unique_ptr<AppWindow> groovebox_, libraryApp_, picker_, recordings_;
+        std::unique_ptr<AppWindow> libraryApp_, picker_, recordings_;
         // The Library's pick over a panel's screen (the pane before the frame that shows it), and what it covers.
         std::unique_ptr<juce::Component> pickerPane_;
         std::unique_ptr<AppFrame> pickerFrame_;
         juce::Component::SafePointer<juce::Component> pickerUnder_;
         std::unique_ptr<LaunchNotice> notice_; // why an app did not open (RFC 0025)
         Actions::Answer pickerAnswer_;
-        std::unique_ptr<PadEditor> pads_;
         std::unique_ptr<PartsView> parts_;
         std::unique_ptr<Keyboards> keyboards_; // none where the profile offers no on-screen keyboard
         std::vector<std::pair<juce::String,juce::String>> themeItems_;
@@ -928,7 +891,7 @@ namespace oscairn::standalone
             {
                 std::printf( "Oscairn [--profile NAME|FILE] [--controller FILE]... [--layout NAME|FILE] [--plugins DIR]\n"
                              "        [--in-process | --connect SOCKET] [--play] [--input-mode automatic|mouse|touch]\n"
-                             "        [--app performance|library|setlist|groovebox|recordings|settings|plugins]\n"
+                             "        [--app performance|library|setlist|recordings|settings|plugins]\n"
                              "        [--snapshot OUT.png [--size WxH] [--play SECONDS] [--view TAB]]\n"
                              "        [the engine's audio options: oscairn-engine --help]\n"
                              "Oscairn --version\n" );

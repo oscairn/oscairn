@@ -4,7 +4,6 @@
 #include "Engine.h"
 #include "Launcher.h" // EngineRecovery
 #include "Layout.h"
-#include "Screen.h"
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -85,8 +84,6 @@ namespace oscairn::standalone
 
     private:
         class Board;
-        class Knob;
-        class Pads;
 
         void timerCallback() override;
 

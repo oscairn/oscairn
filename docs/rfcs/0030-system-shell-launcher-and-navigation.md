@@ -1,5 +1,7 @@
 # RFC 0030: The system shell: launchers, the top bar and how screens flow
 
+Note (2026-11-27): the JUCE Groovebox mentioned below was removed (#358); the text keeps its history.
+
 Status: proposed, 2026-11-01; revised the same day (one top bar, buttons from the profile,
 Home for products that are not instruments, the clock only where the time is known). Required
 for every product with a screen. Builds on apps and actions ([RFC 0022](0022-apps-and-requests.md)),

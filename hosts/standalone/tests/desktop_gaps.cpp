@@ -393,14 +393,8 @@ int main(int argc, char** argv)
             }
             // Clock out beside the transport (RFC 0012 step 2): cabling, kept by the engine.
             {
-                standalone::SequencerPane pane(engine);
-                standalone::setDesktopMode(pane, 1); pane.setSize(1100, 760);
-                pane.refresh();
-                check(pane.clockOut().isVisible() && pane.clockOut().getButtonText() == "Clock out: Off", "clock out shows beside Follow MIDI clock, off: " + pane.clockOut().getButtonText().toStdString());
                 engine.setClockOutputs({standalone::ruleFor(modx)});
-                check(wait([&] { pane.refresh(); return pane.clockOut().getButtonText() == "Clock out: MODX M"; }), "an output chosen for clock shows by name");
-                settle();
-                snapshot(pane, "clock-out");
+                check(wait([&] { return standalone::midiOutName(engine.clockOutputs()) == "MODX M"; }), "an output chosen for clock is kept by the engine");
                 engine.setClockOutputs({});
             }
             // Signing on export (RFC 0006): off by default; a key made from the export's choices,
@@ -581,7 +575,7 @@ int main(int argc, char** argv)
                 std::unique_ptr<standalone::LaunchNotice> notice;
                 bool retried = false;
                 auto show = [&](std::unique_ptr<standalone::LaunchNotice> n) { notice = std::move(n); };
-                check(!standalone::askToLaunch(engine, {"oscairn.groovebox", reserve}, "Groovebox", [&] { retried = true; }, show) && notice && notice->letGo.isVisible(),
+                check(!standalone::askToLaunch(engine, {"oscairn.recordings", reserve}, "Recordings", [&] { retried = true; }, show) && notice && notice->letGo.isVisible(),
                       "refused, with Let the next song go offered");
                 if(notice)
                 {
@@ -593,7 +587,7 @@ int main(int argc, char** argv)
                 }
                 Control::MemoryState now;
                 engine.edit([&](Control& c) { now = c.memoryState(); });
-                check(!now.nextPrepared && std::any_of(now.running.begin(), now.running.end(), [](const auto& a) { return a.app == "oscairn.groovebox"; }), "the next song let go, the Groovebox admitted");
+                check(!now.nextPrepared && std::any_of(now.running.begin(), now.running.end(), [](const auto& a) { return a.app == "oscairn.recordings"; }), "the next song let go, Recordings admitted");
                 check(!standalone::askToLaunch(engine, {"oscairn.setlist", 3500 * MiB}, "Setlist", {}, show) && notice && !notice->letGo.isVisible() &&
                       notice->message().contains("close") && notice->message().contains("Library"), "refused past what closing frees, saying what to close: " + (notice ? notice->message().toStdString() : std::string()));
                 if(notice) { standalone::setDesktopMode(*notice, 1); notice->setSize(1024, 600); snapshot(*notice, "launch-refused"); notice->ok.onClick(); wait([&] { return !notice; }); }
@@ -2082,8 +2076,7 @@ int main(int argc, char** argv)
                 {
                     standalone::Launcher home(engine, {{"Performance", "piano", [] { return juce::String("Untitled: play or edit it"); }, [] {}},
                                                        {"Library", "library-big", [] { return juce::String("3 Performances, 12 Sounds"); }, [] {}},
-                                                       {"Setlist", "list-music", [] { return juce::String("Songs in order, for the stage"); }, [] {}},
-                                                       {"Groovebox", "layout-grid", [] { return juce::String("Patterns and steps"); }, [] {}}}, shell);
+                                                       {"Setlist", "list-music", [] { return juce::String("Songs in order, for the stage"); }, [] {}}}, shell);
                     standalone::setDesktopMode(home, 2);
                     show(home, "home");
                     panel.overlay(nullptr);
@@ -2178,7 +2171,7 @@ int main(int argc, char** argv)
                         // One fader moving redraws its fader, not the view (it redrew about half the screen a frame).
                         check(!frames.empty() && share / double(frames.size()) < .1, where + ": a fader moving redraws under a tenth of the screen a frame on average");
                     }
-                    // The transport running (the Groovebox playing): Stop shows in the top bar, as large
+                    // The transport running (a Performance playing): Stop shows in the top bar, as large
                     // as any touch target, inside the screen and over nothing, and stops it.
                     standalone::setOffscreen(panel); panel.setVisible(true); // shown, as --snapshot shows it: the top bar polls
                     engine.setPlaying(true);
@@ -2211,24 +2204,6 @@ int main(int argc, char** argv)
                         std::replace(name.begin(), name.end(), ' ', '-');
                         show(frame, name);
                     }
-                    panel.overlay(nullptr);
-                }
-                {
-                    standalone::SequencerPane groovebox(engine, true);
-                    standalone::AppFrame frame(engine, "Groovebox", groovebox, shell);
-                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(groovebox, 2);
-                    // Its step view is still the sequencer screen drawn for 1,024 x 600, whose controls
-                    // are not all touch-size yet: Play and Stop are checked, not the whole view.
-                    panel.overlay(&frame); frame.resized(); settle();
-                    if(snap) save(panel, size + "-groovebox");
-                    std::vector<juce::Rectangle<float>> transport;
-                    for(auto* c : groovebox.getChildren())
-                        if(auto* b = dynamic_cast<juce::TextButton*>(c); b && b->isVisible() && (b->getButtonText() == "Play" || b->getButtonText() == "Stop"))
-                            transport.push_back(panel.getLocalArea(b, b->getLocalBounds().toFloat()));
-                    check(transport.size() == 2 && std::all_of(transport.begin(), transport.end(), [&](const auto& r) {
-                              return std::min(r.getWidth(), r.getHeight()) >= minimum - .5f && panel.getLocalBounds().toFloat().contains(r); }) &&
-                          !transport[0].intersects(transport[1]),
-                          where + ": the Groovebox has Play and Stop on the screen, touch-size");
                     panel.overlay(nullptr);
                 }
                 {

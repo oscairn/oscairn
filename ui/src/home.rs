@@ -14,13 +14,12 @@ pub struct App {
     pub line: &'static str,
 }
 
-pub const APPS: [App; 6] = [
+pub const APPS: [App; 5] = [
     App { id: "oscairn.performance", name: "Performance", icon: 0, line: "Play or edit it" },
     App { id: "oscairn.library", name: "Library", icon: 1, line: "Performances and Sounds" },
     App { id: "oscairn.setlist", name: "Setlist", icon: 2, line: "Songs in order, for the stage" },
-    App { id: "oscairn.groovebox", name: "Groovebox", icon: 3, line: "Patterns and steps" },
-    App { id: "oscairn.recordings", name: "Recordings", icon: 4, line: "Takes and captures" },
-    App { id: "oscairn.settings", name: "Settings", icon: 5, line: "Audio, controllers, keys" },
+    App { id: "oscairn.recordings", name: "Recordings", icon: 3, line: "Takes and captures" },
+    App { id: "oscairn.settings", name: "Settings", icon: 4, line: "Audio, controllers, keys" },
 ];
 
 pub struct Home {
@@ -65,7 +64,7 @@ mod tests {
     fn the_profiles_apps_in_the_launchers_order() {
         let h = Home::new(&["oscairn.settings".into(), "oscairn.setlist".into(), "oscairn.unknown".into()], 6);
         assert_eq!(h.tiles.iter().map(|&i| APPS[i].name).collect::<Vec<_>>(), ["Setlist", "Settings"]);
-        assert_eq!(Home::new(&[], 6).tiles.len(), 6);
+        assert_eq!(Home::new(&[], 6).tiles.len(), 5);
     }
 
     #[test]

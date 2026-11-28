@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The pad editor and the Parts views against a real engine session over the control socket,
+// The pad map and the Parts views against a real engine session over the control socket,
 // without an audio device: edits reach the session, and the views render (optionally to PNGs:
-// SNAPSHOTS-pads.png, -parts.png, -part.png).
+// SNAPSHOTS-parts.png, -part.png).
 //   oscairn_pad_editor_test PLUGIN_DIR SCANNER [SNAPSHOTS]
-#include "../PadEditor.h"
 #include "../PartsView.h"
 #include "../Theme.h"
 #include "oscairn/local_socket.h"
@@ -50,9 +49,7 @@ int main(int argc, char** argv)
             standalone::Engine engine(dir.string(), socket.string());
             standalone::Theme theme;
             juce::LookAndFeel::setDefaultLookAndFeel(&theme);
-            standalone::PadEditor editor(engine);
-            editor.setSize(1024, 600);
-            // The editor's edits go through the engine to the session's pad map.
+            // Edits go through the engine to the session's pad map.
             auto map = engine.padMap();
             fillPads(map, 0, {PadFill::Kind::Drums});
             map.assignments[0][3].channel = 9;
@@ -60,8 +57,6 @@ int main(int argc, char** argv)
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while(!(engine.padMap() == map) && std::chrono::steady_clock::now() < deadline) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
             check(engine.padMap() == map, "the engine keeps the edited map");
-            standalone::PadEditor shown(engine);
-            shown.setSize(1024, 600);
             auto save = [&](juce::Component& c, const char* suffix) {
                 const auto image = c.createComponentSnapshot(c.getLocalBounds());
                 check(image.getWidth() == 1024 && image.getHeight() == 600, "renders at the device's screen size");
@@ -71,7 +66,6 @@ int main(int argc, char** argv)
                 juce::FileOutputStream stream(out);
                 juce::PNGImageFormat().writeImageToStream(image, stream);
             };
-            save(shown, "-pads.png");
 
             // The Parts views: a two-layer split and a shared delay, made with the views' edits.
             const auto plugins = standalone::bundledPlugins(argv[1], argv[2]);
@@ -169,6 +163,6 @@ int main(int argc, char** argv)
               "the session has the drum kit and pad 4's channel");
     }
     std::filesystem::remove(socket);
-    if(!failures) std::puts("ok: pad editor and Parts views edit the session and render");
+    if(!failures) std::puts("ok: pad map and Parts views edit the session and render");
     return failures ? 1 : 0;
 }

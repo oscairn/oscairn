@@ -62,7 +62,6 @@ namespace oscairn::standalone
         void padPressure(int index,float pressure);
         const PadMap& padMap() const {return padMap_;}
         void setPadMap(const PadMap& map);
-        std::function<void()> openPads;
         // The Parts views (RFC 0011): the graph with its parts, and edits made through the control
         // API in order; a failed edit is reported in editError().
         Control::GraphState graph() const {return control_->graphState();}

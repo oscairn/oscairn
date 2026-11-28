@@ -10,8 +10,8 @@ it on an emulator or an EVK, and what to expect, as of November 8, 2026.
   [hosts/standalone/profiles/kick.json](../hosts/standalone/profiles/kick.json). Its values are
   **estimates** (cores, memory, audio, controls, MIDI, network), not measured on a unit. It makes
   the app fill the display with no title or menu bar, show the KICK's screen layout
-  (`kick-screen`, 1024 × 600), request 128-frame audio blocks, and offer the Library, Setlist
-  and Groovebox apps.
+  (`kick-screen`, 1024 × 600), request 128-frame audio blocks, and offer the Library and Setlist
+  apps.
 - **Two layouts:** `kick-screen`, the screen alone as the device shows it, and `kick`, the whole
   front panel drawn on a computer screen (with the geometry of chillbeast's KickEM simulator
   board), for trying the KICK's flow on a desktop.
@@ -36,7 +36,6 @@ bar and the apps as tiles.
   solo, the master); Edit opens the parts editor (parts, mixer, routing, controls).
 - **Library:** Performances and Sounds, by source and tags, with audition.
 - **Setlist:** songs in order, for the stage.
-- **Groovebox:** the step sequencer (two tracks, A/B patterns, per-step locks).
 
 On the `kick-screen` layout (no buttons around the screen), each app's top bar has a Home icon.
 On the `kick` layout, the panel's **MAIN** button goes Home, so the screen shows no Home icon;

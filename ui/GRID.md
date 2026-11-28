@@ -68,9 +68,9 @@ the parameter pages on it are `ui/src/params.rs`.
 - Physical knobs (RFC 0019 step 6, RFC 0011, core/control/src/physical_controls.cpp L223-237):
   the editor publishes the shown tiles by priority (`controllers.view` `screen` {name, params as
   assignment targets}); a device's knob group with role `screen` (FANTOM-07: E1 to E6) plays
-  its first N, engine-side. On-screen panels' `row:N` knobs play the selected line of tiles
-  (a tap selects a line; knobs beside the screen take a column) - the JUCE Panel only; no
-  device profile has `row:N` knobs, so the shell does not draw that strip.
+  its first N, engine-side. The JUCE Panel's `row:N` knobs, which played the selected line of tiles
+  (a tap selects a line; knobs beside the screen take a column), are deleted; no
+  device profile had them, so the shell does not draw that strip.
 - Navigation in the JUCE app: touch/mouse only. The panel map's E1 and E6 navigate panes 0 and 1
   only while `controllers.view` says lists show; on a grid page they play E1/E6's parameters.
 

@@ -11,12 +11,8 @@ juce_add_gui_app(oscairn_standalone
 
 juce_add_binary_data(oscairn_standalone_layouts SOURCES
     layouts/desktop.json
-    layouts/kick.json
     layouts/kick-screen.json
-    layouts/modx-m-screen.json
-    layouts/ignite.json
-    layouts/keys49.json
-    layouts/compact.json)
+    layouts/modx-m-screen.json)
 
 # Icons (Lucide, ISC: icons/LICENSE).
 juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE IconData SOURCES
@@ -107,7 +103,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp PaintCounter.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp TextKeyboard.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
+target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp PaintCounter.cpp DesktopShell.cpp ParameterGrid.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp TextKeyboard.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -184,12 +180,12 @@ endif()
 
 # The pad editor against a session served on a socket, without an audio device.
 juce_add_console_app(oscairn_pad_editor_test PRODUCT_NAME "Oscairn Pad Editor Test")
-target_sources(oscairn_pad_editor_test PRIVATE tests/pad_editor.cpp PadEditor.cpp PartsView.cpp ParameterGrid.cpp ZoneEditor.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_pad_editor_test PRIVATE tests/pad_editor.cpp PartsView.cpp ParameterGrid.cpp ZoneEditor.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_pad_editor_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_pad_editor_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_pad_editor_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_splitters oscairn-plugin-scan oscairn-plugin-worker)
 juce_add_console_app(oscairn_desktop_shell_test PRODUCT_NAME "Oscairn Desktop Shell Test")
-target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_shell_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_shell_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_desktop_shell_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_transpose oscairn_splitters oscairn-plugin-scan kick-clap-fixture-normal oscairn-plugin-worker)
@@ -209,7 +205,7 @@ endif()
 set_tests_properties(desktop-shell PROPERTIES ENVIRONMENT "${shell_environment}")
 # Desktop controls for features the control API had first, against a socket session; no MIDI device is opened.
 juce_add_console_app(oscairn_desktop_gaps_test PRODUCT_NAME "Oscairn Desktop Gaps Test")
-target_sources(oscairn_desktop_gaps_test PRIVATE tests/desktop_gaps.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_gaps_test PRIVATE tests/desktop_gaps.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_gaps_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_gaps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 # An instrument describing every oscairn.ui rich view (an FM operator view, envelopes, key maps), for the editors' tests, sounding a sine while a note is held; not installed.
@@ -228,7 +224,7 @@ endif()
 set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 400 ENVIRONMENT "${gaps_environment}")
 # The on-screen keyboards, a window per MIDI input, against a socket session with a described (not opened) MIDI input.
 juce_add_console_app(oscairn_keyboard_window_test PRODUCT_NAME "Oscairn Keyboard Window Test")
-target_sources(oscairn_keyboard_window_test PRIVATE tests/keyboard_window.cpp KeyboardWindow.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_keyboard_window_test PRIVATE tests/keyboard_window.cpp KeyboardWindow.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_keyboard_window_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_keyboard_window_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_keyboard_window_test oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
@@ -255,14 +251,14 @@ add_test(NAME desktop-list-cursor COMMAND oscairn_list_cursor_test "$<TARGET_FIL
 set_tests_properties(desktop-list-cursor PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}" RUN_SERIAL TRUE) # counts frames against the clock: alone
 # Unsaved changes asked about before quitting and before the Library opens another, against a socket session.
 juce_add_console_app(oscairn_desktop_quit_test PRODUCT_NAME "Oscairn Desktop Quit Test")
-target_sources(oscairn_desktop_quit_test PRIVATE tests/desktop_quit.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_quit_test PRIVATE tests/desktop_quit.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_quit_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_quit_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME desktop-quit COMMAND oscairn_desktop_quit_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>")
 set_tests_properties(desktop-quit PROPERTIES TIMEOUT 60)
 # RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
 juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
-target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_apps_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_apps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_desktop_apps_test oscairn_setlist_app oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker kick-clap-fixture-normal)
@@ -271,7 +267,7 @@ set_tests_properties(desktop-apps PROPERTIES TIMEOUT 180 ENVIRONMENT "${shell_en
 # The Settings app as a process of its own, held to `system`; its pages per profile; the Audio page
 # against a socket session whose audio host is a stand-in (no device is opened).
 juce_add_console_app(oscairn_desktop_settings_test PRODUCT_NAME "Oscairn Desktop Settings Test")
-target_sources(oscairn_desktop_settings_test PRIVATE tests/desktop_settings.cpp ${settings_sources} AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_settings_test PRIVATE tests/desktop_settings.cpp ${settings_sources} AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_include_directories(oscairn_desktop_settings_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
 target_link_libraries(oscairn_desktop_settings_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_settings_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
@@ -281,7 +277,7 @@ set_tests_properties(desktop-settings PROPERTIES TIMEOUT 120)
 # Phase 3b's "done when" end to end on the Panel layout, every plugin in a worker: with the in-repo
 # plugins, and with the real engines from the folder OSCAIRN_PHASE3B_ENGINES names (skipped when unset).
 juce_add_console_app(oscairn_phase3b_test PRODUCT_NAME "Oscairn Phase 3b Test")
-target_sources(oscairn_phase3b_test PRIVATE tests/phase3b.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_phase3b_test PRIVATE tests/phase3b.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_phase3b_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_phase3b_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_phase3b_test oscairn_basic_synth oscairn_delay oscairn_lfo oscairn-plugin-scan oscairn-plugin-worker oscairn_views_test_plugin)
@@ -322,7 +318,7 @@ set_tests_properties(ui-waits PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE) # measures
 add_test(NAME desktop-pad-editor COMMAND oscairn_pad_editor_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan>)
 # A crashing plugin in a Performance leaves the other parts playing and is reported (RFC 0010).
 juce_add_console_app(oscairn_plugin_crash_test PRODUCT_NAME "Oscairn Plugin Crash Test")
-target_sources(oscairn_plugin_crash_test PRIVATE tests/plugin_crash.cpp PadEditor.cpp PartsView.cpp ParameterGrid.cpp ZoneEditor.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_plugin_crash_test PRIVATE tests/plugin_crash.cpp PartsView.cpp ParameterGrid.cpp ZoneEditor.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_plugin_crash_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_plugin_crash_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_plugin_crash_test oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker kick-clap-fixture-process_crash)
@@ -331,7 +327,7 @@ add_test(NAME desktop-plugin-crash COMMAND oscairn_plugin_crash_test "$<TARGET_F
 set_tests_properties(desktop-pad-editor desktop-plugin-crash PROPERTIES TIMEOUT 60 ENVIRONMENT "${worker_environment}")
 # What the device's screens draw (RFC 0045), counted: none at rest; scrolling the Library, its list.
 juce_add_console_app(oscairn_ui_draw_test PRODUCT_NAME "Oscairn UI Draw Test")
-target_sources(oscairn_ui_draw_test PRIVATE tests/ui_draw.cpp PaintCounter.cpp DeviceScreen.cpp ${settings_sources} DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_ui_draw_test PRIVATE tests/ui_draw.cpp PaintCounter.cpp DeviceScreen.cpp ${settings_sources} DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp ZoneEditor.cpp Panel.cpp Layout.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_include_directories(oscairn_ui_draw_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
 target_link_libraries(oscairn_ui_draw_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_ui_draw_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")

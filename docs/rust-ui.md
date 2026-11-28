@@ -35,7 +35,7 @@ How (a) works:
   Today the JUCE app starts and owns its engine; on the Rust path it only connects to it.
 - **The Rust shell** (`oscairn-ui`) draws on the display with Slint's `linuxkms` backend and is
   a trusted client of `/run/oscairn/engine.sock`.
-- **A screen not yet ported** (Library, Groovebox, Recordings and Settings, today; the Performance
+- **A screen not yet ported** (Library, Recordings and Settings, today; the Performance
   tile opens Play and Play's Edit the Parts list, both in Rust):
   confirming its tile shows "Opening Settings..." for one frame, writes the app's name to the
   handover file and ends the shell (exit status 3). The start script's UI keeper then starts the
@@ -149,13 +149,10 @@ profile, through one shared function; only what is a UI's own is sent by that UI
 | Opening an app: `memory.launch`, `memory.closed` (Launcher.cpp); a process app's `apps.connect` | Home's tiles, the Apps menu, `--app` | the JUCE app; not at start. The Rust Setlist does not ask a reservation yet. A launch is now let go when the connection that asked it closes without `memory.closed` (a shell killed), as an app's own connections are |
 
 After a Rust-path start (the engine started by the start script with the profile, then the Rust
-shell) the engine reports the same budget, memory classes, capture and repositories as after a
-JUCE-path start; only each UI's own memory differs. `session_setup_matches_the_juce_app`
-(ui/src/tests.rs) checks it with the real engine and the real JUCE app (offscreen: `--connect`
-with `--snapshot`, which leaves capture out, so the test sends the app's `record.retro` itself)
-and the FANTOM-07's figures measured on a unit: `cpu` 0.75, `device` 1,040,187,392 B, `floor`
-300 MiB, `margin` 49.6 MiB, `available` 200 MiB, the two always-available apps, capture 30 s; the
-repositories are compared between the two paths. The engine applies the setup only with `--device-profile`, which engine-args.py
+shell) the engine reports the budget, memory classes, capture and repositories the JUCE-path
+start gave. `session_setup_is_the_fantom_07s` (ui/src/tests.rs) checks the real engine against
+the FANTOM-07's figures measured on a unit: `cpu` 0.75, `device` 1,040,187,392 B, `floor`
+300 MiB, `margin` 49.6 MiB, `available` 200 MiB, the two always-available apps, capture 30 s. The engine applies the setup only with `--device-profile`, which engine-args.py
 passes for a profile with a panel (the FANTOM-07 has one).
 
 ## Themes
@@ -843,7 +840,7 @@ keyboard's text.
 The Performance app (Play, Part, the chain, the sound chooser, the parameter pages, Scene, Parts, Mixer, Controls, Routing),
 the Library app and the Settings app are in this shell, as is the Setlist: nothing in them hands the display over (the walk
 `tests/handover.rs` presses every stop and action of the three, from Home's tiles, with a handover file as on the device). The
-Groovebox tile (and Recordings, where a profile offers it) still hands over to the JUCE app. Each ported tile can be given back
+Recordings tile (where a profile offers it) still hands over to the JUCE app. Each ported tile can be given back
 to its JUCE app by an environment variable of the UI process, for a fault found on a unit: `OSCAIRN_UI_LIBRARY=0` and
 `OSCAIRN_UI_SETTINGS=0` (a value other than `0` forces the Rust app on). A rail label of one word too wide for the rail at 70% of
 the type goes across two lines before it is cut; a list row keeps the theme's padding between its label and its value; the
@@ -876,7 +873,7 @@ the todo list, including window structure"); none of this is built:
 1. **Separate windows where the JUCE app opens them**, each resizable and responsive, in place of
    one Rust window and the JUCE one in turn: the Library app (`showLibraryApp`, an `AppWindow` of
    900 by 700, Main.cpp); Plugins and appearance (`LibraryWindow`, Main.cpp, the Plugins menu);
-   the Groovebox (`openGroovebox`/`showGroovebox`); Recordings (`showRecordings`, 760 by 600); the
+   Recordings (`showRecordings`, 760 by 600); the
    Library's picker (`showPicker`, 760 by 620, for Import Performance and Load Sound); Settings
    and the Setlist (app processes in windows of their own, AppProcesses.cpp, apps/settings and
    apps/setlist); the Performance window's tabs detached into windows (`DesktopShell::detach`:
@@ -896,7 +893,7 @@ the todo list, including window structure"); none of this is built:
    Library, Save Sound, Save Sound As New). The Rust UI has none; on Linux the JUCE menu is inside
    its hidden window, so only the handover reaches it.
 7. **File dialogs** for import and export: `juce::FileChooser` in Main.cpp (Save to Folder, Open
-   Folder, Export), LibraryPane.cpp, PluginBrowser.cpp, Screen.cpp and Setlist.cpp.
+   Folder, Export), LibraryPane.cpp, PluginBrowser.cpp and Setlist.cpp (Screen.cpp, its step display, was removed).
 8. **Drag and drop**: neither UI takes dropped files yet (no `FileDragAndDropTarget` in the JUCE
    app); decide what a drop does (a Performance, a Sound, a library, a sample).
 9. **Keyboard shortcuts**: Cmd-Z and Shift-Cmd-Z (`Window::keyPressed`, Main.cpp) and the menus'
@@ -907,7 +904,7 @@ the todo list, including window structure"); none of this is built:
 11. **Multiple monitors**: the JUCE app places its windows by the displays (DesktopProfile.cpp,
     KeyboardWindow.cpp, DeviceScreen.cpp); the Rust window opens where winit puts it, its place
     and size not kept.
-12. **Screens still JUCE**: the Groovebox, Recordings and the Plugins window (above), handed over.
+12. **Screens still JUCE**: Recordings and the Plugins window (above), handed over. (The JUCE Groovebox was removed, #358.)
 13. **Quitting**: the Rust UI has no question about unsaved changes of its own; the JUCE window
     asks it when the Rust window closes.
 

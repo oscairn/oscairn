@@ -44,23 +44,11 @@ namespace oscairn::standalone
             enum class Type
             {
                 Screen,
-                Knob,
-                Button,
-                Pads,
-                Keys,
                 Label
             };
             Type                 type = Type::Label;
             juce::Rectangle<int> rect;
             std::string          label;
-            /// Knobs: "node:param" (for example "synth:1") or "tempo". Buttons: "play",
-            /// "stop", "play-stop" or "sync". Empty: drawn, but does nothing yet.
-            std::string bind;
-            int         rows = 4, cols = 4; // pads
-            int         note  = 36;         // keys: the lowest key
-            int         count = 25;         // keys
-            bool        steps = false;      // pads light with the sequencer's playhead
-            bool        endless = false;    // knobs: an endless encoder rather than a pot with end stops
             juce::Justification align = juce::Justification::centredLeft; // labels
             Anchor      anchor;
         };
@@ -79,14 +67,11 @@ namespace oscairn::standalone
         Resize               resize = Resize::Scale;
         /// Which UI it is (RFC 0019). Panel: a device's front panel and screen, drawn from
         /// `panels` and `controls`. Desktop: the desktop app's own window, with menus, panes and
-        /// tabs; its panels and controls are not used. Compact: a small screen with encoders, drawn
-        /// like a panel, its screen showing plugin editors as lists (the test layout for RFC 0019's
-        /// small screens).
+        /// tabs; its panels and controls are not used.
         enum class Surface
         {
             Panel,
-            Desktop,
-            Compact
+            Desktop
         };
         Surface              surface = Surface::Panel;
         std::vector<Panel>   panels;

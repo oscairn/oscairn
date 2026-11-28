@@ -9,7 +9,7 @@ Programs built on the core: a file renderer, a live audio/MIDI engine and a desk
   parsed by `MidiStream.h`) into the same path.
   The startup Performance has two parts: Synth (the keys play the Basic Synth into the
   Delay) and Groovebox (the step sequencer, also playing that synth). Its nodes are named
-  `sequencer`, `synth` and `delay`, which the Groovebox and the panel layouts bind to.
+  `sequencer`, `synth` and `delay`, which the panel layouts bind to.
   MIDI notes, polyphonic/channel pressure, sustain (CC64), emergency releases (CC120/123)
   and optional MIDI clock enter here.
 - `engine/`: `oscairn-engine`, a console process that owns that audio/MIDI adapter and a
@@ -195,18 +195,17 @@ prints the table.
 A part sends its MIDI to hardware from the Part page's **MIDI out** tile
 ([RFC 0012](../docs/rfcs/0012-sync-external-midi-and-multi-device.md#step-1-status)): the
 connected outputs by name, and the channel (Own channels keeps each message's). **Clock out**,
-beside Follow MIDI clock in the Groovebox, chooses the outputs the tempo, Start and Stop go to;
+chooses the outputs the tempo, Start and Stop go to (the engine keeps them; the JUCE chooser
+went with the Groovebox, #358);
 it is the device's cabling, not saved with the Performance.
 
 The app starts at **Home** ([RFC 0030](../docs/rfcs/0030-system-shell-launcher-and-navigation.md)):
-a top bar and the apps as tiles, each with a line of its state: Performance, Library, Setlist,
-Groovebox and Settings, those the profile offers (the computer's and the KICK's offer all five;
+a top bar and the apps as tiles, each with a line of its state: Performance, Library, Setlist
+and Settings, those the profile offers (the computer's and the KICK's offer all four;
 Settings' tile is there where the app runs as a process). In the desktop layout, Home is the window's content: Performance opens in its place (its
 toolbar has a Home button), and the other apps open in their own windows; **Apps → Home** goes
 back. In a panel layout, Home covers the screen, and each app opens on the screen in a frame whose top
-bar has its name and a Home icon, unless a layout button is bound to `home`. Layout buttons bound
-to `home` and `back` go Home (Back goes Home for now); the KICK layout's MAIN is `home` and BACK
-is `back`. The Performance app opens in **Play**, for the stage: the scenes, a row of knobs
+bar has its name and a Home icon. Back goes Home for now. The Performance app opens in **Play**, for the stage: the scenes, a row of knobs
 following the Performance's controls (or the selected part's), and a strip per part and bus;
 **Edit** (in the top bar, or the desktop's toolbar) goes to the parts views, and **Play** back.
 Selected, a part's knobs follow its banks: its own controls, then its instrument's first
@@ -333,7 +332,7 @@ build-app/hosts/engine/oscairn_engine_host_artefacts/RelWithDebInfo/oscairn-engi
 Keep that process running. In another terminal, start the UI:
 
 ```sh
-open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --connect "$HOME/.oscairn/control.sock" --layout kick
+open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --connect "$HOME/.oscairn/control.sock" --layout kick-screen
 ```
 
 Quit any existing Oscairn UI first so `open` starts it with the new arguments. On Linux,

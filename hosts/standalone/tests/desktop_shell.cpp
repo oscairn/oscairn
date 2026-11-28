@@ -16,11 +16,9 @@
 #include "../Recording.h"
 #include "../Setlist.h"
 #include "oscairn/setlist.h"
-#include "../Panel.h"
 #include "../PlayView.h"
 #include "../ParameterGrid.h"
 #include "../ZoneEditor.h"
-#include "../CompactEditor.h"
 #include "oscairn/discovery.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/session.h"
@@ -919,95 +917,8 @@ int main(int argc, char** argv)
                 grid.search("");
                 check(grid.tilesShown() == pageTiles, "clearing the search shows the page again");
             }
-            // A device's knobs play the row selected on screen: a panel with four "row:N" knobs to
-            // the right of its screen, and the Basic Synth's page over that screen.
-            {
-                const auto layout = standalone::Layout::parse(R"({"name": "Row test", "size": [1400, 600], "controls": [
-                    {"type": "screen", "rect": [0, 0, 1024, 600]},
-                    {"type": "knob", "rect": [1100, 20, 120, 120], "label": "P1", "bind": "row:1"}, {"type": "knob", "rect": [1100, 160, 120, 120], "label": "P2", "bind": "row:2"},
-                    {"type": "knob", "rect": [1100, 300, 120, 120], "label": "P3", "bind": "row:3"}, {"type": "knob", "rect": [1100, 440, 120, 120], "label": "P4", "bind": "row:4"}]})");
-                standalone::Panel panel(engine, layout);
-                panel.setSize(1400, 600);
-                check(engine.rowKnobs() == 4 && engine.rowEdge() == standalone::Engine::Edge::Right, "the panel's row knobs, right of its screen");
-                NodeId synth = 0;
-                for(const auto& [id, n] : engine.graph().names) if(n == "Basic Synth") synth = id;
-                auto grid = std::make_unique<standalone::ParameterGrid>(engine, synth, "Basic Synth");
-                standalone::setDesktopMode(*grid, 2);
-                panel.overlay(grid.get());
-                for(int i = 0; i < 20; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                // Knobs beside the screen play a column, top to bottom.
-                const auto first = grid->rowShown();
-                check(first.size() >= 2 && first[0] == "Brightness" && first[1] != "Level", "the first column is the side knobs' until another is chosen");
-                // Tap a tile in the next column.
-                juce::Component* tile = nullptr;
-                std::function<void(juce::Component&)> find = [&](juce::Component& c) { for(auto* child : c.getChildren()) { if(auto* s = dynamic_cast<juce::Slider*>(child); s && s->isRotary() && s->getX() > 150 && s->getY() < 100 && !tile) tile = s; find(*child); } };
-                find(*grid);
-                if(tile)
-                {
-                    auto mouse = juce::Desktop::getInstance().getMainMouseSource();
-                    const juce::Point<float> at(4, 4);
-                    grid->mouseDown(juce::MouseEvent(mouse, at, {}, 1, 0, 0, 0, 0, tile, tile, juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false));
-                }
-                const auto second = grid->rowShown();
-                check(tile && !second.empty() && second != first && second[0] == "Level", "tapping a tile in another column gives the knobs that column");
-                // P1 now plays that row's first parameter.
-                juce::Slider* p1 = nullptr;
-                std::function<void(juce::Component&)> knob = [&](juce::Component& c) { // the slider in P1's place on the panel
-                    for(auto* child : c.getChildren()) { if(auto* s = dynamic_cast<juce::Slider*>(child); s && !p1 && s->getParentComponent()->getBounds().getTopLeft() == juce::Point<int>(1100, 20)) p1 = s; knob(*child); }
-                };
-                knob(panel);
-                uint32_t played = 0; double range = 1;
-                for(const auto& p : engine.parameters(synth)) if(p.name == second[0]) { played = p.id; range = p.maximum - p.minimum; }
-                for(int i = 0; i < 10; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(40); // the panel's knobs follow the row
-                check(p1 && p1->isEnabled() && played, "P1 follows the row");
-                if(p1 && played)
-                {
-                    const double target = p1->getMinimum() + range * .25;
-                    p1->setValue(target, juce::sendNotificationSync);
-                    for(int i = 0; i < 100 && std::abs(engine.param("Basic Synth", played) - target) > 1e-6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                    check(std::abs(engine.param("Basic Synth", played) - target) < 1e-6, "turning P1 sets " + second[0]);
-                }
-                if(argc >= 5) { const juce::File out{juce::String(argv[4]) + "-row-knobs.png"}; out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(panel.createComponentSnapshot(panel.getLocalBounds()), stream); }
-                panel.overlay(nullptr); grid.reset();
-                check(engine.row().empty(), "the row goes with its page");
-            }
-            check(engine.rowKnobs() == 0, "and the knobs with their panel");
-            {
-                // Knobs under the screen play a row, left to right.
-                const auto layout = standalone::Layout::parse(R"({"name": "Row test", "size": [1024, 760], "controls": [
-                    {"type": "screen", "rect": [0, 0, 1024, 600]},
-                    {"type": "knob", "rect": [20, 620, 120, 120], "label": "K1", "bind": "row:1"}, {"type": "knob", "rect": [160, 620, 120, 120], "label": "K2", "bind": "row:2"},
-                    {"type": "knob", "rect": [300, 620, 120, 120], "label": "K3", "bind": "row:3"}]})");
-                standalone::Panel panel(engine, layout);
-                panel.setSize(1024, 760);
-                check(engine.rowKnobs() == 3 && engine.rowEdge() == standalone::Engine::Edge::Bottom, "knobs under the screen");
-                // With no page showing, the row is empty; a knob still turns, so Learn hears it.
-                juce::Slider* k1 = nullptr;
-                std::function<void(juce::Component&)> knob = [&](juce::Component& c) {
-                    for(auto* child : c.getChildren()) { if(auto* s = dynamic_cast<juce::Slider*>(child); s && !k1 && s->getParentComponent()->getBounds().getTopLeft() == juce::Point<int>(20, 620)) k1 = s; knob(*child); }
-                };
-                knob(panel);
-                const auto touches = engine.touches();
-                if(k1)
-                {
-                    auto mouse = juce::Desktop::getInstance().getMainMouseSource();
-                    const auto at = k1->getLocalBounds().getCentre().toFloat(), to = at.translated(0, -40);
-                    const auto now = juce::Time::getCurrentTime();
-                    k1->mouseDown(juce::MouseEvent(mouse, at, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, k1, k1, now, at, now, 1, false));
-                    k1->mouseDrag(juce::MouseEvent(mouse, to, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, k1, k1, now, at, now, 1, true));
-                    k1->mouseUp(juce::MouseEvent(mouse, to, {}, 1, 0, 0, 0, 0, k1, k1, now, at, now, 1, true));
-                }
-                check(k1 && engine.touches() > touches && engine.lastTouched() == "knob:1", "an empty row knob turned is heard, for Learn: " + engine.lastTouched());
-                NodeId synth = 0;
-                for(const auto& [id, n] : engine.graph().names) if(n == "Basic Synth") synth = id;
-                standalone::ParameterGrid grid(engine, synth, "Basic Synth");
-                standalone::setDesktopMode(grid, 2); grid.setSize(1024, 600);
-                const auto row = grid.rowShown();
-                check(row.size() >= 3 && row[0] == "Brightness" && row[1] == "Level" && row[2] == "Oscillator", "the first row, left to right");
-            }
-            // RFC 0019 step 3's gate on the Compact test layout (layouts/compact.json, 320 × 240 and
-            // four encoders): the Basic Synth, the test sampler and a third-party plugin, each chosen
-            // from the plugin list and every page's top parameters turned, with the encoders alone.
+            // RFC 0019 step 3's gate: the Basic Synth, the test sampler and a third-party plugin, each
+            // laid out on the Desktop and on a Panel's screen, and edited by a slider.
             {
                 std::vector<standalone::PluginChoice> gate{plugin("Basic Synth"), plugin("Test Sampler")};
                 if(const char* third = std::getenv("OSCAIRN_THIRD_PARTY_CLAP"); third && std::filesystem::exists(third))
@@ -1016,7 +927,7 @@ int main(int argc, char** argv)
                     check(!found.empty(), std::string("the third-party plugin scans: ") + third);
                     if(!found.empty()) gate.push_back({found[0].name, found[0].path, found[0].id});
                 }
-                else std::puts("skipped: the Compact gate's third-party plugin (set OSCAIRN_THIRD_PARTY_CLAP to a .clap)");
+                else std::puts("skipped: the gate's third-party plugin (set OSCAIRN_THIRD_PARTY_CLAP to a .clap)");
                 for(size_t g = 1; g < gate.size(); ++g)
                 {
                     const auto before = engine.graph().names;
@@ -1025,90 +936,14 @@ int main(int argc, char** argv)
                     // Its name in the graph ("Odin2 2" when one is there already).
                     for(const auto& [id, n] : engine.graph().names) if(!before.count(id)) gate[g].name = n;
                 }
-                const auto file = juce::File(argv[3]).getSiblingFile("layouts").getChildFile("compact.json");
-                standalone::Panel panel(engine, standalone::Layout::parse(file.loadFileAsString()));
-                panel.setSize(400, 380);
-                standalone::CompactEditor* compact = nullptr;
-                std::vector<juce::Slider*> encoders;
-                std::function<void(juce::Component&)> find = [&](juce::Component& c) {
-                    for(auto* child : c.getChildren()) { if(auto* e = dynamic_cast<standalone::CompactEditor*>(child)) compact = e; if(auto* s = dynamic_cast<juce::Slider*>(child)) encoders.push_back(s); find(*child); }
-                };
-                find(panel);
-                std::sort(encoders.begin(), encoders.end(), [](juce::Slider* a, juce::Slider* b) { return a->getParentComponent()->getX() < b->getParentComponent()->getX(); });
-                check(compact && encoders.size() == 4, "the compact layout: a screen and four encoders");
-                // The encoders as a hand works them: a detent is a step of the knob, a click a press.
-                auto turn = [&](int e, int steps) { auto* s = encoders[size_t(e)]; s->setValue(std::fmod(s->getValue() + steps + 64, 64.0), juce::sendNotificationSync); };
-                auto press = [&](int e) { auto* s = encoders[size_t(e)]; s->onDragStart(); s->onDragEnd(); };
-                auto snapshot = [&](const juce::String& name) {
-                    if(argc < 5) return;
-                    const juce::File out{juce::String(argv[4]) + "-compact-" + name.replaceCharacter(' ', '-').toLowerCase() + ".png"};
-                    out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(panel.createComponentSnapshot(panel.getLocalBounds()), stream);
-                };
-                using Level = standalone::CompactEditor::Level;
-                for(size_t g = 0; compact && encoders.size() == 4 && g < gate.size(); ++g)
+                for(size_t g = 0; g < gate.size(); ++g)
                 {
                     const auto& name = gate[g].name;
-                    for(int i = 0; i < 3 && compact->level() != Level::Plugins; ++i) press(0);
-                    for(int i = 0; i < 20; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); // the list follows the graph
-                    const auto list = compact->listShown();
-                    const auto at = std::find(list.begin(), list.end(), name);
-                    check(at != list.end(), "the compact plugin list has " + name);
-                    if(at == list.end()) continue;
-                    turn(0, -int(list.size())); turn(0, int(at - list.begin()));
-                    check(compact->chosen() == size_t(at - list.begin()), "turning encoder 1 chooses " + name);
-                    if(g == 0) snapshot("plugins");
-                    press(3);
-                    // The same description as Desktop and Panel: its pages, each one's parameters by priority.
                     NodeId node = 0;
                     for(const auto& [id, n] : engine.graph().names) if(n == name) node = id;
                     const auto params = standalone::editorParameters(engine.parameters(node));
                     const auto pages = standalone::editorPages(params);
-                    // A plugin with no parameters (the test sampler, so far) says so.
-                    check(pages.empty() ? compact->level() == Level::Pages && compact->listShown().empty() : compact->level() == (pages.size() > 1 ? Level::Pages : Level::Parameters),
-                          name + ": its pages, or its one page's parameters");
-                    size_t turned = 0;
-                    for(size_t page = 0; page < pages.size(); ++page)
-                    {
-                        if(pages.size() > 1) { turn(0, -int(pages.size())); turn(0, int(page)); press(3); }
-                        auto top = pages[page].params;
-                        standalone::byPriority(params, top);
-                        std::vector<std::string> expected;
-                        for(size_t k = 0; k < std::min<size_t>(4, top.size()); ++k) expected.push_back(params[top[k]].name);
-                        check(compact->level() == Level::Parameters && compact->encoderNames() == expected, name + ": the encoders have " + pages[page].name + "'s top parameters");
-                        if(g == 0 && page == 0)
-                        {
-                            // Shown, the page is what a device's screen knobs play, by priority (RFC 0011); hidden, it is withdrawn.
-                            panel.addToDesktop(juce::ComponentPeer::windowIsTemporary); panel.setVisible(true);
-                            for(int i = 0; i < 30 && engine.screenPage().params.empty(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                            const auto shown = engine.screenPage();
-                            check(shown.name == pages[page].name && shown.params.size() == top.size() && !top.empty() && shown.params[0].node == node && shown.params[0].param == params[top[0]].id,
-                                  name + ": the compact page shown is the screen knobs'");
-                            panel.setVisible(false); panel.removeFromDesktop();
-                            for(int i = 0; i < 30 && !engine.screenPage().params.empty(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                            check(engine.screenPage().params.empty(), name + ": hidden, it is withdrawn");
-                        }
-                        if(page == 0) snapshot(name + "-page");
-                        for(int e = 0; e < int(expected.size()); ++e)
-                        {
-                            const auto& p = params[top[size_t(e)]];
-                            if(p.flags & CLAP_PARAM_IS_READONLY) continue;
-                            const double before = engine.param(name, p.id);
-                            const int steps = before > (p.minimum + p.maximum) / 2 ? -3 : 3;
-                            turn(e, steps);
-                            for(int i = 0; i < 100 && engine.param(name, p.id) == before; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                            check(engine.param(name, p.id) != before, name + ": encoder " + std::to_string(e + 1) + " turns " + p.name);
-                            turned += engine.param(name, p.id) != before;
-                        }
-                        if(top.size() > 4)
-                        {
-                            press(3);
-                            check(compact->encoderNames().front() == params[top[4]].name, name + ": pressing encoder 4 shows the next four");
-                        }
-                        if(pages.size() > 1) press(0);
-                    }
-                    std::printf("compact: %s, %zu pages, %zu parameters turned\n", name.c_str(), pages.size(), turned);
-                    // And the same plugin on the Desktop and on a Panel's 1024 × 600 screen: every
-                    // page and tab laid out with no controls overlapping, and a slider edits it.
+                    // Every page and tab laid out with no controls overlapping, and a slider edits it.
                     for(const int mode : {1, 2})
                     {
                         if(params.empty()) break;
@@ -1145,7 +980,7 @@ int main(int argc, char** argv)
                 }
             }
             // A mode that changes the controls: the test fixture hides its Toggle in modes 2 and up
-            // and rescans its parameters' info; the Desktop's pages and Compact follow.
+            // and rescans its parameters' info; the Desktop's pages follow.
             if(const char* fixture = std::getenv("OSCAIRN_TEST_FIXTURE"))
             {
                 NodeId node = 0;
@@ -1155,16 +990,14 @@ int main(int argc, char** argv)
                 check(node != 0, "the fixture with modes is in the graph");
                 standalone::ParameterGrid grid(engine, node, "KICK steps");
                 grid.setSize(1180, 820);
-                standalone::CompactEditor compact(engine);
-                compact.edit(node, "KICK steps");
                 auto has = [](const std::vector<std::string>& names) { return std::find(names.begin(), names.end(), "Toggle") != names.end(); };
-                check(has(grid.namesShown()) && has(compact.encoderNames()), "the Toggle shows in mode 0");
+                check(has(grid.namesShown()), "the Toggle shows in mode 0");
                 auto mode = [&](double m, bool shown) {
                     engine.setParam("KICK steps", 9, m);
-                    for(int i = 0; i < 300 && (has(grid.namesShown()) != shown || has(compact.encoderNames()) != shown); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-                    return has(grid.namesShown()) == shown && has(compact.encoderNames()) == shown;
+                    for(int i = 0; i < 300 && has(grid.namesShown()) != shown; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+                    return has(grid.namesShown()) == shown;
                 };
-                check(mode(3, false), "mode 3 hides the Toggle on the Desktop and on Compact");
+                check(mode(3, false), "mode 3 hides the Toggle on the Desktop");
                 check(mode(0, true), "and mode 0 shows it again");
                 // The plugin's own window (RFC 0019): offered for the fixture's effect, which floats
                 // one from its worker without drawing anything, and not for the Basic Synth.

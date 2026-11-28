@@ -362,7 +362,7 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 42, "within half a second of the last: not shown");
     let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
-    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances · 1 Sound", "Songs in order, for the stage", "Patterns and steps", "No audio device (--audio null)"]);
+    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances · 1 Sound", "Songs in order, for the stage", "No audio device (--audio null)"]);
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
@@ -503,7 +503,7 @@ fn home_moves_by_keys_panel_and_touch() {
     f.reopened();
     let s = &mut f.screen;
     let names: Vec<String> = s.ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
-    assert_eq!(names, ["Performance", "Library", "Setlist", "Groovebox", "Settings"]);
+    assert_eq!(names, ["Performance", "Library", "Setlist", "Settings"]);
     s.frame();
     s.save("home");
     assert_eq!(s.frame(), None, "at rest");
@@ -533,17 +533,11 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!((s.ui.get_screen(), title(&s.ui).as_str(), s.ui.global::<Bar>().get_home_button(), s.ui.global::<Bar>().get_back()), (1, "Setlist", true, true));
     assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
     assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
-    s.ui.global::<HomeState>().invoke_tapped(3); // Groovebox: a JUCE screen
-    assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")));
     let file = std::env::temp_dir().join(format!("oscairn-ui-handover-{}", std::process::id()));
-    shell::write_handover(&file, shell::handover().unwrap()).unwrap();
+    shell::write_handover(&file, "recordings").unwrap();
     let written = std::fs::read_to_string(&file).unwrap();
     let _ = std::fs::remove_file(&file);
-    assert_eq!(written, "groovebox\n", "a whole line, as the start script reads it");
-    s.frame();
-    s.save("home-opening-groovebox");
-    shell::act(Action::Move { pane: None, by: 1 });
-    assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
+    assert_eq!(written, "recordings\n", "a whole line, as the start script reads it");
 }
 
 // Home walked with panel moves only (no touch): every action it offers reached and held to a real
@@ -552,9 +546,8 @@ fn home_moves_by_keys_panel_and_touch() {
 // Record `record.start` with no parameters, Capture `record.start` naming the Performance and the
 // seconds the buffer keeps. Then every tile the screen's own tiles model declares: the cursor
 // moves to it and Confirm opens the screen at that tile (Performance → Play, Setlist, the Rust
-// Library and Settings, and the Groovebox last because it hands the display over), each Rust
-// tile left back on Home by Cancel (EXIT is Back in one step), the Groovebox leaving the shell
-// handing the display to the JUCE app. Nothing switches until the press.
+// Library and Settings), each tile left back on Home by Cancel (EXIT is Back in one step).
+// Nothing switches until the press.
 #[test]
 fn home_walked_with_panel_moves_only() {
     let mut f = Fixture::new("home-walk");
@@ -627,12 +620,11 @@ fn home_walked_with_panel_moves_only() {
     nav(&mut f, "move:2", 5); // past the last stop: the cursor gives the bar back to the screen
     assert!(f.screen.ui.get_screen() == 0 && !ui.global::<crate::Theme>().get_bar_cursor(), "past the last stop the bar's cursor is gone and Home has it");
     // Every tile the screen's own tiles model declares, reached and confirmed; the Rust ones left
-    // back on Home, the Groovebox last (it hands the display over to the JUCE app).
+    // back on Home.
     let tiles: Vec<String> = ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
     let n = tiles.len();
     assert!(n > 0, "the screen declares its tiles");
-    let rust: Vec<usize> = (0..n).filter(|&i| tiles[i] != "Groovebox").collect();
-    for i in rust.iter().copied().chain(std::iter::once(tiles.iter().position(|t| t == "Groovebox").expect("the profile offers the Groovebox"))) {
+    for (i, tile) in tiles.iter().enumerate() {
         assert_eq!(f.screen.ui.get_screen(), 0, "the cursor is back on Home before the next tile");
         nav(&mut f, "move:0", 1); // the first move shows the cursor on the first tile
         if i > 0 {
@@ -641,22 +633,17 @@ fn home_walked_with_panel_moves_only() {
         assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 1, "one cursor, on the tile it moved to");
         nav(&mut f, "confirm", 1);
         settle(&mut f);
-        if tiles[i] == "Groovebox" {
-            assert_eq!((f.screen.ui.get_screen(), f.screen.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")), "the Groovebox tile hands the display over to the JUCE app");
-            assert_eq!(ui.global::<HomeState>().get_tiles().iter().filter(|t| t.cursor).count(), 0, "a tap or a press drops the cursor");
-            continue;
-        }
-        let expect = match tiles[i].as_str() {
+        let expect = match tile.as_str() {
             "Performance" => 3,
             "Library" => 13,
             "Setlist" => 1,
             "Settings" => 14,
-            _ => panic!("a Home tile the walk does not know: {}", tiles[i]),
+            _ => panic!("a Home tile the walk does not know: {}", tile),
         };
-        assert_eq!(f.screen.ui.get_screen(), expect, "the {} tile opens its screen", tiles[i]);
+        assert_eq!(f.screen.ui.get_screen(), expect, "the {} tile opens its screen", tile);
         nav(&mut f, "cancel", 1); // EXIT is Back, in one step from anywhere on a screen
         settle(&mut f);
-        assert_eq!(f.screen.ui.get_screen(), 0, "back on Home from {}", tiles[i]);
+        assert_eq!(f.screen.ui.get_screen(), 0, "back on Home from {}", tile);
     }
 }
 
@@ -1344,22 +1331,14 @@ fn session_setup(engine: &RealEngine) -> serde_json::Value {
     })
 }
 
-// The session's setup after a Rust-path start is the JUCE path's (docs/rust-ui.md, "Session
-// setup"). Rust: the engine started with the profile, as the start script's engine-args gives it
-// (--device-profile), then the shell's own start against it. JUCE: an engine with no profile, as
-// the app starts its own, configured by the real JUCE app's start (--connect, offscreen through
-// --snapshot), and the one request a snapshot run leaves out, record.retro with the length the app
-// would read (none saved: the profile's 30 s). Both report the same budget, memory classes,
-// capture and repositories, the FANTOM-07's measured on a unit; each UI's own memory differs and
-// is compared apart. Needs OSCAIRN_ENGINE and OSCAIRN_APP (the JUCE app), which ctest gives.
+// The session's setup after a start (docs/rust-ui.md, "Session setup"): the engine started with the
+// profile, as the start script's engine-args gives it (--device-profile), then the shell's own start
+// against it. The budget, memory classes, capture and repositories are the FANTOM-07's, measured on
+// a unit. Needs OSCAIRN_ENGINE.
 #[test]
-fn session_setup_matches_the_juce_app() {
-    let Some(app) = std::env::var_os("OSCAIRN_APP").filter(|a| !a.is_empty()) else {
-        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_APP is not set");
-        return;
-    };
+fn session_setup_is_the_fantom_07s() {
     let Some(rust) = RealEngine::start("setup-rust", &["--device-profile", "fantom-07"]) else {
-        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_ENGINE is not set");
+        eprintln!("session_setup_is_the_fantom_07s: skipped, OSCAIRN_ENGINE is not set");
         return;
     };
     let screen = Screen::new();
@@ -1375,26 +1354,14 @@ fn session_setup_matches_the_juce_app() {
     let shell = rust.call("memory.state", json!({}))["shell"].as_u64().unwrap();
     assert!(shell > 1 << 20, "the shell sends its own memory: {shell}");
 
-    let juce = RealEngine::start("setup-juce", &[]).unwrap();
-    juce.call("session.status", json!({})); // listening
-    let out = std::process::Command::new(app)
-        .args(["--connect", juce.socket.to_str().unwrap(), "--profile", "fantom-07", "--snapshot", "juce.png", "--size", "1280x720"])
-        .current_dir(&juce.home)
-        .envs(RealEngine::folders(&juce.home))
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "the JUCE app: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
-    juce.call("record.retro", json!({"seconds": 30}));
-
-    let (r, j) = (session_setup(&rust), session_setup(&juce));
-    assert_eq!(r, j, "the Rust path's setup (left) and the JUCE path's (right)");
+    let r = session_setup(&rust);
     const MIB: u64 = 1 << 20;
     let m = &r["memory"];
     let always = json!([{"app": "oscairn.performance", "reserve": 150 * MIB}, {"app": "oscairn.library", "reserve": 120 * MIB}]);
     assert_eq!(
         (&r["budget"]["cpu"], &m["device"], &m["floor"], &m["margin"], &m["available"], &m["alwaysAvailable"], &r["capture"]),
         (&json!(0.75), &json!(992 * MIB), &json!(300 * MIB), &json!(992 * MIB / 20), &json!(200 * MIB), &always, &json!(30)),
-        "the FANTOM-07's, as measured on a unit after a JUCE-path start"
+        "the FANTOM-07's, as measured on a unit"
     );
 }
 

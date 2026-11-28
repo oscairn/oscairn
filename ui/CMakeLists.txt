@@ -9,6 +9,20 @@ set(ui_features --no-default-features --features $<IF:$<BOOL:${OSCAIRN_ROLAND_FA
 set(ui_options "")
 # The release and the commit the JUCE apps are built with, which the Settings app's About page says (src/settings_keys.rs).
 set(ui_env RUSTUP_AUTO_INSTALL=0 "OSCAIRN_RELEASE=${OSCAIRN_RELEASE}" "OSCAIRN_SOURCE_COMMIT=${OSCAIRN_SOURCE_COMMIT}")
+# cargo and rustup live under the invoking user's home by default; pass the real paths through
+# explicitly (resolved at configure time) so the ui-rust test still finds the toolchain and its
+# crates when a runner sets HOME to an empty or unrelated folder.
+if(NOT "$ENV{CARGO_HOME}" STREQUAL "")
+    set(_ui_cargo_home "$ENV{CARGO_HOME}")
+else()
+    set(_ui_cargo_home "$ENV{HOME}/.cargo")
+endif()
+if(NOT "$ENV{RUSTUP_HOME}" STREQUAL "")
+    set(_ui_rustup_home "$ENV{RUSTUP_HOME}")
+else()
+    set(_ui_rustup_home "$ENV{HOME}/.rustup")
+endif()
+list(APPEND ui_env "CARGO_HOME=${_ui_cargo_home}" "RUSTUP_HOME=${_ui_rustup_home}")
 if(OSCAIRN_UI_VENDOR)
     list(APPEND ui_options --offline --config "source.crates-io.replace-with='oscairn-vendor'" --config "source.oscairn-vendor.directory='${OSCAIRN_UI_VENDOR}'")
 endif()

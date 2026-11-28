@@ -224,6 +224,7 @@ Control::InstalledPlugin storedIdentity(const fs::path& folder){
         if(const V from=member(doc.get(),"opensStateFrom");from && from->type==json_type_string){
             p.opensStateFrom=text(from);p.claimKey=text(field(doc.get(),"claimKey"));
             if(const V changes=member(doc.get(),"soundChanges");changes && changes->type==json_type_string)p.soundChanges=text(changes);}
+        if(const V kept=member(doc.get(),"kept");kept && kept->type==json_type_true)p.kept=true;
     }catch(const std::exception&){p.id.clear();}
     return p;
 }
@@ -234,7 +235,7 @@ std::string storedName(const std::string& format,const std::string& id,const std
 // plugin.json, as storedIdentity reads it.
 void writeIdentity(const fs::path& folder,const Control::InstalledPlugin& p){
     const auto claim=p.opensStateFrom.empty()?std::string():",\"opensStateFrom\":"+quote(p.opensStateFrom)+(p.soundChanges.empty()?"":",\"soundChanges\":"+quote(p.soundChanges))+",\"claimKey\":"+quote(p.claimKey);
-    const auto identity="{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+",\"name\":"+quote(p.name)+",\"license\":"+quote(p.license)+claim+"}\n";
+    const auto identity="{\"format\":"+quote(p.format)+",\"id\":"+quote(p.id)+",\"version\":"+quote(p.version)+",\"name\":"+quote(p.name)+",\"license\":"+quote(p.license)+claim+(p.kept?",\"kept\":true":"")+"}\n";
     state_files::write(folder/"plugin.json",identity.data(),identity.size());
 }
 // A file or folder moved by a rename where it can be, else copied: an install's unpacked folder is
@@ -2988,14 +2989,47 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
     // What each library item uses. shortcut: reads every item's document on each call; keep it in
     // the library's index when libraries reach thousands of items.
     std::vector<std::pair<std::string,std::set<std::tuple<std::string,std::string,std::string>>>> uses;
-    for(const auto& item:library().items())try{
-        const auto bytes=state_files::read(fs::path(item.path)/documentOf(item.kind),4*1024*1024);
-        const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
-        if(!doc)continue;
-        std::set<std::tuple<std::string,std::string,std::string>> plugins;
-        for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");plugins.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
-        uses.push_back({item.name.empty()?"Untitled":item.name,std::move(plugins)});
-    }catch(const std::exception&){}
+    // RFC 0043: a source that cannot be read keeps every version, as nothing says which it needs; never counted as unused.
+    std::vector<std::string> unreadable;
+    for(const auto& item:library().items()){
+        const auto type=itemType(item.kind);
+        if(!type || (type->format!="oscairn.performance" && type->format!="oscairn.sound"))continue; // a type whose documents hold no plugins
+        try{
+            const auto bytes=state_files::read(fs::path(item.path)/type->document,4*1024*1024);
+            const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+            if(!doc)bad("not JSON");
+            std::set<std::tuple<std::string,std::string,std::string>> plugins;
+            for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");plugins.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
+            uses.push_back({item.name.empty()?"Untitled":item.name,std::move(plugins)});
+        }catch(const std::exception&){unreadable.push_back(item.name.empty()?"Untitled":item.name);}
+    }
+    // Performances saved outside the library (performance.save's folders), as they are while their folder is here.
+    std::vector<std::pair<std::string,std::set<std::tuple<std::string,std::string,std::string>>>> outside;
+    for(const auto& [folder,saved]:assets_.roots()){
+        std::error_code e;
+        if(!fs::exists(folder,e) && fs::exists(folder.parent_path(),e))continue; // deleted from a folder that is here: gone
+        try{
+            const auto bytes=state_files::read(folder/"performance.json",4*1024*1024);
+            const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+            if(!doc)bad("not JSON");
+            std::set<std::tuple<std::string,std::string,std::string>> plugins;
+            for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");plugins.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
+            outside.push_back({folder.string(),std::move(plugins)});
+        }catch(const std::exception&){unreadable.push_back(folder.string());} // away (a drive not here) or unreadable: it keeps them
+    }
+    // Kept moves (Moves/<move>/move.json): the version they moved from, which undoing them needs.
+    std::vector<std::pair<std::string,std::tuple<std::string,std::string,std::string>>> moved;
+    // A move still settling counts as kept too; one whose journal cannot be read keeps every version.
+    {std::error_code e;for(const auto& m:fs::directory_iterator(dataHome()/"Moves",e)){
+        if(!m.is_directory() || m.path().filename().string().front()=='.')continue;
+        try{
+            const auto bytes=state_files::read(m.path()/"move.json",1024*1024);
+            const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+            if(!doc)bad("not JSON");
+            const V plugin=field(doc.get(),"plugin");
+            moved.push_back({text(field(doc.get(),"date")),{text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))}});
+        }catch(const std::exception&){unreadable.push_back("kept move "+m.path().filename().string());}
+    }}
     std::vector<InstalledPlugin> out;
     std::error_code e;
     for(const auto* format:{"clap","lv2"})
@@ -3014,13 +3048,48 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
             for(const auto& [name,plugins]:uses)if(plugins.count({p.format,p.id,p.version}))p.usedBy.push_back(name);
             const auto here=(entry.path()/platform()).string()+"/";
             for(const auto& n:nodes_)if(graph_.host(n.first).descriptor().path.rfind(here,0)==0 && graph_.host(n.first).failure().empty())p.open=true; // a stand-in plays nothing
+            // What keeps it (RFC 0043): the items using it, the open Performance, Performances saved outside the library, kept moves, a keep mark.
+            for(const auto& name:p.usedBy)p.keptBy.push_back({"item",name});
+            if(p.open)p.keptBy.push_back({"open","the open Performance"});
+            for(const auto& [folder,plugins]:outside)if(plugins.count({p.format,p.id,p.version}))p.keptBy.push_back({"outside",folder});
+            for(const auto& [date,plugin]:moved)if(plugin==std::make_tuple(p.format,p.id,p.version))p.keptBy.push_back({"move",date});
+            if(p.kept)p.keptBy.push_back({"kept",""});
+            for(const auto& what:unreadable)p.keptBy.push_back({"unreadable",what});
             out.push_back(std::move(p));
         }
+    // The newest installed version of each plugin is never offered for removal, so new sounds have one.
+    for(auto& p:out)p.newest=std::none_of(out.begin(),out.end(),[&](const auto& q){return q.format==p.format && q.id==p.id && assets::older(p.version,q.version);});
     std::sort(out.begin(),out.end(),[](const auto& a,const auto& b){return std::tie(a.name,a.version)<std::tie(b.name,b.version);});
     return out;
 }
 
 void Session::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform) { removePlugin(format,id,version,forPlatform,false); }
+
+void Session::keepPlugin(const PluginVersion& plugin,bool keep) {
+    const auto folder=storeFolder(plugin.format,plugin.id,plugin.version);
+    auto p=storedIdentity(folder);
+    if(p.id!=plugin.id || p.version!=plugin.version || p.format!=plugin.format)bad("that plugin is not installed");
+    p.kept=keep;
+    writeIdentity(folder,p);
+}
+
+// RFC 0043: never on its own; what keeps each version is read again just before it goes.
+std::vector<Control::UnusedPlugin> Session::removeUnusedPlugins(const std::vector<PluginVersion>& remove) {
+    if(versionJobRunning())bad("a version job is running; wait for it to finish");
+    std::vector<UnusedPlugin> out;
+    auto unused=[](const InstalledPlugin& p){return p.keptBy.empty() && !p.newest;};
+    if(remove.empty()){for(const auto& p:installedPlugins())if(unused(p))out.push_back({p.format,p.id,p.version,p.name,p.bytes});return out;}
+    for(const auto& r:remove){
+        const auto all=installedPlugins(); // read again just before each removal
+        const auto p=std::find_if(all.begin(),all.end(),[&](const auto& q){return q.format==r.format && q.id==r.id && q.version==r.version;});
+        if(p==all.end())bad(r.id+" "+r.version+" is not installed");
+        UnusedPlugin u{p->format,p->id,p->version,p->name,p->bytes,false,p->keptBy};
+        if(p->newest)u.keptBy.push_back({"newest",""});
+        if(unused(*p))try{removePlugin(p->format,p->id,p->version,{},false);u.removed=true;}catch(const std::exception& e){u.keptBy.push_back({"refused",e.what()});}
+        out.push_back(std::move(u));
+    }
+    return out;
+}
 void Session::removePlugin(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform,bool evenIfUsed) {
     if(!forPlatform.empty() && !knownPlatform(forPlatform))bad("unknown platform "+forPlatform);
     const auto folder=storeFolder(format,id,version);

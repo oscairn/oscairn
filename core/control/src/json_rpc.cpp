@@ -571,7 +571,7 @@ namespace oscairn
                 {"packages.list",System},{"packages.install",System},{"packages.job",System},{"packages.installed",System},{"packages.removal",System},{"packages.uninstall",System},{"packages.preinstalled",System},{"packages.repositories",System},{"packages.addRepository",System},
                 {"packages.removeRepository",System},{"packages.enableRepository",System},{"packages.setDeviceRepositories",System},
                 {"trust.list",System},{"trust.set",System},{"trust.remove",System},{"keys.list",System},{"keys.make",System},
-                {"plugins.list",System},{"plugins.remove",System},{"plugins.addBuild",System},
+                {"plugins.list",System},{"plugins.remove",System},{"plugins.addBuild",System},{"plugins.keep",System},{"plugins.removeUnused",System},
                 {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"panel.lamps",System},{"system.rolandNextBoot",System},{"midi.ignore",System},
                 {"controllers.inputs",System},{"controllers.choose",System},{"controllers.ignore",System},
                 {"engine.attach",System},{"engine.release",System},{"budget.set",System},{"budget.forget",System},{"performance.reopen",System},{"audio.set",System},
@@ -997,13 +997,15 @@ namespace oscairn
             if(method=="plugins.list") {
                 fields(p,{});std::vector<std::string> out;
                 auto orNull=[](const std::string& s){return s.empty()?std::string("null"):quote(s);};
+                auto keptBy=[](const std::vector<Control::KeptBy>& list){std::vector<std::string> out;for(const auto& k:list)out.push_back("{\"kind\":"+quote(k.kind)+",\"name\":"+quote(k.name)+'}');return join(out);};
                 for(const auto& x:c.installedPlugins()){
                     std::vector<std::string> platforms,used;
                     for(const auto& s:x.platforms)platforms.push_back(quote(s));
                     for(const auto& s:x.usedBy)used.push_back(quote(s));
                     out.push_back("{\"format\":"+quote(x.format)+",\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"name\":"+quote(x.name)+",\"platforms\":"+join(platforms)+
                                   ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+
-                                  ",\"opensStateFrom\":"+orNull(x.opensStateFrom)+",\"soundChanges\":"+orNull(x.soundChanges)+",\"claimKey\":"+orNull(x.claimKey)+'}');
+                                  ",\"opensStateFrom\":"+orNull(x.opensStateFrom)+",\"soundChanges\":"+orNull(x.soundChanges)+",\"claimKey\":"+orNull(x.claimKey)+
+                                  ",\"kept\":"+(x.kept?"true":"false")+",\"newest\":"+(x.newest?"true":"false")+",\"keptBy\":"+keptBy(x.keptBy)+'}');
                 }
                 return "{\"plugins\":"+join(out)+'}';
             }
@@ -1016,6 +1018,27 @@ namespace oscairn
                 catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return R"({"accepted":true})";
+            }
+            // Removing unused plugin versions (RFC 0043), only when asked.
+            if(method=="plugins.keep") {
+                fields(p,{"format","id","version","keep"});
+                try{c.keepPlugin({std::string(string(member(p,"format"))),std::string(string(member(p,"id"))),std::string(string(member(p,"version")))},boolean(member(p,"keep")));}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                return R"({"accepted":true})";
+            }
+            if(method=="plugins.removeUnused") {
+                fields(p,{"remove"});
+                std::vector<Control::PluginVersion> remove;
+                if(member(p,"remove"))for(auto v:array(member(p,"remove"),4096,0)){fields(v,{"format","id","version"});remove.push_back({std::string(string(member(v,"format"))),std::string(string(member(v,"id"))),std::string(string(member(v,"version")))});}
+                std::vector<Control::UnusedPlugin> done;
+                try{done=c.removeUnusedPlugins(remove);}catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                std::vector<std::string> out;
+                for(const auto& u:done){
+                    std::vector<std::string> kept;for(const auto& k:u.keptBy)kept.push_back("{\"kind\":"+quote(k.kind)+",\"name\":"+quote(k.name)+'}');
+                    out.push_back("{\"format\":"+quote(u.format)+",\"id\":"+quote(u.id)+",\"version\":"+quote(u.version)+",\"name\":"+quote(u.name)+",\"bytes\":"+std::to_string(u.bytes)+
+                                  (remove.empty()?std::string():",\"removed\":"+std::string(u.removed?"true":"false")+",\"keptBy\":"+join(kept))+'}');
+                }
+                return "{\"plugins\":"+join(out)+'}';
             }
             // Moving library items to a newer plugin version (RFC 0043).
             if(method=="versions.plan" || method=="versions.move") {

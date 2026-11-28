@@ -630,7 +630,9 @@ that. A pulled drive or a bad hash leaves nothing behind.
 `.`, `-`, `@` and `_` made `_`) holds `plugin.json`, `{format, id, version, name, license}`, as the folder
 name cannot say them exactly, with the publisher's claim when an install kept one
 (`opensStateFrom`, `soundChanges` and `claimKey`, the public key that signed it; a later install
-of the same version with a kept claim replaces it only under the same key, one without leaves it; a claim whose key signed no build in the store is listed as none), and a folder per
+of the same version with a kept claim replaces it only under the same key, one without leaves it; a
+claim whose key signed no build in the store is listed as none), `kept` when the musician marked the
+version to keep (`plugins.keep`), and a folder per
 platform with its build: `macos-arm64/Odin2.clap`.
 The desktop's plugin scan looks in each plugin's folder for its own platform, so what an
 archive installed is found there.

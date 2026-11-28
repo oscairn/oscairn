@@ -1473,7 +1473,7 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   then an object of the type's fields it read, each a string (`{"artist":"...","bpm":"120"}`;
   absent when none); one whose extractor fails is listed without, by name and path.
 - `plugins.list` (`{}`) returns `{plugins}`: the plugin store ([RFC 0006](rfcs/0006-packages-and-portability.md)),
-  each `{format,id,version,name,platforms,bytes,usedBy,open,license,opensStateFrom,soundChanges,claimKey}`: the platforms it has builds for,
+  each `{format,id,version,name,platforms,bytes,usedBy,open,license,opensStateFrom,soundChanges,claimKey,kept,newest,keptBy}`: the platforms it has builds for,
   their size on disk, the names of the library items that use it, whether the open
   Performance plays this device's build from the store, and the SPDX license expression of the
   plugin package it was installed from (empty when unknown, as for a build installed before the
@@ -1481,7 +1481,23 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   publisher's claim kept at install ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim):
   the oldest version whose saved state this one opens, and what may sound different) and
   `claimKey` the public key that signed it; each null when none, and when `claimKey` signed none
-  of the version's builds in the store.
+  of the version's builds in the store. `kept`: marked with `plugins.keep`; `newest`: the newest
+  version of that plugin installed, never offered for removal; `keptBy`: what keeps this version
+  installed ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#what-keeps-a-version)),
+  each `{kind,name}`: `item` (a library item using it, by name), `open` (the open Performance
+  plays it), `outside` (a Performance saved outside the library uses it, by folder), `move` (a kept
+  move left items at it, or names it as it settles, by its date), `kept`, and `unreadable` (a source
+  that could not be read: an item document unreadable or over 4 MB, a saved Performance's folder on
+  a drive that is away, an unreadable kept move; it keeps every version, as nothing says which it
+  needs). The open Performance's undo history and an audition's set-aside chain are not counted yet.
+- `plugins.keep` takes `{format,id,version,keep}` and returns `{"accepted":true}`: marks the
+  version to keep (or not), in the store's `plugin.json`.
+- `plugins.removeUnused` (`{}`) returns `{plugins}`: the preview, each version nothing keeps
+  (`keptBy` empty and not `newest`) as `{format,id,version,name,bytes}`. Given `remove` (a list of
+  `{format,id,version}`, from the preview), what keeps each is read again just before each one goes,
+  and each is removed only when nothing does; each is returned with `removed` and `keptBy` (what
+  kept it: the kinds above, `newest`, or `refused` with why `plugins.remove` refused it). Refused
+  (`-32005`) while a version job runs. Nothing is removed on its own, ever.
 - `plugins.remove` takes `{format,id,version}` and optional `platform` (absent or empty: every
   build) and returns `{"accepted":true}`. A `platform` is one of those `plugins.addBuild` takes.
   It is refused while the open Performance plays the build; items that use it open with a stand-in until it is installed again.

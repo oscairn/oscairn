@@ -284,6 +284,80 @@ int main(int argc, char** argv)
         check(refusal([&] { s.useVersion(v1, "2"); }).find("does not say it opens") != std::string::npos, "without the claim, refused");
         check(refusal([&] { s.useVersion(v1, "2", {}, true); }).find("ports are not the same") != std::string::npos && version() == "1", "other ports: refused, nothing changed");
     }
+    // Removing unused versions (step 6): what keeps a version, the newest kept, nothing removed unless asked, and what
+    // keeps a version is read again just before it goes.
+    {
+        home("g");
+        Session s(rate, frames);
+        install(s, fixture, "1", false);
+        install(s, v2, "2", true);
+        auto listed = [&](const std::string& version) { for(const auto& p : s.installedPlugins()) if(p.id == id && p.version == version) return p; return Control::InstalledPlugin{}; };
+        auto kinds = [&](const std::string& version) { std::string k; for(const auto& b : listed(version).keptBy) k += b.kind + " "; return k; };
+        check(listed("2").newest && !listed("1").newest && listed("1").keptBy.empty(), "the newest version is marked; nothing keeps version 1");
+        auto preview = s.removeUnusedPlugins();
+        check(preview.size() == 1 && preview[0].version == "1" && preview[0].bytes > 0 && !preview[0].removed && fs::exists(stored("1")), "the preview offers version 1 alone, the newest never, and removes nothing");
+        s.keepPlugin(v1, true);
+        check(kinds("1") == "kept " && s.removeUnusedPlugins().empty(), "a version marked to keep is kept");
+        s.keepPlugin(v1, false);
+        const auto a = save(s, "Alpha");
+        check(kinds("1") == "item item ", "items using it keep it: " + kinds("1"));
+        {
+            Session t(rate, frames);
+            const auto n = t.add("synth", stored("1").string(), id);
+            const auto p = t.addPart("Outside"); t.insertIntoPart(p, 0, n); t.commit();
+            t.savePerformance((temp / "outside").string());
+            const auto open = t.installedPlugins();
+            check(std::any_of(open.begin(), open.end(), [&](const auto& p) { return p.version == "1" && std::count(p.keptBy.begin(), p.keptBy.end(), Control::KeptBy{"open", "the open Performance"}); }), "the open Performance keeps it");
+        }
+        check(kinds("1") == "item item outside ", "a Performance saved outside the library keeps it: " + kinds("1"));
+        fs::remove_all(temp / "outside");
+        auto moved = wait(s, s.moveVersions(v1, "2", {a.performance, a.sound}));
+        check(kinds("1") == "move ", "a kept move keeps the version it left: " + kinds("1"));
+        s.forgetVersionMove(moved.move);
+        preview = s.removeUnusedPlugins();
+        check(preview.size() == 1 && preview[0].version == "1", "unused again");
+        // A source that cannot be read keeps every version, never counts as unused: an item's document, a saved
+        // Performance's folder on a drive that is away, a kept move's journal.
+        {
+            const auto spare = save(s, "Spare");
+            const auto doc = pathOf(s, spare.performance) / "performance.json";
+            const auto bytes = slurp(doc);
+            std::ofstream(doc) << "{ not json";
+            check(kinds("1").find("unreadable") != std::string::npos && s.removeUnusedPlugins().empty(), "an unreadable item document keeps it: " + kinds("1"));
+            std::ofstream(doc) << bytes;
+            s.deleteLibraryItem(spare.performance); s.deleteLibraryItem(spare.sound);
+            {
+                Session t(rate, frames);
+                const auto n = t.add("synth", stored("2").string(), id);
+                const auto p = t.addPart("Away"); t.insertIntoPart(p, 0, n); t.commit();
+                t.savePerformance((temp / "drive" / "away").string());
+            }
+            fs::rename(temp / "drive", temp / "drive-unplugged");
+            check(kinds("1").find("unreadable") != std::string::npos, "a saved Performance on a drive that is away keeps it: " + kinds("1"));
+            fs::rename(temp / "drive-unplugged", temp / "drive");
+            fs::create_directories(fs::path(std::getenv("OSCAIRN_DATA_HOME")) / "Moves" / "2026-11-28-broken");
+            std::ofstream(fs::path(std::getenv("OSCAIRN_DATA_HOME")) / "Moves" / "2026-11-28-broken" / "move.json") << "{ not json";
+            check(kinds("1").find("unreadable") != std::string::npos, "an unreadable kept move keeps it: " + kinds("1"));
+            fs::remove_all(fs::path(std::getenv("OSCAIRN_DATA_HOME")) / "Moves" / "2026-11-28-broken");
+            // While a version job runs (a state load held 6 s), nothing is removed.
+            const auto slow = temp / "slow-once";
+            std::ofstream(slow) << "x";
+            ::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE", slow.c_str(), 1);
+            const auto busy = save(s, "Busy");
+            const auto job = s.planVersionMove(v1, "2", {.items = {busy.performance}});
+            check(refusal([&] { s.removeUnusedPlugins({v1}); }).find("version job is running") != std::string::npos, "removal is refused while a version job runs");
+            wait(s, job);
+            ::unsetenv("KICK_FIXTURE_SLOW_LOAD_ONCE");
+            s.deleteLibraryItem(busy.performance); s.deleteLibraryItem(busy.sound);
+        }
+        const auto b = save(s, "Beta"); // used between the preview and the removal
+        auto done = s.removeUnusedPlugins({v1});
+        check(done.size() == 1 && !done[0].removed && !done[0].keptBy.empty() && done[0].keptBy[0].kind == "item" && fs::exists(stored("1")), "a version used since the preview is kept, saying why");
+        s.deleteLibraryItem(b.performance); s.deleteLibraryItem(b.sound);
+        done = s.removeUnusedPlugins({v1, {"clap", id, "2"}});
+        check(done.size() == 2 && done[0].removed && !fs::exists(stored("1")) && !done[1].removed && !done[1].keptBy.empty() && done[1].keptBy.back().kind == "newest" && fs::exists(stored("2")),
+              "removed only when asked and unused; the newest stays: " + [&] { std::string o; for(const auto& d : done) { o += d.version + (d.removed ? " removed" : " kept"); for(const auto& k : d.keptBy) o += " " + k.kind + ":" + k.name; o += "; "; } return o; }());
+    }
     std::printf("%s\n", failures ? "FAILED" : "PASSED");
     return failures ? 1 : 0;
 }

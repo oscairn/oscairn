@@ -80,6 +80,8 @@ plugin worker use it. The plugin worker's process is C++. Other options:
 
 `ctest --test-dir build-dev` runs every test the configuration built; `-R` picks some by name
 (`ctest --test-dir build-dev -R '^control-'`). A test never touches the developer's own folders:
+the `control-library-scale` test's full 50,000-item run, with its 50 ms search check, is for optimized
+builds (RelWithDebInfo, Release); a Debug build runs the same test on 5,000 items without the timing gate.
 the top-level `CMakeLists.txt` runs every registered test with `HOME` set to the empty
 `build-dev/test-home` and, unless the test names its own, `OSCAIRN_DATA_HOME` and
 `OSCAIRN_CONFIG_HOME` under `build-dev/test-data/<test>/`. The `test-home-clear` fixture empties both

@@ -109,12 +109,12 @@ fn every_built_in_themes_accent_and_meter_warning_read_on_the_background() {
 fn what_a_file_may_leave_out_has_the_references_default() {
     let mut doc = dark_doc();
     let o = doc.as_object_mut().unwrap();
-    for key in ["fontScale", "spacing", "radius"] {
+    for key in ["fontScale", "spacing", "radius", "scrollWidth"] {
         o.remove(key);
     }
     o["font"].as_object_mut().unwrap().remove("bold");
     let t = parse(&doc).unwrap();
-    assert_eq!((t.font_scale, t.spacing, t.radius, t.font.bold.as_str(), t.warning, t.focus, &t.splash), (1., 1., 6., "", None, None, &Splash::default()));
+    assert_eq!((t.font_scale, t.spacing, t.radius, t.scroll_width, t.font.bold.as_str(), t.warning, t.focus, &t.splash), (1., 1., 6., 32., "", None, None, &Splash::default()));
     // A bold font given as null reads as absent, as the reference's JSON reads it.
     doc["font"]["bold"] = Value::Null;
     assert_eq!(parse(&doc).unwrap().font.bold, "");
@@ -122,17 +122,18 @@ fn what_a_file_may_leave_out_has_the_references_default() {
     doc["fontScale"] = json!(1.2);
     doc["spacing"] = json!(0.75);
     doc["radius"] = json!(11.5);
+    doc["scrollWidth"] = json!(20);
     doc["colors"]["warning"] = json!("#112233");
     doc["colors"]["focus"] = json!("#AABBCC");
     doc["splash"] = json!({"image": "splash.png", "background": "#000000", "ink": "#FFFFFF"});
     let t = parse(&doc).unwrap();
-    assert_eq!((t.font_scale, t.spacing, t.radius, t.warning, t.focus), (1.2, 0.75, 11.5, Some(c(0x112233)), Some(c(0xaabbcc))));
+    assert_eq!((t.font_scale, t.spacing, t.radius, t.scroll_width, t.warning, t.focus), (1.2, 0.75, 11.5, 20., Some(c(0x112233)), Some(c(0xaabbcc))));
     assert_eq!((t.splash.image.as_str(), t.splash.background, t.splash.ink), ("splash.png", Some(c(0)), Some(c(0xffffff))));
     // The splash may give one of its colors; the other is the theme's (contrast checked with it).
     doc["splash"] = json!({"ink": "#FFFFFF"});
     assert_eq!(parse(&doc).unwrap().splash.ink, Some(c(0xffffff)));
     // The range ends are in the range (docs/theme.schema.json: minimum and maximum): radius 0 and 16, font scale 0.8 and 1.4, spacing 0.6 and 1.6.
-    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.8, 1.4], [0.79, 1.41]), ("spacing", [0.6, 1.6], [0.59, 1.61])] {
+    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.8, 1.4], [0.79, 1.41]), ("spacing", [0.6, 1.6], [0.59, 1.61]), ("scrollWidth", [8., 48.], [7.9, 48.1])] {
         let mut doc = dark_doc();
         for v in ok {
             doc[key] = json!(v);

@@ -7,9 +7,9 @@
 //! Read live: a new choice is seen within a second and repaints the window once.
 //!
 //! Everything a theme file can set is read: the nine colors (and the optional `warning` and
-//! `focus`), `radius`, `fontScale`, `spacing`, the eight `style` choices, the six `wires` colors, the
+//! `focus`), `radius`, `fontScale`, `spacing`, `scrollWidth`, the eight `style` choices, the six `wires` colors, the
 //! `splash`, and the font files. A file is accepted or refused whole, as the reference does:
-//! only `fontScale`, `spacing`, `radius`, `colors.warning`, `colors.focus`, `font.bold` and `splash` may be
+//! only `fontScale`, `spacing`, `radius`, `scrollWidth`, `colors.warning`, `colors.focus`, `font.bold` and `splash` may be
 //! absent (their defaults below); anything else missing, unknown, mistyped or out of range, text
 //! contrast under 4.5:1, a folder not named after its id or a font the reference would not take
 //! refuses the theme, which then shows the default theme, else the emergency one, as `reload`
@@ -103,6 +103,8 @@ pub struct ThemeData {
     /// A scale on the paddings and gaps (0.6 to 1.6).
     pub spacing: f32,
     pub radius: f32,
+    /// The scroll bar's width, in design units: the bar fills exactly this lane (8 to 48).
+    pub scroll_width: f32,
     /// By `INKS`.
     pub colors: [Color; 9],
     pub warning: Option<Color>,
@@ -126,6 +128,7 @@ impl Default for ThemeData {
             font_scale: 1.,
             spacing: 1.,
             radius: 6.,
+            scroll_width: 32.,
             colors: [0x15181d, 0x20252d, 0x2c333d, 0x526070, 0xedf1f5, 0xa3aebb, 0xffa45b, 0x5ad9a4, 0xff8d87].map(rgb),
             warning: None,
             focus: None,
@@ -195,7 +198,7 @@ impl ThemeData {
         require(text.len() as u64 <= MAX_THEME_BYTES, "Theme exceeds 16 KiB")?;
         let value: Value = serde_json::from_str(text).map_err(|_| "Invalid theme JSON")?;
         let object = value.as_object().ok_or("Theme must be an object")?;
-        fields(object, &["version", "id", "name", "font", "fontScale", "spacing", "radius", "colors", "style", "wires", "splash"])?;
+        fields(object, &["version", "id", "name", "font", "fontScale", "spacing", "radius", "scrollWidth", "colors", "style", "wires", "splash"])?;
         require(object.get("version").is_some_and(|v| v.as_i64() == Some(7)), "Unsupported theme version")?;
         let string = |key: &str| object.get(key).and_then(Value::as_str);
         let id = string("id").unwrap_or_default().to_string();
@@ -221,6 +224,7 @@ impl ThemeData {
         let font_scale = number("fontScale", 1., 0.8, 1.4)?;
         let spacing = number("spacing", 1., 0.6, 1.6)?;
         let radius = number("radius", 6., 0., 16.)?;
+        let scroll_width = number("scrollWidth", 32., 8., 48.)?;
         let colors = object.get("colors").and_then(Value::as_object).ok_or("Theme needs semantic colors")?;
         let mut allowed = INKS.to_vec();
         allowed.extend(["warning", "focus"]);
@@ -280,7 +284,7 @@ impl ThemeData {
             let (ink_color, behind) = (splash.ink.unwrap_or(ink[4]), splash.background.unwrap_or(ink[0]));
             require(contrast(ink_color, behind) >= 4.5, "Theme splash text contrast must be at least 4.5:1")?;
         }
-        Ok(ThemeData { id, name, font, font_scale, spacing, radius, colors: ink, warning, focus, style, wires, splash })
+        Ok(ThemeData { id, name, font, font_scale, spacing, radius, scroll_width, colors: ink, warning, focus, style, wires, splash })
     }
 
     pub fn ink(&self, name: &str) -> Color {
@@ -561,6 +565,7 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_key_light(if brighter(text, surface) { text } else { surface });
     g.set_key_dark(if brighter(text, surface) { surface } else { text });
     g.set_radius(d.radius);
+    g.set_scroll_lane(d.scroll_width);
     g.set_font_scale(d.font_scale);
     g.set_spacing(d.spacing);
     let s = d.style;

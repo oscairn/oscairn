@@ -214,17 +214,15 @@ fn the_scroll_bar_is_tapped_and_dragged() {
     assert_eq!(first_shown(&s), 1);
 }
 
-// The scroll bar can be hit with a finger: its lane is the theme's touch target and the visible bar fills it, a side margin
-// from each side (issue #269: the bar was a third of the lane, with the lane's empty space beside it). lib-A-1 is the narrower
-// lane tried, three quarters of a touch target; lib-A-2 the default.
+// The scroll bar is the theme's width (`scrollWidth`) and fills it: the default, and a theme that sets another (lib-A-1: 24).
 #[test]
 fn the_scroll_bar_is_wide_enough_to_tap() {
-    for (n, lane_of_touch) in [(1, 0.75f32), (2, 1.0)] {
+    for (n, width) in [(1, Some(24.)), (2, None)] {
         let mut s = scene("owner-wide", 300);
         let ui = s.ui();
         let t = ui.global::<crate::Theme>();
-        if n == 1 {
-            t.set_scroll_lane(t.get_touch() * lane_of_touch);
+        if let Some(w) = width {
+            t.set_scroll_lane(w);
         }
         shell::act(Action::Move { pane: None, by: 1 });
         shell::act(Action::Move { pane: None, by: 150 });
@@ -232,14 +230,9 @@ fn the_scroll_bar_is_wide_enough_to_tap() {
         s.f.screen.frame();
         s.f.screen.frame();
         lib_png(&s, &format!("lib-A-{n}"));
-        if n == 2 {
-            assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "the lane is a touch target: {} of {}", t.get_scroll_lane(), t.get_touch());
-        }
-        // The bar fills the lane it is given: its thumb is the lane, less the side margins, wider than the old third.
-        let pad = t.get_scroll_pad();
-        let want = t.get_scroll_lane() - 2. * pad;
-        assert!((ui.get_thumb_w() - want).abs() <= 1.5, "the bar fills the lane minus its side margins: {} against {} - 2*{}", ui.get_thumb_w(), t.get_scroll_lane(), pad);
-        assert!(ui.get_thumb_w() >= t.get_scroll_lane() / 3. - 0.01, "the bar is wider than a third of the lane: {}", ui.get_thumb_w());
+        let want = width.unwrap_or(32.);
+        assert_eq!(t.get_scroll_lane(), want, "the lane is the theme's width");
+        assert!((ui.get_thumb_w() - want).abs() <= 0.01, "the bar fills the lane: {} against {want}", ui.get_thumb_w());
     }
 }
 
@@ -272,10 +265,9 @@ fn the_settings_rail_holds_its_longest_label_on_one_line() {
     }
 }
 
-// The scroll bar fills its lane: the bar is a small side margin (`scroll-pad`) from the lane's left (the list's side) and the
-// same from the lane's right, so there is no band of empty lane beside it (issue #269), while the lane, the touch target, stays
-// a full touch target wide and begins no further left than the rows' right padding, so a tap on the star or the warning icon is
-// the row's, never the lane's. A non-flush bar (Part's list) keeps both margins. Pictures: polish-2 (and -blue).
+// The scroll bar fills exactly its lane (issue #269): the theme's `scrollWidth`, with no margin of its own on any side. As drawn,
+// the thumb's run on its middle row starts at the lane's left and is the lane wide; the rows end the list's gap before the
+// lane, so the bar never draws over a row. Pictures: polish-2 (and -blue).
 #[test]
 fn the_scroll_bar_sits_close_to_the_list() {
     for (name, theme) in [("polish-2", None), ("polish-2-blue", Some(super::theme_pictures::blue_square_theme()))] {
@@ -288,29 +280,23 @@ fn the_scroll_bar_sits_close_to_the_list() {
         }
         let t = ui.global::<crate::Theme>();
         let k = 1.55;
-        let lane_left = ui.get_list_x() + ui.get_lane_x();
-        assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "{name}: the lane is a touch target");
-        // The bar fills the lane: its width is the lane less a side margin from each side (Part's list is not flush).
-        let pad = t.get_scroll_pad();
-        let lane = t.get_scroll_lane();
-        let want = lane - 2. * pad;
-        assert!((ui.get_thumb_w() - want).abs() <= 1.5, "{name}: the bar fills the lane minus its side margins: {} against {} - 2*{}", ui.get_thumb_w(), lane, pad);
-        // As drawn: the first pixel of the bar's thumb (the muted color) in the first row's height is the lane's side margin
-        // from the lane's left, in the lane (a bar at the far side would start `lane - 2*pad` away).
-        let y = ((ui.get_list_y() + t.get_margin() + t.get_touch() / 2.) * k) as usize;
+        let (lane_left, lane) = (ui.get_list_x() + ui.get_lane_x(), t.get_scroll_lane());
+        assert!((ui.get_thumb_w() - lane).abs() <= 0.01, "{name}: the bar is the lane wide: {} against {lane}", ui.get_thumb_w());
+        let y = ((ui.get_list_y() + t.get_margin() + ui.get_thumb_y() + ui.get_thumb_h() / 2.) * k) as usize;
         let m = t.get_muted();
         let want = (m.red(), m.green(), m.blue());
         let w = s.f.screen.w;
-        let from = (lane_left * k) as usize;
-        let to = ((lane_left + lane) * k) as usize;
-        let at = (from..to).find(|&x| {
+        let is = |x: usize| {
             let p = s.f.screen.pixels[y * w + x];
             (p.r, p.g, p.b) == want
-        });
-        let left = at.expect("the thumb is drawn") as f32 / k - lane_left;
-        eprintln!("{name}: the bar starts {left:.1} px into the lane (the side margin {})", t.get_scroll_pad());
-        assert!((left - pad).abs() <= 2., "{name}: the bar starts its side margin {left} into the lane (the margin {})", t.get_scroll_pad());
-        assert!(left + ui.get_thumb_w() <= lane, "{name}: the bar's right leaves its side margin too");
+        };
+        let from = ((lane_left - t.get_scroll_gap()) * k) as usize;
+        let first = (from..w).find(|&x| is(x)).expect("the thumb is drawn");
+        let last = (first..w).take_while(|&x| is(x)).last().unwrap();
+        let (left, width) = (first as f32 / k - lane_left, (last + 1 - first) as f32 / k);
+        eprintln!("{name}: the bar starts {left:.1} px past its lane's left and is {width:.1} wide (the lane {lane})");
+        assert!(left.abs() <= 1.5, "{name}: the bar starts {left} from the lane's left, with no margin of its own");
+        assert!((width - lane).abs() <= 1.5, "{name}: the bar is {width} wide as drawn, the lane is {lane}");
         lib_png(&s, name);
     }
 }

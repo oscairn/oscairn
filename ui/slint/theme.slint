@@ -144,12 +144,11 @@ export global Theme {
     // How much of the width a rail may take to hold its longest label on one line (the rail is the theme's width, more only
     // for that).
     out property <float> rail-label-share: 0.16;
-    // A list's scroll bar (touch aid only): its own lane (the touch target) and the thumb's least length. The visible bar fills
-    // the lane, a small side margin (`scroll-pad`) from each side, and keeps a touch target wide by default (`scroll-lane` is the
-    // shared ScrollBar's default width; the bar draws `given width` less the side margins). The lane begins at the rows' edge, so
-    // a tap on a row's star or warning is the row's, never the lane's, and the bar never draws over a row.
-    in-out property <length> scroll-lane: touch;
-    out property <length> scroll-pad: pad-tight;
+    // A list's scroll bar (touch aid only): `scroll-lane` is its width, the theme file's `scrollWidth` (set by `theme::apply`), and the
+    // bar fills exactly the lane it is given, with no margin of its own. The space around it is its container's: `scroll-gap` is
+    // what a list leaves between its rows and the bar; a list's padding or margin is the space beside the bar.
+    in-out property <length> scroll-lane: 32px;
+    out property <length> scroll-gap: pad-tight;
     out property <length> scroll-thumb-min: touch;
     // A finger drag on a list's rows becomes a scroll (not a tap) once it has moved this far.
     in-out property <length> scroll-drag-threshold: touch / 4;

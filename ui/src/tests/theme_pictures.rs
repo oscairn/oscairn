@@ -211,10 +211,9 @@ fn polish_1_play_pictures() {
     }
 }
 
-// The drawn scroll thumb is the lane's bar (D1): it starts a side margin from the lane's left, is the lane's width less those
-// margins, and is drawn as a rounded bar where the geometry puts it (the pixel well inside — beyond the scaled corner, which for
-// a track this wide is several px — and the thumb's middle are the thumb's color, not the track's or the lane's). A bar drawn
-// at the far side of its lane, or flush, would fail here.
+// The drawn scroll thumb is the lane's bar (D1): it starts at the lane's left, is the lane wide, and is drawn as a rounded bar
+// where the geometry puts it (the pixel well inside — beyond the scaled corner, which for a track this wide is several px — and
+// the thumb's middle are the thumb's color, not the track's or the lane's).
 #[test]
 fn the_scroll_thumb_corner_is_drawn_scaled() {
     let mut s = super::owner::scene("scaled-thumb", 10);
@@ -222,7 +221,7 @@ fn the_scroll_thumb_corner_is_drawn_scaled() {
     s.f.screen.frame();
     let t = ui.global::<crate::Theme>();
     let k = ui.window().scale_factor();
-    let x = (ui.get_list_x() + ui.get_lane_x() + t.get_scroll_pad()) * k;
+    let x = (ui.get_list_x() + ui.get_lane_x()) * k;
     let y = (ui.get_list_y() + t.get_margin() + ui.get_thumb_y()) * k;
     let at = |dx: f32, dy: f32| s.f.screen.pixels[(y + dy).ceil() as usize * s.f.screen.w + (x + dx).ceil() as usize];
     let (corner, inside) = (at(8., 8.), at(ui.get_thumb_w() * k / 2., ui.get_thumb_h() * k / 2.));

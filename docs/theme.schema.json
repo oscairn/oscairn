@@ -58,6 +58,11 @@
       "minimum": 0,
       "maximum": 16
     },
+    "scrollWidth": {
+      "type": "number",
+      "minimum": 8,
+      "maximum": 48
+    },
     "colors": {
       "type": "object",
       "properties": {

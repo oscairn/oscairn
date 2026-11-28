@@ -162,7 +162,7 @@ fn the_menu_scrolls_a_list_longer_than_its_view() {
 
 // A modal shows its scroll bar only when its content is taller than its view (issue #269): the menu (a dialog) when it holds
 // more rows than a view, the notice when its question overflows the window; both fit it and show none. The notice's bar is the
-// panel's (`bar-on`, set as the panel lays out), flush to the modal's edge.
+// panel's (`bar-on`, set as the panel lays out).
 #[test]
 fn a_menu_and_a_notice_show_their_bar_only_when_they_overflow() {
     // The menu: a longer list shows the bar, a list that fits shows none.
@@ -178,7 +178,7 @@ fn a_menu_and_a_notice_show_their_bar_only_when_they_overflow() {
     short.show();
     let ms = ui.global::<MenuState>();
     assert!(ms.get_total() <= ms.get_rows_per_view(), "a list that fits shows no scroll bar: {} rows, {} in a view", ms.get_total(), ms.get_rows_per_view());
-    // The notice: many choices overflow the small window and show the flush bar; one choice fits and shows none.
+    // The notice: many choices overflow the small window and show the bar; one choice fits and shows none.
     let mut s = Screen::sized(800, 480);
     let ui = s.ui.clone_strong();
     let many = ["A fairly long choice label"; 18];
@@ -186,10 +186,9 @@ fn a_menu_and_a_notice_show_their_bar_only_when_they_overflow() {
     s.frame();
     s.frame();
     assert!(ui.global::<NoticeState>().get_bar_on(), "a notice taller than the view shows its scroll bar ({} choices)", many.len());
-    // The bar is flush to the panel's edge: its thumb is the lane less one side margin (not two).
+    // The bar is the theme's width, nothing around it.
     let t = ui.global::<crate::Theme>();
-    let flush = t.get_scroll_lane() - t.get_scroll_pad();
-    assert!((ui.get_notice_bar_w() - flush).abs() <= 1.5, "the notice's flush bar is the lane less one side margin: {} against {} - {}", ui.get_notice_bar_w(), t.get_scroll_lane(), t.get_scroll_pad());
+    assert_eq!(ui.get_notice_bar_w(), t.get_scroll_lane(), "the notice's bar is the lane wide");
     Notice::open(&ui, "Just", "A short message.", &["OK"]);
     s.frame();
     s.frame();

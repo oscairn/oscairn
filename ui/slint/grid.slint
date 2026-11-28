@@ -840,7 +840,6 @@ export component Grid inherits Rectangle {
             }
             bar := ScrollBar {
                 visible: root.long;
-                flush: true;
                 x: parent.width - Theme.scroll-lane - Theme.margin;
                 y: Theme.touch + Theme.pad-tight;
                 width: Theme.scroll-lane;
@@ -908,5 +907,5 @@ export component Grid inherits Rectangle {
     }
     property <int> per-list: GridState.list-per-view;
     property <bool> long: GridState.list-open && GridState.list.length > per-list;
-    property <length> lane: long ? Theme.scroll-lane : 0px;
+    property <length> lane: long ? Theme.scroll-lane + Theme.scroll-gap : 0px;
 }

@@ -254,22 +254,19 @@ export component Row inherits Section {
     }
 }
 
-// A list's scroll bar, a touch aid: the whole bar in its lane (the touch target), its thumb the view's share of the list
-// (never shorter than `Theme.scroll-thumb-min`) at the view's place. A tap on the track or a drag asks for the view at that
-// place (`scrolled`, a whole view's first row); it is not a cursor stop and draws nothing while the list fits. `flush` drops
-// the bar's outer (right) margin, for a bar on the screen's or a modal's edge.
+// A list's scroll bar, a touch aid: the whole bar fills exactly the width given to it and carries no spacing on any side (the
+// container spaces it), its thumb the view's share of the list (never shorter than `Theme.scroll-thumb-min`) at the view's
+// place. A tap on the track or a drag asks for the view at that place (`scrolled`, a whole view's first row); it is not a cursor
+// stop and draws nothing while the list fits.
 export component ScrollBar inherits Rectangle {
-    in property <bool> flush;
     in property <int> total;
     in property <int> first;
     in property <int> per-view;
     callback scrolled(int);
-    // The visible bar fills the width given to it, a small side margin (`scroll-pad`) from each side — none at the outer
-    // (right) edge when `flush`.
-    out property <length> thumb-w: root.flush ? root.width - Theme.scroll-pad : root.width - 2 * Theme.scroll-pad;
+    out property <length> thumb-w: root.width;
     out property <length> thumb-h: min(root.height, max(Theme.scroll-thumb-min, root.height * root.per-view / max(1, root.total)));
     out property <length> thumb-y: (root.height - root.thumb-h) * min(1.0, root.first / max(1, root.total - root.per-view));
-    // A list's lane is this wide, a touch target: a bar left unwidened still fills it.
+    // The default width is the theme's.
     width: Theme.scroll-lane;
     function seek(y: length) {
         let f = min(1.0, max(0.0, (y - root.thumb-h / 2) / max(1px, root.height - root.thumb-h)));
@@ -279,8 +276,8 @@ export component ScrollBar inherits Rectangle {
         }
     }
     Rectangle {
-        x: Theme.scroll-pad;
-        width: root.thumb-w;
+        x: 0px;
+        width: root.width;
         border-radius: Theme.scaled-radius(self.width);
         background: Theme.track;
         Rectangle {
@@ -341,11 +338,12 @@ export component Part inherits Rectangle {
     }
     // The scroll bar, when the list is longer than the view: its own lane at the list's right edge, the rows narrower by it.
     property <bool> long: PartState.total > root.per-view;
-    property <length> lane: root.long ? Theme.scroll-lane : 0px;
+    // The lane and the gap the list leaves between its rows and the bar.
+    property <length> lane: root.long ? Theme.scroll-lane + Theme.scroll-gap : 0px;
     out property <length> thumb-h: bar.thumb-h;
     out property <length> thumb-y: bar.thumb-y;
     out property <length> thumb-w: bar.thumb-w;
-    out property <length> lane-x: root.list-width - root.lane + Theme.margin;
+    out property <length> lane-x: root.list-width - Theme.scroll-lane + Theme.margin;
     out property <length> track-h: bar.height;
     property <length> line: Theme.body + Theme.margin;
     // A lane's key range as the strip over the keyboard, over the panel's lines.

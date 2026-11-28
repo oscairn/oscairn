@@ -23,10 +23,10 @@ Changing either must not change the audio graph, parameters, MIDI assignments or
   on screen, or for an icon its tooltip and accessible title.
 - Accent marks selection or an action; positive marks active playback; danger marks failures.
   State must also be conveyed by text, position, shape or accessibility state, not color alone.
-- A scroll bar (a touch aid on lists and scrollable popups) fills its own lane, a touch target wide, from a small
-  `scroll-pad` side margin, so there is no band of empty lane beside it (issue #269). A bar on the screen's or a
-  modal's edge is `flush`: it keeps the inner margin (next to the list) and drops the outer one, sitting against the
-  edge. The lane begins over the rows' right padding, so a tap on a row's trailing icon is the row's, never the bar's.
+- A scroll bar (a touch aid on lists and scrollable popups) fills exactly the lane it is given and carries no spacing on
+  any side (issue #269). Its width is the theme's `scrollWidth` (default 32). Spacing belongs to the containers: a list leaves
+  a tight gap between its rows and the bar, a dialog's or menu's padding is the same on both sides of the list and its bar,
+  the Library's columns are apart by the container gap only, and a list at the screen's edge has the bar at the edge.
 - Distinguish browsing from applying. **Replace instrument/effect** explicitly changes the
   loaded engine; **Use sound** switches a prepared sound. Replacement ends the old slot's
   notes, tails and prepared sounds. It is not a seamless sound transition.
@@ -82,6 +82,7 @@ folders and the same `appearance.txt`, so a theme chosen in either shows in both
 | `colors` (the nine roles) | all | all |
 | `colors.warning`, `colors.focus` (optional, added 2026-11-14) | accepted, not used | a meter past 75% (absent: `#A78815`, a yellow that reads 3:1 on the light theme); the cursor's border (absent: `accent`) |
 | `radius`, `fontScale`, `spacing` | all | all (the JUCE app applies `spacing` to the gaps between sections and Play's padding only; ui/THEME.md lists what each does) |
+| `scrollWidth` (optional) | accepted, kept, no such bar | the scroll bar's width |
 | `font.regular`, `font.bold` | all | all (registered at run time) |
 | `style`, `wires`, `splash` | all | not yet: no Rust screen draws them |
 
@@ -191,6 +192,7 @@ fonts, so text never depends on what a device has installed.
 | `fontScale` | Optional number, 0.8–1.4; default 1 |
 | `spacing` | Optional number, 0.6–1.6; default 1. A scale on the interface's paddings and gaps (not on the size of a control, a touch target or a line's width): 0.6 is tight, 1.6 roomy. A value outside the range refuses the theme, as `fontScale` does |
 | `radius` | Optional number, 0–16; default 6 |
+| `scrollWidth` | Optional number, 8–48; default 32. The Rust UI's scroll bar is exactly this wide, in design units: the bar carries no margin of its own, the lists' and dialogs' containers space it |
 | `colors` | All nine semantic colors below, opaque `#RRGGBB` |
 | `style` | How controls are drawn: one choice for each of the eight below |
 | `wires` | The routing views' wire colors, opaque `#RRGGBB`: `audio` and `notes` for enabled wires, `disabled` (muted, or off in a scene), `draining` (taking no new notes while held ones ring out, in a seamless change), `unconnected` (no longer fits its plugin's ports), and `control` for control lines (a plugin's param-target lane to a control or a parameter, and a control to the plugins it drives; RFC 0011). Disabled and draining wires are drawn dashed |

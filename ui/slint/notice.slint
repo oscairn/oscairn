@@ -38,8 +38,8 @@ export component Notice inherits Rectangle {
         root.first = p;
         flick.content-y = -p * root.step-px;
     }
-    // The bar's visible width (the lane less one side margin, flush: no margin at the panel's edge), read by a test.
-    out property <length> bar-w: root.long ? Theme.scroll-lane - Theme.scroll-pad : 0px;
+    // The bar's width as shown (the theme's lane, nothing around it), read by a test.
+    out property <length> bar-w: root.long ? Theme.scroll-lane : 0px;
     changed long => { NoticeState.bar-on = root.long; }
     init => { NoticeState.bar-on = root.long; }
     background: Theme.scrim;
@@ -56,11 +56,10 @@ export component Notice inherits Rectangle {
         clip: true;
         TouchArea { }
         if root.long: bar := ScrollBar {
-            flush: true;
-            x: parent.width - Theme.scroll-lane - Theme.pad-tight;
-            y: 0px;
+            x: parent.width - Theme.scroll-lane - Theme.pad;
+            y: Theme.pad;
             width: Theme.scroll-lane;
-            height: parent.height;
+            height: parent.height - 2 * Theme.pad;
             total: root.steps;
             first: root.first;
             per-view: 1;
@@ -83,7 +82,7 @@ export component Notice inherits Rectangle {
                 padding: Theme.pad;
                 // The bar's lane is kept clear of the content once the bar shows (`bar-on`, set by the `changed long` below, not
                 // bound to `long`, so the narrower content cannot loop back into it: narrower is only taller, so it stays long).
-                padding-right: Theme.pad + (NoticeState.bar-on ? Theme.scroll-lane : 0px);
+                padding-right: Theme.pad + (NoticeState.bar-on ? Theme.scroll-lane + Theme.scroll-gap : 0px);
                 spacing: root.gap;
                 Text {
                     text: NoticeState.title;

@@ -1480,7 +1480,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   store recorded it or one from a library archive). `opensStateFrom` and `soundChanges` are the
   publisher's claim kept at install ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim):
   the oldest version whose saved state this one opens, and what may sound different) and
-  `claimKey` the public key that signed it; each null when none.
+  `claimKey` the public key that signed it; each null when none, and when `claimKey` signed none
+  of the version's builds in the store.
 - `plugins.remove` takes `{format,id,version}` and optional `platform` (absent or empty: every
   build) and returns `{"accepted":true}`. A `platform` is one of those `plugins.addBuild` takes.
   It is refused while the open Performance plays the build; items that use it open with a stand-in until it is installed again.

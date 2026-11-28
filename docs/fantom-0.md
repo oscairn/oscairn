@@ -552,21 +552,29 @@ Oscairn. Checked on the unit where it says so.
 - **The word** (the app): byte 0 is 0x85; byte 1 the lamp's number, low seven bits; byte 2 its
   top three bits, then a 3-bit mode from bit 3, then bit 7 of the level in bit 6; byte 3 the
   level's low seven bits.
-- **The numbers** (the test tool): 0 WHEEL1; 1 and 2 TEMPO (green, and its other color); 3
+- **The numbers** (the test tool): 0 the WHEEL1 and WHEEL2 lights (both wheels share this one
+  light); 1 and 2 TEMPO (green, and its other color); 3
   to 18 the tone category buttons; 19 PLAY, 20 REC, 21 PAD MODE, 22 SAMPLING, 23 CLIP BOARD, 24
   BANK, 25 HOLD; 26 OSC, 27 AMP, 28 FX, 29 LFO; 30 PATTERN, 31 GROUP, 32 SONG, 33 TR-REC, 34
-  RHYTHM PTN; 35 PARAM, 36 FILTER TYPE and 37 to 40 its four type lamps; 41 WRITE, 42 MASTER
-  FX, 43 MOTIONAL PAD, 44 DAW CTRL, 45 MENU; 46 SCENE SELECT, 47 SCENE CHAIN, 48 ZONE VIEW, 49
+  RHYTHM PTN; 35 PARAM, 36 FILTER TYPE and 37 LPF, 38 HPF, 39 BPF and 40 PKG, the four type
+  lamps above FILTER TYPE; 41 and 45 WRITE and MENU, unconfirmed which is which; 42 MASTER
+  FX, 43 MOTIONAL PAD, 44 DAW CTRL; 46 SCENE SELECT, 47 SCENE CHAIN, 48 ZONE VIEW, 49
   SINGLE TONE; 50 SHIFT, 51 EXIT, 52 ENTER; 53 PAN/LEVEL, 54 CTRL, 56 ASSIGN; 58 ZONE 9-16, 59
   ZONE SELECT, 60 SPLIT, 61 CHORD MEMORY, 62 ARPEGGIO, 63 TRANSPOSE, 64 and 65 OCTAVE DOWN and
-  UP; 66 to 73 ZONE 1 to 8 in green and 74 to 81 in their other color; 82 S1, 83 S2; 84 to
-  99 the pads, 100 to 115 their green and 116 to 131 their blue.
+  UP; 66 to 73 the ZONE 1 to 8 buttons in green and 74 to 81 the same eight in their other color;
+  82 S1, 83 S2; 84 to 99 the pads in red, 100 to 115 the same pad buttons' green and 116 to 131
+  their blue.
 - **Oscairn sets them** with `panel.lamps` ([the control protocol](control-protocol.md)): the
   engine writes one such frame per change, as Roland's app does (mode 1 and level 150 for lit,
   mode 0 and level 0 for off), through the message link it already holds. The panel map names
-  the switches' lamps (`lamp`) by the numbers above where the names agree; DEC and INC are not
-  in the list and have no number yet (55 and 57 are the gaps), nor do the zone buttons, TEMPO and
-  the pads, which have two or three colors each. Not yet seen lit on the unit by Oscairn. With
+  the switches' lamps (`lamp`) by the numbers above where the names agree: S1 and S2 (`button:1`
+  and `button:2`), the ZONE 1 to 8 buttons (`button:101` to `button:108`) in green 66 to 73, and the
+  pads (`pad:1` to `pad:16`) in red 84 to 99 were found on 2026-11-28 and put in the map (one lamp
+  per control). DEC and INC are not in the list and have no number yet (55 and 57 are the gaps).
+  A control can carry only one lamp in the map, so the wheels' shared light (0, on analog controls),
+  TEMPO (1 and 2, a gpio key not on the panel bus), the four FILTER TYPE lamps (37 to 40), the zone
+  buttons' other color (74 to 81) and the pads' green and blue (100 to 115 and 116 to 131) are
+  known but not in the map. Not yet seen lit on the unit by Oscairn. With
   Roland's app stopped the lamps keep whatever it last set (inferred).
 
 ### The audio link's channels

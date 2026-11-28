@@ -605,6 +605,8 @@ namespace oscairn
         }
     }
 
+    bool Session::versionJobRunning() { return versionWork_ && versionJob(versionWork_->id).state == "running"; }
+
     void Session::recoverVersionMoves()
     {
         std::lock_guard guard(journalMutex);

@@ -50,7 +50,9 @@ Checked when built and tested; the sections below say how.
       (the engine's part built 2026-11-27: `keptBy` from library items, the open Performance,
       Performances saved outside the library while their folder is there, kept moves and keep
       marks; `newest`; `plugins.keep`; `plugins.removeUnused`, reading what keeps each version again
-      before it goes. Not built: plugin roots recorded when `performance.save` writes outside the
+      before each one goes and refused while a version job runs; a source that cannot be read (an
+      item document, a saved Performance's folder on a drive that is away, a kept move's journal)
+      keeps every version, after the independent review. Not built: plugin roots recorded when `performance.save` writes outside the
       library, so a drive that is away keeps its pins; the undo history and an audition as roots;
       the Installed content page)
 - [ ] 7. The offers: the Library, the Catalog's **Update sounds using this**, the Setlist's scope (#185)

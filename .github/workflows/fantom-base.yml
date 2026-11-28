@@ -1,0 +1,99 @@
+name: FANTOM base
+
+# Builds the FANTOM-0 bundle's Buildroot base (os/base-image.sh, docs/releasing.md "A prebuilt base for the bundle"):
+# the toolchain and every package of the bundle's configuration but Oscairn's own, as a container image
+# ghcr.io/oscairn/oscairn-os-base:<key>, the key naming everything that decides the base (os/scripts/base-key.sh).
+# The Release workflow's fantom_base input then builds only Oscairn on top of it.
+#
+# NOT RUN AND NOT ENABLED: it starts only by hand, and nothing is pushed unless "publish" is on and the run is on
+# main. Publishing is the first package under the organization (a decision for the owner: the package's
+# visibility, and this repository's access to it, are set once in the organization's package settings).
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Push the image to ghcr.io/oscairn/oscairn-os-base (only from main; off: build the image on the runner and discard it, a test of the build)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  base:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The base's key
+        run: |
+          key=$(os/scripts/base-key.sh arm64)
+          echo "OSCAIRN_BASE_KEY=$key" >> "$GITHUB_ENV"
+          echo "OSCAIRN_BASE_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER}/oscairn-os-base:$key" >> "$GITHUB_ENV"
+          echo "key: $key"
+
+      - name: Does the image exist already
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if docker buildx imagetools inspect "$OSCAIRN_BASE_IMAGE" > /dev/null 2>&1; then
+            echo "$OSCAIRN_BASE_IMAGE exists: nothing to build" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space
+        if: steps.exists.outputs.exists != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+          df -h /
+
+      # The downloads and ccache of the bundle job's cache (same key prefix), so a base build starts from them.
+      - name: Restore the downloads and ccache
+        if: steps.exists.outputs.exists != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/oscairn-os/dl
+            ${{ runner.temp }}/oscairn-os/ccache
+          key: fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-${{ github.run_id }}
+          restore-keys: |
+            fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-
+            fantom-0-buildroot-
+
+      - name: Build the base
+        if: steps.exists.outputs.exists != 'true'
+        run: |
+          work=$RUNNER_TEMP/oscairn-os
+          mkdir -p "$work"
+          sudo chown -R 1000:1000 "$work"
+          # stopped at 5 h 35 min so that the cache below is still saved; the next run continues from it
+          sudo -E timeout 335m env OSCAIRN_OS_VOLUME="$work" os/base-image.sh build BR2_JLEVEL="$(nproc)"
+
+      - name: Return the cached folders to the runner
+        if: steps.exists.outputs.exists != 'true' && always()
+        run: |
+          docker ps -q | xargs -r docker kill
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/oscairn-os/dl" "$RUNNER_TEMP/oscairn-os/ccache" build-os 2>/dev/null || true
+
+      - name: Save the downloads and ccache
+        if: steps.exists.outputs.exists != 'true' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/oscairn-os/dl
+            ${{ runner.temp }}/oscairn-os/ccache
+          key: fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-${{ github.run_id }}
+
+      - name: Make the image
+        if: steps.exists.outputs.exists != 'true'
+        run: |
+          OSCAIRN_BASE_REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/oscairn-os-base" OSCAIRN_OS_VOLUME="$RUNNER_TEMP/oscairn-os" os/base-image.sh image
+          docker image ls "ghcr.io/${GITHUB_REPOSITORY_OWNER}/oscairn-os-base"
+
+      - name: Push the image
+        if: steps.exists.outputs.exists != 'true' && inputs.publish && github.ref == 'refs/heads/main'
+        run: docker push "$OSCAIRN_BASE_IMAGE"

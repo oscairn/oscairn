@@ -1,0 +1,5 @@
+# The FANTOM bundle's Buildroot base (os/base-image.sh image): the builder image with /work holding the Buildroot
+# clone and the pruned output of everything the bundle's configuration builds but Oscairn's packages and the root
+# filesystem. base.tar is made by the script, from the build volume.
+FROM oscairn-os-builder
+ADD base.tar /work/

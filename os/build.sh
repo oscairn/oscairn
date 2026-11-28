@@ -21,7 +21,7 @@ volume=${OSCAIRN_OS_VOLUME:-oscairn-os}
 case $volume in /*) mkdir -p "$volume" ;; *) docker volume create "$volume" > /dev/null ;; esac # a path is a folder the CI caches
 mkdir -p "$repo/build-os"
 run() {
-	docker run --rm -v "$volume":/work -v "$repo":/src:ro -v "$repo/build-os":/out -e HOME=/tmp oscairn-os-builder \
+	docker run --rm -v "$volume":/work -v "$repo":/src:ro -v "$repo/build-os":/out -e HOME=/tmp -e OSCAIRN_BASE_MODE -e OSCAIRN_BASE_PRUNE oscairn-os-builder \
 		sh -c "chown builder: /work /out && exec runuser -u builder -- env HOME=/tmp $*"
 }
 

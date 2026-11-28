@@ -204,9 +204,23 @@ What is realistic, and what is not known:
 - The job uses an arm64 runner because the builder container and the bundle have only been built on arm64.
 - Nothing in this job, or in its cache handling, has been run on GitHub yet. The first run is its test.
 
-## Planned: a prebuilt base for the bundle
+## A prebuilt base for the bundle
 
-Not built yet (issue 336, point 1). The `fantom-0` job builds the whole Buildroot tree each run: the first release run
+**State (issue 336, stage B).** Built and tried locally; nothing is published, run on GitHub, or enabled. The scripts:
+`os/scripts/base-key.sh` (the key), `os/base-image.sh key|build|image|seed`, `OSCAIRN_BASE_MODE=base` in
+`os/scripts/container-build.sh` (builds the 98 base targets `make show-targets` lists, refuses a volume that built
+Oscairn, prunes `build/` to stamps), `os/docker/Dockerfile.base`, and `OSCAIRN_OS_BASE_IMAGE=<image> os/fantom-bundle.sh`,
+which seeds an empty volume from the image first (the entry points `os/build.sh` and `os/fantom-bundle.sh` keep their
+arguments). On GitHub, written and off: `.github/workflows/fantom-base.yml` (only `workflow_dispatch`; it pushes only
+with its `publish` input on and from `main`) and the Release workflow's `fantom_base` input (empty by default).
+Tried on this Mac with a copy of a full bundle build's volume: pruning `build/` from 8.4 GB to 8 MB (with `host/` 741 MB
+and `target/` 172 MB kept) lets Buildroot finish the bundle, building only `oscairn-juce`, `oscairn-samplepack`,
+`oscairn-ui-crates` and `oscairn` and then the root filesystem, never a base package; the tarball is 74.9 MB, and the same size from the seeded volume below;
+the image made from that base is 839 MB of content; a bundle build from an empty volume
+seeded from it, with a cold ccache and no downloads, took 11.4 min (seed copy included). Not tried: building the base
+from nothing (hours), pushing and pulling through the registry, the workflow on a runner. The owner decides whether to
+publish the package (`ghcr.io/oscairn/oscairn-os-base`) and sets its visibility and the repository's access.
+The `fantom-0` job builds the whole Buildroot tree each run: the first release run
 (a cold one, nothing in the Actions cache yet) took 67.9 min; every run compiles the cross toolchain again, since only `dl/` and ccache are kept, and then every base package.
 The plan is to build everything that is not Oscairn once per Buildroot configuration, publish it as a container image, and let
 the job build only Oscairn's four packages (`oscairn`, `oscairn-juce`, `oscairn-samplepack`, `oscairn-ui-crates`) and the

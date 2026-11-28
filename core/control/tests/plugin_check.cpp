@@ -8,6 +8,14 @@
 //                        [--add-build PLATFORM=PATH] [--keep-archive FILE]
 //                        [--state FILE] [--asset NAME=FILE] [--library FILE] [--sound ITEM]
 //   oscairn-plugin-check --install FILE synth|effect
+//   oscairn-plugin-check PLUGIN ID synth|effect --state-from OLD-BUILD OLD-VERSION [--param ID=VALUE] [--sound-changes]
+// --state-from checks a publisher's claim that PLUGIN opens the state OLD-BUILD saved (RFC 0043):
+// each test state (the defaults, and every --param set) is played and saved with the old build,
+// moved to PLUGIN as a musician's move does (versions.move, which opens it with the new build and
+// saves it again there), opened and played. It fails when a state does not move, its ports change
+// or a parameter reads back differently (named), or, without --sound-changes, when the render
+// differs by more than -60 dB below the old render's level; with --sound-changes (the release says
+// what sounds different) the difference is reported. Both builds install unsigned into a fresh store.
 // --add-build adds another platform's build before the export; --keep-archive keeps the export,
 // for --install on that platform: installed fresh there, it must open from the store and play.
 // --juce-state sets an attribute in a JUCE plugin's saved state (its binary XML), as choosing a
@@ -31,6 +39,7 @@
 // sound: it is played notes, as a synth is, and checked for notes out instead, through its part's MIDI out.
 #include "oscairn/session.h"
 #include "oscairn/package.h"
+#include "oscairn/assets.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <algorithm>
 #include <cmath>
@@ -39,6 +48,9 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <thread>
+#include <limits>
+#include <chrono>
 
 using namespace oscairn;
 namespace fs = std::filesystem;
@@ -197,6 +209,64 @@ std::vector<float> installAndOpen(const fs::path& archive, const fs::path& home,
     return there;
 }
 
+// --state-from (RFC 0043): each test state played and saved with the old build, moved to the new one, played again.
+void stateFrom(const std::string& plugin, const std::string& id, bool synth, const std::string& oldBuild, const std::string& oldVersion,
+               const std::vector<std::pair<uint32_t, double>>& params, bool soundChanges)
+{
+    state_files::TemporaryDirectory temp;
+    std::string version;
+    {
+        device(temp.path / "probe");
+        Session probe(rate, block, {}, stereoIn);
+        probe.add("plugin", plugin, id);
+        version = probe.graphState().topology.nodes.at(0).plugin.version;
+    }
+    device(temp.path / "s");
+    // Both builds into the store, as plugin packages install them: a move takes builds from there.
+    pluginPackage(temp.path / "old.olib", oldBuild, id, oldVersion, temp.path / "old.stage");
+    pluginPackage(temp.path / "new.olib", plugin, id, version, temp.path / "new.stage");
+    {
+        Session store(rate, block, {}, stereoIn);
+        check(store.installArchive((temp.path / "old.olib").string(), false, {}, true).notes.empty() && store.installArchive((temp.path / "new.olib").string(), false, {}, true).notes.empty(),
+              "both builds install");
+    }
+    check(assets::older(oldVersion, version), "version " + version + " is newer than " + oldVersion);
+    const auto stored = temp.path / "s" / "Plugins" / "clap" / pluginFolderName(id, oldVersion) / platform() / fs::path(oldBuild).filename();
+    std::vector<std::pair<std::string, std::vector<std::pair<uint32_t, double>>>> states{{"the defaults", {}}};
+    if(!params.empty()) states.push_back({"with every --param", params});
+    for(const auto& [what, set] : states)
+    {
+        Session s(rate, block, {}, stereoIn); // a Performance of its own for each state
+        midiOutput(s);
+        const auto node = s.add("plugin", stored.string(), id);
+        const auto part = s.addPart("Part", synth ? PartInput{} : PartInput{PartInput::Kind::Audio, 0});
+        s.insertIntoPart(part, 0, node);
+        s.commit();
+        for(const auto& [param, value] : set) check(s.setParameter(node, param, value), what + ": parameter " + std::to_string(param) + " set");
+        render(s, synth); // edits reach the plugin at service(), which a render does
+        const auto item = s.savePerformanceToLibrary(what, true);
+        s.loadPerformanceFromLibrary(item);
+        const auto before = render(s, synth);
+        auto job = s.moveVersions({"clap", id, oldVersion}, version, {item}, true);
+        Control::VersionJob done;
+        for(int i = 0; i < 6000 && (done = s.versionJob(job)).state == "running"; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const auto moved = std::find_if(done.items.begin(), done.items.end(), [&](const auto& i) { return i.id == item; });
+        if(moved == done.items.end() || moved->status != "moved") { check(false, what + ": moves to " + version + ": " + (moved == done.items.end() ? done.state : moved->status + " " + moved->reason)); continue; }
+        for(const auto& c : moved->changes)
+            check(false, what + ": parameter " + std::to_string(c.param) + " (" + c.name + ") reads " + (c.after ? std::to_string(*c.after) : "nothing (gone)") + " in " + version +
+                             ", " + (c.before ? std::to_string(*c.before) : "nothing (new)") + " in " + oldVersion);
+        if(moved->changes.empty()) check(true, what + ": opens in " + version + " with every parameter as " + oldVersion + " reads it");
+        s.loadPerformanceFromLibrary(item);
+        opened(s, what + ": the moved Performance opens with " + version);
+        const auto after = render(s, synth);
+        const double level = rms(before), off = difference(before, after);
+        const double db = off == 0 ? -std::numeric_limits<double>::infinity() : 20 * std::log10(off / std::max(level, 1e-12));
+        std::printf("%s: render differs by %.1f dB below the old render (rms %g, difference %g)\n", what.c_str(), db, level, off);
+        if(soundChanges) std::printf("  reported, not a failure: the release says what sounds different\n");
+        else check(db <= -60, what + ": renders the same as " + oldVersion + " within -60 dB");
+    }
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 4 && std::string(argv[1]) == "--install")
@@ -206,7 +276,7 @@ int main(int argc, char** argv)
         std::printf("%s\n", failures ? "FAILED" : "PASSED");
         return failures ? 1 : 0;
     }
-    if(argc < 4) { std::fprintf(stderr, "usage: %s PLUGIN ID synth|effect [--param ID=VALUE] [--juce-state NAME=VALUE] [--add-build PLATFORM=PATH] [--keep-archive FILE] [--state FILE] [--asset NAME=FILE] [--library FILE] [--sound ITEM]\n       %s --install FILE synth|effect\n", argv[0], argv[0]); return 2; }
+    if(argc < 4) { std::fprintf(stderr, "usage: %s PLUGIN ID synth|effect [--param ID=VALUE] [--juce-state NAME=VALUE] [--add-build PLATFORM=PATH] [--keep-archive FILE] [--state FILE] [--asset NAME=FILE] [--library FILE] [--sound ITEM]\n       %s PLUGIN ID synth|effect --state-from OLD-BUILD OLD-VERSION [--param ID=VALUE] [--sound-changes]\n       %s --install FILE synth|effect\n", argv[0], argv[0], argv[0]); return 2; }
     const std::string plugin = fs::absolute(argv[1]).string(), id = argv[2];
     bool synth = std::string(argv[3]) == "synth";
     const bool lv2 = fs::path(plugin).extension() == ".lv2";
@@ -215,9 +285,17 @@ int main(int argc, char** argv)
     std::vector<fs::path> libraries;
     std::string sound;
     fs::path keep, stateFile;
-    for(int i = 4; i + 1 < argc; i += 2)
+    // --state-from takes two values and --sound-changes none; the rest are pairs.
+    std::vector<std::string> args(argv + 4, argv + argc);
+    std::string oldBuild, oldVersion;
+    bool soundChanges = false;
+    for(size_t i = 0; i < args.size();)
+        if(args[i] == "--state-from" && i + 2 < args.size()) { oldBuild = fs::absolute(args[i + 1]).string(); oldVersion = args[i + 2]; args.erase(args.begin() + long(i), args.begin() + long(i) + 3); }
+        else if(args[i] == "--sound-changes") { soundChanges = true; args.erase(args.begin() + long(i)); }
+        else i += 2;
+    for(size_t i = 0; i + 1 < args.size(); i += 2)
     {
-        const std::string option = argv[i], value = argv[i + 1];
+        const std::string option = args[i], value = args[i + 1];
         if(option == "--keep-archive") { keep = fs::absolute(value); continue; }
         if(option == "--library") { libraries.push_back(fs::absolute(value)); continue; }
         if(option == "--sound") { sound = value; inSound = true; continue; }
@@ -229,6 +307,13 @@ int main(int argc, char** argv)
         else if(option == "--asset") assets.push_back({value.substr(0, eq), fs::absolute(value.substr(eq + 1)).string()});
         else if(option == "--add-build") builds.push_back({value.substr(0, eq), fs::absolute(value.substr(eq + 1)).string()});
         else { std::fprintf(stderr, "unknown option %s\n", option.c_str()); return 2; }
+    }
+    if(!oldBuild.empty())
+    {
+        try { stateFrom(plugin, id, synth, oldBuild, oldVersion, params, soundChanges); }
+        catch(const std::exception& e) { check(false, e.what()); }
+        std::printf("%s\n", failures ? "FAILED" : "PASSED");
+        return failures ? 1 : 0;
     }
     content = !stateFile.empty() || !assets.empty() || !libraries.empty() || !sound.empty();
     try

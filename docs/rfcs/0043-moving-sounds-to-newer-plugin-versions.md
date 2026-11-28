@@ -41,6 +41,10 @@ Checked when built and tested; the sections below say how.
 - [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`) (#181)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import
       workflow's state check in oscairn/packages, then the repository's Loading check (#183)
+      (`oscairn-plugin-check --state-from` built 2026-11-27: the defaults and the `--param` state,
+      moved by the engine's own `versions.move`, so the check takes the path a device does; not
+      built: `--states <archive>`, the import workflow's `state-check` and `checked` in the index,
+      which are oscairn/packages', and the Loading check)
 - [ ] 6. Removing unused versions: retention roots for plugins, `plugins.list`'s `keptBy`,
       `plugins.removeUnused`, Settings' Installed content page (#185)
 - [ ] 7. The offers: the Library, the Catalog's **Update sounds using this**, the Setlist's scope (#185)

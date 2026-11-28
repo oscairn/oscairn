@@ -56,8 +56,9 @@ constexpr const char* ids[]{"org.kick.test.synth", "org.kick.test.effect", "org.
 const char* instrument[]{CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYNTHESIZER, nullptr};
 const char* effect[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
 // The kick-clap-fixture-v2* builds are version 2 of the same plugins (RFC 0043's moves): v2 reads version 1's
-// state as it is, v2_changed reads its gain at half, v2_ports has a stereo output where version 1 has mono.
-#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports)
+// state as it is, v2_changed reads its gain at half, v2_ports has a stereo output where version 1 has mono,
+// v2_sound plays 10% quieter with every setting the same (a sound change, oscairn-plugin-check --state-from).
+#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports) || defined(FIXTURE_v2_sound)
 #define FIXTURE_VERSION "2"
 #else
 #define FIXTURE_VERSION "1"
@@ -255,6 +256,9 @@ struct Plugin {
                 if (s.kind == 2 && wheels) value = c == 0 ? s.bend / 16383.f : s.wheel / 127.f;
                 if (s.kind == 1) value = b->audio_inputs[0].data32[c][i] * static_cast<float>(s.gain);
                 if (s.kind == 3) value = std::numeric_limits<float>::quiet_NaN();
+#ifdef FIXTURE_v2_sound
+                value *= .9f;
+#endif
                 b->audio_outputs[0].data32[c][i] = value;
             }
             if(s.tailFrames && !--s.tailFrames){s.tailNote.header.type=CLAP_EVENT_NOTE_END;s.tailNote.header.time=i;b->out_events->try_push(b->out_events,&s.tailNote.header);}

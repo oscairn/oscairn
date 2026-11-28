@@ -1148,6 +1148,16 @@ What changes for the plugin:
   your parameters back to compare them with what the old version reads from the same state, and
   saves the state again with your new version's state save; so your state load must take every
   older state the claim covers, and your parameter values must be readable right after it.
+  Check the claim before publishing: `oscairn-plugin-check NEW.clap <id> synth|effect
+  --state-from OLD.clap <old-version> [--param ID=VALUE]... [--sound-changes]` plays your
+  defaults (and, with `--param`, a state with those settings) in the old build, saves them, moves
+  them to the new build as a musician's move does and plays them again. It fails when a state does
+  not move (it does not open, or the ports changed), when a parameter reads back differently (named
+  with both values), and, unless you pass `--sound-changes` because your release says what sounds
+  different, when the new render differs by more than -60 dB below the old one; with it the
+  difference is printed for you to judge. Run it against every published version from your
+  `--opens-state-from` version up to this one. It proves the states it played, not every sound a
+  musician made.
   Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),
   named by your plugin package with `--asset-dependency <library-id> <least-version>`: the
   Catalog lists it under Content, and one installed only because your package needed it says

@@ -82,7 +82,7 @@ To avoid an app framework, there are only plugins and the UI:
 
 1. **Anything timing-related is an event plugin**: sequencers, arpeggiators, loopers.
    These are what the community builds most, and they also work in a DAW.
-2. **One first-party UI**, with Live (sounds, setlists) and Groovebox as screens inside it.
+2. **One first-party UI**, with Live (sounds, setlists) and Groovebox as screens inside it. (The JUCE Groovebox screen was removed, #358; the Sequencer app in the Rust UI is a new design, #335.)
 3. **The UI is a separate process using the control API**, so a UI crash cannot stop
    audio. Anything else that speaks the control API is therefore already an "app".
 4. **Plugins can bring their own screens** (CLAP GUIs), shown inside the UI.

@@ -25,45 +25,6 @@ namespace oscairn::standalone
     bool touchSized(InputMode mode) { return mode == InputMode::Touch; }
     juce::String inputModeName(InputMode mode) { return mode == InputMode::Touch ? "Touch" : mode == InputMode::Mouse ? "Keyboard and mouse" : "Automatic"; }
 
-    SequencerPane::SequencerPane(Engine& engine, bool transport) : engine_(engine), screen_(engine)
-    {
-        play_.onClick = [this] { engine_.setPlaying(true); };
-        stop_.onClick = [this] { engine_.setPlaying(false); };
-        sync_.setTooltip("Start, stop and follow tempo from an external MIDI clock");
-        sync_.onClick = [this] { engine_.setFollowMidiClock(sync_.getToggleState()); };
-        clockOut_.setTooltip("The MIDI outputs the tempo, Start and Stop go to, for drum machines and sequencers; kept with this device, not the Performance");
-        clockOut_.onClick = [this] { outputsMenu(engine_.clockOutputs(), engine_.status().midiOutputs, clockOut_, [this](std::vector<DeviceRule> outputs) { engine_.setClockOutputs(std::move(outputs)); }); };
-        for(auto* c : std::initializer_list<juce::Component*>{&play_, &stop_, &sync_, &clockOut_}) addChildComponent(c);
-        for(auto* c : std::initializer_list<juce::Component*>{&play_, &stop_, &sync_, &clockOut_}) c->setVisible(transport);
-        addAndMakeVisible(screen_);
-        refresh();
-        startTimerHz(30); // as a panel's screen: a step clicked or dragged shows at once, the playhead moves smoothly
-    }
-    void SequencerPane::refresh()
-    {
-        const bool playing = engine_.status().playing;
-        play_.setColour(juce::TextButton::buttonColourId, playing ? ink(Ink::Positive) : ink(Ink::Raised));
-        play_.setColour(juce::TextButton::textColourOffId, playing ? ink(Ink::Background) : ink(Ink::Text));
-        sync_.setToggleState(engine_.followsMidiClock(), juce::dontSendNotification);
-        clockOut_.setButtonText("Clock out: " + juce::String::fromUTF8(midiOutName(engine_.clockOutputs()).c_str()));
-        screen_.refresh();
-    }
-    void SequencerPane::resized()
-    {
-        const int control = desktopMode(*this) == 2 ? 44 : 30;
-        auto area = getLocalBounds().reduced(16, 12);
-        if(play_.isVisible())
-        {
-            auto bar = area.removeFromTop(control);
-            play_.setBounds(bar.removeFromLeft(88)); bar.removeFromLeft(6);
-            stop_.setBounds(bar.removeFromLeft(88)); bar.removeFromLeft(16);
-            sync_.setBounds(bar.removeFromLeft(180)); bar.removeFromLeft(6);
-            clockOut_.setBounds(bar.removeFromLeft(220));
-            area.removeFromTop(12);
-        }
-        screen_.setBounds(area);
-    }
-
     /// The parts and buses down the left: name, what plays and from where, mute and solo, a
     /// meter per channel of its sound and where its fader sits. Clicking one shows it.
     class DesktopShell::PartList : public juce::Component

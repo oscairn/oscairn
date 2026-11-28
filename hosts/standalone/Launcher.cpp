@@ -33,7 +33,7 @@ namespace oscairn::standalone
         notesOff_.getProperties().set("danger", true);
         notesOff_.onHeld = shell_.notesOff;
         addChildComponent(notesOff_);
-        stop_.setTooltip("Stop the transport: the Groovebox and anything else following it");
+        stop_.setTooltip("Stop the transport: anything following it");
         stop_.onClick = [this] { engine_.setPlaying(false); };
         addChildComponent(stop_);
         if(shell_.record) { record_ = std::make_unique<RecordButtons>(engine_); addAndMakeVisible(*record_); }
@@ -285,7 +285,7 @@ namespace oscairn::standalone
     {
         // The engine names apps by ID: Oscairn's own by their names here.
         auto reason = juce::String::fromUTF8(refused.reason.c_str());
-        for(const auto& [id, shown] : {std::pair{"oscairn.performance", "Performance"}, {"oscairn.library", "Library"}, {"oscairn.setlist", "Setlist"}, {"oscairn.groovebox", "Groovebox"}, {"oscairn.recordings", "Recordings"}}) reason = reason.replace(id, shown);
+        for(const auto& [id, shown] : {std::pair{"oscairn.performance", "Performance"}, {"oscairn.library", "Library"}, {"oscairn.setlist", "Setlist"}, {"oscairn.recordings", "Recordings"}}) reason = reason.replace(id, shown);
         message_ = "It " + reason + ".";
         ok.setButtonText(refused.offerNext ? "Cancel" : "OK");
         letGo.setVisible(refused.offerNext);

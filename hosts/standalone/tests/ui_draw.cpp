@@ -157,7 +157,6 @@ int main(int argc, char** argv)
                 juce::String library = "121 Performances";
                 std::vector<standalone::Launcher::App> apps{
                     {"Performance", "piano", [] { return juce::String("Untitled: play or edit it"); }, [] {}},
-                    {"Groovebox", "layout-grid", [] { return juce::String("Patterns for the open Performance"); }, [] {}},
                     {"Library", "library-big", [&] { return library; }, [] {}},
                     {"Setlist", "list-music", [] { return juce::String("Songs in order, for the stage"); }, [] {}},
                     {"Settings", "settings", [] { return juce::String("Audio, MIDI and more"); }, [] {}}};

@@ -13,7 +13,7 @@ Rust shell and tested against a fake engine. **Nothing inside the Performance ap
 Home's Performance tile opens Play, and every stop of every screen of the app (the dial, the knobs, every action of every bar)
 is walked by tests/handover.rs, which fails if a press shows the "Opening ..." screen or asks for a JUCE app. What stays
 unported inside is one thing, F9: a plugin's own view is a disabled entry (the owner's decision: a surface the shell hands the
-plugin, a separate project). The handover mechanism itself stays; **the Home tiles that still use it** are Library, Groovebox
+plugin, a separate project). The handover mechanism itself stays; **the Home tiles that still use it** are Library
 and Settings (and Recordings on a profile that offers it; the FANTOM-07's does not). The Performance and the Setlist are Rust
 screens.
 

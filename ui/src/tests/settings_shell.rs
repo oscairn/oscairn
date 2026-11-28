@@ -104,12 +104,12 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     let mut s = Shelf::new("settings-tile");
     let ui = s.ui();
     shell::settings_in_rust(false);
-    ui.global::<crate::HomeState>().invoke_tapped(4);
+    ui.global::<crate::HomeState>().invoke_tapped(3);
     assert_eq!((ui.get_screen(), ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")), "the JUCE app, as before");
     shell::goto(shell::Screen::Home);
     s.serve();
     shell::settings_in_rust(true);
-    ui.global::<crate::HomeState>().invoke_tapped(4);
+    ui.global::<crate::HomeState>().invoke_tapped(3);
     s.serve();
     assert_eq!(ui.get_screen(), 14);
     assert_eq!(title(&ui), "Settings › Appearance");

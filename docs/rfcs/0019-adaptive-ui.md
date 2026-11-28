@@ -290,7 +290,8 @@ Not built now. To keep it possible:
 
 A test layout in the desktop app at 320 × 240 with four encoders, showing a plugin's
 description as Compact would, is the check that this holds (step 3). It is built: View >
-Layout > Compact (`layouts/compact.json`), see [Step 1 status](#step-1-status).
+Layout > Compact (`layouts/compact.json`), see [Step 1 status](#step-1-status). (Removed on
+2026-11-28 with `CompactEditor`: no profile used it. The Compact surface is not built.)
 
 ## Plugin editor descriptions
 
@@ -491,7 +492,8 @@ drawn for the type its value text names.
 - *No fixed effect sends or EQ in the Mixer:* sends go to the Performance's own buses, and an
   EQ is a plugin put wherever it is needed (RFC 0016).
 
-**The Compact test layout (2026-11-01):** a layout's `"surface": "compact"` draws its panel
+**The Compact test layout (2026-11-01; removed 2026-11-28, with `CompactEditor`, `layouts/compact.json`
+and its `desktop-shell` gate: no profile used it, and the Desktop and Panel checks of the gate stay):** a layout's `"surface": "compact"` draws its panel
 as a device's, with its screen showing `CompactEditor` instead of the device screen: the
 Performance's plugins as a list, then a plugin's pages, then a page's parameters by priority,
 four at a time, as a column above each of four encoders (its name, its value as the plugin

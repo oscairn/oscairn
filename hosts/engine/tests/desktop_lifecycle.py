@@ -49,13 +49,13 @@ def rpc(method, params=None):
     return response['result']
 
 def snapshot(name):
-    process = launch(ui, ['--connect',str(endpoint),'--layout','kick','--snapshot',str(artifacts/name),'--play','0.7'],name+'.log')
+    process = launch(ui, ['--connect',str(endpoint),'--layout','kick-screen','--snapshot',str(artifacts/name),'--play','0.7'],name+'.log')
     assert process.wait(timeout=15) == 0, (artifacts/(name+'.log')).read_text()
     assert (artifacts/name).stat().st_size > 1000
 
 try:
     if args.managed:
-        ui_args = ['--layout', 'kick']
+        ui_args = ['--layout', 'kick-screen']
         if args.audio_outputs is not None:
             ui_args += ['--audio-outputs', args.audio_outputs]
         starter = launch(ui, ui_args, 'managed-ui.log')
@@ -109,7 +109,7 @@ try:
         assert starter.wait(timeout=5) == -9
         assert engine_running()
     snapshot('kick-before.png')
-    controller = launch(ui, ['--connect',str(endpoint),'--layout','kick'], 'crashed-ui.log')
+    controller = launch(ui, ['--connect',str(endpoint),'--layout','kick-screen'], 'crashed-ui.log')
     time.sleep(1)
     assert controller.poll() is None, (artifacts/'crashed-ui.log').read_text()
     before = rpc('transport.get')['beat']

@@ -92,7 +92,7 @@ namespace oscairn::standalone
                     layouts.push_back( { file.upToLastOccurrenceOf( ".json", false, false ), juce::String::fromUTF8( data, size ) } );
             }
             // A fixed order for the menu.
-            const juce::StringArray order{ "desktop", "kick", "kick-screen", "ignite", "keys49" };
+            const juce::StringArray order{ "desktop", "kick-screen" };
             std::sort( layouts.begin(), layouts.end(), [&]( const NamedLayout& a, const NamedLayout& b ) {
                 return order.indexOf( a.name ) < order.indexOf( b.name );
             } );
@@ -321,8 +321,7 @@ namespace oscairn::standalone
             {
                 // The running apps keep their state behind it (RFC 0030).
                 if( !launcher_ ) { launcher_ = std::make_unique<Launcher>( engine_, launcherApps(), barShell() ); setDesktopMode( *launcher_, 2 ); }
-                // A compact screen's own lists are its Home, until a device has its system screens.
-                p->overlay( p->layout().surface == Layout::Surface::Compact ? nullptr : launcher_.get() );
+                p->overlay( launcher_.get() );
                 switcher_.reset();
                 return;
             }
@@ -507,20 +506,15 @@ namespace oscairn::standalone
             showApp( recordings_, "Recordings", [this] { return new RecordingsPane( engine_, theme_.configuration() ); }, 760, 600 );
         }
         Panel* panel() const { return dynamic_cast<Panel*>( getContentComponent() ); }
-        bool layoutBinds( const std::string& bind ) const
-        {
-            return std::any_of( layout_.controls.begin(), layout_.controls.end(), [&]( const Layout::Control& c ) { return c.bind == bind; } );
-        }
-        // What the top bar's buttons do (RFC 0030): each shown only where the layout has no button
-        // for it; the running apps on a panel; Back goes Home for now (every app's top screen is
-        // one level down; going back inside an app is the app's own).
+        // What the top bar's buttons do (RFC 0030); the running apps on a panel; Back goes Home
+        // for now (every app's top screen is one level down; going back inside an app is the app's own).
         TopBar::Shell barShell()
         {
             TopBar::Shell shell;
-            if( !layoutBinds( "home" ) ) shell.home = [this] { leave(); };
-            if( !layoutBinds( "back" ) ) shell.back = [this] { leave(); };
+            shell.home = [this] { leave(); };
+            shell.back = [this] { leave(); };
             if( panel() ) shell.apps = [this] { showSwitcher(); };
-            if( !layoutBinds( "panic" ) ) shell.notesOff = [this] { engine_.allNotesOff(); };
+            shell.notesOff = [this] { engine_.allNotesOff(); };
             shell.save = [this]( bool asNew ) { saveToLibrary( asNew ); };
             shell.record = true;
             return shell;

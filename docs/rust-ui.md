@@ -893,7 +893,7 @@ the todo list, including window structure"); none of this is built:
    Library, Save Sound, Save Sound As New). The Rust UI has none; on Linux the JUCE menu is inside
    its hidden window, so only the handover reaches it.
 7. **File dialogs** for import and export: `juce::FileChooser` in Main.cpp (Save to Folder, Open
-   Folder, Export), LibraryPane.cpp, PluginBrowser.cpp, Screen.cpp and Setlist.cpp.
+   Folder, Export), LibraryPane.cpp, PluginBrowser.cpp and Setlist.cpp (Screen.cpp, its step display, was removed).
 8. **Drag and drop**: neither UI takes dropped files yet (no `FileDragAndDropTarget` in the JUCE
    app); decide what a drop does (a Performance, a Sound, a library, a sample).
 9. **Keyboard shortcuts**: Cmd-Z and Shift-Cmd-Z (`Window::keyPressed`, Main.cpp) and the menus'

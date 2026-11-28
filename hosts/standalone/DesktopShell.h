@@ -8,7 +8,6 @@
 #include "PartsView.h"
 #include "PlayView.h"
 #include "Recording.h"
-#include "Screen.h"
 #include "Theme.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>

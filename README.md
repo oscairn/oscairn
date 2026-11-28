@@ -139,11 +139,11 @@ that device: the keyboard button beside a part's devices opens it. Switch
 panel layouts in the View menu, or start with one:
 
 ```bash
-open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --layout kick
+open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --layout kick-screen
 ```
 
 Options: `--app performance|library|setlist|recordings|settings|plugins` (open an app,
-or the plugin browser, instead of Home), `--layout desktop|kick|kick-screen|ignite|keys49|modx-m-screen|file.json`,
+or the plugin browser, instead of Home), `--layout desktop|kick-screen|modx-m-screen|file.json`,
 `--profile kick` (a device's screen: one window, full screen under any window manager, with
 everything else opening inside it, dense by design: touch-size controls with the least space
 between them, in the theme its profile names until you choose one; see [running on a
@@ -255,20 +255,9 @@ them. Each starts at Home. Captured with `--snapshot`.
 
 ![Desktop layout](docs/images/layouts/desktop.png)
 
-**KICK** (`kick`), with the geometry of chillbeast's KickEM simulator board (MAIN goes Home), and
-the KICK's screen alone (`kick-screen`), as the device shows it:
-
-![KICK layout](docs/images/layouts/kick.png)
+**KICK screen** (`kick-screen`), the KICK's screen alone, as the device shows it:
 
 ![KICK screen layout](docs/images/layouts/kick-screen.png)
-
-**Ignite** (`ignite`), from its front-panel photo; every rotary is an endless encoder:
-
-![Ignite layout](docs/images/layouts/ignite.png)
-
-**49-key keyboard** (`keys49`), a concept for a future device:
-
-![49-key keyboard layout](docs/images/layouts/keys49.png)
 
 ### The core, tests and offline renderer
 

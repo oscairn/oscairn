@@ -829,10 +829,10 @@ stepped, hidden and read-only flags. How the editors use them:
 - value texts are shown as written, except a bare number with more than three decimals,
   which is shortened (`0.0100000` shows as `0.01`), so write units and names where they help;
 - a search box finds parameters on any page by name or module, so keep names specific;
-- a small screen with a few encoders (RFC 0019's Compact surface, tried with the Compact
-  layout) lists the same pages, then a page's parameters four at a time in priority order,
-  so a page's first four by priority (or in your order, without hints) are what a pedal-sized
-  device reaches first;
+- a small screen with a few encoders (RFC 0019's Compact surface, not built) would list the
+  same pages, then a page's parameters four at a time in priority order, so a page's first
+  four by priority (or in your order, without hints) are what a pedal-sized device reaches
+  first;
 - a device's screen knobs follow the editor page shown, taking its first parameters by
   priority;
 - an envelope's parameters (described, or recognized by name below), and an LFO's or

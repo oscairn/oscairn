@@ -46,10 +46,6 @@ namespace oscairn::standalone
         {
             using Type = Layout::Control::Type;
             if( name == "screen" ) return Type::Screen;
-            if( name == "knob" ) return Type::Knob;
-            if( name == "button" ) return Type::Button;
-            if( name == "pads" ) return Type::Pads;
-            if( name == "keys" ) return Type::Keys;
             if( name == "label" ) return Type::Label;
             invalid( where + ": unknown type \"" + name + "\"" );
         }
@@ -95,8 +91,7 @@ namespace oscairn::standalone
             const auto surface = root["surface"].toString();
             if( surface == "panel" ) layout.surface = Surface::Panel;
             else if( surface == "desktop" ) layout.surface = Surface::Desktop;
-            else if( surface == "compact" ) layout.surface = Surface::Compact;
-            else invalid( "\"surface\" must be panel, desktop or compact" );
+            else invalid( "\"surface\" must be panel or desktop" );
         }
 
         if( const auto* panels = root["panels"].getArray() )
@@ -119,20 +114,7 @@ namespace oscairn::standalone
             control.type  = typeOf( c["type"].toString(), where );
             control.rect  = rectOf( c["rect"], where );
             control.label = c["label"].toString().toStdString();
-            control.bind  = c["bind"].toString().toStdString();
             control.anchor = anchorOf( c["anchor"], where );
-            if( c.hasProperty( "rows" ) ) control.rows = c["rows"];
-            if( c.hasProperty( "cols" ) ) control.cols = c["cols"];
-            if( c.hasProperty( "note" ) ) control.note = c["note"];
-            if( c.hasProperty( "count" ) ) control.count = c["count"];
-            if( c.hasProperty( "steps" ) ) control.steps = c["steps"];
-            if( c.hasProperty( "mode" ) )
-            {
-                const auto mode = c["mode"].toString();
-                if( mode != "endless" && mode != "absolute" )
-                    invalid( where + ": \"mode\" must be endless or absolute" );
-                control.endless = mode == "endless";
-            }
             if( c.hasProperty( "align" ) )
             {
                 const auto align = c["align"].toString();
@@ -141,8 +123,6 @@ namespace oscairn::standalone
                 else if( align == "right" ) control.align = juce::Justification::centredRight;
                 else invalid( where + ": \"align\" must be left, center or right" );
             }
-            if( control.rows < 1 || control.cols < 1 || control.count < 1 || control.note < 0 || control.note > 127 )
-                invalid( where + ": rows, cols and count must be positive, note 0-127" );
             if( control.type == Control::Type::Screen )
             {
                 if( screen )

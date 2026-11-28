@@ -205,9 +205,7 @@ and Settings, those the profile offers (the computer's and the KICK's offer all 
 Settings' tile is there where the app runs as a process). In the desktop layout, Home is the window's content: Performance opens in its place (its
 toolbar has a Home button), and the other apps open in their own windows; **Apps → Home** goes
 back. In a panel layout, Home covers the screen, and each app opens on the screen in a frame whose top
-bar has its name and a Home icon, unless a layout button is bound to `home`. Layout buttons bound
-to `home` and `back` go Home (Back goes Home for now); the KICK layout's MAIN is `home` and BACK
-is `back`. The Performance app opens in **Play**, for the stage: the scenes, a row of knobs
+bar has its name and a Home icon. Back goes Home for now. The Performance app opens in **Play**, for the stage: the scenes, a row of knobs
 following the Performance's controls (or the selected part's), and a strip per part and bus;
 **Edit** (in the top bar, or the desktop's toolbar) goes to the parts views, and **Play** back.
 Selected, a part's knobs follow its banks: its own controls, then its instrument's first
@@ -334,7 +332,7 @@ build-app/hosts/engine/oscairn_engine_host_artefacts/RelWithDebInfo/oscairn-engi
 Keep that process running. In another terminal, start the UI:
 
 ```sh
-open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --connect "$HOME/.oscairn/control.sock" --layout kick
+open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app --args --connect "$HOME/.oscairn/control.sock" --layout kick-screen
 ```
 
 Quit any existing Oscairn UI first so `open` starts it with the new arguments. On Linux,

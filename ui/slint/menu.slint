@@ -194,6 +194,7 @@ export component Menu inherits Rectangle {
         }
         bar := ScrollBar {
             visible: root.long;
+            flush: true;
             x: parent.width - Theme.scroll-lane - Theme.pad-tight;
             y: root.header + root.gap;
             width: Theme.scroll-lane;

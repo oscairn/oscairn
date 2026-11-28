@@ -252,8 +252,8 @@ color goes: left, right, dot, fill), `style.depth`, `spacing` (every gap and pad
 divider were not separate tokens: they were the sections' (`Theme.gap-between`, `section-radius`, the joined line). They are now
 `Theme.list-gap`, `list-radius` and `list-divider` (and `Section.divider`), used by the shared list's rows and the Library's
 sidebar, and each follows the sections' style, so a theme looks as it did; making them keys of a theme file waits for the same
-keys in the JUCE parser (hosts/standalone/Theme.cpp). The Library's sidebar width is `Theme.sidebar-share`, the scroll bar's lane and
-bar `scroll-lane` and `scroll-bar`. Pictures of the same screens in two themes, one light with a blue accent, square and joined
+keys in the JUCE parser (hosts/standalone/Theme.cpp). The Library's sidebar width is `Theme.sidebar-share`, the scroll bar's lane
+`scroll-lane` and its side margin `scroll-pad`. Pictures of the same screens in two themes, one light with a blue accent, square and joined
 (tests/theme_pictures.rs, `blue_square_theme`: a theme as a file would define it; it becomes selectable in Settings > Appearance as
 a folder with that theme.json in the themes folder, and a built-in once it is added to hosts/standalone/themes).
 
@@ -274,14 +274,14 @@ height) and in a rounded one (`radius`), fields (half the height up to 56, else 
 chain's plugin chips and the routing boxes and their cursor (`radius`). `style.buttons` (pill, rounded) is still read, checked and
 kept, but both draw the family's corner: a pill beside the rows' and cards' corners did not read as one family. Left as they were,
 by design or as a different thing: knobs and slider thumbs, a switch's pill, the recording dot, the meters and thin tracks,
-progress lines, the scroll bar's track (a third of a lane wide: its half width, at most the radius), a mark (`mark-radius`: its
+progress lines, the scroll bar's track (the lane's width less its side margins, its corner the scaled one), a mark (`mark-radius`: its
 own style), the piano's keys (`key-radius`, Panel.cpp's), and a table cell of the grid's views (half the radius).
 Test: `radii_are_one_family` (src/tests/theme_pictures.rs) reads the corner of the strip, the search box, the info button, a
 sidebar entry and a list item as drawn, in the default theme and the blue square one.
 
-## The scroll bar sits close to the list (2026-11-17)
+## The scroll bar fills its lane (2026-11-28, issue #269)
 
-The lane stays a touch target wide (`scroll-lane`, 44) but the visible bar is drawn at the list side of it, not centered: the lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and the bar starts `Theme.scroll-gap` (a tight padding) past the row's edge (`Theme.scroll-lead` = overlap + gap, in the lane). The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the gap as drawn, in both themes.
+The lane stays a touch target wide (`scroll-lane`, 44) and the visible bar fills it: the bar is `Theme.scroll-pad` (a tight padding) from each side, so there is no band of empty lane beside it. The lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and a bar on the screen's or a modal's edge drops its outer (right) margin (`ScrollBar.flush`, set on the modals: the menu, the dropdown, the notice) so it sits flush against that edge. The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the bar's left as drawn, in both themes.
 
 ## Compact and the sidebar's views (2026-11-17)
 

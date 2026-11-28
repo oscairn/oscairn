@@ -160,6 +160,43 @@ fn the_menu_scrolls_a_list_longer_than_its_view() {
     assert_eq!((ms.get_total(), ms.get_first()), (9, 0), "the list and view stay consistent");
 }
 
+// A modal shows its scroll bar only when its content is taller than its view (issue #269): the menu (a dialog) when it holds
+// more rows than a view, the notice when its question overflows the window; both fit it and show none. The notice's bar is the
+// panel's (`bar-on`, set as the panel lays out), flush to the modal's edge.
+#[test]
+fn a_menu_and_a_notice_show_their_bar_only_when_they_overflow() {
+    // The menu: a longer list shows the bar, a list that fits shows none.
+    let s = Screen::new();
+    let ui = s.ui.clone_strong();
+    let mut tall = Menu::open(&ui, "M", long_menu());
+    ui.global::<MenuState>().set_rows_per_view(3);
+    tall.show();
+    let ms = ui.global::<MenuState>();
+    assert!(ms.get_total() > ms.get_rows_per_view(), "a longer list shows the scroll bar: {} rows, {} in a view", ms.get_total(), ms.get_rows_per_view());
+    let mut short = Menu::open(&ui, "S", vec![Item::choice("Only", 1), Item::choice("Two", 2)]);
+    ui.global::<MenuState>().set_rows_per_view(5);
+    short.show();
+    let ms = ui.global::<MenuState>();
+    assert!(ms.get_total() <= ms.get_rows_per_view(), "a list that fits shows no scroll bar: {} rows, {} in a view", ms.get_total(), ms.get_rows_per_view());
+    // The notice: many choices overflow the small window and show the flush bar; one choice fits and shows none.
+    let mut s = Screen::sized(800, 480);
+    let ui = s.ui.clone_strong();
+    let many = ["A fairly long choice label"; 18];
+    Notice::open(&ui, "Many", "A message.", &many);
+    s.frame();
+    s.frame();
+    assert!(ui.global::<NoticeState>().get_bar_on(), "a notice taller than the view shows its scroll bar ({} choices)", many.len());
+    // The bar is flush to the panel's edge: its thumb is the lane less one side margin (not two).
+    let t = ui.global::<crate::Theme>();
+    let flush = t.get_scroll_lane() - t.get_scroll_pad();
+    assert!((ui.get_notice_bar_w() - flush).abs() <= 1.5, "the notice's flush bar is the lane less one side margin: {} against {} - {}", ui.get_notice_bar_w(), t.get_scroll_lane(), t.get_scroll_pad());
+    Notice::open(&ui, "Just", "A short message.", &["OK"]);
+    s.frame();
+    s.frame();
+    assert!(!ui.global::<NoticeState>().get_bar_on(), "a notice that fits shows no scroll bar");
+    assert_eq!(ui.get_notice_bar_w(), 0., "a notice that fits has no bar to measure");
+}
+
 // A long menu fits the small window in the light theme: at 800x480 and at the FANTOM-07's 1280x720 at
 // scale 1.55 the rows' text and the page marks stay inside the window, nothing reaches an edge, and
 // the cursor's focus border is drawn in the light theme.

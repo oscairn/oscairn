@@ -23,6 +23,10 @@ Changing either must not change the audio graph, parameters, MIDI assignments or
   on screen, or for an icon its tooltip and accessible title.
 - Accent marks selection or an action; positive marks active playback; danger marks failures.
   State must also be conveyed by text, position, shape or accessibility state, not color alone.
+- A scroll bar (a touch aid on lists and scrollable popups) fills its own lane, a touch target wide, from a small
+  `scroll-pad` side margin, so there is no band of empty lane beside it (issue #269). A bar on the screen's or a
+  modal's edge is `flush`: it keeps the inner margin (next to the list) and drops the outer one, sitting against the
+  edge. The lane begins over the rows' right padding, so a tap on a row's trailing icon is the row's, never the bar's.
 - Distinguish browsing from applying. **Replace instrument/effect** explicitly changes the
   loaded engine; **Use sound** switches a prepared sound. Replacement ends the old slot's
   notes, tails and prepared sounds. It is not a seamless sound transition.

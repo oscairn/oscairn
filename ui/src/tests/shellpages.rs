@@ -109,6 +109,91 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     assert_eq!(ui.get_screen(), 4);
 }
 
+// The FM page's burst of params.text (one per operator value, a hundred and more) goes out while the engine is not
+// reading: the connection stays (#341), and every text is asked in the end.
+#[test]
+fn the_fm_page_opened_from_the_shell_keeps_the_connection() {
+    let mut f = Fixture::new("fm-burst");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
+    let graph = super::part::part_graph();
+    let list = super::fm::fm_n(&[super::fm::parallel()]);
+    let values = super::fm::fm_n_values(0., false);
+    let read = |r: &serde_json::Value| {
+        let of = |v: &serde_json::Value| values.iter().find(|x| Some(x.0 as u64) == v["param"].as_u64()).map_or(0., |x| x.1);
+        json!({"values": r["params"]["values"].as_array().unwrap().iter().map(|v| json!({"node": v["node"], "param": v["param"], "value": of(v)})).collect::<Vec<_>>()})
+    };
+    let ui = f.screen.ui.clone_strong();
+    // Answers whatever is asked until the engine goes quiet (or, with `until`, until that request: returned unanswered).
+    let settle = |f: &mut Fixture, until: &str| {
+        let mut quiet = 0;
+        while quiet < 2 {
+            let Some(r) = f.engine.try_request(std::time::Duration::from_millis(400)) else { quiet += 1; continue };
+            quiet = 0;
+            let result = match r["method"].as_str().unwrap_or_default() {
+                m if m == until => return Some(r),
+                "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+                "graph.get" => graph.clone(),
+                "session.status" => json!({"midiInputs": []}),
+                "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
+                "window.info" => json!({"available": false}),
+                "params.list" => list.clone(),
+                "params.get" => read(&r),
+                "params.text" => json!({"text": "t"}),
+                _ => json!({}),
+            };
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": result})));
+            for _ in 0..25 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                f.drain();
+            }
+        }
+        None
+    };
+    settle(&mut f, "");
+    ui.global::<crate::PlayState>().invoke_part_tapped(0);
+    settle(&mut f, "");
+    shell::act(Action::End(1));
+    shell::act(Action::End(1));
+    shell::act(Action::Move { pane: None, by: -2 });
+    shell::act(Action::Confirm(None)); // the chain
+    settle(&mut f, "");
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Confirm(None)); // the plugin's actions
+    settle(&mut f, "");
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Confirm(None)); // Parameters: params.list, then params.get, then the burst
+    let asked = settle(&mut f, "params.list").expect("the list is asked");
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": asked["id"], "result": list})));
+    f.pump(); // the list arrives: the burst of params.text is written here, with nobody reading
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    while let Ok(e) = f.events.try_recv() {
+        assert!(!matches!(e, Event::Lost(_)), "the connection was lost");
+        shell::dispatch(e);
+    }
+    // The engine reads now: no more than 32 texts are out unanswered, and answering them brings the rest.
+    let mut first = vec![];
+    while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(400)) {
+        first.extend(Some(r).filter(|r| r["method"] == "params.text"));
+    }
+    assert_eq!(first.len(), 32);
+    let mut texts = 0;
+    let mut answer = first;
+    while !answer.is_empty() {
+        for r in std::mem::take(&mut answer) {
+            f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": r["id"], "result": {"text": "t"}})));
+            f.pump();
+            texts += 1;
+        }
+        while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(400)) {
+            answer.extend(Some(r).filter(|r| r["method"] == "params.text"));
+        }
+    }
+    assert!(texts > 100, "the page asked {texts} texts");
+}
+
 // A `session.resync` (the engine's parameter-change history wrapped, or a pending command dropped:
 // docs/control-protocol.md) means the page's values may be stale: it reads them again, as an Undo does,
 // while the page is shown; with no such screen shown it asks nothing.

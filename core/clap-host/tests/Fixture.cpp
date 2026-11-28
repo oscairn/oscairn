@@ -55,21 +55,28 @@ constexpr const char* ids[]{"org.kick.test.synth", "org.kick.test.effect", "org.
                             "org.kick.test.save-failure", "org.kick.test.transport", "org.kick.test.tail", "org.kick.test.memory"};
 const char* instrument[]{CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYNTHESIZER, nullptr};
 const char* effect[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
+// The kick-clap-fixture-v2* builds are version 2 of the same plugins (RFC 0043's moves): v2 reads version 1's
+// state as it is, v2_changed reads its gain at half, v2_ports has a stereo output where version 1 has mono.
+#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports)
+#define FIXTURE_VERSION "2"
+#else
+#define FIXTURE_VERSION "1"
+#endif
 const clap_plugin_descriptor_t descriptors[]{
-    {CLAP_VERSION, ids[0], "KICK fixture", "KICK", "", "", "", "1", "Test instrument", instrument},
-    {CLAP_VERSION, ids[1], "KICK effect", "KICK", "", "", "", "1", "Test effect", effect},
-    {CLAP_VERSION, ids[2], "KICK MIDI", "KICK", "", "", "", "1", "MIDI-only instrument", instrument},
-    {CLAP_VERSION, ids[3], "KICK NaN", "KICK", "", "", "", "1", "Fault fixture", instrument},
-    {CLAP_VERSION, ids[4], "KICK error", "KICK", "", "", "", "1", "Fault fixture", instrument},
-    {CLAP_VERSION, ids[5], "KICK sleep", "KICK", "", "", "", "1", "Sleep fixture", instrument},
-    {CLAP_VERSION, ids[6], "KICK activation failure", "KICK", "", "", "", "1", "Failure fixture", instrument},
-    {CLAP_VERSION, ids[7], "KICK start failure", "KICK", "", "", "", "1", "Failure fixture", instrument},
-    {CLAP_VERSION, ids[8], "KICK steps", "KICK", "", "", "", "1", "Stepped fixture", instrument},
-    {CLAP_VERSION, ids[9], "KICK no state", "KICK", "", "", "", "1", "Unsupported state fixture", instrument},
-    {CLAP_VERSION, ids[10], "KICK save failure", "KICK", "", "", "", "1", "Failed state fixture", instrument},
-    {CLAP_VERSION, ids[11], "KICK transport", "KICK", "", "", "", "1", "Transport fixture", instrument},
-    {CLAP_VERSION, ids[12], "KICK tail", "KICK", "", "", "", "1", "Release-tail instrument", instrument},
-    {CLAP_VERSION, ids[13], "KICK memory", "KICK", "", "", "", "1", "Effect declaring its memory (oscairn.memory)", effect}};
+    {CLAP_VERSION, ids[0], "KICK fixture", "KICK", "", "", "", FIXTURE_VERSION, "Test instrument", instrument},
+    {CLAP_VERSION, ids[1], "KICK effect", "KICK", "", "", "", FIXTURE_VERSION, "Test effect", effect},
+    {CLAP_VERSION, ids[2], "KICK MIDI", "KICK", "", "", "", FIXTURE_VERSION, "MIDI-only instrument", instrument},
+    {CLAP_VERSION, ids[3], "KICK NaN", "KICK", "", "", "", FIXTURE_VERSION, "Fault fixture", instrument},
+    {CLAP_VERSION, ids[4], "KICK error", "KICK", "", "", "", FIXTURE_VERSION, "Fault fixture", instrument},
+    {CLAP_VERSION, ids[5], "KICK sleep", "KICK", "", "", "", FIXTURE_VERSION, "Sleep fixture", instrument},
+    {CLAP_VERSION, ids[6], "KICK activation failure", "KICK", "", "", "", FIXTURE_VERSION, "Failure fixture", instrument},
+    {CLAP_VERSION, ids[7], "KICK start failure", "KICK", "", "", "", FIXTURE_VERSION, "Failure fixture", instrument},
+    {CLAP_VERSION, ids[8], "KICK steps", "KICK", "", "", "", FIXTURE_VERSION, "Stepped fixture", instrument},
+    {CLAP_VERSION, ids[9], "KICK no state", "KICK", "", "", "", FIXTURE_VERSION, "Unsupported state fixture", instrument},
+    {CLAP_VERSION, ids[10], "KICK save failure", "KICK", "", "", "", FIXTURE_VERSION, "Failed state fixture", instrument},
+    {CLAP_VERSION, ids[11], "KICK transport", "KICK", "", "", "", FIXTURE_VERSION, "Transport fixture", instrument},
+    {CLAP_VERSION, ids[12], "KICK tail", "KICK", "", "", "", FIXTURE_VERSION, "Release-tail instrument", instrument},
+    {CLAP_VERSION, ids[13], "KICK memory", "KICK", "", "", "", FIXTURE_VERSION, "Effect declaring its memory (oscairn.memory)", effect}};
 struct Plugin {
     clap_plugin_t api{}, late{}; // late: the functions held back until init (KICK_FIXTURE_LATE_FUNCTIONS)
     const clap_host_t* host;
@@ -274,7 +281,12 @@ struct Plugin {
             [](const clap_plugin_t* p, uint32_t i, bool input, clap_audio_port_info_t* out) {
                 auto& s = get(p); s.main(); if (i || (input && s.kind != 1 && s.kind != 13)) return false;
                 *out = {}; out->id = 0; std::strcpy(out->name, "Main"); out->flags = CLAP_AUDIO_PORT_IS_MAIN;
-                out->channel_count = s.kind == 0 ? 1 : 2; out->port_type = s.kind == 0 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
+#ifdef FIXTURE_v2_ports
+                const bool mono = false;
+#else
+                const bool mono = s.kind == 0;
+#endif
+                out->channel_count = mono ? 1 : 2; out->port_type = mono ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
                 out->in_place_pair = CLAP_INVALID_ID; return true;
             }};
         static const clap_plugin_note_ports_t notes{
@@ -353,6 +365,9 @@ struct Plugin {
                 }
                 double value = 0;
                 if (in->read(in, &value, sizeof(value)) != sizeof(value) || !std::isfinite(value)) return false;
+#ifdef FIXTURE_v2_changed
+                value *= .5;
+#endif
                 // After the gain, optionally a sound asset ("library\0path"), which must resolve, as a
                 // sampler's state with a library reference must (RFC 0009).
                 std::string asset; char chunk[256]; int64_t got;

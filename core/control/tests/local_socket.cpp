@@ -271,6 +271,15 @@ namespace
             check(has(app.call("library.query"), R"("items":[])"), "library.query allowed");
             check(has(app.call("packages.install", R"({"source":"https://example.com","id":"x"})"), "packages.install needs the system permission"), "packages.install refused");
             check(has(app.call("trust.set", R"({"id":"x"})"), "trust.set needs the system permission"), "trust.set refused");
+            // Moving sounds to a newer plugin version is the library's (RFC 0043), not an editor's.
+            {
+                LocalClient editor;
+                host.call("apps.connect", R"({"app":"com.example.editor","permissions":["edit"]})");
+                editor.adopt(host.takeDescriptor());
+                const auto refused = editor.call("versions.plan", R"({"plugin":{"format":"clap","id":"x","version":"1"},"to":"2","scope":{"all":true}})");
+                check(has(refused, "-32008") && has(refused, "versions.plan needs the library permission"), "versions.plan refused with edit only: " + refused);
+                check(has(app.call("versions.moves"), R"("moves":[])"), "versions.moves allowed with library");
+            }
             check(has(app.call("subscribe", R"({"topics":["status","transport"]})"), "transport needs the play or edit permission"), "a topic outside the grant is not subscribed");
             check(has(app.call("subscribe", R"({"topics":["status"]})"), "accepted") && has(app.call("session.status"), "result") && has(app.call("session.hello"), "protocolVersion"), "every app reads what it draws");
             check(has(app.call("debug.anything"), "debug.anything is not open to apps"), "a method not in the table is refused");

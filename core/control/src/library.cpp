@@ -410,7 +410,7 @@ namespace oscairn
         for(const auto& entry : fs::directory_iterator(home, error))
         {
             const auto name = entry.path().filename().string();
-            const size_t prefix = name.starts_with(".install-") ? 9 : name.starts_with(".export-") ? 8 : 0;
+            const size_t prefix = name.starts_with(".install-") ? 9 : name.starts_with(".export-") ? 8 : name.starts_with(".move-") ? 6 : 0;
             if(!prefix) continue;
             std::error_code unread;
             if(!fs::is_directory(entry.symlink_status(unread)) || unread) continue; // a real folder, never a link's target

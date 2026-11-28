@@ -561,6 +561,7 @@ namespace oscairn
                 {"library.query",Library},{"library.favorite",Library},{"library.tag",Library},{"library.edit",Library},{"library.copy",Library},{"library.export",Library},{"library.exportLibrary",Library},{"setlists.get",Library},{"library.types",Library},{"library.folders",Library},{"library.addFolder",Library},{"library.removeFolder",Library},{"setlists.save",Library},
                 {"library.rescan",Library},{"library.contents",Library},{"library.install",Library},{"library.libraries",Library},{"library.uninstall",Library},
                 {"library.delete",Library},{"library.save",Library},{"library.load",Library},
+                {"versions.plan",Library},{"versions.move",Library},{"versions.job",Library},{"versions.moves",Library},{"versions.undo",Library},{"versions.forget",Library},
                 {"performance.save",Library},{"performance.load",Library},{"performance.prepare",Library},{"performance.export",Library},{"performance.info",Library},
                 {"performance.setInfo",Library},{"performance.contents",Library},{"performance.import",Library},{"budget.estimate",Library},
                 {"audition.start",Library},{"audition.stop",Library},{"audition.get",Library},
@@ -1015,6 +1016,68 @@ namespace oscairn
                 catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return R"({"accepted":true})";
+            }
+            // Moving library items to a newer plugin version (RFC 0043).
+            if(method=="versions.plan" || method=="versions.move") {
+                const bool move=method=="versions.move";
+                if(move)fields(p,{"plugin","to","items","withoutClaim"});else fields(p,{"plugin","to","scope"});
+                const auto plugin=member(p,"plugin");fields(plugin,{"format","id","version"});
+                const Control::PluginVersion from{std::string(string(member(plugin,"format"))),std::string(string(member(plugin,"id"))),std::string(string(member(plugin,"version")))};
+                const auto to=std::string(string(member(p,"to")));
+                auto ids=[&](Value list){std::vector<std::string> out;for(auto v:array(list,10000,0))out.push_back(std::string(string(v)));return out;};
+                try{
+                    uint64_t job=0;
+                    if(move)job=c.moveVersions(from,to,ids(member(p,"items")),member(p,"withoutClaim") && boolean(member(p,"withoutClaim")));
+                    else{
+                        const auto s=member(p,"scope");fields(s,{"items","library","setlist","all"});
+                        Control::VersionScope scope;
+                        if(member(s,"items"))scope.items=ids(member(s,"items"));
+                        if(member(s,"library"))scope.library=std::string(string(member(s,"library")));
+                        if(member(s,"setlist"))scope.setlist=std::string(string(member(s,"setlist")));
+                        scope.all=member(s,"all") && boolean(member(s,"all"));
+                        job=c.planVersionMove(from,to,scope);
+                    }
+                    return "{\"job\":"+std::to_string(job)+'}';
+                }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
+                catch(const std::exception& e){throw Failure{-32005,e.what(),move && std::string(e.what()).rfind("Stop the transport",0)==0?R"({"reason":"playing"})":"null"};}
+            }
+            if(method=="versions.job") {
+                fields(p,{"job"});
+                Control::VersionJob j;
+                try{j=c.versionJob(integer(member(p,"job")));}catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                auto value=[](const std::optional<double>& v){return v?encode(*v):std::string("null");};
+                std::vector<std::string> items;
+                for(const auto& i:j.items){
+                    std::vector<std::string> changes;
+                    for(const auto& x:i.changes)changes.push_back("{\"node\":"+quote(x.node)+",\"param\":"+std::to_string(x.param)+",\"name\":"+quote(x.name)+",\"before\":"+value(x.before)+",\"after\":"+value(x.after)+'}');
+                    items.push_back("{\"id\":"+quote(i.id)+",\"name\":"+quote(i.name)+",\"kind\":"+quote(i.kind)+",\"status\":"+quote(i.status)+",\"locked\":"+(i.locked?"true":"false")+
+                                    ",\"nodes\":"+std::to_string(i.nodes)+",\"changes\":"+join(changes)+",\"reason\":"+quote(i.reason)+'}');
+                }
+                const auto claim=j.claim?"{\"opensStateFrom\":"+quote(j.claim->opensStateFrom)+",\"soundChanges\":"+(j.claim->soundChanges.empty()?std::string("null"):quote(j.claim->soundChanges))+",\"key\":"+quote(j.claim->key)+",\"checked\":"+(j.claim->checked?"true":"false")+'}':std::string("null");
+                return "{\"state\":"+quote(j.state)+",\"error\":"+quote(j.error)+",\"checked\":"+std::to_string(j.checked)+",\"total\":"+std::to_string(j.total)+",\"items\":"+join(items)+",\"claim\":"+claim+
+                       ",\"move\":"+(j.move.empty()?std::string("null"):quote(j.move))+'}';
+            }
+            if(method=="versions.moves") {
+                fields(p,{});std::vector<std::string> out;
+                for(const auto& m:c.versionMoves()){
+                    std::vector<std::string> ids;for(const auto& i:m.items)ids.push_back(quote(i));
+                    out.push_back("{\"move\":"+quote(m.move)+",\"date\":"+quote(m.date)+",\"plugin\":{\"format\":"+quote(m.plugin.format)+",\"id\":"+quote(m.plugin.id)+",\"version\":"+quote(m.plugin.version)+"},\"to\":"+quote(m.to)+
+                                  ",\"items\":"+join(ids)+",\"undoable\":"+(m.undoable?"true":"false")+'}');
+                }
+                return "{\"moves\":"+join(out)+'}';
+            }
+            if(method=="versions.undo" || method=="versions.forget") {
+                fields(p,{"move"});
+                const auto move=std::string(string(member(p,"move")));
+                try{
+                    if(method=="versions.forget"){c.forgetVersionMove(move);return R"({"accepted":true})";}
+                    std::vector<std::string> out;
+                    for(const auto& u:c.undoVersionMove(move))out.push_back("{\"id\":"+quote(u.id)+",\"savedSince\":"+(u.savedSince?"true":"false")+'}');
+                    return "{\"items\":"+join(out)+'}';
+                }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
             }
             // The trust store (RFC 0006).
             if(method=="trust.list") {

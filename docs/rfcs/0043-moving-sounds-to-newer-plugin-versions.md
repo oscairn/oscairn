@@ -27,8 +27,13 @@ Checked when built and tested; the sections below say how.
       `claimKey`, kept only from an archive signed whole by a key that signed the plugin's builds,
       and `plugins.list`'s three fields; `newest` and `keptBy` are step 6's. The fork's
       `oscairn-release.json` schema in oscairn/packages is not changed here)
-- [ ] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
-      `stateSavedBy` (#179)
+- [x] 2. Moving library items: `versions.plan`, `versions.move`, `versions.job`, undo and
+      `stateSavedBy` (#179) (built 2026-11-27, `core/control/src/versions.cpp`, with `versions.moves`
+      and `versions.forget`: the state is saved again by the new version and the whole item kept
+      under `Moves/` for undo, so `stateSavedBy` is not written, as the owner decided 2026-11-28,
+      [below](#what-it-does-to-a-document); `checked` is always false until the repository's check
+      is read; the claim's same-publisher route through a repository's index is not built, so the
+      old version's build must be here for the claim to count)
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line (#179)
 - [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`) (#181)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import
@@ -147,6 +152,14 @@ the new version reads them when the item next opens, and writes its own state at
 So the move never loses anything the old version saved, and undoing it is restoring one JSON
 file. The content `hash` changes, as the document changes.
 
+**Changed by the owner, 2026-11-28** (found on the keyboard, issue #259): after a move the saved
+state must be in the new version's format, or the kept-warm take never matches a state against
+its file. So the move does rewrite it: the job that opens each node with the new version (below)
+saves its state again as the new version writes it, into a copy of the item, and the copy takes
+the item's place whole. Nothing is lost all the same: the item as it was, state included, is kept
+under `Moves/<move>/<id>/` until the musician forgets the move, and undo puts that folder back.
+`stateSavedBy` is not needed and not written.
+
 **Before writing, each node is opened by the new version:** a job, off the control thread, loads
 the new build (in a worker where workers are used, [RFC 0010](0010-plugin-worker-isolation.md),
 with a time limit and memory limit, its stderr captured, the worker recycled after each item),
@@ -179,8 +192,8 @@ Performance, moves at a time, after **Compare** or **Move without comparing**
 
 ### Undo
 
-Each move keeps, per item, the document as it was before (`performance.json` or `sound.json`
-only, as nothing else changed) in the data folder under `Moves/<move>/`, with the revision the
+Each move keeps, per item, the item as it was before (its whole folder, as the state is rewritten
+too, [above](#what-it-does-to-a-document)) in the data folder under `Moves/<move>/`, with the revision the
 move wrote. **Undo** puts back each item whose revision is still the one the move wrote; an item
 saved since is not touched and is listed ("Warm Pad was saved since; open it to move it back by
 hand"). Kept moves are listed in Installed content and are a retention root for the old version
@@ -430,7 +443,7 @@ path.
 | Method | Takes | Returns | Permission |
 | --- | --- | --- | --- |
 | `versions.plan` (new) | `plugin` `{format,id,version}` (the version saved), `to` (installed), `scope`: `{items}`, `{library}`, `{setlist}` or `{all:true}` | `{job}`; one job at a time (`busy`) | `library` |
-| `versions.move` (new) | As `versions.plan`, with `items` (the IDs to move, from the plan) and optional `withoutClaim` (one item only) | `{job}`; refused `playing` at `instrument` and above while the transport runs | `library` |
+| `versions.move` (new) | `plugin`, `to`, `items` (the IDs to move, from the plan) and optional `withoutClaim` (one item only) | `{job}`; refused `playing` at `instrument` and above while the transport runs | `library` |
 | `versions.job` (new) | `job` | `{state, items}`: per item `{id,name,kind,status,locked,nodes,changes,reason}`; `status` one of `movable`, `changed` (settings read differently, `changes` each `{node,param,name,before,after}`, `after` null when gone), `locked`, `noClaim`, `refused` (`reason`: no build here, the state did not open, ports changed, a time or memory limit), `moved`; and `claim` `{opensStateFrom,soundChanges,key,checked}` or null | `library` |
 | `versions.moves` (new) | none | Kept moves: `{move,date,plugin,to,items,undoable}` | `library` |
 | `versions.undo` (new) | `move` | Per item: put back, or `savedSince` | `library` |
@@ -494,7 +507,9 @@ All before the first public release, so they break freely (the
 2. **Moving keeps the old state bytes** and changes only the version, the lock and
    `stateSavedBy`, until the next save. Recommended: lossless, cheap, exact undo. The alternative,
    re-saving every item's state through the new version during the move, proves more up front
-   but loses the old bytes and costs a plugin save per item.
+   but loses the old bytes and costs a plugin save per item. **Decided otherwise by the owner
+   2026-11-28:** the state is saved again by the new version, the old bytes kept with the whole
+   item under `Moves/` ([what it does to a document](#what-it-does-to-a-document)).
 3. **Without a claim:** one item or the open Performance at a time, after a warning, never in bulk.
    Recommended. Stricter: never without a claim; that leaves third-party plugins' fixes out of
    reach.

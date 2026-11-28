@@ -1,4 +1,4 @@
-add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
+add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/versions.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
 set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
 # The library's index (RFC 0023 step 5): no extensions loaded, double-quoted strings refused.
 set_source_files_properties(third_party/sqlite/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DQS=0")
@@ -514,3 +514,13 @@ add_executable(oscairn-worker-prestart-test tests/worker_prestart.cpp)
 target_link_libraries(oscairn-worker-prestart-test PRIVATE oscairn_control)
 add_test(NAME control-worker-prestart COMMAND oscairn-worker-prestart-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(control-worker-prestart PROPERTIES TIMEOUT 120)
+
+# RFC 0043: moving library items to a newer plugin version, in process and with plugins in workers.
+add_executable(oscairn-version-moves-test tests/version_moves.cpp)
+target_link_libraries(oscairn-version-moves-test PRIVATE oscairn_control)
+add_dependencies(oscairn-version-moves-test oscairn-sign)
+add_test(NAME control-version-moves COMMAND oscairn-version-moves-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2>
+    $<TARGET_FILE:kick-clap-fixture-v2_changed> $<TARGET_FILE:kick-clap-fixture-v2_ports> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-version-moves-workers COMMAND oscairn-version-moves-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2>
+    $<TARGET_FILE:kick-clap-fixture-v2_changed> $<TARGET_FILE:kick-clap-fixture-v2_ports> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn-plugin-worker>)
+set_tests_properties(control-version-moves control-version-moves-workers PROPERTIES TIMEOUT 120)

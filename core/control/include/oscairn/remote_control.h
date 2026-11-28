@@ -251,6 +251,13 @@ namespace oscairn
         std::vector<Take> recordTakes() const override;
         void recordRetro(double seconds,const std::vector<RecordTap>& taps={}) override;
         double recordRetroSeconds() const override;
+        void setCaptureBuffer(double seconds) override;
+        void setCaptureBufferPolicy(double defaultSeconds,double maxSeconds) override;
+        double captureBuffer() const override;
+        double captureBufferDefault() const override;
+        double captureBufferMax() const override;
+        std::vector<double> captureBufferChoices() const override;
+        uint64_t captureBufferBytes(double seconds) override;
         void recordDelete(uint32_t take) override;
         void recordRename(uint32_t take,const std::string& name) override;
         void recordPlay(uint32_t take) override;

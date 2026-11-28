@@ -325,9 +325,13 @@ impl Piano {
         let this = self.inputs.iter().find(|e| e["name"].as_str() == Some(self.input.as_str()));
         rules.iter().any(|r| {
             let pattern = r["pattern"].as_str().unwrap_or_default();
-            let named = |name: &str| match r["match"].as_str() {
-                Some("contains") => name.to_lowercase().contains(&pattern.to_lowercase()),
-                _ => name == pattern,
+            // The engine's DeviceRule::named (parts.cpp): equals is the whole name, any case;
+            // contains (and the engine's default, and regex, which the UI has no crate to evaluate
+            // exactly) is a case-insensitive substring.
+            let named = |name: &str| {
+                let n = name.to_lowercase();
+                if r["match"].as_str() == Some("equals") { n == pattern.to_lowercase() }
+                else { n.contains(&pattern.to_lowercase()) }
             };
             match (r["kind"].as_str(), this) {
                 (Some("all"), _) => true,
@@ -337,7 +341,7 @@ impl Piano {
                 (Some("external"), Some(e)) => e["kind"] != "builtIn",
                 (Some("port"), Some(e)) => e["kind"] == "port" && e["port"] == r["port"],
                 (Some("usb"), Some(e)) => e["kind"] == "usb",
-                (Some("usbNamed"), Some(e)) => e["kind"] != "network" && named(e["name"].as_str().unwrap_or_default()),
+                (Some("usbNamed"), Some(e)) => e["kind"] == "usb" && named(e["name"].as_str().unwrap_or_default()),
                 (Some("network"), Some(e)) => e["kind"] == "network" && (pattern.is_empty() || named(e["name"].as_str().unwrap_or_default())),
                 _ => false,
             }
@@ -539,6 +543,30 @@ mod tests {
         assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "net1"}])), "usbNamed skips a network");
         p.input = "Missing".into();
         assert!(!p.plays(&json!([{"kind": "external"}])), "a plugged device that is gone plays no external rule");
+    }
+
+    #[test]
+    fn plays_matches_the_engine_named_rule_table() {
+        // The engine's own DeviceRule table from core/control/tests/parts.cpp `devices`,
+        // through the UI's plays(): both sides agree.
+        let mut p = piano("");
+        p.inputs = vec![
+            json!({"name": "Arturia KeyLab 61", "source": 1, "kind": "usb", "port": 0}),
+            json!({"name": "nanoKONTROL2", "source": 2, "kind": "usb", "port": 0}),
+            json!({"name": "MIDI 2", "source": 3, "kind": "port", "port": 2}),
+            json!({"name": "Session 1", "source": 4, "kind": "network", "port": 0}),
+        ];
+        p.input = "Arturia KeyLab 61".into();
+        assert!(p.plays(&json!([{"kind": "usbNamed", "pattern": "arturia keylab 61", "match": "equals"}])), "equals is the whole name, any case");
+        assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "arturia", "match": "equals"}])), "equals is the whole name, not a part");
+        p.input = "MIDI 2".into();
+        assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "midi"}])), "usbNamed skips a port, even one it is named");
+        assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "midi", "match": "equals"}])), "usbNamed skips a port for equals too");
+        assert!(p.plays(&json!([{"kind": "port", "port": 2}])), "the port rule hears the port");
+        p.input = "nanoKONTROL2".into();
+        // The UI has no regex crate and no engine report here, so regex falls back to a
+        // case-insensitive contains (documented in the note, not exact).
+        assert!(p.plays(&json!([{"kind": "usbNamed", "pattern": "kontrol", "match": "regex"}])), "regex falls back to case-insensitive contains");
     }
 
     #[test]

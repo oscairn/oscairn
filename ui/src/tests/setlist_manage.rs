@@ -332,6 +332,54 @@ fn slots_are_added_moved_and_removed() {
     assert!(slots(&f)[1].cursor && slots(&f)[1].title == first[2], "the cursor is on what took its place");
 }
 
+// The Manage Edit by touch (a tap on the bar's Manage, then the group and entry): unlike the panel's bar cursor, the touch
+// path leaves the top bar's cursor clear, so a Page after it reaches the slots (the panel's cursor would swallow it).
+fn manage_touch(f: &mut Fixture, group: &str, entry: &str) {
+    let at = f.screen.ui.global::<Bar>().get_actions().iter().position(|a| a.label == "Manage").expect("Manage is on the bar");
+    f.screen.ui.global::<Bar>().invoke_action(at as i32);
+    f.screen.frame();
+    let tap = |f: &mut Fixture, label: &str| {
+        let row = menu(f).get_rows().iter().position(|r| r.label == label).unwrap_or_else(|| panic!("{label} is not a row: {:?}", offered(f)));
+        menu(f).invoke_tapped(row as i32);
+        f.screen.frame();
+    };
+    tap(f, group);
+    tap(f, entry);
+}
+
+// Plays slot 1 (p1) to make it the slot being stepped from (`current`), performs the Manage edit `group`>`entry` (which saves
+// the document and reads it again), then a forward step; the step is the one past where the edit left the slot, proving
+// Previous/Next stepped from the right slot after the document changed (issue #338).
+fn plays_then(f: &mut Fixture, id: &str, group: &str, entry: &str, want: &str) {
+    state(f).invoke_tapped_slot(1);
+    let load = f.engine.request();
+    assert_eq!(load["params"]["id"], "p1", "{load}");
+    f.reply(&load, json!({"result": {}}));
+    quiet(f);
+    manage_touch(f, group, entry); // the edit: saved and read again, the slot followed
+    saved(f, id);
+    shell::act(Action::Page(1)); // Next: what follows the slot `current` points at
+    let next = f.engine.request();
+    assert_eq!(next["params"]["id"], want, "stepped from the slot that was playing: {next}");
+    f.reply(&next, json!({"result": {}}));
+    quiet(f);
+}
+
+// Reordering, moving or removing the slot being stepped from through Manage re-maps `current` to where that slot is now (or,
+// if it is gone, to where the engine's open Performance is, else none): Previous/Next do not step from a stale position until
+// the engine reasserts the open Performance.
+#[test]
+fn step_follows_a_slot_moved_removed_or_banked() {
+    let mut f = fixture("remap-down", 1);
+    plays_then(&mut f, "remap-down-1", "Slots", "Move down", "p3"); // p1 down one: the slot after where it came from
+    let mut f = fixture("remap-up", 1);
+    plays_then(&mut f, "remap-up-1", "Slots", "Move up", "p0"); // p1 up one: the slot that was before it
+    let mut f = fixture("remap-remove", 1);
+    plays_then(&mut f, "remap-remove-1", "Slots", "Remove", "p0"); // p1 gone: none to step from, the first slot
+    let mut f = fixture("remap-bank", 2);
+    plays_then(&mut f, "remap-bank-1", "Bank", "Move later", "p2"); // p1 now in the second bank: the slot after it there
+}
+
 // A refusal of the save is said in the top bar and nothing else changes.
 #[test]
 fn a_refused_save_is_said() {

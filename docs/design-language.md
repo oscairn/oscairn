@@ -76,7 +76,7 @@ folders and the same `appearance.txt`, so a theme chosen in either shows in both
 | Field | JUCE app | Rust UI |
 | --- | --- | --- |
 | `colors` (the nine roles) | all | all |
-| `colors.warning`, `colors.focus` (optional, added 2026-11-14) | accepted, not used | a meter past 75% (absent: `#E8C547`, the JUCE meters' yellow); the cursor's border (absent: `accent`) |
+| `colors.warning`, `colors.focus` (optional, added 2026-11-14) | accepted, not used | a meter past 75% (absent: `#A78815`, a yellow that reads 3:1 on the light theme); the cursor's border (absent: `accent`) |
 | `radius`, `fontScale`, `spacing` | all | all (the JUCE app applies `spacing` to the gaps between sections and Play's padding only; ui/THEME.md lists what each does) |
 | `font.regular`, `font.bold` | all | all (registered at run time) |
 | `style`, `wires`, `splash` | all | not yet: no Rust screen draws them |

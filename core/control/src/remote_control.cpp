@@ -626,7 +626,7 @@ namespace oscairn
         auto d=impl_->call("library.query","{\"text\":"+quote(q.text)+",\"tags\":"+quoted(q.tags)+",\"favorites\":"+(q.favorites?"true":"false")+",\"recent\":"+(q.recent?"true":"false")+",\"limit\":"+std::to_string(q.limit)+(q.kind.empty()?std::string():",\"kind\":"+quote(q.kind))+(q.source.empty()?std::string():",\"source\":"+quote(q.source))+(q.id.empty()?std::string():",\"id\":"+quote(q.id))+(q.types.empty()?std::string():",\"type\":"+quoted(q.types))+'}');
         auto r=field(d.get(),"result");LibraryResult result;
         for(auto i:array(field(r,"items"))){result.items.push_back({string(field(i,"id")),string(field(i,"kind")),string(field(i,"name")),string(field(i,"description")),string(field(i,"path")),strings(field(i,"tags")),boolean(field(i,"favorite")),static_cast<uint32_t>(integer(field(i,"recent"))),string(field(i,"color")),string(field(i,"revision")),string(field(i,"hash")),string(field(i,"library")),{},detail::member(i,"unfit")?string(detail::member(i,"unfit")):std::string(),
-                                         detail::member(i,"readOnly") && boolean(detail::member(i,"readOnly")),detail::member(i,"inPlace") && boolean(detail::member(i,"inPlace"))});
+                                         detail::member(i,"readOnly") && boolean(detail::member(i,"readOnly")),detail::member(i,"inPlace") && boolean(detail::member(i,"inPlace")),detail::member(i,"missing") && boolean(detail::member(i,"missing"))});
             if(V f=detail::member(i,"fields");f && f->type==json_type_object) // RFC 0023 step 4
                 for(auto* m=static_cast<const json_object_s*>(f->payload)->start;m;m=m->next)result.items.back().fields.emplace_back(std::string(m->name->string,m->name->string_size),string(m->value));}
         for(auto t:array(field(r,"tags")))result.tags.emplace_back(string(field(t,"tag")),static_cast<uint32_t>(integer(field(t,"count"))));
@@ -1276,6 +1276,19 @@ namespace oscairn
     }
     void RemoteControl::recordRetro(double seconds,const std::vector<RecordTap>& taps){impl_->call("record.retro","{\"seconds\":"+encode(seconds)+",\"taps\":"+tapList(taps)+'}',30000);}
     double RemoteControl::recordRetroSeconds() const{auto d=impl_->call("record.get");return number(field(field(field(d.get(),"result"),"retro"),"seconds"));}
+    void RemoteControl::setCaptureBuffer(double seconds){impl_->call("capture.buffer","{\"seconds\":"+encode(seconds)+'}');}
+    void RemoteControl::setCaptureBufferPolicy(double defaultSeconds,double maxSeconds){impl_->call("capture.policy","{\"default\":"+encode(defaultSeconds)+",\"max\":"+encode(maxSeconds)+'}');}
+    double RemoteControl::captureBuffer() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"seconds"));}
+    double RemoteControl::captureBufferDefault() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"default"));}
+    double RemoteControl::captureBufferMax() const{auto d=impl_->call("capture.buffer","{}");return number(field(field(d.get(),"result"),"max"));}
+    std::vector<double> RemoteControl::captureBufferChoices() const
+    {
+        std::vector<double> out;
+        auto d=impl_->call("capture.buffer","{}");
+        for(auto v:array(field(field(d.get(),"result"),"choices"))) out.push_back(number(field(v,"seconds")));
+        return out;
+    }
+    uint64_t RemoteControl::captureBufferBytes(double seconds){auto d=impl_->call("capture.buffer","{}");auto m=field(field(d.get(),"result"),"memory");return static_cast<uint64_t>(integer(field(m,encode(seconds))));}
     void RemoteControl::recordDelete(uint32_t take){impl_->call("record.delete","{\"take\":"+std::to_string(take)+'}',30000);}
     void RemoteControl::recordRename(uint32_t take,const std::string& name){impl_->call("record.rename","{\"take\":"+std::to_string(take)+",\"name\":"+quote(name)+'}',30000);}
     void RemoteControl::recordPlay(uint32_t take){impl_->call("record.play","{\"take\":"+std::to_string(take)+'}',30000);}

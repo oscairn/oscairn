@@ -81,9 +81,26 @@ fn every_built_in_theme_loads_with_its_file_values() {
     assert_eq!((k.wires.disabled, k.wires.draining), (c(0x6b7685), c(0xffa45b)));
 
     let l = find(&places, "oscairn-light").unwrap().data;
-    assert_eq!((l.colors[0], l.colors[1], l.colors[4], l.colors[6]), (c(0xeef1f5), c(0xffffff), c(0x10161e), c(0xb85a0a)));
+    assert_eq!((l.colors[0], l.colors[1], l.colors[4], l.colors[6]), (c(0xeef1f5), c(0xffffff), c(0x10161e), c(0xae5509)));
     assert_eq!((l.wires.audio, l.wires.notes), (c(0x2f6fd0), c(0x7b4bd6)));
     assert!(!dark(l.colors[0]) && dark(d.colors[0]), "darkTheme: the light theme is not, the dark one is");
+}
+
+// Issue #26 item 5: in every built-in theme the accent reads on the background (4.5:1, the same bar
+// the `/themes` scheme pins for the text) and the meters' warning fallback (the yellow a theme that
+// sets no `warning` uses, `#a78815`) reads on the background too at 3:1 — WCAG 1.4.11's least for a
+// UI component against its backdrop, so the yellow bar shows on the strip behind it.
+#[test]
+fn every_built_in_themes_accent_and_meter_warning_read_on_the_background() {
+    let places = built_in();
+    for dir in std::fs::read_dir(themes_dir()).unwrap().filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+        let id = dir.file_name().to_string_lossy().into_owned();
+        let data = find(&places, &id).unwrap().data;
+        let (bg, accent) = (data.colors[0], data.colors[6]);
+        assert!(contrast(accent, bg) >= 4.5, "{id}: accent {accent:?} on {bg:?} must read (4.5:1)");
+        let warning = data.warning.unwrap_or(rgb(0xa78815));
+        assert!(contrast(warning, bg) >= 3., "{id}: the meter's warning {warning:?} on {bg:?} must read (3:1)");
+    }
 }
 
 // What the reference lets a file leave out has its default: `fontScale` 1, `spacing` 1, `radius` 6, no

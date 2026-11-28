@@ -1155,7 +1155,7 @@ What changes for the plugin:
   not move (it does not open, or the ports changed), when a parameter reads back differently (named
   with both values), and, unless you pass `--sound-changes` because your release says what sounds
   different, when the new render differs by more than -60 dB below the old one; with it the
-  difference is printed for you to judge. Run it against every published version from your
+  difference is printed for you to judge. A note effect (no audio out) is compared by the MIDI it sends instead of a render. The check needs `oscairn-plugin-worker` (beside it, or named by `OSCAIRN_PLUGIN_WORKER`), as a move opens plugins only in workers. Run it against every published version from your
   `--opens-state-from` version up to this one. It proves the states it played, not every sound a
   musician made.
   Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),

@@ -1795,7 +1795,7 @@ fn applying_a_theme_sets_every_property() {
         let (g, d) = (s.ui.global::<crate::Theme>(), &t.data);
         let colors = [g.get_background(), g.get_surface(), g.get_raised(), g.get_border(), g.get_text(), g.get_muted(), g.get_accent(), g.get_positive(), g.get_danger()];
         assert_eq!(colors, d.colors, "{}", t.id);
-        assert_eq!((g.get_warning(), g.get_focus()), (d.warning.unwrap_or(slint::Color::from_rgb_u8(0xe8, 0xc5, 0x47)), d.focus.unwrap_or(d.colors[6])), "{}", t.id);
+        assert_eq!((g.get_warning(), g.get_focus()), (d.warning.unwrap_or(slint::Color::from_rgb_u8(0xa7, 0x88, 0x15)), d.focus.unwrap_or(d.colors[6])), "{}", t.id);
         assert_eq!((g.get_radius(), g.get_font_scale(), g.get_spacing()), (d.radius, d.font_scale, d.spacing), "{}", t.id);
         assert_eq!((g.get_gap(), g.get_margin(), g.get_pad(), g.get_pad_wide(), g.get_pad_narrow(), g.get_pad_tight()), (4. * d.spacing, 6. * d.spacing, 10. * d.spacing, 12. * d.spacing, 8. * d.spacing, 4. * d.spacing), "{}: paddings and gaps scale", t.id);
         let st = d.style;

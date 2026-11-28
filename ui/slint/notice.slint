@@ -83,48 +83,54 @@ export component Notice inherits Rectangle {
                 font-size: Theme.small;
                 wrap: word-wrap;
             }
-            for choice[i] in NoticeState.choices: Rectangle {
-                height: Theme.touch;
-                width: (parent.width - 2 * Theme.pad) - root.lane + (root.long ? Theme.scroll-overlap : 0px);
-                visible: i >= NoticeState.first && i < NoticeState.first + NoticeState.per-view;
-                property <length> press-y: 0px;
-                property <bool> armed: false;
-                property <bool> dragging: false;
-                Button {
-                    text: choice;
-                    clicked => { NoticeState.tapped(i); }
-                }
-                TouchArea {
-                    pointer-event(e) => {
-                        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                            parent.press-y = self.mouse-y;
-                            parent.armed = true;
-                            parent.dragging = false;
-                        } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                            if (parent.armed && !parent.dragging && e.kind == PointerEventKind.up) {
-                                NoticeState.tapped(i);
-                            }
-                            parent.armed = false;
-                            parent.dragging = false;
-                            root.dz-end();
-                        }
+            Rectangle {
+                property <int> shown: max(1, min(NoticeState.total, NoticeState.per-view));
+                height: self.shown * Theme.touch + (self.shown - 1) * root.gap;
+                for choice[i] in NoticeState.choices: Rectangle {
+                    // Placed by its place in the window: a hidden row in the layout would still take its room.
+                    y: (i - NoticeState.first) * (Theme.touch + root.gap);
+                    height: Theme.touch;
+                    width: parent.width - root.lane + (root.long ? Theme.scroll-overlap : 0px);
+                    visible: i >= NoticeState.first && i < NoticeState.first + NoticeState.per-view;
+                    property <length> press-y: 0px;
+                    property <bool> armed: false;
+                    property <bool> dragging: false;
+                    Button {
+                        text: choice;
+                        clicked => { NoticeState.tapped(i); }
                     }
-                    moved => {
-                        if (parent.armed && !parent.dragging) {
-                            let dy = self.mouse-y - parent.press-y;
-                            if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
-                                parent.dragging = true;
+                    TouchArea {
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                parent.press-y = self.mouse-y;
+                                parent.armed = true;
+                                parent.dragging = false;
+                            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                if (parent.armed && !parent.dragging && e.kind == PointerEventKind.up) {
+                                    NoticeState.tapped(i);
+                                }
+                                parent.armed = false;
+                                parent.dragging = false;
+                                root.dz-end();
                             }
                         }
-                        if (parent.dragging) {
-                            root.dz-move(self.mouse-y - parent.press-y);
+                        moved => {
+                            if (parent.armed && !parent.dragging) {
+                                let dy = self.mouse-y - parent.press-y;
+                                if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                                    parent.dragging = true;
+                                }
+                            }
+                            if (parent.dragging) {
+                                root.dz-move(self.mouse-y - parent.press-y);
+                            }
                         }
                     }
-                }
-                Cursor {
-                    shown: NoticeState.cursor == i;
-                    always: true;
-                    corner: Theme.button-radius(parent.height);
+                    Cursor {
+                        shown: NoticeState.cursor == i;
+                        always: true;
+                        corner: Theme.button-radius(parent.height);
+                    }
                 }
             }
         }

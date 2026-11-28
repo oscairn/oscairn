@@ -147,17 +147,25 @@ component Pill inherits Rectangle {
     accessible-checkable: true;
     accessible-checked: root.data.on;
     accessible-label: root.data.label;
-    // A library's count after its name: its own text in the caption size and secondary ink, a gap away, keeping its room
-    // (the selected check and number are never cut; a name too long for the whole bubble is the part that gives way).
-    property <bool> count-shown: root.data.count != "";
+    // A library's count after its name: its own text in the caption size and secondary ink, and it yields space first —
+    // the count is shown only when the name and the number fit side by side; a bubble too narrow for both hides the
+    // count and draws the name whole, so a name is never shortened to borrow the count's room.
+    property <bool> has-count: root.data.count != "";
     count-measure := Text {
         visible: false;
         font-size: Theme.small;
         font-weight: 700;
         text: root.data.count;
     }
-    property <length> count-w: root.count-shown ? min(count-measure.preferred-width, max(0px, self.width - 2 * Theme.pad - root.dot-room - Theme.gap)) : 0px;
-    property <length> name-w: self.width - 2 * Theme.pad - root.dot-room - root.count-w - (root.count-shown ? Theme.gap : 0px);
+    name-measure := Text {
+        visible: false;
+        font-size: Theme.body;
+        text: root.data.label;
+    }
+    property <length> content-w: max(0px, self.width - 2 * Theme.pad - root.dot-room);
+    property <bool> count-shown: root.has-count && (name-measure.preferred-width + count-measure.preferred-width + Theme.gap) <= root.content-w;
+    property <length> count-w: root.count-shown ? count-measure.preferred-width : 0px;
+    property <length> name-w: root.content-w - root.count-w - (root.count-shown ? Theme.gap : 0px);
     if root.data.tinted: Rectangle {
         x: Theme.pad;
         y: (parent.height - self.height) / 2;

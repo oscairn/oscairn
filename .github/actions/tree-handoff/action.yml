@@ -25,7 +25,8 @@ runs:
       run: |
         set -eu
         start=$(date +%s)
-        tar --zstd -cf "$RUNNER_TEMP/tree.tar.zst" "${{ inputs.dir }}"
+        # object files are not needed to run tests (7.5 GB of the sanitizer tree is mostly them)
+        tar --zstd --exclude='*.o' -cf "$RUNNER_TEMP/tree.tar.zst" "${{ inputs.dir }}"
         echo "packed ${{ inputs.dir }}: $(du -sh "${{ inputs.dir }}" | cut -f1) to $(du -sh "$RUNNER_TEMP/tree.tar.zst" | cut -f1) in $(( $(date +%s) - start )) s" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload the build folder

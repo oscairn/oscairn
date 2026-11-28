@@ -127,12 +127,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, shards: 3, shard: 0 }
-          - { os: ubuntu-24.04, shards: 3, shard: 1 }
-          - { os: ubuntu-24.04, shards: 3, shard: 2 }
-          - { os: macos-15, shards: 3, shard: 0 }
-          - { os: macos-15, shards: 3, shard: 1 }
-          - { os: macos-15, shards: 3, shard: 2 }
+          - { os: ubuntu-24.04, shards: 4, shard: 0 }
+          - { os: ubuntu-24.04, shards: 4, shard: 1 }
+          - { os: ubuntu-24.04, shards: 4, shard: 2 }
+          - { os: ubuntu-24.04, shards: 4, shard: 3 }
+          - { os: macos-15, shards: 4, shard: 0 }
+          - { os: macos-15, shards: 4, shard: 1 }
+          - { os: macos-15, shards: 4, shard: 2 }
+          - { os: macos-15, shards: 4, shard: 3 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -158,9 +158,9 @@ commit touches.
 
 **CI test shards.** `ci.yml` builds each tree once (`build`, `thread-sanitizer-build`, `cpp-reference-host-build`: the
 only jobs that restore and save the ccache) and packs the build folder as an artifact (`.github/actions/tree-handoff`:
-a zstd tarball, kept a day; the folder holds absolute paths of the runner's workspace, which are the same on every
-runner of an OS). The test jobs unpack it into the same path and run one shard each: the thread sanitizer 10, Linux 3,
-macOS 3, the C++ host 2. `tools/ci-ctest-shard.sh BUILD_DIR SHARDS SHARD EXCLUDE [COSTS [INCLUDE]]` deals the tests out
+a zstd tarball without the object files, kept a day; the folder holds absolute paths of the runner's workspace, which are the same on every
+runner of an OS). The test jobs unpack it into the same path and run one shard each: the thread sanitizer 10, Linux 4,
+macOS 4, the C++ host 2. `tools/ci-ctest-shard.sh BUILD_DIR SHARDS SHARD EXCLUDE [COSTS [INCLUDE]]` deals the tests out
 by cost, longest first to the shard with the least so far (`tools/ci-costs/*.txt`: seconds per test of 3 s or more, from
 CI logs; a test not named counts 1 s; the costs decide only the balance, never which tests run), and runs the shard's
 tests by exact name. Before it runs, it lists every shard's tests with `ctest -N` and fails the job if a test of the
@@ -169,7 +169,7 @@ cheap fixture setup tests (`test-home-*`) run in every shard. Shard 0 of an OS a
 but no test (the clap-ext check, the production LV2 tests). To change a count, change the matrix and the number in the
 script's arguments together; refresh a costs file from a CI log when the balance drifts (the slowest shard's minutes
 show it). The limit on concurrent jobs: GitHub's documentation gives a Free organization 20 concurrent jobs, 5 of them
-macOS (not verified for this organization; the API reports the plan "free"), so one run's 15 Linux test jobs (and up to 3 builds) and 3
+macOS (not verified for this organization; the API reports the plan "free"), so one run's 16 Linux test jobs (and up to 3 builds) and 4
 macOS ones fit, and several runs at once queue.
 
 **Paths that skip the builds.** The `changes` job of `ci.yml` lists the files a change touches (a pull request against

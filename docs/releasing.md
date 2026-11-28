@@ -172,6 +172,23 @@ show it). The limit on concurrent jobs: GitHub's documentation gives a Free orga
 macOS (not verified for this organization; the API reports the plan "free"), so one run's 16 Linux test jobs (and up to 3 builds) and 4
 macOS ones fit, and several runs at once queue.
 
+**Measured**, job minutes (queue time is not in them). Before: `main` run 46113647163, the caches warm, the thread
+sanitizer in four shards that each built. After: pull request run 46126666243, ccache 99% hits, the shards above.
+
+| Job | Before | After |
+| --- | --- | --- |
+| build-and-test, Linux | 21.2 (setup 0.9, Build 3.3, tests 16.8) | build 1.9, then 4 shards of 4.8 to 7.1 |
+| build-and-test, macOS | 26.0 (setup 1.0, Build 3.0, tests 21.6) | build 1.7, then 4 shards of 5.8 to 7.7 |
+| cpp-reference-host | 13.9 (Build 3.2, tests 9.8) | build 1.1, then 2 shards of 6.1 and 6.3 |
+| thread-sanitizer | 4 shards of 15.2 to 31.3 (each: Build 3.5 to 4.2, tests 11.2 to 26.5) | build 2.2, then 10 shards of 8.0 to 10.3 (each: setup 0.4, take the build 0.6 to 2.7, tests 6.2 to 8.9) |
+| standalone-launch | 9.4 | 3.0 |
+
+The longest path of a run without queueing is the changes job (0.1), the sanitizer build (2.2) and the slowest
+sanitizer shard (10.3): about 13 min, from about 31. Wall times seen, queue included: 18.5 min on a run whose shards
+started promptly, 26.5 min on one whose sanitizer shards waited up to 12 min for runners (other runs share the
+organization's limit). The sanitizer's compute is about the same as before (93 against 99 runner minutes: the four
+rebuilds are replaced by ten downloads of the 2 GB tree); only its wall time fell.
+
 **Paths that skip the builds.** The `changes` job of `ci.yml` lists the files a change touches (a pull request against
 its base, a push against the previous head) and `tools/ci-skippable.sh` says whether any of them can matter: Markdown
 anywhere, `notes/`, `.trail/`, `docs/images/` and `ui/` cannot (`docs/`'s `.json` schemas are read by tests, so they

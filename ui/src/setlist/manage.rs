@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Managing setlists in the Setlist app (issue #41; it was the Library's Setlists tab): the top bar's Manage opens one menu of
-//! three submenus, Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots
+//! three submenus, Setlist (new, rename, tags, description, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots
 //! (add a Performance, add an empty slot, up, down, remove, move to the end of another bank). An edit changes the document the engine gave (`Setlist::doc`) and
 //! saves it whole with `setlists.save`, then the setlists are read again and the one saved shown, the cursor where the edit
 //! left it. A duplicate is `library.copy`, a delete `library.delete`, as the Library's were. Names and tags are asked on the
@@ -26,6 +26,7 @@ pub enum Ask {
     NewSetlist,
     RenameSetlist,
     Tags,
+    Description,
     RenameBank,
 }
 
@@ -41,6 +42,7 @@ mod entry {
     pub const NEW: usize = 1;
     pub const RENAME: usize = 2;
     pub const TAGS: usize = 3;
+    pub const DESCRIPTION: usize = 6;
     pub const DUPLICATE: usize = 4;
     pub const DELETE: usize = 5;
     pub const BANK_NEW: usize = 10;
@@ -85,6 +87,7 @@ impl Screen {
             Item::choice("New setlist...", entry::NEW),
             on(Item::choice("Rename...", entry::RENAME), open),
             on(Item::choice("Tags...", entry::TAGS), open),
+            on(Item::choice("Description...", entry::DESCRIPTION), open),
             on(Item::sub("Color", colors), open),
             on(Item::choice("Duplicate", entry::DUPLICATE), open),
             on(Item::choice("Delete...", entry::DELETE), open),
@@ -165,6 +168,10 @@ impl Screen {
             entry::TAGS => {
                 let tags = s.doc["info"]["tags"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
                 self.ask(Ask::Tags, "Tags, separated by commas", &tags);
+            }
+            entry::DESCRIPTION => {
+                let description = s.doc["info"]["description"].as_str().unwrap_or_default().to_string();
+                self.ask(Ask::Description, "Setlist description", &description);
             }
             entry::DUPLICATE => {
                 let id = s.id.clone();
@@ -304,6 +311,10 @@ impl Screen {
                     None
                 });
             }
+            Some(Ask::Description) => self.save("Description saved.", |d| {
+                d["info"]["description"] = json!(text);
+                None
+            }),
             Some(Ask::RenameBank) => {
                 let page = self.page;
                 self.save("Bank renamed.", |d| {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Managing setlists in the Setlist app (issue #41; the Library's Setlists tab is gone): the top bar's Manage opens the menu of
-//! Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots (add a Performance,
+//! Setlist (new, rename, tags, description, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots (add a Performance,
 //! add an empty slot, up, down, remove, move to the end of another bank). Each is reached with panel moves only (the bar's cursor by the third pane, the dial in the
 //! menus, the keys of the typing keyboard) and asserted by the request the engine received.
 
@@ -192,6 +192,20 @@ fn a_setlist_is_renamed_tagged_and_colored() {
     let sent = saved(&mut f, "manage-info-1");
     assert_eq!(sent["info"]["color"], "#3e63dd");
     assert_eq!(sent["info"]["tags"], json!(["live", "club"]), "the tags kept");
+}
+
+// A setlist's description is asked on the keyboard and saved in the document's info, the banks kept.
+#[test]
+fn a_setlist_description_is_saved() {
+    let mut f = fixture("manage-description", 2);
+    let was = doc("manage-description-1", "Night 1", "list", 2, 4);
+    manage(&mut f, "Setlist", "Description...");
+    assert_eq!(f.screen.ui.global::<KeyboardState>().get_before(), "", "it starts with no description");
+    type_text(&f, "Two sets at the Crown");
+    let sent = saved(&mut f, "manage-description-1");
+    assert_eq!(sent["info"]["description"], "Two sets at the Crown");
+    assert_eq!(sent["info"]["id"], "manage-description-1", "saved over the same setlist");
+    assert_eq!(sent["pages"], was["pages"], "the banks are as they were");
 }
 
 // Duplicate is the engine's library.copy of the setlist open, and the copy is shown after; Delete asks first, and only the

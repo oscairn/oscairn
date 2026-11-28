@@ -27,7 +27,7 @@ use crate::views;
 use crate::{GridBox, GridCard, GridHeading, GridLabel, GridPanel, GridPoint, GridShape, GridState, GridTile, Shell};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model as _, ModelRc, VecModel};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 /// A page with more parameters than this has tabs.
@@ -171,7 +171,14 @@ pub struct Screen {
     /// Where each FM operator's most recent voice is on its envelope (the dots), when the plugin says.
     positions: Vec<Option<views::Along>>,
     pub out: Vec<Out>,
+    /// params.text requests sent and not yet answered, and the ones waiting for an answer to make room: a page asks the text of
+    /// every value of every stepped parameter (hundreds for an FM plugin), paced so no burst is out at once (#341).
+    texts_out: usize,
+    backlog: VecDeque<Out>,
 }
+
+/// How many params.text requests a page has out at once.
+const TEXTS_AT_ONCE: usize = 32;
 
 impl Screen {
     pub fn new(ui: &Shell) -> Screen {
@@ -222,6 +229,8 @@ impl Screen {
             memory: None,
             positions: vec![],
             out: vec![],
+            texts_out: 0,
+            backlog: VecDeque::new(),
         }
     }
 
@@ -419,6 +428,14 @@ impl Screen {
     }
 
     pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
+        if matches!(request, Request::Text(..)) {
+            self.texts_out = self.texts_out.saturating_sub(1);
+            while self.texts_out < TEXTS_AT_ONCE {
+                let Some(next) = self.backlog.pop_front() else { break };
+                self.texts_out += 1;
+                self.out.push(next);
+            }
+        }
         match (request, result) {
             (Request::List, Ok(r)) => self.listed(&r),
             (Request::Values, Ok(r)) => {
@@ -459,8 +476,15 @@ impl Screen {
 
     fn ask_text(&mut self, param: u32, value: f64) {
         let key = (param, value.to_bits());
-        if !self.texts.contains_key(&key) && !self.out.iter().any(|o| o.0 == Request::Text(param, value.to_bits())) {
-            self.out.push((Request::Text(param, value.to_bits()), "params.text", json!({"node": self.node, "param": param, "value": value})));
+        let request = Request::Text(param, value.to_bits());
+        if !self.texts.contains_key(&key) && !self.out.iter().chain(&self.backlog).any(|o| o.0 == request) {
+            let ask = (request, "params.text", json!({"node": self.node, "param": param, "value": value}));
+            if self.texts_out < TEXTS_AT_ONCE {
+                self.texts_out += 1;
+                self.out.push(ask);
+            } else {
+                self.backlog.push_back(ask);
+            }
         }
     }
 

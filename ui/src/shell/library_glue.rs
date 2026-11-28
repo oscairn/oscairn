@@ -94,6 +94,20 @@ impl App {
         self.notice_outcome(outcome);
     }
 
+    /// The notice's scroll bar or a finger drag asked for the window starting at choice `first`.
+    pub(super) fn notice_scroll_to(&mut self, first: i32) {
+        if let Some((_, n)) = self.question.as_mut() {
+            n.scroll_to(first);
+        }
+    }
+
+    /// The window's size changed while a notice was up: the view reshown, so the cursor stays on a choice it shows.
+    pub(super) fn notice_reshown(&mut self) {
+        if let Some((_, n)) = self.question.as_mut() {
+            n.reshown();
+        }
+    }
+
     /// What a question came to: a choice goes to the screen that asked, a close is no choice.
     fn notice_outcome(&mut self, outcome: Option<notice::Outcome>) {
         let choice = match outcome {

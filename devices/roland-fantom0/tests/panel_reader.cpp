@@ -124,6 +124,16 @@ namespace
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "colour": 3})")), "an unknown field");
         auto lamp = [&](const char* name) { for(const auto& c : fantom.controls) if(c.control == name) return c.lamp; return std::optional<uint16_t>{}; };
         check(lamp("play") == 19 && lamp("panLevel") == 53 && lamp("tone16") == 18 && !lamp("dec") && !lamp("stop"), "the FANTOM's lamps by the test tool's numbers, DEC and STOP without one");
+        // The lamps found on 2026-11-28 and put in the map, each by its control's name (docs/fantom-0.md #lamps):
+        // the two wheels' one light covers both (0, not in the map: they are analog); TEMPO (1 and 2), the
+        // four FILTER TYPE lamps (37 to 40) and the red ZONE 1 to 8 (74 to 81) have no single control and stay
+        // in the docs; S1 and S2 (82 and 83) are button:1 and button:2, the ZONE buttons 1 to 8 the green 66 to
+        // 73, and each pad the red 84 to 99 (green 100 to 115 and blue 116 to 131 stay in the docs).
+        check(lamp("button:1") == 82 && lamp("button:2") == 83 &&
+              lamp("button:101") == 66 && lamp("button:102") == 67 && lamp("button:103") == 68 && lamp("button:104") == 69 &&
+              lamp("button:105") == 70 && lamp("button:106") == 71 && lamp("button:107") == 72 && lamp("button:108") == 73 &&
+              lamp("pad:1") == 84 && lamp("pad:8") == 91 && lamp("pad:16") == 99 && !lamp("wheel:1") && !lamp("tempo"),
+            "the lamps found on 2026-11-28, by their control's name: S1 S2, the ZONE buttons in green, the pads in red");
         check(PanelMap::parse(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "lamp": 1023})")).controls[0].lamp == 1023, "a switch's lamp");
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "lamp": 1024})")) && refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "lamp": 3})")), "a lamp past 1023, or on an encoder");
         {

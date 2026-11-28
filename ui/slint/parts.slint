@@ -9,6 +9,7 @@
 // height, so the window, the theme's spacing and the type scale all reflow it.
 
 import { Theme, Section, Button, Cursor, Mark, SliderBar } from "theme.slint";
+import { ScrollBar } from "part.slint";
 
 export struct PartRowData {
     kind: int, // 0 a part, 1 a bus, 2 a node several parts are wired into in Routing
@@ -71,6 +72,11 @@ export global PartsState {
     in-out property <length> row-pitch: 1px;
     in-out property <length> heading-pitch: 0px;
     in-out property <length> slack: 0px; // the gap that a view's last row needs no room for
+    // The list's size and the first row shown, for its scroll bar (0: no bar); how many rows the view holds.
+    in property <int> total;
+    in property <int> first;
+    in-out property <int> per-view: 1;
+    callback scrolled(int); // a drag or a tap on the scroll bar asks for a view's first row
     callback resized();
     callback open(int); // a row's part
     callback level(int, float); // a row, the slider's new place
@@ -171,6 +177,14 @@ component PartRow inherits Section {
     callback send(int, float);
     callback held(int, bool);
     callback mute();
+    // A finger drag on the row's words: once it passes the theme's drag threshold it is a scroll
+    // (`drag-move`, the vertical offset since the press), not a tap; a press and a release within
+    // the threshold are a tap (open).
+    callback drag-move(length);
+    callback drag-end();
+    property <length> press-y: 0px;
+    property <bool> armed: false;
+    property <bool> dragging: false;
     cells := Cells {
         total: root.width;
         buses: root.buses;
@@ -184,7 +198,31 @@ component PartRow inherits Section {
     }
     TouchArea {
         width: cells.info-x + cells.info-w + Theme.gap;
-        clicked => { root.open(); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.press-y = self.mouse-y;
+                root.armed = true;
+                root.dragging = false;
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                if (root.armed && !root.dragging && e.kind == PointerEventKind.up) {
+                    root.open();
+                }
+                root.armed = false;
+                root.dragging = false;
+                root.drag-end();
+            }
+        }
+        moved => {
+            if (root.armed && !root.dragging) {
+                let dy = self.mouse-y - root.press-y;
+                if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                    root.dragging = true;
+                }
+            }
+            if (root.dragging) {
+                root.drag-move(self.mouse-y - root.press-y);
+            }
+        }
     }
     Text {
         x: Theme.pad-narrow;
@@ -421,6 +459,21 @@ export component Parts inherits Rectangle {
     property <length> tools-y: self.height - Theme.margin - footer - Theme.gap - tools-height;
     property <length> list-height: max(0px, tools-y - Theme.gap - list-y);
     property <int> buses: PartsState.bus-names.length;
+    // The scroll bar, when the list is longer than the view: its own lane at the list's right edge, the rows narrower by it.
+    property <bool> long: PartsState.total > PartsState.per-view;
+    property <length> lane: root.long ? Theme.scroll-lane : 0px;
+    // A finger drag on a row scrolls the list: the anchor (the view the drag began at) and the row pitch it follows.
+    property <bool> dz-on: false;
+    property <int> dz-first0: 0;
+    property <length> dz-y0: 0px;
+    property <length> dz-pitch: PartsState.row-pitch;
+    function dz-move(dy: length) {
+        if (!root.dz-on) { root.dz-on = true; root.dz-first0 = PartsState.first; root.dz-y0 = dy; }
+        let up = round((root.dz-y0 - dy) / root.dz-pitch);
+        let target = max(0, min(root.dz-first0 + up, PartsState.total - 1));
+        if (target != PartsState.first) { PartsState.scrolled(target); }
+    }
+    function dz-end() { root.dz-on = false; }
     changed list-height => { PartsState.area-height = list-height; PartsState.resized(); }
     changed row-height => { PartsState.row-pitch = row-height + gap; PartsState.slack = gap; PartsState.resized(); }
     changed heading-height => { PartsState.heading-pitch = heading-height + gap; PartsState.resized(); }
@@ -442,7 +495,7 @@ export component Parts inherits Rectangle {
     VerticalLayout {
         x: Theme.margin;
         y: root.list-y;
-        width: root.width - 2 * Theme.margin;
+        width: root.width - 2 * Theme.margin - root.lane + (root.long ? Theme.scroll-overlap : 0px);
         height: root.list-height;
         spacing: root.gap;
         alignment: start;
@@ -468,8 +521,21 @@ export component Parts inherits Rectangle {
                 send(k, f) => { PartsState.send(i, k, f); }
                 held(cell, down) => { PartsState.held(i, cell, down); }
                 mute => { PartsState.mute(i); }
+                drag-move(dy) => { root.dz-move(dy); }
+                drag-end() => { root.dz-end(); }
             }
         }
+    }
+    bar := ScrollBar {
+        visible: root.long;
+        x: root.width - Theme.margin - Theme.scroll-lane;
+        y: root.list-y;
+        width: Theme.scroll-lane;
+        height: root.list-height;
+        total: PartsState.total;
+        first: PartsState.first;
+        per-view: PartsState.per-view;
+        scrolled(page) => { PartsState.scrolled(page); }
     }
     if PartsState.empty: Text {
         x: Theme.margin;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Managing setlists in the Setlist app (issue #41; the Library's Setlists tab is gone): the top bar's Manage opens the menu of
-//! Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots (add a Performance,
-//! add an empty slot, up, down, remove). Each is reached with panel moves only (the bar's cursor by the third pane, the dial in the
+//! Setlist (new, rename, tags, description, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots (add a Performance,
+//! add an empty slot, up, down, remove, move to the end of another bank). Each is reached with panel moves only (the bar's cursor by the third pane, the dial in the
 //! menus, the keys of the typing keyboard) and asserted by the request the engine received.
 
 use super::setlist_bar::*;
@@ -194,6 +194,20 @@ fn a_setlist_is_renamed_tagged_and_colored() {
     assert_eq!(sent["info"]["tags"], json!(["live", "club"]), "the tags kept");
 }
 
+// A setlist's description is asked on the keyboard and saved in the document's info, the banks kept.
+#[test]
+fn a_setlist_description_is_saved() {
+    let mut f = fixture("manage-description", 2);
+    let was = doc("manage-description-1", "Night 1", "list", 2, 4);
+    manage(&mut f, "Setlist", "Description...");
+    assert_eq!(f.screen.ui.global::<KeyboardState>().get_before(), "", "it starts with no description");
+    type_text(&f, "Two sets at the Crown");
+    let sent = saved(&mut f, "manage-description-1");
+    assert_eq!(sent["info"]["description"], "Two sets at the Crown");
+    assert_eq!(sent["info"]["id"], "manage-description-1", "saved over the same setlist");
+    assert_eq!(sent["pages"], was["pages"], "the banks are as they were");
+}
+
 // Duplicate is the engine's library.copy of the setlist open, and the copy is shown after; Delete asks first, and only the
 // first choice sends library.delete.
 #[test]
@@ -332,6 +346,30 @@ fn slots_are_added_moved_and_removed() {
     assert!(slots(&f)[1].cursor && slots(&f)[1].title == first[2], "the cursor is on what took its place");
 }
 
+// The slot under the cursor moves to the end of another bank, saved whole; with one bank there is no Move to bank.
+#[test]
+fn a_slot_moves_to_another_bank() {
+    let mut f = fixture("manage-move", 2);
+    manage(&mut f, "Slots", "Add a Performance...");
+    assert_eq!(menu(&f).get_title(), "Add a Performance");
+    choose(&mut f, &song(30));
+    let sent = saved(&mut f, "manage-move-1");
+    let want = song(30);
+    assert_eq!(names_of(&sent, 0).last(), Some(&want), "the slot is in the first bank");
+    // The setlist's other bank is offered by name; choosing it moves the slot under the cursor to its end.
+    manage(&mut f, "Slots", "Move to bank...");
+    choose(&mut f, "Bank 2");
+    let sent = saved(&mut f, "manage-move-1");
+    assert!(!names_of(&sent, 0).contains(&want), "gone from the first bank: {:?}", names_of(&sent, 0));
+    assert_eq!(names_of(&sent, 1).last(), Some(&want), "last slot of the other bank");
+    assert_eq!(stops(&f)[1].text, "Bank 2  2/2", "the bank the slot moved to is shown");
+    // With one bank there are no other banks: the action is absent.
+    let mut f = fixture("manage-move-one", 1);
+    bar_press(&mut f, "Manage");
+    choose(&mut f, "Slots");
+    assert!(offered(&f).iter().all(|r| r.0 != "Move to bank..."), "{:?}", offered(&f));
+}
+
 // The Manage Edit by touch (a tap on the bar's Manage, then the group and entry): unlike the panel's bar cursor, the touch
 // path leaves the top bar's cursor clear, so a Page after it reaches the slots (the panel's cursor would swallow it).
 fn manage_touch(f: &mut Fixture, group: &str, entry: &str) {
@@ -344,13 +382,19 @@ fn manage_touch(f: &mut Fixture, group: &str, entry: &str) {
         f.screen.frame();
     };
     tap(f, group);
-    tap(f, entry);
+    for e in entry.split('>') {
+        tap(f, e); // a submenu's entry after its parent: "Move to bank...>Bank 2"
+    }
 }
 
 // Plays slot 1 (p1) to make it the slot being stepped from (`current`), performs the Manage edit `group`>`entry` (which saves
 // the document and reads it again), then a forward step; the step is the one past where the edit left the slot, proving
 // Previous/Next stepped from the right slot after the document changed (issue #338).
 fn plays_then(f: &mut Fixture, id: &str, group: &str, entry: &str, want: &str) {
+    plays_then_step(f, id, group, entry, 1, want);
+}
+
+fn plays_then_step(f: &mut Fixture, id: &str, group: &str, entry: &str, by: i32, want: &str) {
     state(f).invoke_tapped_slot(1);
     let load = f.engine.request();
     assert_eq!(load["params"]["id"], "p1", "{load}");
@@ -358,7 +402,7 @@ fn plays_then(f: &mut Fixture, id: &str, group: &str, entry: &str, want: &str) {
     quiet(f);
     manage_touch(f, group, entry); // the edit: saved and read again, the slot followed
     saved(f, id);
-    shell::act(Action::Page(1)); // Next: what follows the slot `current` points at
+    shell::act(Action::Page(by)); // Next (or Previous): what follows the slot `current` points at
     let next = f.engine.request();
     assert_eq!(next["params"]["id"], want, "stepped from the slot that was playing: {next}");
     f.reply(&next, json!({"result": {}}));
@@ -378,6 +422,8 @@ fn step_follows_a_slot_moved_removed_or_banked() {
     plays_then(&mut f, "remap-remove-1", "Slots", "Remove", "p0"); // p1 gone: none to step from, the first slot
     let mut f = fixture("remap-bank", 2);
     plays_then(&mut f, "remap-bank-1", "Bank", "Move later", "p2"); // p1 now in the second bank: the slot after it there
+    let mut f = fixture("remap-to-bank", 2);
+    plays_then_step(&mut f, "remap-to-bank-1", "Slots", "Move to bank...>Bank 2", -1, "p7"); // p1 at the end of the second bank: Previous is the slot before it there
 }
 
 // A refusal of the save is said in the top bar and nothing else changes.

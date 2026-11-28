@@ -20,6 +20,8 @@ pub enum Outcome {
 pub struct Notice {
     ui: slint::Weak<Shell>,
     choices: usize,
+    /// The first choice the window shows, for its scroll bar (0: no bar); a drag or a tap on the bar asks for one.
+    first: i32,
     at: Option<usize>,
 }
 
@@ -29,15 +31,33 @@ impl Notice {
         state.set_title(title.into());
         state.set_message(message.into());
         state.set_choices(ModelRc::new(VecModel::from(choices.iter().map(|c| SharedString::from(*c)).collect::<Vec<_>>())));
+        state.set_total(choices.len() as i32);
+        state.set_first(0);
         state.set_cursor(-1);
         state.set_open(true);
-        Notice { ui: ui.as_weak(), choices: choices.len(), at: None }
+        Notice { ui: ui.as_weak(), choices: choices.len(), first: 0, at: None }
     }
 
-    fn show(&self) {
-        if let Some(ui) = self.ui.upgrade() {
-            ui.global::<NoticeState>().set_cursor(self.at.map_or(-1, |a| a as i32));
+    /// How many choices the window holds: the panel's, from how the notice fits the window. 0 if unset.
+    fn per_view(&self) -> usize {
+        self.ui.upgrade().map(|ui| ui.global::<NoticeState>().get_per_view().max(1) as usize).unwrap_or(usize::MAX)
+    }
+
+    /// The window's first choice: the cursor sits on a shown one (the view that holds it), so the dial and
+    /// the knobs never move it out of view. How many fit comes from the panel (the window's height).
+    fn show(&mut self) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let state = ui.global::<NoticeState>();
+        let per = self.per_view();
+        let last = self.choices.saturating_sub(1);
+        let first = (self.first as usize).clamp(0, last);
+        if let Some(at) = self.at {
+            if at < first || at >= first + per {
+                self.first = (at / per.max(1)) as i32 * per.max(1) as i32;
+            }
         }
+        state.set_first(self.first);
+        state.set_cursor(self.at.map_or(-1, |a| a as i32));
     }
 
     pub fn close(&mut self) {
@@ -77,6 +97,23 @@ impl Notice {
         Outcome::Stay
     }
 
+    /// The window's size changed (the panel re-fits): the view reshown, so the cursor stays on a shown choice.
+    pub fn reshown(&mut self) {
+        self.show();
+    }
+
+    /// The scroll bar's or a finger drag's window starts at choice `first` (a touch only): a whole window,
+    /// and the cursor, if there is one, drops to the window's first choice so it sits on a shown one.
+    pub fn scroll_to(&mut self, first: i32) {
+        let per = self.per_view().max(1);
+        let last = self.choices.saturating_sub(1);
+        self.first = ((first.max(0) as usize / per) * per).min(last) as i32;
+        if self.at.is_some() {
+            self.at = Some(self.first as usize);
+        }
+        self.show();
+    }
+
     /// A tap on choice `i`.
     pub fn tap(&mut self, i: usize) -> Outcome {
         if i < self.choices {
@@ -95,7 +132,7 @@ mod tests {
     /// A notice with no window: `show` and `close` upgrade an unset weak and are no-ops, so the
     /// cursor and the decisions are what is tested.
     fn notice(choices: usize) -> Notice {
-        Notice { ui: slint::Weak::default(), choices, at: None }
+        Notice { ui: slint::Weak::default(), choices, first: 0, at: None }
     }
 
     #[test]

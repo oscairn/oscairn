@@ -4,6 +4,7 @@
 // buttons down the panel, one under the border cursor. Cancel or a tap outside closes it.
 
 import { Theme, Section, Button, Cursor } from "theme.slint";
+import { ScrollBar } from "part.slint";
 
 export global NoticeState {
     in property <bool> open;
@@ -11,6 +12,12 @@ export global NoticeState {
     in property <string> message;
     in property <[string]> choices;
     in property <int> cursor: -1;
+    // The list's size and the first choice shown, for its scroll bar (0: no bar); how many fit: the panel's.
+    in property <int> total;
+    in property <int> first;
+    in-out property <int> per-view: 1;
+    callback scrolled(int); // a drag or a tap on the scroll bar asks for a choice
+    callback resized(); // the window's size changed: the view reshown
     callback tapped(int);
     callback close();
 }
@@ -18,6 +25,24 @@ export global NoticeState {
 export component Notice inherits Rectangle {
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> panel-width: min(Theme.overlay-width, self.width - 2 * Theme.margin);
+    // How many choices fit under the head (the measured title and message): the scroll bar's per-view.
+    property <int> per: max(1, floor((root.height - 2 * Theme.margin - head-measure.preferred-height - 2 * Theme.gap) / (Theme.touch + root.gap)));
+    property <bool> long: NoticeState.total > root.per;
+    property <length> lane: root.long ? Theme.scroll-lane : 0px;
+    // A finger drag on a choice scrolls the notice: the anchor (the choice the drag began at) and the row pitch.
+    property <bool> dz-on: false;
+    property <int> dz-first0: 0;
+    property <length> dz-y0: 0px;
+    property <length> dz-pitch: Theme.touch + root.gap;
+    function dz-move(dy: length) {
+        if (!root.dz-on) { root.dz-on = true; root.dz-first0 = NoticeState.first; root.dz-y0 = dy; }
+        let up = round((root.dz-y0 - dy) / root.dz-pitch);
+        let target = max(0, min(root.dz-first0 + up, NoticeState.total - 1));
+        if (target != NoticeState.first) { NoticeState.scrolled(target); }
+    }
+    function dz-end() { root.dz-on = false; }
+    changed per => { NoticeState.per-view = per; NoticeState.resized(); }
+    init => { NoticeState.per-view = per; NoticeState.resized(); }
     background: Theme.scrim;
     // A tap outside the panel closes it; one inside is the panel's own.
     TouchArea {
@@ -31,6 +56,17 @@ export component Notice inherits Rectangle {
         fill: Theme.raised;
         clip: true;
         TouchArea { }
+        bar := ScrollBar {
+            visible: root.long;
+            x: parent.width - Theme.scroll-lane - Theme.pad;
+            y: head-measure.preferred-height + Theme.gap;
+            width: Theme.scroll-lane;
+            height: parent.height - head-measure.preferred-height - Theme.pad - Theme.gap;
+            total: NoticeState.total;
+            first: NoticeState.first;
+            per-view: NoticeState.per-view;
+            scrolled(page) => { NoticeState.scrolled(page); }
+        }
         layout := VerticalLayout {
             padding: Theme.pad;
             spacing: root.gap;
@@ -47,18 +83,75 @@ export component Notice inherits Rectangle {
                 font-size: Theme.small;
                 wrap: word-wrap;
             }
-            for choice[i] in NoticeState.choices: Rectangle {
-                height: Theme.touch;
-                Button {
-                    text: choice;
-                    clicked => { NoticeState.tapped(i); }
-                }
-                Cursor {
-                    shown: NoticeState.cursor == i;
-                    always: true;
-                    corner: Theme.button-radius(parent.height);
+            Rectangle {
+                property <int> shown: max(1, min(NoticeState.total, NoticeState.per-view));
+                height: self.shown * Theme.touch + (self.shown - 1) * root.gap;
+                for choice[i] in NoticeState.choices: Rectangle {
+                    // Placed by its place in the window: a hidden row in the layout would still take its room.
+                    y: (i - NoticeState.first) * (Theme.touch + root.gap);
+                    height: Theme.touch;
+                    width: parent.width - root.lane + (root.long ? Theme.scroll-overlap : 0px);
+                    visible: i >= NoticeState.first && i < NoticeState.first + NoticeState.per-view;
+                    property <length> press-y: 0px;
+                    property <bool> armed: false;
+                    property <bool> dragging: false;
+                    Button {
+                        text: choice;
+                        clicked => { NoticeState.tapped(i); }
+                    }
+                    TouchArea {
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                parent.press-y = self.mouse-y;
+                                parent.armed = true;
+                                parent.dragging = false;
+                            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                if (parent.armed && !parent.dragging && e.kind == PointerEventKind.up) {
+                                    NoticeState.tapped(i);
+                                }
+                                parent.armed = false;
+                                parent.dragging = false;
+                                root.dz-end();
+                            }
+                        }
+                        moved => {
+                            if (parent.armed && !parent.dragging) {
+                                let dy = self.mouse-y - parent.press-y;
+                                if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                                    parent.dragging = true;
+                                }
+                            }
+                            if (parent.dragging) {
+                                root.dz-move(self.mouse-y - parent.press-y);
+                            }
+                        }
+                    }
+                    Cursor {
+                        shown: NoticeState.cursor == i;
+                        always: true;
+                        corner: Theme.button-radius(parent.height);
+                    }
                 }
             }
+        }
+    }
+    // The head's own height, measured (the choices' room is what is left of the window): hidden, it only lays out.
+    head-measure := VerticalLayout {
+        visible: false;
+        padding: Theme.pad;
+        spacing: root.gap;
+        Text {
+            text: NoticeState.title;
+            color: Theme.text;
+            font-size: Theme.body;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+        if NoticeState.message != "": Text {
+            text: NoticeState.message;
+            color: Theme.muted;
+            font-size: Theme.small;
+            wrap: word-wrap;
         }
     }
 }

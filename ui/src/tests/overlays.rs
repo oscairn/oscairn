@@ -116,6 +116,37 @@ fn a_notice_is_reached_without_touch() {
     assert!(!ui.global::<NoticeState>().get_open());
 }
 
+// The notice scrolls the same way the shared lists do (issue #269): when it holds more choices than a
+// view fits a scroll bar shows (total > per-view), and the window keeps the cursor on a shown choice:
+// a move past the view turns it, and the bar or a drag turns it too, the cursor on a shown one.
+#[test]
+fn the_notice_scrolls_a_list_longer_than_its_view() {
+    let s = Screen::new();
+    let ui = s.ui.clone_strong();
+    let mut n = Notice::open(&ui, LONG, "Delete these six performances?", &["One", "Two", "Three", "Four", "Five", "Six"]);
+    ui.global::<NoticeState>().set_per_view(2);
+    let ns = ui.global::<NoticeState>();
+    assert!(ns.get_total() > ns.get_per_view(), "a longer list shows the scroll bar: {} choices, {} in a view", ns.get_total(), ns.get_per_view());
+    // A dial move past the last shown choice turns the window so the cursor stays on a shown one
+    // (the first move drops past the window, as a list's does; the second reaches the last choice).
+    n.act(crate::nav::Action::Move { pane: None, by: 5 });
+    n.act(crate::nav::Action::Move { pane: None, by: 5 });
+    let ns = ui.global::<NoticeState>();
+    assert_eq!(ns.get_cursor(), 5, "the cursor is on the last choice");
+    assert!(
+        i64::from(ns.get_cursor()) >= i64::from(ns.get_first()) && i64::from(ns.get_cursor()) < i64::from(ns.get_first()) + i64::from(ns.get_per_view()),
+        "a move keeps the cursor on a shown choice: cursor {}, first {}",
+        ns.get_cursor(),
+        ns.get_first()
+    );
+    assert_eq!(ns.get_first(), 4, "the window turned to the whole view that holds the choice");
+    // The bar or a drag asked for the first choice: the window turns back, the cursor on a shown one.
+    n.scroll_to(0);
+    let ns = ui.global::<NoticeState>();
+    assert_eq!((ns.get_first(), ns.get_cursor()), (0, 0), "a scroll to the first choice: the window and the cursor on it");
+    assert_eq!((ns.get_total(), ns.get_per_view()), (6, 2), "the list and view stay consistent");
+}
+
 // A menu and a notice shown over an at-rest screen cost nothing once they settle: with nothing
 // changing, a tick draws no frame and the window is not animating (the sweep that moves the loading
 // chip is not here).

@@ -3,8 +3,11 @@ name: CI
 env:
   OSCAIRN_REQUIRE_SOCKET_BIND: "1"
 
+# Branches run once, through their pull request; a push runs only on main. A newer push to a pull request
+# cancels the run of the older one.
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -12,6 +15,10 @@ on:
         description: 'Use the build caches (ccache; off: every job builds from nothing and saves nothing)'
         type: boolean
         default: true
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 # The caches (.github/actions/cache-build): actions: write lets a run on main delete the entry it replaces.
 permissions:

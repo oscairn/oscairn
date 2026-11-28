@@ -1061,9 +1061,6 @@ NodeId Session::holding(const fs::path& root,const std::string& key,const std::s
     std::optional<std::string> digest;
     for(const auto& [n,name]:nodes_){
         const auto loaded=loaded_.find(n);if(skip.count(n) || edited_.count(n) || loaded==loaded_.end())continue;
-        // Silent three seconds: take compares it with the file and resets it, or gives it the state again where they differ (a
-        // Sampler loaded fresh saves another state than its file until it is given it again: FANTOM k8). Unseen only what sounds.
-        if(graph_.silent(n,uint64_t(sampleRate_*3)))continue;
         const auto& h=graph_.host(n);
         if(h.descriptor().id!=id || h.descriptor().version!=version || !h.failure().empty() || dynamic_cast<const SoundContext*>(&h))continue;
         // An earlier change's tail still ringing out of it: its ring-out routes are this node's, which a kept instance leaves behind.
@@ -1075,10 +1072,15 @@ NodeId Session::holding(const fs::path& root,const std::string& key,const std::s
         bool same=loaded->second.source==source;
         if(const auto s=stateOf_.find(n);!same && s!=stateOf_.end() && !s->second.empty()){if(!digest)digest=stateDigest(folder);same=*digest==s->second;}
         if(!same)continue;
-        // An engine offering effect contexts (issue 340): kept as it is, its tail going on, only alone in its group (no other node a context
-        // of it) and opened from this very file (its source, not a state of the same bytes: a file saved again may wire it otherwise);
-        // else it goes by slice 1, as before.
-        try{if(h.effectResources() && (graph_.effectSource(n,{n})!=n || loaded->second.source!=source))continue;}catch(const std::exception&){continue;}
+        // Silent three seconds: take compares it with the file and resets it, or gives it the state again where they differ (a
+        // Sampler loaded fresh saves another state than its file until it is given it again: FANTOM k8). Unseen only what sounds.
+        // An engine offering effect contexts (issue 340) is never taken over (slice 1), so it is kept as it is, its tail going on, silent
+        // or not (silent ones loaded afresh at every reload: TSO's 11 effects behind its silent parts and buses, FANTOM x1), only alone in
+        // its group (no other node a context of it) and opened from this very file (its source, not a state of the same bytes: a file
+        // saved again may wire it otherwise); else it goes by slice 1, as before.
+        bool effect=false;try{effect=h.effectResources().has_value();}catch(const std::exception&){continue;}
+        if(!effect && graph_.silent(n,uint64_t(sampleRate_*3)))continue;
+        if(effect && (graph_.effectSource(n,{n})!=n || loaded->second.source!=source))continue;
         return n;}
     return 0;
 }

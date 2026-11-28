@@ -7,6 +7,8 @@ target_include_directories(oscairn_control PUBLIC include)
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSION="${PROJECT_VERSION}") # what a package's requires.oscairn is checked against (RFC 0031)
 # The release, with its pre-release label (the top-level CMakeLists.txt): what preinstalled.json records the packages that come with it under (RFC 0031).
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
+# RFC 0043: the worker a version move opens plugins in when the placement policy names none and none is beside the program.
+target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSIONS_WORKER="$<TARGET_FILE:oscairn-plugin-worker>")
 target_link_libraries(oscairn_control PUBLIC oscairn_engine PRIVATE $<$<PLATFORM_ID:Linux>:m>)
 target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 
@@ -189,11 +191,16 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
 add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn-test-sampler>)
-# The independent review's cases (RFC 0043): here any other build stands for version 2, as only the claim's record is checked.
+# The independent review's cases (RFC 0043): claims, a failed swap, crashes at each step, worker isolation.
 add_executable(oscairn-moves-review-test tests/moves_review.cpp)
 target_link_libraries(oscairn-moves-review-test PRIVATE oscairn_control)
 add_dependencies(oscairn-moves-review-test oscairn-sign)
-add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:oscairn-sign>)
+add_dependencies(oscairn-moves-review-test oscairn-plugin-worker kick-clap-fixture-v2 kick-clap-fixture-v2_hang kick-clap-fixture-v2_hog)
+add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-moves-review-isolation COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>
+    isolation $<TARGET_FILE:kick-clap-fixture-v2_hang> $<TARGET_FILE:kick-clap-fixture-v2_hog>)
+set_tests_properties(control-moves-review PROPERTIES TIMEOUT 300)
+set_tests_properties(control-moves-review-isolation PROPERTIES TIMEOUT 300 ENVIRONMENT "OSCAIRN_WORKER_MEMORY_MB=256")
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)

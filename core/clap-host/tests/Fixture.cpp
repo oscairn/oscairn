@@ -57,7 +57,8 @@ const char* instrument[]{CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYN
 const char* effect[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
 // The kick-clap-fixture-v2* builds are version 2 of the same plugins (RFC 0043's moves): v2 reads version 1's
 // state as it is, v2_changed reads its gain at half, v2_ports has a stereo output where version 1 has mono.
-#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports)
+// v2_hang never returns from a state load (two minutes), v2_hog takes 1 GiB in one (a version move's worker limits).
+#if defined(FIXTURE_v2) || defined(FIXTURE_v2_changed) || defined(FIXTURE_v2_ports) || defined(FIXTURE_v2_hang) || defined(FIXTURE_v2_hog)
 #define FIXTURE_VERSION "2"
 #else
 #define FIXTURE_VERSION "1"
@@ -367,6 +368,12 @@ struct Plugin {
                 if (in->read(in, &value, sizeof(value)) != sizeof(value) || !std::isfinite(value)) return false;
 #ifdef FIXTURE_v2_changed
                 value *= .5;
+#endif
+#ifdef FIXTURE_v2_hang
+                std::this_thread::sleep_for(std::chrono::seconds(120));
+#endif
+#ifdef FIXTURE_v2_hog
+                { const size_t n = size_t(1) << 30; auto* m = new char[n]; for(size_t i = 0; i < n; i += 4096) m[i] = 1; static volatile char* keep; keep = m; std::this_thread::sleep_for(std::chrono::seconds(5)); }
 #endif
                 // After the gain, optionally a sound asset ("library\0path"), which must resolve, as a
                 // sampler's state with a library reference must (RFC 0009).

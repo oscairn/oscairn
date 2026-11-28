@@ -194,7 +194,10 @@ Performance, moves at a time, after **Compare** or **Move without comparing**
 
 Each move keeps, per item, the item as it was before (its whole folder, as the state is rewritten
 too, [above](#what-it-does-to-a-document)) in the data folder under `Moves/<move>/`, with the revision the
-move wrote. **Undo** puts back each item whose revision is still the one the move wrote; an item
+move wrote. The swap runs under a journal, `Moves/<move>/move.json`, written durably before the first
+rename and settled from the disk at the next start after a crash, so the library always shows every
+item, old or new. Because the item as it was is kept by a rename into `Moves/`, an item whose folder
+is outside the data folder or on another drive cannot move; the plan says so for that item. **Undo** puts back each item whose revision is still the one the move wrote; an item
 saved since is not touched and is listed ("Warm Pad was saved since; open it to move it back by
 hand"). Kept moves are listed in Installed content and are a retention root for the old version
 ([below](#what-keeps-a-version)) until the musician chooses **Forget** on them; nothing forgets
@@ -309,7 +312,11 @@ builds in the same archive. **And it honors it only for the same publisher:** a 
 the old version moves under the claim only when the old version's build in the store carries a
 signature by that same key (its `<bundle>.sig`), or, with the old build not installed, when a
 repository's index lists the old version under the same publisher key. Otherwise the move is
-offered as without a claim.
+offered as without a claim. **Decided by the coordinator, 2026-11-28 (for the owner to confirm):**
+the claim also counts only while its key is, at the time of the move, a key the trust store trusts
+for plugins and has not revoked; an untrusted or revoked claim key means no claim (one item at a
+time, with `withoutClaim`). This also closes the case of an old build that is not installed whose
+public bytes someone else signs.
 
 `oscairn-sign plugin-package` gains `--opens-state-from <id> <version>` and
 `--sound-changes <id> <text>`.

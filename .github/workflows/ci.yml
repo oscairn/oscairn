@@ -23,12 +23,14 @@ permissions:
 # are exactly the whole list); the built folder goes to the shards as an artifact (.github/actions/tree-handoff).
 jobs:
   changes:
-    # A change that touches only Markdown, notes/, .trail/, docs/images/ or ui/ cannot change what a build or a test
+    # A change that touches only Markdown, notes/, .trail/ or docs/images/ cannot change what a build or a test
     # does (tools/ci-skippable.sh says which paths): the build jobs are skipped, and "CI result" at the end still
-    # passes, so it is the one check a branch rule can require.
+    # passes, so it is the one check a branch rule can require. The ui-rust job runs when ui/, the profiles and
+    # themes it embeds, or the workflows change, and not for a change to the C++ alone.
     runs-on: ubuntu-24.04
     outputs:
       build: ${{ steps.diff.outputs.build }}
+      ui: ${{ steps.diff.outputs.ui }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,9 +48,11 @@ jobs:
           if [ -n "$base" ] && git diff --name-only "$base" HEAD > changed.txt 2> /dev/null; then
             cat changed.txt
             tools/ci-skippable.sh < changed.txt | tee -a "$GITHUB_OUTPUT"
+            tools/ci-skippable.sh --ui < changed.txt | tee -a "$GITHUB_OUTPUT"
           else
             echo "no base to compare with: everything runs"
             echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "ui=true" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -224,6 +228,47 @@ jobs:
             build/production-results/results.json
             build/x42-production-results/results.json
           if-no-files-found: ignore
+
+  ui-rust:
+    # The Rust UI (ui/) is built by no other CI job (OSCAIRN_UI is off): its tests, which render headless through Slint's
+    # software renderer, and clippy with warnings as errors, as docs/rust-ui.md's gate. Dependencies come from crates.io
+    # at ui/Cargo.lock (--locked), the vendored KMS backend by the patch in ui/Cargo.toml. Not run here: the tests that
+    # need the engine (OSCAIRN_ENGINE) or the JUCE app (OSCAIRN_APP) skip themselves without them.
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the libraries the desktop backend builds against
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev
+      - name: Install Rust 1.95.0 (ui/rust-toolchain.toml's release)
+        run: tools/install-rust.sh
+      - name: Restore cargo
+        id: cargo
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/target
+          # Everything cargo's own fingerprints do not decide: the toolchain, the lock, the manifest and the vendored crates.
+          key: cargo-ci-ui-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ui/rust-toolchain.toml', 'ui/Cargo.lock', 'ui/Cargo.toml', 'ui/vendor/**', 'CMakeLists.txt') }}
+        if: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+      - name: Test
+        working-directory: ui
+        run: cargo test --locked
+      - name: Clippy
+        working-directory: ui
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Save cargo
+        if: ${{ !cancelled() && steps.cargo.outputs.cache-hit != 'true' && github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/target
+          key: cargo-ci-ui-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ui/rust-toolchain.toml', 'ui/Cargo.lock', 'ui/Cargo.toml', 'ui/vendor/**', 'CMakeLists.txt') }}
 
   standalone-launch:
     # The desktop app (JUCE) is otherwise never built; this builds it and runs the desktop-launch
@@ -428,7 +473,7 @@ jobs:
     # was cancelled or never ran for another reason. The one name a branch rule requires.
     name: CI result
     if: always()
-    needs: [changes, build, build-and-test, standalone-launch, thread-sanitizer-build, thread-sanitizer, cpp-reference-host-build, cpp-reference-host]
+    needs: [changes, ui-rust, build, build-and-test, standalone-launch, thread-sanitizer-build, thread-sanitizer, cpp-reference-host-build, cpp-reference-host]
     runs-on: ubuntu-24.04
     steps:
       - name: Every job passed or was skipped
@@ -439,4 +484,5 @@ jobs:
           echo "$NEEDS" | grep '"result"'
           if echo "$NEEDS" | grep -q '"result": "\(failure\|cancelled\)"'; then echo "a job failed or was cancelled" >&2; exit 1; fi
           # skipped is right only for a change that skips the builds
-          if [ "$BUILD" = true ] && echo "$NEEDS" | grep -q '"result": "skipped"'; then echo "a job was skipped though the change builds" >&2; exit 1; fi
+          # (ui-rust is skipped for a change to the C++ alone, whatever else)
+          if [ "$BUILD" = true ] && echo "$NEEDS" | jq -e 'del(.["ui-rust"]) | [.[].result] | index("skipped")' > /dev/null; then echo "a job was skipped though the change builds" >&2; exit 1; fi

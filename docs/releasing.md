@@ -191,12 +191,18 @@ rebuilds are replaced by ten downloads of the 2 GB tree); only its wall time fel
 
 **Paths that skip the builds.** The `changes` job of `ci.yml` lists the files a change touches (a pull request against
 its base, a push against the previous head) and `tools/ci-skippable.sh` says whether any of them can matter: Markdown
-anywhere, `notes/`, `.trail/`, `docs/images/` and `ui/` cannot (`docs/`'s `.json` schemas are read by tests, so they
+anywhere, `notes/`, `.trail/` and `docs/images/` cannot (`docs/`'s `.json` schemas are read by tests, so they
 build). When none can, the build jobs, and so the test jobs, are skipped, and the last job, `CI result`, passes: it
 is the one name a branch rule should require, since a skipped matrix job reports under no name a rule could list.
-`ui/` is skipped because `ci.yml` builds `oscairn-ui` nowhere (`OSCAIRN_UI` is off; only the release workflow builds
-it) and no C++ test reads it; the Rust CLAP host (`core/clap-host/rust`) is not under `ui/`, so its coverage is
-unchanged. It also means a change to `ui/` is built and tested by no CI job at all today.
+
+**The `ui-rust` job** builds the Rust UI, which no other CI job does (`OSCAIRN_UI` is off; only the release workflow
+builds `oscairn-ui`): `cargo test --locked` (every test renders headless through Slint's software renderer) and
+`cargo clippy --locked --all-targets -- -D warnings`, on Linux, in `ui/`, with crates from crates.io at `ui/Cargo.lock`
+and the vendored KMS backend by the patch in `ui/Cargo.toml`. The tests that need the real engine (`OSCAIRN_ENGINE`) or the
+JUCE app (`OSCAIRN_APP`) are not given them here, and skip themselves. It runs when `ui/`, `hosts/standalone/profiles`,
+`hosts/standalone/themes` (which `ui/build.rs` embeds) or `.github/` change (`tools/ci-skippable.sh --ui`), so a change
+to `ui/` alone runs it and skips the C++ builds, and a change to the C++ alone skips it. Cached: `~/.cargo/registry` and
+`ui/target`, keyed by the toolchain, `Cargo.lock`, `Cargo.toml` and `ui/vendor`. Not on macOS: its runners are the scarce ones.
 
 ## The FANTOM-0 bundle
 

@@ -290,9 +290,6 @@ fn the_scroll_bar_sits_close_to_the_list() {
         let k = 1.55;
         let lane_left = ui.get_list_x() + ui.get_lane_x();
         assert!(t.get_scroll_lane() >= t.get_touch() - 0.01, "{name}: the lane is a touch target");
-        // The icons end a padding short of the row's edge: the lane starts where they end, not over them.
-        let star_right = lane_left + t.get_scroll_overlap() - t.get_pad();
-        assert!(lane_left >= star_right - 0.01, "{name}: the lane {lane_left} overlaps the star's end {star_right}");
         // The bar fills the lane: its width is the lane less a side margin from each side (Part's list is not flush).
         let pad = t.get_scroll_pad();
         let lane = t.get_scroll_lane();

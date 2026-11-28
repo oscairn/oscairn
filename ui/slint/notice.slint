@@ -81,6 +81,9 @@ export component Notice inherits Rectangle {
                 y: 0px;
                 width: parent.width;
                 padding: Theme.pad;
+                // The bar's lane is kept clear of the content once the bar shows (`bar-on`, set by the `changed long` below, not
+                // bound to `long`, so the narrower content cannot loop back into it: narrower is only taller, so it stays long).
+                padding-right: Theme.pad + (NoticeState.bar-on ? Theme.scroll-lane : 0px);
                 spacing: root.gap;
                 Text {
                     text: NoticeState.title;

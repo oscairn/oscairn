@@ -146,13 +146,11 @@ export global Theme {
     out property <float> rail-label-share: 0.16;
     // A list's scroll bar (touch aid only): its own lane (the touch target) and the thumb's least length. The visible bar fills
     // the lane, a small side margin (`scroll-pad`) from each side, and keeps a touch target wide by default (`scroll-lane` is the
-    // shared ScrollBar's default width; the bar draws `given width` less the side margins). The lane begins over the row's right
-    // padding (`pad`, where no icon is: the star and the warning end a padding short of the row's edge), so a tap on them is the
-    // row's, never the lane's.
+    // shared ScrollBar's default width; the bar draws `given width` less the side margins). The lane begins at the rows' edge, so
+    // a tap on a row's star or warning is the row's, never the lane's, and the bar never draws over a row.
     in-out property <length> scroll-lane: touch;
     out property <length> scroll-pad: pad-tight;
     out property <length> scroll-thumb-min: touch;
-    out property <length> scroll-overlap: pad;
     // A finger drag on a list's rows becomes a scroll (not a tap) once it has moved this far.
     in-out property <length> scroll-drag-threshold: touch / 4;
     // Compact (the Library's): the spacing scale at its 0.7 step (ui/LIBRARY-APP.md), applied to the gaps between a list's rows and a

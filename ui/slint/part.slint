@@ -361,7 +361,7 @@ export component Part inherits Rectangle {
     for row[i] in PartState.rows: Row {
         x: Theme.margin;
         y: root.list-y + i * (Theme.touch + root.gap);
-        width: root.list-width - root.lane + (root.long ? Theme.scroll-overlap : 0px);
+        width: root.list-width - root.lane;
         height: Theme.touch;
         data: row;
         tapped => { PartState.tapped(i); }

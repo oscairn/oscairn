@@ -222,8 +222,8 @@ export component Library inherits Rectangle {
         root.sd-on = false;
     }
     // What the entries share across: the sidebar less its lane (kept in bubbles whether or not a bar shows, so that the lines
-    // that wrap do not change with the bar) and the overlap the rows take.
-    property <length> side-room: max(0px, root.side-width - (LibraryState.bubbles || root.side-long ? Theme.scroll-lane - Theme.scroll-overlap : 0px));
+    // that wrap do not change with the bar).
+    property <length> side-room: max(0px, root.side-width - (LibraryState.bubbles || root.side-long ? Theme.scroll-lane : 0px));
     changed side-room => { LibraryState.side-room = root.side-room; LibraryState.side-resized(); }
     changed side-height => { LibraryState.side-height = root.side-height; LibraryState.side-resized(); }
     property <bool> side-long: LibraryState.side-total > root.side-per-view;

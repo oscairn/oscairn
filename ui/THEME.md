@@ -281,7 +281,7 @@ sidebar entry and a list item as drawn, in the default theme and the blue square
 
 ## The scroll bar fills its lane (2026-11-28, issue #269)
 
-The lane stays a touch target wide (`scroll-lane`, 44) and the visible bar fills it: the bar is `Theme.scroll-pad` (a tight padding) from each side, so there is no band of empty lane beside it. The lane begins over the rows' right padding (`Theme.scroll-overlap`, one `pad`: the star and the warning icon end a padding short of a row's edge, so a tap on them is the row's, never the lane's), and a bar on the screen's or a modal's edge drops its outer (right) margin (`ScrollBar.flush`, set on the modals: the menu, the dropdown, the notice) so it sits flush against that edge. The rows are wider by the overlap while a bar is shown, in the shared list and in the Library's sidebar. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the bar's left as drawn, in both themes.
+The lane stays a touch target wide (`scroll-lane`, 44) and the visible bar fills it: the bar is `Theme.scroll-pad` (a tight padding) from each side, so there is no band of empty lane beside it. The lane begins at the rows' edge (the rows are not widened over it: a bar drawn only a tight padding into a lane that began over the rows' padding would cover their borders), and a bar on the screen's or a modal's edge drops its outer (right) margin (`ScrollBar.flush`, set on the modals: the menu, the dropdown, the notice) so it sits flush against that edge. Test: `the_scroll_bar_sits_close_to_the_list` (src/tests/owner.rs) reads the bar's left as drawn, in both themes.
 
 ## Compact and the sidebar's views (2026-11-17)
 

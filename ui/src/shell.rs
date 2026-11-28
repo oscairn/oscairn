@@ -51,7 +51,7 @@ mod wait_glue;
 
 pub use settings_glue::theme_followed;
 #[cfg(test)]
-pub use settings_glue::{settings_folders, settings_in_rust};
+pub use settings_glue::{settings_files_dir, settings_folders, settings_in_rust};
 
 /// What each request is for, so its answer goes where it belongs.
 pub enum Request {
@@ -430,6 +430,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     menu.on_back(|| with_app(|a| a.menu_back()));
     menu.on_close(|| with_app(|a| a.close_menu()));
     menu.on_turn(|by| with_app(|a| a.menu_turn(by)));
+    menu.on_scrolled(|first| with_app(|a| a.menu_scroll_to(first)));
     menu.on_resized(|| with_app(|a| a.menu_shown()));
     ui.global::<crate::LibraryState>().on_show_page(|i| with_app(|a| a.on_library(|l| l.tap_page(i.max(0) as usize))));
     ui.global::<crate::LibraryState>().on_search_tapped(|| with_app(|a| a.library_act(|l| l.ask_search())));
@@ -453,6 +454,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     grid.on_show_page(|k| with_app(|a| a.on_params(|p| p.show_page(k))));
     grid.on_show_tab(|k| with_app(|a| a.on_params(|p| p.show_tab(k))));
     grid.on_scrolled(|by| with_app(|a| a.on_params(|p| p.scrolled(by))));
+    grid.on_list_scrolled(|first| with_app(|a| a.on_params(|p| p.list_scroll_to(first))));
     grid.on_view_down(|v, x, y| {
         let mut taken = false;
         with_app(|a| taken = a.on_params(|p| p.view_down(v, x, y)));
@@ -1839,6 +1841,13 @@ impl App {
     fn menu_turn(&mut self, by: i32) {
         if let Some((_, m)) = self.menu.as_mut() {
             m.turn(by);
+        }
+    }
+
+    /// The menu's scroll bar or a finger drag asked for the view starting at row `first`.
+    fn menu_scroll_to(&mut self, first: i32) {
+        if let Some((_, m)) = self.menu.as_mut() {
+            m.scroll_to(first);
         }
     }
 

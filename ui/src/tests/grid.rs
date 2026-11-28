@@ -328,6 +328,36 @@ fn every_control_by_touch() {
     assert_eq!(names(ui), ["Gain"]);
 }
 
+// The dropdown over a plugin's page (the sound block's parameters) scrolls the same way the shared
+// lists do (issue #269): when it holds more values than a view a scroll bar shows (the list is longer
+// than its view), a drag or the bar turns the view to the value asked, and the cursor stays on a
+// shown row when the dial moves it.
+#[test]
+fn the_dropdown_list_scrolls_when_longer_than_a_view() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let mut p = open(&mut s, every_kind(), &every_kind_values());
+    // A small view, so the list holds more than it: the scroll bar shows.
+    ui.global::<crate::GridState>().set_list_per_view(2);
+    p.shown();
+    p.tap(5, -1); // the Wave list opens, six values, more than two fit
+    let g = ui.global::<crate::GridState>();
+    assert!(g.get_list_open(), "the list is open");
+    let total = g.get_list().row_count();
+    assert!(total > (g.get_list_per_view() as usize), "a longer list shows its scroll bar: {total} values, {} in view", g.get_list_per_view());
+    // The bar or a drag asked for a deep value: the view turns, page-aligned, the cursor on a shown row.
+    p.list_scroll_to(total as i32);
+    let per = (g.get_list_per_view().max(1)) as usize;
+    assert!((g.get_list_first() as usize) >= total - per, "the view turned near the end: first {} of {total}", g.get_list_first());
+    assert!((g.get_list_cursor() as usize) < (g.get_list_first() as usize) + per, "the cursor is on a shown row after the scroll");
+    // A dial move past the last shown value keeps the cursor on a shown row.
+    p.act(Action::Move { pane: None, by: 100 });
+    assert!((g.get_list_cursor() as usize) >= (g.get_list_first() as usize) && (g.get_list_cursor() as usize) < (g.get_list_first() as usize) + per, "a move keeps the cursor on a shown row: cursor {}, first {}", g.get_list_cursor(), g.get_list_first());
+    // Cancel still closes it.
+    p.act(Action::Cancel(None));
+    assert!(!g.get_list_open());
+}
+
 // The columns follow the width the grid is given: two to six.
 #[test]
 fn the_grid_reflows_for_the_width() {

@@ -1129,11 +1129,15 @@ power-on, with a way back to Roland's app at each one. `go.sh` does, in order: `
 `oscairn-fantom-boot` ([source](../devices/roland-fantom0/bundle/oscairn-fantom-boot)) runs just
 before that last line.
 
-**Oscairn starts at once** (`oscairn-fantom-start --cold`), in Roland's app's place: a cold
-start now has sound ([The cold start's audio](#the-cold-starts-audio)). The file `roland-first`
-in the boot folder keeps the takeover instead (items 2 and 3): Roland's app first, then Oscairn,
-roughly the settle time (below) plus Oscairn's own start later. Before November 25 a cold start
-gave no sound at the outputs, though the engine's ALSA output (`hw:1,0`) ran.
+**The cold start is the default path:** the boot script gives the instrument to Oscairn at once,
+in Roland's app's place, running `oscairn-fantom-start --cold`, which does for itself what Roland's
+app does at its start for the panel and the outputs
+([The cold start's audio](#the-cold-starts-audio)). Roland's app first is the other path, asked
+for either by the file `roland-first` in the boot folder, which keeps the takeover instead (items
+2 and 3: Roland's app first, then Oscairn roughly the settle time (below) plus Oscairn's own
+start later), or by the TEMPO tap of item 1, which leaves this boot to Roland's app alone.
+Before November 25 a cold start gave no sound at the outputs, though the engine's ALSA output
+(`hw:1,0`) ran.
 
 1. **Roland's app alone when asked for:** TEMPO **pressed** while Roland's FANTOM picture shows,
    within `OSCAIRN_BOOT_TAP_SECS` seconds (2) of the script's start, about 1 s after power-on

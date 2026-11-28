@@ -491,9 +491,11 @@ fn installed_and_available_reachable_from_home_by_panel_moves() {
         let want = pages.iter().position(|p| p == want).expect("the rail names the page") as i32;
         let mut tries = 0;
         while ui.global::<crate::SettingsState>().get_page_cursor() != want {
-            nav(s, "move", 1);
+            // The rail enters on the page shown; a page before it needs a step back, then forward onto it.
+            let step = if ui.global::<crate::SettingsState>().get_page_cursor() > want { -1 } else { 1 };
+            nav(s, "move", step);
             tries += 1;
-            assert!(tries <= 9, "the rail reaches the page");
+            assert!(tries <= 20, "the rail reaches the page");
         }
         nav(s, "confirm", 1);
         s.serve();
@@ -637,11 +639,14 @@ fn signing_keys_page_is_a_no_touch_walk() {
         s.f.pump();
         s.serve();
     };
-    // From Home the dial alone: five moves out of the first read's baseline put the cursor on the Settings
-    // tile, a press opens the Rust app.
-    nav(&mut s, "move", 0); // the first read: a baseline
-    for _ in 0..5 {
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (the one named so) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !s.ui().global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
         nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
     }
     nav(&mut s, "confirm", 1);
     s.serve();
@@ -705,4 +710,396 @@ fn signing_keys_page_is_a_no_touch_walk() {
     let ui = s.ui();
     assert!(rows(&ui).iter().any(|r| r.label == "stage"), "the new key is listed: {:?}", labels(&ui));
     assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one key made");
+}
+
+// A no-touch walk of the Audio page: from Home by the panel's moves alone, up to the page rail and along it to
+// the Audio tab, a press shows it, then every row the page shows (Output, Input, Sample rate, Buffer size) is
+// walked by the dial and pressed, each choice laid down and held against the `audio.set` the fake engine got with
+// its parameters, the count the page's own rows give (never a hard-coded one) and no row twice. Only a profile
+// that does not fix its audio device has the Audio page, so the walk runs on a computer.
+#[test]
+fn audio_page_is_a_no_touch_walk() {
+    let mut e = Fake::new();
+    // The two outputs offer the same rates and sizes, so the menus do not shift when the open device changes.
+    e.audio.outputs = vec![
+        super::settings_fake::dev("Room", &[44100, 48000, 96000], &[64, 128, 256, 512]),
+        super::settings_fake::dev("Stage", &[44100, 48000, 96000], &[64, 128, 256, 512]),
+    ];
+    e.audio.output = "Room".into();
+    e.audio.inputs = vec![
+        super::settings_fake::dev("Mic In", &[48000], &[128]),
+        super::settings_fake::dev("Line In", &[48000], &[128]),
+    ];
+    e.audio.input = "Mic In".into();
+    e.audio.rate = 48000;
+    e.audio.size = 128;
+    let mut s = Shelf::on("w15-audio-walk", None, e);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (always the last one the screen offers) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !ui.global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    // The Audio page is a tab of this computer's app: where it sits among the pages the screen shows.
+    let audio_tab = {
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        pages.iter().position(|p| p == "Audio").expect("a computer's app has the Audio page") as i32
+    };
+    // Up to the page rail (not the top bar), along to the Audio tab, a press shows it.
+    nav(&mut s, "move", -1);
+    nav(&mut s, "move", -1);
+    assert!(ui.global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+    let mut tries = 0;
+    while ui.global::<crate::SettingsState>().get_page_cursor() != audio_tab {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries <= audio_tab as usize + 1, "the rail reaches the Audio tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.global::<crate::SettingsState>().get_page(), audio_tab, "a press shows the Audio page");
+    assert_eq!(title(&ui), "Settings › Audio");
+    // Down past the rail's last tab to the list: the cursor on its first row (Output).
+    while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+        nav(&mut s, "move", 1);
+    }
+    // Every row the page shows, walked and pressed: each choice laid down is one `audio.set` of that choice alone,
+    // its parameters held. The walk visits as many rows as the page shows, none twice.
+    let n = rows(&ui).len();
+    assert!(n >= 4, "Output, Input, Sample rate and Buffer size all show (the fake has inputs): {n} rows");
+    for step in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        let label = rows(&ui)[step].label.to_string();
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert!(ui.global::<crate::MenuState>().get_open(), "{label}: the press opens its choice");
+        // The current choice is ticked; the dial walks one choice on and turns the menu a page at a time
+        // until a different (unticked) one has the cursor — every choice row offers more than the current,
+        // so one always differs — and a press lays that one down as one `audio.set`.
+        nav(&mut s, "move", 1);
+        s.serve();
+        let mut guards = 0;
+        while ui.global::<crate::MenuState>().get_rows().iter().any(|r| r.cursor && r.tick == 1) {
+            nav(&mut s, "move", 1);
+            s.serve();
+            guards += 1;
+            assert!(guards < 8, "{label}: the dial reaches a different choice");
+        }
+        let chose = ui.global::<crate::MenuState>().get_rows().iter().find(|r| r.cursor).map(|r| r.label.to_string()).expect("{label}: the menu has the cursor");
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert!(!ui.global::<crate::MenuState>().get_open(), "{label}: the choice closed the menu");
+        let called = s.e.called("audio.set").last().cloned().expect("{label}: a laid-down choice is one audio.set");
+        match label.as_str() {
+            "Output" => assert_eq!(called, json!({"output": chose}), "{label}: the choice sets that output"),
+            "Input" => assert_eq!(called, json!({"input": chose}), "{label}: the choice sets that input"),
+            "Sample rate" => {
+                let rate: i64 = chose.split_whitespace().next().unwrap().parse().unwrap();
+                assert_eq!(called, json!({"sampleRate": rate}), "{label}: the choice sets that rate");
+            }
+            "Buffer size" => {
+                let size: u32 = chose.split_whitespace().next().unwrap().parse().unwrap();
+                assert_eq!(called, json!({"bufferSize": size}), "{label}: the choice sets that size");
+            }
+            other => panic!("a row the walk did not expect: {other}"),
+        }
+        if step + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+}
+
+
+// A no-touch walk of the Package repositories page: from Home by the panel's moves alone, then every row the
+// page's own model shows (never a hard-coded count) is walked by the dial and pressed to its real effect — a
+// repository's row turns its switch, the engine's `packages.enableRepository` naming that address, and the Add
+// row's press opens the keyboard, the address typed, the listing read and kept: `packages.list`, the job polled,
+// `packages.addRepository`, and the new repository listed.
+#[test]
+fn package_repositories_page_is_a_no_touch_walk() {
+    let oscairn = "https://packages.oscairn.org";
+    let friend = "https://packages.friend.org";
+    let more = "https://packages.more.org";
+    let key = "33".repeat(32);
+    let mut e = Fake::new();
+    e.repos = vec![
+        super::settings_fake::Repo {
+            address: oscairn.into(),
+            name: "Oscairn".into(),
+            key: "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841".into(),
+            origin: "official".into(),
+            enabled: true,
+        },
+        super::settings_fake::Repo { address: friend.into(), name: "Friend Sounds".into(), key: key.clone(), origin: "user".into(), enabled: true },
+    ];
+    e.sources = vec![(more.into(), super::settings_fake::Reads::Done("More Sounds".into(), key.clone()))];
+    e.trusted.push(key.clone());
+    let mut s = Shelf::with("w17-repos-walk", e);
+    shell::set_text_on_screen(false);
+    let ui = s.ui();
+    tall(&ui);
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        let n = json!(total.clone());
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        s.f.pump();
+        s.serve();
+    };
+    // From Home the dial alone: the first read is a baseline, then the dial walks the tiles until the
+    // Settings tile (the one named so) has the cursor, and a press opens the Rust app.
+    nav(&mut s, "move", 0);
+    let mut tries = 0;
+    while !s.ui().global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().get_screen(), 14, "the Settings tile opens the Rust app");
+    // Up to the page rail (not the top bar), along to the Package repositories tab, a press shows it.
+    nav(&mut s, "move", -1);
+    nav(&mut s, "move", -1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() >= 0, "the second up reaches the page rail, not the top bar");
+    let (tab, last) = {
+        let ui = s.ui();
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        (pages.iter().position(|p| p == "Package repositories").expect("a Package repositories tab") as i32, pages.len() as i32 - 1)
+    };
+    let mut tries = 0;
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() != tab {
+        nav(&mut s, "move", 1);
+        tries += 1;
+        assert!(tries <= tab as usize + 1, "the rail reaches the Package repositories tab");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(s.ui().global::<crate::SettingsState>().get_page(), tab, "a press shows the Package repositories page");
+    assert_eq!(title(&s.ui()), "Settings › Package repositories");
+    // Down past the last tab leaves the rail for the list, the cursor on its first row.
+    while s.ui().global::<crate::SettingsState>().get_page_cursor() < last {
+        nav(&mut s, "move", 1);
+    }
+    nav(&mut s, "move", 1);
+    assert!(s.ui().global::<crate::SettingsState>().get_page_cursor() < 0, "down past the last tab leaves for the list");
+    // The page's own rows, the walk counted from them: each repository's switch pressed, then the Add row's press.
+    let n = rows(&s.ui()).len();
+    assert!(n >= 3, "the page shows a row per repository and the Add row: {n}");
+    for step in 0..n {
+        if step > 0 {
+            nav(&mut s, "move", 1);
+        }
+        let ui = s.ui();
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(step), "the dial reached row {step}");
+        if rows(&ui)[step].switch {
+            let want = s.e.repos[step].address.clone();
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert_eq!(s.e.called("packages.enableRepository").last(), Some(&json!({"address": want, "enabled": false})), "a press turns repository {step} off");
+            assert_eq!(rows(&s.ui())[step].value, "Off", "the switch is now Off");
+        } else {
+            assert_eq!(rows(&ui)[step].label, "Add a repository", "the last row adds one");
+            nav(&mut s, "confirm", 1);
+            s.serve();
+            assert!(s.ui().global::<crate::KeyboardState>().get_open(), "the Add row's press opens the keyboard");
+        }
+    }
+    // The address is typed on the keyboard; Return asks packages.list, the listing read and polled, the
+    // repository added and listed.
+    let before = rows(&s.ui()).len();
+    for ch in more.chars() {
+        assert!(shell::key(&ch.to_string()));
+    }
+    assert!(shell::key(&slint::SharedString::from(slint::platform::Key::Return)));
+    s.serve();
+    assert_eq!(s.e.called("packages.list"), [json!({"source": more})]);
+    assert_eq!(s.e.called("packages.addRepository").last(), Some(&json!({"address": more, "key": key, "name": "More Sounds"})), "the repository the listing kept is added");
+    let ui = s.ui();
+    assert!(rows(&ui).iter().any(|r| r.label == "More Sounds"), "the new repository is listed: {:?}", labels(&ui));
+    assert_eq!(before + 1, rows(&ui).len(), "the page's own count grew by the one repository added");
+    assert_eq!(value_of(&ui, "More Sounds"), "On", "the added repository is on");
+}
+
+// W19: the Settings Appearance and Top bar pages, reached from Home by the panel's moves alone (no touch), every
+// action each offers pressed to its real effect, counted from the screen's own rows (never hard-coded). Appearance:
+// a press on each theme row writes appearance.txt with its id and shows the theme at once; the bar's Install...
+// opens the file chooser, where choosing a theme.json installs it (a new row) and shows it. Top bar: a press on
+// the CPU and RAM rows opens their choice, choosing one writes top-bar.json and moves the shell's meters at once.
+// Nothing is reached by touch.
+#[test]
+fn appearance_and_top_bar_reachable_from_home_by_panel_moves() {
+    // A theme of the player's own, listed on the Appearance page, and another whose folder is the Install chooser's
+    // source (kept out of the installed list until it is installed; a folder named after its id).
+    let mut s = Shelf::with("w19-appearance-topbar", Fake::new());
+    installed_theme(&s.config, "evening-glass", "Evening Glass", |d| d["spacing"] = json!(1.3));
+    installed_theme(&s.config, "amber", "Amber", |_| {});
+    std::fs::rename(s.config.join("themes/amber"), s.config.join("amber")).unwrap();
+    shell::settings_files_dir(s.config.join("amber"));
+    let ui = s.ui();
+    tall(&ui);
+    let id_of = |name: &str| -> &'static str {
+        match name {
+            "Oscairn Block" => "oscairn-block",
+            "Oscairn Classic" => "oscairn-classic",
+            "Oscairn Dark" => "oscairn-dark",
+            "Oscairn Light" => "oscairn-light",
+            "Evening Glass" => "evening-glass",
+            _ => panic!("a theme the test does not know: {name}"),
+        }
+    };
+    let mut total = std::collections::BTreeMap::<String, i64>::new();
+    let mut nav = |s: &mut Shelf, key: &str, by: i64| {
+        *total.entry(key.to_string()).or_default() += by;
+        s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": json!(total.clone())}})));
+        s.f.pump();
+        s.serve();
+    };
+    // Up out of the whole list to the page rail, then along it to the page `want` (found in the screen's own get_pages
+    // by name) and a press shows it; past the last tab the list has the cursor again. Entered on the list.
+    let to_page = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), want: &str| {
+        while ui.global::<crate::SettingsState>().get_page_cursor() < 0 {
+            nav(s, "move", -1);
+        }
+        let pages: Vec<String> = ui.global::<crate::SettingsState>().get_pages().iter().map(|p| p.to_string()).collect();
+        let want = pages.iter().position(|p| p == want).expect("the rail names the page") as i32;
+        let mut tries = 0;
+        while ui.global::<crate::SettingsState>().get_page_cursor() != want {
+            // The rail enters on the page shown; a page before it needs a step back, then forward onto it.
+            let step = if ui.global::<crate::SettingsState>().get_page_cursor() > want { -1 } else { 1 };
+            nav(s, "move", step);
+            tries += 1;
+            assert!(tries <= 20, "the rail reaches the page");
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+        assert_eq!(ui.global::<crate::SettingsState>().get_page(), want, "a press shows the page");
+        while ui.global::<crate::SettingsState>().get_page_cursor() >= 0 {
+            nav(s, "move", 1);
+        }
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the list's first row has the cursor");
+    };
+    // A bar tool stop: enter the top bar's actions from the list (pane 2), walk to the action `label` of the page by
+    // name in the screen's own get_actions, and press.
+    let bar_tool = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64), label: &str| {
+        let at = ui.global::<crate::Bar>().get_actions().iter().position(|a| a.label == label).expect("the bar action the test wants") as i32;
+        nav(s, "move:2", 1); // the bar, at its first stop (Back)
+        for _ in 0..=at {
+            nav(s, "move", 1);
+        }
+        nav(s, "confirm", 1);
+        s.serve();
+    };
+    // A move past the bar's last stop puts the cursor back on the screen's list (the bar had it).
+    let drop_bar = |s: &mut Shelf, nav: &mut dyn FnMut(&mut Shelf, &str, i64)| {
+        nav(s, "move", 30);
+        s.serve();
+    };
+    // Home → the Settings tile → the Rust app (the page it opens on is Appearance); the first move shows the list's
+    // first row.
+    nav(&mut s, "move", 0); // the first read is only a baseline
+    let mut tries = 0;
+    while !ui.global::<crate::HomeState>().get_tiles().iter().any(|t| t.cursor && t.name == "Settings") {
+        nav(&mut s, "move", 1); // onto the Settings tile
+        tries += 1;
+        assert!(tries < 8, "the dial reaches the Settings tile");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust app");
+    assert_eq!(title(&ui), "Settings › Appearance");
+    nav(&mut s, "move", 1);
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the list's first row has the cursor");
+    // Appearance: every theme the page's own rows show is reached by the dial, and a press on each writes
+    // appearance.txt with its id and shows the theme at once. The count is the screen's own.
+    let n = rows(&ui).len();
+    assert!(n >= 5, "the built-in themes and the player's own are listed: {n}");
+    for i in 0..n {
+        assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(i), "the dial reached the theme row {i}");
+        let theme = rows(&ui)[i].label.to_string();
+        nav(&mut s, "confirm", 1);
+        s.serve();
+        assert_eq!(std::fs::read_to_string(s.config.join("appearance.txt")).unwrap(), id_of(&theme), "choosing {theme} wrote appearance.txt");
+        assert_eq!(ui.global::<crate::Theme>().get_id(), id_of(&theme), "{theme} is shown at once");
+        assert_eq!(value_of(&ui, &theme), "In use", "{theme} is the row's in-use one");
+        if i + 1 < n {
+            nav(&mut s, "move", 1);
+            s.serve();
+        }
+    }
+    // The rail to the Top bar page.
+    to_page(&mut s, &mut nav, "Top bar");
+    assert_eq!(title(&ui), "Settings › Top bar");
+    assert_eq!(labels(&ui), ["CPU", "RAM"]);
+    assert!(ui.global::<crate::Bar>().get_cpu_bar() && ui.global::<crate::Bar>().get_cpu_percent(), "CPU starts Bar and percent");
+    // The CPU row: a press opens its choice, choosing Bar writes top-bar.json and the shell shows Bar at once.
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(0), "the dial reached CPU");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert!(ui.global::<MenuState>().get_open(), "a press on CPU opens its choice");
+    nav(&mut s, "move", 1); // to Bar
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(std::fs::read_to_string(s.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"bar\"}\n", "choosing Bar wrote top-bar.json");
+    assert!(ui.global::<crate::Bar>().get_cpu_bar() && !ui.global::<crate::Bar>().get_cpu_percent(), "the bar shows Bar now");
+    assert_eq!(value_of(&ui, "CPU"), "Bar ›");
+    // The RAM row: the dial reaches it and a press opens its choice; choosing Hidden writes it and the shell hides the
+    // RAM meter at once.
+    nav(&mut s, "move", 1);
+    s.serve();
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(1), "the dial reached RAM");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert!(ui.global::<MenuState>().get_open(), "a press on RAM opens its choice");
+    let mut tries = 0;
+    while !ui.global::<MenuState>().get_rows().iter().any(|r| r.cursor && r.label == "Hidden") {
+        nav(&mut s, "move", 1); // along the choice to Hidden
+        tries += 1;
+        assert!(tries < 8, "the dial reaches Hidden");
+    }
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(std::fs::read_to_string(s.config.join("top-bar.json")).unwrap(), "{\"cpu\":\"bar\",\"ram\":\"none\"}\n", "choosing Hidden wrote it");
+    assert!(!ui.global::<crate::Bar>().get_ram_bar() && !ui.global::<crate::Bar>().get_ram_percent(), "RAM Hidden now");
+    assert_eq!(value_of(&ui, "RAM"), "Hidden ›");
+    // The rail to the Appearance page, for the Install... tool.
+    to_page(&mut s, &mut nav, "Appearance");
+    assert_eq!(title(&ui), "Settings › Appearance");
+    // The bar's Install... opens the file chooser (the path gains a level); the chooser's own theme.json, when pressed,
+    // installs the source theme as a new row and shows it.
+    let was = rows(&ui).len();
+    bar_tool(&mut s, &mut nav, "Install...");
+    assert_eq!(title(&ui), "Settings › Appearance › Install a theme", "the chooser is over the page");
+    assert_eq!(rows(&ui)[0].label, "‹ Up", "the chooser lists the files");
+    drop_bar(&mut s, &mut nav);
+    let target = labels(&ui).iter().position(|l| l == "theme.json").expect("the chooser lists theme.json");
+    assert!(target >= 1, "Up, then the source's theme.json: {:?}", labels(&ui));
+    for _ in 0..target {
+        nav(&mut s, "move", 1);
+        s.serve();
+    }
+    assert_eq!(rows(&ui).iter().position(|r| r.cursor), Some(target), "the dial reaches theme.json");
+    nav(&mut s, "confirm", 1);
+    s.serve();
+    assert_eq!(title(&ui), "Settings › Appearance", "the chooser closed");
+    assert_eq!(std::fs::read_to_string(s.config.join("appearance.txt")).unwrap(), "amber", "the installed theme is shown");
+    assert_eq!(value_of(&ui, "Amber"), "In use");
+    assert_eq!(rows(&ui).len(), was + 1, "the pages own count grew by the one theme installed: {:?}", labels(&ui));
 }

@@ -491,11 +491,13 @@ component TabShape inherits Rectangle {
         border-width: root.selected ? 0px : Theme.hair;
         border-color: Theme.rule;
     }
+    // A column's folder tab is the whole box, selected or not (the column's gap is between them, VTabs, Rail): the
+    // selected one reaches the rule and the page past it, the others stopping short of it at the rule's side.
     if !root.segmented && root.vertical: Rectangle {
         x: root.selected ? root.inset : root.inset + root.back;
-        y: root.inset;
+        y: 0px;
         width: (root.selected ? parent.width : parent.width - root.reach - Theme.hair) - self.x;
-        height: parent.height - 2 * root.inset;
+        height: parent.height;
         border-top-left-radius: Theme.inner(root.inset);
         border-bottom-left-radius: Theme.inner(root.inset);
         background: root.selected ? Theme.tab-on : Theme.tab-off;
@@ -718,7 +720,8 @@ component VTabs inherits Rectangle {
     property <bool> segmented: Theme.tabs == TabStyle.segmented;
     property <int> keep: root.cursor >= 0 ? root.cursor : root.current;
     property <length> more: Theme.touch * 0.6;
-    property <length> content: root.names.length * root.item;
+    property <length> gap: root.segmented ? 0px : Theme.gap;
+    property <length> content: root.names.length * root.item + max(0, root.names.length - 1) * root.gap;
     out property <bool> over: root.content > root.height + 0.5px;
     function settle() {
         flick.content-y = min(0px, max(root.height - root.content, flick.content-y));
@@ -755,6 +758,7 @@ component VTabs inherits Rectangle {
             width: parent.width;
             height: root.content;
             alignment: start;
+            spacing: root.segmented ? 0px : Theme.gap;
             for name[i] in root.names: TabItem {
                 vertical: true;
                 min-height: root.item;
@@ -909,8 +913,9 @@ component Rail inherits Rectangle {
     property <length> more: Theme.touch * 0.6;
     out property <length> head: root.heading == "" ? 0px : Theme.small * 2;
     out property <length> room: max(0px, root.height - root.head);
-    out property <length> item: max(Theme.touch, root.room / max(1, root.labels.length));
-    property <length> content: root.labels.length * root.item;
+    property <length> gap: root.segmented ? 0px : Theme.gap;
+    out property <length> item: max(Theme.touch, max(0px, root.room - max(0, root.labels.length - 1) * root.gap) / max(1, root.labels.length));
+    property <length> content: root.labels.length * root.item + max(0, root.labels.length - 1) * root.gap;
     out property <bool> over: root.content > root.room + 0.5px;
     // The room for a label across: the rail less the tab's inset and the padding each side, so a bold label never
     // touches the tab's edges.
@@ -968,7 +973,7 @@ component Rail inherits Rectangle {
         interactive: root.over;
         for l[i] in root.labels: RailItem {
             x: 0px;
-            y: i * root.item;
+            y: i * (root.item + root.gap);
             width: root.width + root.over-edge;
             height: root.item;
             label: l;

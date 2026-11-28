@@ -189,6 +189,14 @@ std::map<std::string,fs::path> storedBuilds(const std::string& format,const std:
     }
     return out;
 }
+// Whether `key` signed a build of this version that is in the store: its <bundle>.sig there, which an install fills only
+// with signatures it verified over that build (RFC 0043: a claim counts only under a key that signed what is installed).
+bool storedSignedBy(const std::string& format,const std::string& id,const std::string& version,const std::string& key){
+    if(key.empty())return false;
+    for(const auto& [forPlatform,build]:storedBuilds(format,id,version))
+        try{for(const auto& s:signing::readSignatures(build.string()+".sig"))if(s.key==key)return true;}catch(const std::exception&){}
+    return false;
+}
 fs::path storedPlugin(const std::string& format,const std::string& id,const std::string& version){
     const auto builds=storedBuilds(format,id,version);const auto here=builds.find(platform());
     return here==builds.end()?fs::path():here->second;
@@ -2616,14 +2624,18 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string(),build.cpu,build.memory);
             }
             // The publisher's claim (RFC 0043), kept only from an archive signed whole by a key that
-            // also signed this plugin's builds in it; it replaces one recorded before.
+            // also signed this plugin's builds in it and a build that is in the store now (one already
+            // there from another signer is kept, so its claim may not be); it replaces one recorded
+            // before only under the same key.
             std::error_code e;
             const bool claimed=!plugin.opensStateFrom.empty() && !p.signature.key.empty() &&
-                std::any_of(plugin.builds.begin(),plugin.builds.end(),[&](const auto& b){return std::any_of(b.signatures.begin(),b.signatures.end(),[&](const auto& s){return s.key==p.signature.key;});});
+                std::any_of(plugin.builds.begin(),plugin.builds.end(),[&](const auto& b){return std::any_of(b.signatures.begin(),b.signatures.end(),[&](const auto& s){return s.key==p.signature.key;});}) &&
+                storedSignedBy(plugin.format,plugin.id,plugin.version,p.signature.key);
             if(claimed && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
                 auto identity=storedIdentity(storeFolder(plugin.format,plugin.id,plugin.version));
-                identity.opensStateFrom=plugin.opensStateFrom;identity.soundChanges=plugin.soundChanges;identity.claimKey=p.signature.key;
-                writeIdentity(storeFolder(plugin.format,plugin.id,plugin.version),identity);
+                if(!identity.claimKey.empty() && identity.claimKey!=p.signature.key)out.notes.push_back(plugin.name+" "+plugin.version+" has a claim recorded under another key; this archive's was not kept");
+                else{identity.opensStateFrom=plugin.opensStateFrom;identity.soundChanges=plugin.soundChanges;identity.claimKey=p.signature.key;
+                     writeIdentity(storeFolder(plugin.format,plugin.id,plugin.version),identity);}
             }
             // A plugin package's license texts and notices stay beside its plugins' builds, and the
             // asset libraries it needs in assets.tsv ("id<TAB>version"): a root they stay installed for.
@@ -2993,6 +3005,7 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
             if(!entry.is_directory() || leaf.front()=='.')continue;
             auto p=storedIdentity(entry.path());
             if(p.id.empty() || p.format!=format || storeFolder(p.format,p.id,p.version)!=entry.path())continue;
+            if(!p.claimKey.empty() && !storedSignedBy(p.format,p.id,p.version,p.claimKey)){p.opensStateFrom.clear();p.soundChanges.clear();p.claimKey.clear();} // a claim no stored build's signer made is shown as none
             for(const auto& [forPlatform,build]:storedBuilds(p.format,p.id,p.version)){
                 p.platforms.push_back(forPlatform);
                 if(fs::is_regular_file(build,e))p.bytes+=fs::file_size(build,e);

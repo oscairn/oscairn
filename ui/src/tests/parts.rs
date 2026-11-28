@@ -350,6 +350,38 @@ fn the_rows_a_view_holds_fill_the_height_and_the_cursor_turns_the_view() {
     assert_eq!(rows(&tall.ui).len(), 7, "all of them in a tall window");
 }
 
+// The list scrolls the same way the shared lists do (issue #269): when it holds more rows than a view
+// fits a scroll bar shows (total > per-view), and the window keeps the cursor on a shown row: a fan of
+// the bar or a drag turns the view, the cursor dropping to a shown row of it (a scroll is not a stop).
+#[test]
+fn the_list_scrolls_a_list_longer_than_a_view() {
+    // A small window: seven entries (four parts, two buses, a shared node), two fit a view.
+    let mut s = Screen::sized(1280, 312);
+    let mut p = parts_screen(&mut s, &parts_graph());
+    let ui = &s.ui;
+    let (total, per) = {
+        let st = ui.global::<PartsState>();
+        assert!(st.get_total() > st.get_per_view(), "a longer list shows the scroll bar: {} rows, {} in a view", st.get_total(), st.get_per_view());
+        (st.get_total(), st.get_per_view() as usize)
+    };
+    // A cursor on the first part; the bar or a drag asked for the last row: the view turns to the whole
+    // view that holds it and the cursor sits on a shown row of it.
+    mv(&mut p, Some(0), 1);
+    let before = ui.global::<PartsState>().get_first();
+    p.scroll_to(total - 1);
+    let st = ui.global::<PartsState>();
+    assert!(st.get_first() > before, "a scroll near the end turned the view further: first {} then {}", before, st.get_first());
+    let at = rows(ui).iter().position(|r| r.2 >= 0).expect("the cursor is on a shown row");
+    assert!(at < st.get_per_view() as usize, "the cursor is on a shown row (row {at} of {})", st.get_per_view());
+    assert!((st.get_first() as usize + per) >= total as usize, "the view holds the row the scroll asked for, near the end");
+    // A scroll back to the first view: the cursor returns to a shown row of it.
+    p.scroll_to(0);
+    let st = ui.global::<PartsState>();
+    assert_eq!(st.get_first(), 0, "a scroll to the first view");
+    let at = rows(ui).iter().position(|r| r.2 >= 0).expect("a scroll keeps the cursor on a shown row");
+    assert!(at < st.get_per_view() as usize, "the cursor is on a shown row (row {at})");
+}
+
 // No parts: the words the JUCE page has, the buttons stay.
 #[test]
 fn an_empty_performance_says_so_and_still_adds() {

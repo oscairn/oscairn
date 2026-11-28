@@ -398,6 +398,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     list.on_send(|i, k, f| with_app(|a| a.on_parts(|p| p.send(i, k, f))));
     list.on_held(|i, cell, down| with_app(|a| a.on_parts(|p| p.hold(i, cell, down))));
     list.on_tool(|i| with_app(|a| a.parts_act(|p| p.tap_tool(i))));
+    list.on_scrolled(|first| with_app(|a| a.on_parts(|p| p.scroll_to(first))));
     list.on_resized(|| with_app(|a| a.on_parts(parts::Screen::shown)));
     let mix = ui.global::<MixerState>();
     mix.on_level(|i, f| with_app(|a| a.on_mixer(|m| m.level(i, f))));
@@ -445,6 +446,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     let notice = ui.global::<crate::NoticeState>();
     notice.on_tapped(|i| with_app(|a| a.notice_tap(i.max(0) as usize)));
     notice.on_close(|| with_app(|a| a.notice_act(Action::Cancel(None))));
+    notice.on_scrolled(|first| with_app(|a| a.notice_scroll_to(first)));
+    notice.on_resized(|| with_app(|a| a.notice_reshown()));
     let grid = ui.global::<GridState>();
     grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
     grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));

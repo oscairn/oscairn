@@ -699,6 +699,10 @@ impl Screen {
         state.set_empty(self.entries.is_empty());
         state.set_message(self.message().into());
         state.set_view(if self.entries.is_empty() { String::new() } else { format!("Parts {}–{} of {}", self.first + 1, end, self.entries.len()) }.into());
+        // The list's size and the view's first row, for its scroll bar: a drag or a tap on the bar asks for a view.
+        state.set_total(self.entries.len() as i32);
+        state.set_first(self.first as i32);
+        state.set_per_view((end - self.first) as i32);
     }
 
     /// The cursor's next place along the dial: cell by cell, row by row, then the buttons.
@@ -924,6 +928,24 @@ impl Screen {
             if self.first < self.entries.len() {
                 self.stop = Some(Stop::Cell(self.first, c.min(self.cells(self.first) - 1)));
             }
+        }
+    }
+
+    /// The scroll bar's or a finger drag's view starts at row `first` (a touch only): the view turns to
+    /// the whole view that holds it, and the cursor, if there is one, drops to that view's first row so it
+    /// sits on a shown one (a scroll is not a cursor stop).
+    pub fn scroll_to(&mut self, first: i32) {
+        let (area, pitch, heading, slack) = self.geometry();
+        let views = self.views(area, pitch, heading, slack);
+        let to = views.iter().rposition(|s| *s <= first.max(0) as usize).unwrap_or(0);
+        if self.first != views[to] {
+            self.first = views[to];
+            if let Some(Stop::Cell(_, c)) = self.stop {
+                if self.first < self.entries.len() {
+                    self.stop = Some(Stop::Cell(self.first, c.min(self.cells(self.first) - 1)));
+                }
+            }
+            self.show();
         }
     }
 

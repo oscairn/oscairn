@@ -232,6 +232,8 @@ target_link_libraries(oscairn-plugin-check PRIVATE oscairn_control)
 target_compile_definitions(oscairn-plugin-check PRIVATE OSCAIRN_SAMPLE_TYPES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/types/org.oscairn.sample-types")
 # A note effect is checked for the notes it sends, an audio effect for sound.
 add_test(NAME control-plugin-check-note-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect)
+# A note effect's edit is checked by the notes it sends (here transposed a fourth), as it makes no sound.
+add_test(NAME control-plugin-check-note-effect-edit COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect --param 1=5)
 # RFC 0025's CPU estimates: a stall or a burst does not spoil them, and a spoiled one can be forgotten.
 # RFC 0025's admission per core: parallel parts spread over the cores, a chain within one block, uncertain figures allowed.
 add_executable(oscairn-admission-test tests/admission.cpp)
@@ -249,7 +251,24 @@ endif()
 # Given relative to the working folder, as a packager types it.
 add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check ./$<TARGET_FILE_NAME:oscairn_delay> org.oscairn.delay effect
     WORKING_DIRECTORY $<TARGET_FILE_DIR:oscairn_delay>)
-set_tests_properties(control-plugin-check-note-effect control-plugin-check-audio-effect PROPERTIES TIMEOUT 60)
+set_tests_properties(control-plugin-check-note-effect control-plugin-check-note-effect-edit control-plugin-check-audio-effect PROPERTIES TIMEOUT 60)
+# RFC 0043 step 5: --state-from, the machine check of a publisher's claim, on the test synth at versions 1 and 2:
+# a version 2 that reads 1's state passes; one that reads a parameter differently fails naming it; one that sounds
+# different fails without --sound-changes and passes, reporting it, with; one with other ports fails naming them.
+add_test(NAME control-plugin-check-state-from COMMAND oscairn-plugin-check $<TARGET_FILE:kick-clap-fixture-v2> org.kick.test.synth synth
+    --state-from $<TARGET_FILE:kick-clap-fixture-normal> 1 --param 7=0.8)
+add_test(NAME control-plugin-check-state-from-changed COMMAND oscairn-plugin-check $<TARGET_FILE:kick-clap-fixture-v2_changed> org.kick.test.synth synth
+    --state-from $<TARGET_FILE:kick-clap-fixture-normal> 1 --param 7=0.8)
+add_test(NAME control-plugin-check-state-from-sound COMMAND oscairn-plugin-check $<TARGET_FILE:kick-clap-fixture-v2_sound> org.kick.test.synth synth
+    --state-from $<TARGET_FILE:kick-clap-fixture-normal> 1 --param 7=0.8)
+add_test(NAME control-plugin-check-state-from-sound-changes COMMAND oscairn-plugin-check $<TARGET_FILE:kick-clap-fixture-v2_sound> org.kick.test.synth synth
+    --state-from $<TARGET_FILE:kick-clap-fixture-normal> 1 --param 7=0.8 --sound-changes)
+add_test(NAME control-plugin-check-state-from-ports COMMAND oscairn-plugin-check $<TARGET_FILE:kick-clap-fixture-v2_ports> org.kick.test.synth synth
+    --state-from $<TARGET_FILE:kick-clap-fixture-normal> 1)
+set_tests_properties(control-plugin-check-state-from-ports PROPERTIES PASS_REGULAR_EXPRESSION "FAIL: the defaults: moves to 2: refused .*ports are not the same in 2")
+set_tests_properties(control-plugin-check-state-from-changed PROPERTIES PASS_REGULAR_EXPRESSION "FAIL: with every --param: parameter 7 \\(Gain\\) reads 0.400000 in 2, 0.800000 in 1")
+set_tests_properties(control-plugin-check-state-from-sound PROPERTIES PASS_REGULAR_EXPRESSION "FAIL: the defaults: renders the same as 1 within -60 dB")
+set_tests_properties(control-plugin-check-state-from control-plugin-check-state-from-changed control-plugin-check-state-from-sound control-plugin-check-state-from-sound-changes control-plugin-check-state-from-ports PROPERTIES TIMEOUT 120)
 
 add_executable(oscairn-parts-test tests/parts.cpp)
 target_include_directories(oscairn-parts-test PRIVATE ../clap-host/tests)

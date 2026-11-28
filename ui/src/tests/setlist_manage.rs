@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Managing setlists in the Setlist app (issue #41; the Library's Setlists tab is gone): the top bar's Manage opens the menu of
 //! Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots (add a Performance,
-//! add an empty slot, up, down, remove). Each is reached with panel moves only (the bar's cursor by the third pane, the dial in the
+//! add an empty slot, up, down, remove, move to the end of another bank). Each is reached with panel moves only (the bar's cursor by the third pane, the dial in the
 //! menus, the keys of the typing keyboard) and asserted by the request the engine received.
 
 use super::setlist_bar::*;
@@ -330,6 +330,30 @@ fn slots_are_added_moved_and_removed() {
     assert!(!names_of(&sent, 0).contains(&first[1]), "{:?}", names_of(&sent, 0));
     assert_eq!(names_of(&sent, 0)[..2], [first[0].clone(), first[2].clone()]);
     assert!(slots(&f)[1].cursor && slots(&f)[1].title == first[2], "the cursor is on what took its place");
+}
+
+// The slot under the cursor moves to the end of another bank, saved whole; with one bank there is no Move to bank.
+#[test]
+fn a_slot_moves_to_another_bank() {
+    let mut f = fixture("manage-move", 2);
+    manage(&mut f, "Slots", "Add a Performance...");
+    assert_eq!(menu(&f).get_title(), "Add a Performance");
+    choose(&mut f, &song(30));
+    let sent = saved(&mut f, "manage-move-1");
+    let want = song(30);
+    assert_eq!(names_of(&sent, 0).last(), Some(&want), "the slot is in the first bank");
+    // The setlist's other bank is offered by name; choosing it moves the slot under the cursor to its end.
+    manage(&mut f, "Slots", "Move to bank...");
+    choose(&mut f, "Bank 2");
+    let sent = saved(&mut f, "manage-move-1");
+    assert!(!names_of(&sent, 0).contains(&want), "gone from the first bank: {:?}", names_of(&sent, 0));
+    assert_eq!(names_of(&sent, 1).last(), Some(&want), "last slot of the other bank");
+    assert_eq!(stops(&f)[1].text, "Bank 2  2/2", "the bank the slot moved to is shown");
+    // With one bank there are no other banks: the action is absent.
+    let mut f = fixture("manage-move-one", 1);
+    bar_press(&mut f, "Manage");
+    choose(&mut f, "Slots");
+    assert!(offered(&f).iter().all(|r| r.0 != "Move to bank..."), "{:?}", offered(&f));
 }
 
 // A refusal of the save is said in the top bar and nothing else changes.

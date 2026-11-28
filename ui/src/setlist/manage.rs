@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Managing setlists in the Setlist app (issue #41; it was the Library's Setlists tab): the top bar's Manage opens one menu of
 //! three submenus, Setlist (new, rename, tags, color, duplicate, delete), Bank (new, rename, earlier, later, delete) and Slots
-//! (add a Performance, add an empty slot, up, down, remove). An edit changes the document the engine gave (`Setlist::doc`) and
+//! (add a Performance, add an empty slot, up, down, remove, move to the end of another bank). An edit changes the document the engine gave (`Setlist::doc`) and
 //! saves it whole with `setlists.save`, then the setlists are read again and the one saved shown, the cursor where the edit
 //! left it. A duplicate is `library.copy`, a delete `library.delete`, as the Library's were. Names and tags are asked on the
 //! keyboard, a delete is confirmed.
@@ -53,8 +53,10 @@ mod entry {
     pub const UP: usize = 22;
     pub const DOWN: usize = 23;
     pub const REMOVE: usize = 24;
-    /// A submenu of colors: None, then the nine.
-    pub const COLOR: usize = 100;
+    /// A submenu of the setlist's other banks: `MOVE_TO + j` is the `j`-th bank that is not the slot's.
+    pub const MOVE_TO: usize = 25;
+    /// A submenu of colors: None, then the nine (kept past the Move-to-bank ids, which can grow with the banks).
+    pub const COLOR: usize = 200;
 }
 
 /// The most banks a setlist holds (docs/setlist-format.md).
@@ -72,10 +74,10 @@ impl Screen {
     /// Manage: the menu of what can be done, from what is open and where the cursor is.
     pub fn manage_menu(&mut self) {
         let open = self.setlist.is_some();
-        let target = self.target().is_some();
         let (banks, count) = self.setlist.as_ref().map_or((0, 0), |s| (s.pages.len(), s.count()));
         let at = self.target().map_or(0, |t| t.1);
         let on = |item: Item, yes: bool| if yes { item } else { item.off() };
+        let target = self.target();
         let current = self.setlist.as_ref().map_or("", |s| s.doc["info"]["color"].as_str().unwrap_or_default());
         let mut colors = vec![Item::ticked("None", entry::COLOR, current.is_empty())];
         colors.extend(COLORS.iter().enumerate().map(|(i, (name, hex))| Item::ticked(*name, entry::COLOR + 1 + i, current == *hex)));
@@ -94,13 +96,21 @@ impl Screen {
             on(Item::choice("Move later", entry::BANK_LATER), self.page + 1 < banks),
             on(Item::choice("Delete...", entry::BANK_DELETE), banks > 1),
         ];
-        let slot = vec![
+        let mut slot = vec![
             on(Item::choice("Add a Performance...", entry::ADD), open && count < MAX_SLOTS && !self.performances.is_empty()),
             on(Item::choice("Add an empty slot", entry::GAP), open && count < MAX_SLOTS),
-            on(Item::choice("Move up", entry::UP), target && at > 0),
-            on(Item::choice("Move down", entry::DOWN), target && self.target().is_some_and(|t| t.1 + 1 < self.setlist.as_ref().map_or(0, |s| s.pages[t.0].slots.len()))),
-            on(Item::choice("Remove", entry::REMOVE), target),
+            on(Item::choice("Move up", entry::UP), target.is_some() && at > 0),
+            on(Item::choice("Move down", entry::DOWN), target.is_some() && self.target().is_some_and(|t| t.1 + 1 < self.setlist.as_ref().map_or(0, |s| s.pages[t.0].slots.len()))),
+            on(Item::choice("Remove", entry::REMOVE), target.is_some()),
         ];
+        if let Some((p, _)) = target {
+            if banks > 1 {
+                // The other banks a slot can move to, by their name (the slot's own bank left out).
+                let s = self.setlist.as_ref().expect("a targeted slot is in a setlist");
+                let moves: Vec<Item> = (0..banks).filter(|n| *n != p).enumerate().map(|(j, n)| Item::choice(bank_name(s, n), entry::MOVE_TO + j)).collect();
+                slot.push(Item::sub("Move to bank...", moves));
+            }
+        }
         self.menu_for = MenuFor::Manage;
         self.menu = Some(("Manage".into(), vec![Item::sub("Setlist", setlist), Item::sub("Bank", bank), Item::sub("Slots", slot)], 0));
     }
@@ -164,6 +174,18 @@ impl Screen {
                 let name = if s.name.is_empty() { "Untitled".to_string() } else { s.name.clone() };
                 self.notice = Some((format!("Delete {name}?"), "The setlist is removed. Its Performances stay in the library.".into(), vec!["Delete".into(), "Cancel".into()]));
                 self.notice_for = Some(Sure::DeleteSetlist);
+            }
+            c if (entry::MOVE_TO..entry::COLOR).contains(&c) => {
+                let Some((p, i)) = target else { return };
+                let to = (0..s.pages.len()).filter(|n| *n != p).nth(c - entry::MOVE_TO);
+                if let Some(to) = to {
+                    self.save("Slot moved.", |d| {
+                        let slot = slots(d, p).remove(i);
+                        let at = slots(d, to).len();
+                        slots(d, to).push(slot);
+                        Some((to, at))
+                    });
+                }
             }
             c if c >= entry::COLOR => {
                 if let Some(color) = c.checked_sub(entry::COLOR + 1).map_or(Some(""), |i| COLORS.get(i).map(|c| c.1)) {

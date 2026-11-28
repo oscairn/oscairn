@@ -78,6 +78,14 @@ fn main() -> Result<(), slint::PlatformError> {
     if std::env::var_os("SLINT_SCALE_FACTOR").is_none() && profile.scale > 1. {
         std::env::set_var("SLINT_SCALE_FACTOR", profile.scale.to_string());
     }
+    // Started by the desktop app (--handover), on macOS: no Dock icon or menu bar of its own; the app's is the one Oscairn has.
+    #[cfg(target_os = "macos")]
+    if arg("--handover").is_some() {
+        use slint::winit_030::winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        let mut builder = slint::winit_030::winit::event_loop::EventLoop::with_user_event();
+        builder.with_activation_policy(ActivationPolicy::Accessory);
+        slint::BackendSelector::new().backend_name("winit".into()).with_winit_event_loop_builder(builder).select()?;
+    }
     let ui = Shell::new()?;
     let places = theme::Places::found();
     theme::attach(&ui);
@@ -85,6 +93,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let watch = slint::Timer::default();
     theme::follow(&ui, places, profile.theme.clone(), &watch);
     shell::show_settings(&ui, settings::top_bar(topbar::MeterSettings::default()));
+    // macOS has no parent-death signal: a child of the app that has died (a crash, SIGKILL) ends with it, not on as an orphan.
+    #[cfg(target_os = "macos")]
+    let orphan = slint::Timer::default();
+    #[cfg(target_os = "macos")]
+    if arg("--handover").is_some() {
+        let parent = unsafe { libc::getppid() };
+        orphan.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
+            if unsafe { libc::getppid() } != parent {
+                std::process::exit(0)
+            }
+        });
+    }
     let weak = ui.as_weak();
     let post = move |event| {
         let _ = weak.upgrade_in_event_loop(move |_| shell::dispatch(event));

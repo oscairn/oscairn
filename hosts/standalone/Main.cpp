@@ -1136,7 +1136,7 @@ namespace oscairn::standalone
                 }
                 if( const auto app = argument( args, "--app" ); app.isNotEmpty() ) window_->openApp( app.toLowerCase() );
                 // A computer's interface is the Rust UI (docs/rust-ui.md) unless OSCAIRN_UI=juce, or no oscairn-ui is beside this program.
-                else if( !offscreen && !args.contains( "--view" ) && ( !profile.screen() || profile.screen()->surface == "desktop" )
+                else if( ( !offscreen || rustUiProgram().isNotEmpty() ) && !args.contains( "--view" ) && ( !profile.screen() || profile.screen()->surface == "desktop" )
                          && juce::SystemStats::getEnvironmentVariable( "OSCAIRN_UI", {} ) != "juce" )
                     startRustUi();
                 if( const auto view = argument( args, "--view" ); view.isNotEmpty() )
@@ -1201,9 +1201,12 @@ namespace oscairn::standalone
         // menu bar's items (macOS: with this app in front) bring this window out beside it; its Home hides it.
         // Its window closed (status 0): the app quits. Anything else: this window, as before.
         // shortcut: one Rust window and the JUCE one in turn; the separate windows are on docs/rust-ui.md's desktop list.
+        // A test's own program in place of oscairn-ui (tests/desktop_rust_ui.py), the only start of one with --snapshot's no windows.
+        static juce::String rustUiProgram() { return juce::SystemStats::getEnvironmentVariable( "OSCAIRN_UI_PROGRAM", {} ); }
+
         void startRustUi()
         {
-            const auto ui = executableFile().getSiblingFile( "oscairn-ui" );
+            const auto ui = rustUiProgram().isNotEmpty() ? juce::File( rustUiProgram() ) : executableFile().getSiblingFile( "oscairn-ui" );
             if( !ui.existsAsFile() || engine_->socketPath().empty() ) return; // the JUCE window stays
             handover_ = juce::File::getSpecialLocation( juce::File::tempDirectory ).getChildFile( "oscairn-handover-" + juce::String( int( ::getpid() ) ) ); // one an instance
             try { ui_ = host::spawnChild( { ui.getFullPathName().toStdString(), "--socket", engine_->socketPath(), "--handover", handover_.getFullPathName().toStdString() }, STDERR_FILENO, { "OSCAIRN_PROFILE=" } ); }
@@ -1223,7 +1226,7 @@ namespace oscairn::standalone
             window_->setVisible( true ); window_->toFront( true );
             const int code = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
             if( code == 3 && app.isNotEmpty() )
-                try { window_->openApp( app ); return; } catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: the Rust UI handed over %s: %s\n", app.toRawUTF8(), e.what() ); }
+                try { std::fprintf( stderr, "oscairn: the Rust UI handed over %s\n", app.toRawUTF8() ); window_->openApp( app ); return; } catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: the Rust UI handed over %s: %s\n", app.toRawUTF8(), e.what() ); }
             if( code == 0 ) { systemRequestedQuit(); return; } // asked over this window when changes are unsaved
             std::fprintf( stderr, "oscairn: the Rust UI ended (status %d); the JUCE window instead\n", status );
         }

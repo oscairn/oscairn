@@ -2,7 +2,7 @@
 
 A release is, for now, one macOS disk image for Apple silicon,
 `Oscairn-<version>-macos-arm64.dmg`, holding `Oscairn.app` (with its engine, plugin worker,
-scan helper, bundled plugins, the Setlist and Settings apps, the themes and the
+scan helper, the Rust UI `oscairn-ui`, bundled plugins, the Setlist and Settings apps, the themes and the
 [preinstalled packages](#preinstalled-packages)), an `Applications` link to drag it to, and
 `Licenses/`; and one tarball for each Linux CPU, `oscairn-<version>-linux-x86_64.tar.gz` and
 `oscairn-<version>-linux-arm64.tar.gz` ([below](#the-linux-tarball)), each with the
@@ -87,7 +87,7 @@ two things in the Actions cache between runs, through one composite action, `.gi
   reads, so a hit is the object the compiler would have made. The cache entry's own key names the job, the OS and
   CPU, the compiler's version and the build's variant (build type, sanitizer, the C++ CLAP host): the
   thread-sanitizer job's cache is its own and shares nothing with another job's.
-- **cargo**, for the jobs that build `oscairn-ui` (the Linux releases; no CI job builds it): the registry and
+- **cargo**, for the jobs that build `oscairn-ui` (the desktop releases; no CI job builds it): the registry and
   download folders (`~/.cargo/registry/{index,cache}`, `~/.cargo/git/db`) and the build folder's target folders
   (`ui-cargo`, `engine-core-cargo`, `samplepack-cargo`). Only `ui/` has crates from crates.io (531 in
   `ui/Cargo.lock`); `core/` has none, and what is vendored (`ui/vendor`, `core/clap-host/rust/vendor`) is a patched
@@ -257,7 +257,7 @@ tools/release-macos.sh
 ```
 
 It needs a clean tree (a release is built from a commit, so its source is that commit),
-CMake, Ninja and Xcode's command-line tools, and the network the first time (JUCE). It deletes
+CMake, Ninja, Xcode's command-line tools and the Rust toolchain (`tools/install-rust.sh`), and the network the first time (JUCE, and the crates `oscairn-ui` needs). It deletes
 and rebuilds `build-release/`, builds the app in Release for arm64 and macOS 13.3 or later
 (the oldest with floating-point `std::to_chars`), checks that no program or plugin in it links
 anything but the system's libraries or has an rpath, signs it, and writes
@@ -265,6 +265,13 @@ anything but the system's libraries or has an rpath, signs it, and writes
 
 codesign accepts only code in `Contents/MacOS`, where the app looks for its `themes/` and
 `Apps/`; the script moves them to `Contents/Resources` and leaves links in their place.
+
+`oscairn-ui` is the Rust UI, which the app starts as its interface ([Rust UI](rust-ui.md)); the script builds it
+(`-DOSCAIRN_UI=ON`), the build copies it to `Contents/MacOS` beside the app's program, where
+`Application::startRustUi` looks, and the script fails when it is not there. It is checked with the other programs
+(system libraries only, no rpath). The app starts it with `--handover`, which makes it an accessory app of its own
+(no Dock icon or menu bar: the Dock icon and menu bar are Oscairn's), and it ends itself if the app that started it
+is gone.
 
 ## The Linux tarball
 

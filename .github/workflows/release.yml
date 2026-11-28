@@ -99,7 +99,7 @@ jobs:
         if: matrix.kind != 'fantom'
         run: tools/install-rust.sh
 
-      # ccache for the C++ and, on Linux (the only release that builds oscairn-ui), cargo's downloads and target
+      # ccache for the C++ and, on the desktop releases (which build oscairn-ui), cargo's downloads and target
       # folders; the key names the job, the OS, the compiler and the Rust release (.github/actions/cache-build).
       - name: Restore the build caches
         if: matrix.kind != 'fantom'
@@ -110,7 +110,7 @@ jobs:
           name: release-${{ matrix.target }}
           variant: release-standalone-ui
           ccache-size: 300M
-          rust: ${{ matrix.kind == 'linux' }}
+          rust: ${{ matrix.kind != 'fantom' }}
           build-dir: build-release
 
       - name: Build
@@ -127,7 +127,7 @@ jobs:
           enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
           name: release-${{ matrix.target }}
           variant: release-standalone-ui
-          rust: ${{ matrix.kind == 'linux' }}
+          rust: ${{ matrix.kind != 'fantom' }}
           build-dir: build-release
 
       # The FANTOM-0 bundle ---------------------------------------------------------------------

@@ -295,6 +295,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME desktop-launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_launch.py"
         $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/launch")
     set_tests_properties(desktop-launch PROPERTIES TIMEOUT 420)
+    # The Rust UI as the app's child, and the display handed back (a stub in place of oscairn-ui; no window).
+    add_test(NAME desktop-rust-ui COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_rust_ui.py"
+        $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/rust-ui")
+    set_tests_properties(desktop-rust-ui PROPERTIES TIMEOUT 300)
 endif()
 # Linux: the app's X11 window image leaves no SysV shared-memory segment behind when the app is
 # killed, quits or is resized, on an Xvfb of the test's own (skipped without Xvfb).

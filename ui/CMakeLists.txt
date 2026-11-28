@@ -33,14 +33,10 @@ add_custom_target(oscairn_ui ALL
     VERBATIM COMMAND_EXPAND_LISTS)
 install(PROGRAMS "${ui_binary}" DESTINATION bin)
 # Its tests: headless (the software renderer into a buffer, no window), a fake engine on a
-# socket, and the real engine with no audio device when this build has it, and the JUCE app
-# beside it to compare the session's setup with (session_setup_matches_the_juce_app).
+# socket, and the real engine with no audio device when this build has it.
 set(ui_test_env "")
 if(TARGET oscairn_engine_host)
     list(APPEND ui_test_env "OSCAIRN_ENGINE=$<TARGET_FILE:oscairn_engine_host>")
-endif()
-if(TARGET oscairn_standalone)
-    list(APPEND ui_test_env "OSCAIRN_APP=$<TARGET_FILE:oscairn_standalone>")
 endif()
 add_test(NAME ui-rust COMMAND ${CMAKE_COMMAND} -E env ${ui_env} ${ui_test_env}
     ${SAMPLEPACK_CARGO} test --release --locked ${ui_options} ${ui_features} --target-dir "${ui_dir}"

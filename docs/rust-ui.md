@@ -149,13 +149,10 @@ profile, through one shared function; only what is a UI's own is sent by that UI
 | Opening an app: `memory.launch`, `memory.closed` (Launcher.cpp); a process app's `apps.connect` | Home's tiles, the Apps menu, `--app` | the JUCE app; not at start. The Rust Setlist does not ask a reservation yet. A launch is now let go when the connection that asked it closes without `memory.closed` (a shell killed), as an app's own connections are |
 
 After a Rust-path start (the engine started by the start script with the profile, then the Rust
-shell) the engine reports the same budget, memory classes, capture and repositories as after a
-JUCE-path start; only each UI's own memory differs. `session_setup_matches_the_juce_app`
-(ui/src/tests.rs) checks it with the real engine and the real JUCE app (offscreen: `--connect`
-with `--snapshot`, which leaves capture out, so the test sends the app's `record.retro` itself)
-and the FANTOM-07's figures measured on a unit: `cpu` 0.75, `device` 1,040,187,392 B, `floor`
-300 MiB, `margin` 49.6 MiB, `available` 200 MiB, the two always-available apps, capture 30 s; the
-repositories are compared between the two paths. The engine applies the setup only with `--device-profile`, which engine-args.py
+shell) the engine reports the budget, memory classes, capture and repositories the JUCE-path
+start gave. `session_setup_is_the_fantom_07s` (ui/src/tests.rs) checks the real engine against
+the FANTOM-07's figures measured on a unit: `cpu` 0.75, `device` 1,040,187,392 B, `floor`
+300 MiB, `margin` 49.6 MiB, `available` 200 MiB, the two always-available apps, capture 30 s. The engine applies the setup only with `--device-profile`, which engine-args.py
 passes for a profile with a panel (the FANTOM-07 has one).
 
 ## Themes

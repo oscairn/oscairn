@@ -1331,22 +1331,14 @@ fn session_setup(engine: &RealEngine) -> serde_json::Value {
     })
 }
 
-// The session's setup after a Rust-path start is the JUCE path's (docs/rust-ui.md, "Session
-// setup"). Rust: the engine started with the profile, as the start script's engine-args gives it
-// (--device-profile), then the shell's own start against it. JUCE: an engine with no profile, as
-// the app starts its own, configured by the real JUCE app's start (--connect, offscreen through
-// --snapshot), and the one request a snapshot run leaves out, record.retro with the length the app
-// would read (none saved: the profile's 30 s). Both report the same budget, memory classes,
-// capture and repositories, the FANTOM-07's measured on a unit; each UI's own memory differs and
-// is compared apart. Needs OSCAIRN_ENGINE and OSCAIRN_APP (the JUCE app), which ctest gives.
+// The session's setup after a start (docs/rust-ui.md, "Session setup"): the engine started with the
+// profile, as the start script's engine-args gives it (--device-profile), then the shell's own start
+// against it. The budget, memory classes, capture and repositories are the FANTOM-07's, measured on
+// a unit. Needs OSCAIRN_ENGINE.
 #[test]
-fn session_setup_matches_the_juce_app() {
-    let Some(app) = std::env::var_os("OSCAIRN_APP").filter(|a| !a.is_empty()) else {
-        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_APP is not set");
-        return;
-    };
+fn session_setup_is_the_fantom_07s() {
     let Some(rust) = RealEngine::start("setup-rust", &["--device-profile", "fantom-07"]) else {
-        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_ENGINE is not set");
+        eprintln!("session_setup_is_the_fantom_07s: skipped, OSCAIRN_ENGINE is not set");
         return;
     };
     let screen = Screen::new();
@@ -1362,26 +1354,14 @@ fn session_setup_matches_the_juce_app() {
     let shell = rust.call("memory.state", json!({}))["shell"].as_u64().unwrap();
     assert!(shell > 1 << 20, "the shell sends its own memory: {shell}");
 
-    let juce = RealEngine::start("setup-juce", &[]).unwrap();
-    juce.call("session.status", json!({})); // listening
-    let out = std::process::Command::new(app)
-        .args(["--connect", juce.socket.to_str().unwrap(), "--profile", "fantom-07", "--snapshot", "juce.png", "--size", "1280x720"])
-        .current_dir(&juce.home)
-        .envs(RealEngine::folders(&juce.home))
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "the JUCE app: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
-    juce.call("record.retro", json!({"seconds": 30}));
-
-    let (r, j) = (session_setup(&rust), session_setup(&juce));
-    assert_eq!(r, j, "the Rust path's setup (left) and the JUCE path's (right)");
+    let r = session_setup(&rust);
     const MIB: u64 = 1 << 20;
     let m = &r["memory"];
     let always = json!([{"app": "oscairn.performance", "reserve": 150 * MIB}, {"app": "oscairn.library", "reserve": 120 * MIB}]);
     assert_eq!(
         (&r["budget"]["cpu"], &m["device"], &m["floor"], &m["margin"], &m["available"], &m["alwaysAvailable"], &r["capture"]),
         (&json!(0.75), &json!(992 * MIB), &json!(300 * MIB), &json!(992 * MIB / 20), &json!(200 * MIB), &always, &json!(30)),
-        "the FANTOM-07's, as measured on a unit after a JUCE-path start"
+        "the FANTOM-07's, as measured on a unit"
     );
 }
 

@@ -105,7 +105,7 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   sent by each UI; the Rust shell sends it on connecting. `session_setup_matches_the_juce_app`
   (ui-rust): real engine twice, Rust path vs the real JUCE app (`--connect --snapshot`, offscreen,
   plus the `record.retro` a snapshot leaves out); equal, and equal to the unit's figures. Passed on
-  the Mac. Commit adafc7eb.
+  the Mac. Commit adafc7eb. (The JUCE half was removed; the test is now `session_setup_is_the_fantom_07s`.)
 - Packaging: `BR2_PACKAGE_OSCAIRN_UI` and the `oscairn-ui-crates` package (531 crates from
   crates.io as Buildroot extra downloads against Cargo.lock's checksums: 87 MB downloaded, 699 MB
   unpacked, 1.2 GB cargo target dir). Built in Docker in my own volume `oscairn-os-rustui` (a copy

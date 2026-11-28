@@ -427,3 +427,4 @@ and add those notices to the script.
 
 `SOURCE.txt` points at the commit on GitHub, so a dmg is only complete once its commit is
 pushed: build releases from a pushed tag.
+

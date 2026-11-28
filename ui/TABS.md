@@ -282,3 +282,4 @@ theme that wants the strips says `top`.
 Both forms were looked at in both tab styles in the dark, light and the two odd themes at 826 x 465, 1280 x 720 at 1 and 800 x 480
 (pictures `tabs-PLUGIN-PLACEMENT-THEME-STYLE@*` in target/theme-shots, rails enlarged `tabrows-*-rails@*`, the 14-tab and long-name
 rails `rail-*`).
+

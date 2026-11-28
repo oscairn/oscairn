@@ -234,3 +234,21 @@ fn a_refused_audition_is_said() {
     assert_eq!(value_of(r.ui(), "Brass Corner"), "brass  ·  warm");
     let _ = Error { code: 0, message: String::new() };
 }
+
+// Issue 333 (the owner, 2026-11-27): the same Performance pressed again within a couple of seconds asks for a fresh load, keeping
+// nothing: `library.load` with `fresh`, nothing prepared ahead (a fresh load would not publish it), and said. Another Performance
+// pressed between opens as usual.
+#[test]
+fn the_same_performance_pressed_twice_soon_opens_fresh() {
+    let mut r = Rig::new(library());
+    r.e.calls.clear();
+    r.press_row("Brass Corner");
+    r.press_row("Brass Corner");
+    assert_eq!(r.e.called("library.load"), [json!({"id": "p4"}), json!({"id": "p4", "fresh": true})]);
+    assert_eq!(r.e.methods().iter().filter(|m| *m == "performance.prepare").count(), 1, "the fresh one prepares nothing: {:?}", r.e.methods());
+    assert_eq!(footer(r.ui()).0, "Performance opened fresh: every plugin loaded again from its saved files.");
+    r.e.calls.clear();
+    r.press_row("Evening Strings");
+    r.press_row("Brass Corner");
+    assert_eq!(r.e.called("library.load"), [json!({"id": "p1"}), json!({"id": "p4"})], "another between: as usual");
+}

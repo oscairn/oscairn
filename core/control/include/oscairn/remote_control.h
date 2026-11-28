@@ -66,7 +66,7 @@ namespace oscairn
         Estimate estimate(const std::string& directory = {}) override;
         void forgetMeasurements() override;
         std::vector<std::string> exportPerformance(const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
-        void loadPerformance(const std::string& directory) override;
+        void loadPerformance(const std::string& directory, bool fresh = false) override;
         bool preparePerformance(const std::string& directory) override;
         PerformanceInfo performanceInfo() const override;
         void setPerformanceInfo(const PerformanceInfo& info) override;
@@ -75,7 +75,7 @@ namespace oscairn
         void libraryTag(const std::string& tag, bool hidden, const std::string& color) override;
         uint32_t libraryRescan() override;
         std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) override;
-        void loadPerformanceFromLibrary(const std::string& id) override;
+        void loadPerformanceFromLibrary(const std::string& id, bool fresh = false) override;
         std::string reopenPerformance() override;
         Archive archiveContents(const std::string& file) override;
         Installed installArchive(const std::string& file, bool asLibrary, const std::vector<std::string>& items = {}, bool acceptUnsignedCode = false) override;

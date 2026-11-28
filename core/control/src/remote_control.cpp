@@ -598,8 +598,8 @@ namespace oscairn
         for(auto x:array(field(r,"plugins"))){e.plugins.push_back({string(field(x,"name")),string(field(x,"plugin")),number(field(x,"cpu")),uint64_t(integer(field(x,"memory"))),boolean(field(x,"measured"))});if(detail::member(x,"earlier"))e.plugins.back().earlier=boolean(field(x,"earlier"));}
         return e;
     }
-    void RemoteControl::loadPerformance(const std::string& directory) {
-        impl_->call("performance.load","{\"directory\":"+quote(directory)+'}',30000);impl_->refresh();
+    void RemoteControl::loadPerformance(const std::string& directory,bool fresh) {
+        impl_->call("performance.load","{\"directory\":"+quote(directory)+(fresh?",\"fresh\":true}":"}"),30000);impl_->refresh();
     }
     bool RemoteControl::preparePerformance(const std::string& directory) {
         auto d=impl_->call("performance.prepare","{\"directory\":"+quote(directory)+'}',30000);return boolean(field(field(d.get(),"result"),"prepared"));
@@ -835,8 +835,8 @@ namespace oscairn
         auto d=impl_->call("parts.fromSound","{\"id\":"+quote(id)+'}',30000);impl_->refresh();
         return static_cast<uint32_t>(integer(field(field(d.get(),"result"),"part")));
     }
-    void RemoteControl::loadPerformanceFromLibrary(const std::string& id) {
-        impl_->call("library.load","{\"id\":"+quote(id)+'}',30000);impl_->refresh();
+    void RemoteControl::loadPerformanceFromLibrary(const std::string& id,bool fresh) {
+        impl_->call("library.load","{\"id\":"+quote(id)+(fresh?",\"fresh\":true}":"}"),30000);impl_->refresh();
     }
     std::string RemoteControl::reopenPerformance() {
         auto d=impl_->call("performance.reopen","{}",30000);impl_->refresh();return string(field(field(d.get(),"result"),"notice"));

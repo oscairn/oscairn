@@ -83,7 +83,7 @@ namespace oscairn
         void removeLibraryFolder(const std::string& folder) override;
         std::vector<SigningKey> signingKeys() override;
         SigningKey makeSigningKey(const std::string& name) override;
-        void loadPerformance(const std::string& directory) override;
+        void loadPerformance(const std::string& directory, bool fresh = false) override;
         bool preparePerformance(const std::string& directory) override;
         PerformanceInfo performanceInfo() const override {auto i=info_;i.unsaved=unsaved();return i;}
         void setPerformanceInfo(const PerformanceInfo& info) override;
@@ -92,7 +92,7 @@ namespace oscairn
         void libraryTag(const std::string& tag, bool hidden, const std::string& color) override {library().setTag(tag,hidden,color);}
         uint32_t libraryRescan() override {return library().rescan();}
         std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) override;
-        void loadPerformanceFromLibrary(const std::string& id) override;
+        void loadPerformanceFromLibrary(const std::string& id, bool fresh = false) override;
         std::string reopenPerformance() override;
         bool inLibrary(const std::string& path) override;
         Archive archiveContents(const std::string& file) override;
@@ -138,12 +138,12 @@ namespace oscairn
         void showPluginWindow(NodeId node,bool show,const std::string& title = {}) override {graph_.host(node).showWindow(show,title);}
         std::vector<PresetInfo> presets(NodeId node) override {return graph_.host(node).presets();}
         std::vector<PropertyInfo> properties(NodeId node) const override {return graph_.host(node).properties();}
-        bool setProperty(NodeId node,const std::string& uri,const PropertyValue& value) override {return graph_.host(node).setProperty(uri,value);}
+        bool setProperty(NodeId node,const std::string& uri,const PropertyValue& value) override {edited_.insert(node);return graph_.host(node).setProperty(uri,value);}
         bool requestProperty(NodeId node,const std::string& uri) override {return graph_.host(node).requestProperty(uri);}
         std::optional<PropertyValue> propertyValue(NodeId node,const std::string& uri) const override {return graph_.host(node).propertyValue(uri);}
         Sounds sounds(NodeId node) const override;
         assets::Store& assets() noexcept { return assets_; }
-        uint32_t prepareSound(NodeId node,const std::string& name,const std::vector<oscairn_sound_parameter_t>& p,const std::string& state={},const std::string& preset={},const std::string& sfz={},const std::string& library={},const std::string& directory={}) override {return graph_.host(node).prepareSound(name,p,state,preset,sfz,library,directory);}
+        uint32_t prepareSound(NodeId node,const std::string& name,const std::vector<oscairn_sound_parameter_t>& p,const std::string& state={},const std::string& preset={},const std::string& sfz={},const std::string& library={},const std::string& directory={}) override {edited_.insert(node);return graph_.host(node).prepareSound(name,p,state,preset,sfz,library,directory);} // its sounds changed: not kept unseen at a reload (issue 333)
         AssetFolder registerAssetFolder(const std::string& folder) override {AssetFolder f;if(!assets_.locate(folder,f.library,f.directory))f.library=assets_.registerFolder(folder);return f;}
         kick::clap::AssetReference importAsset(const std::string& file) override {return assets_.import(file);}
         std::vector<AssetLibrary> assetLibraries() const override {std::vector<AssetLibrary> r;for(const auto& l:assets_.libraries())r.push_back({l.id,l.name,l.path,l.files});return r;}
@@ -157,8 +157,8 @@ namespace oscairn
         // Whether a package is installed here at least at `least` (one recorded without a version,
         // installed from a file whose manifest carries none, counts as any).
         bool packageInstalled(const std::string& id, const std::string& least);
-        bool selectSound(NodeId node,uint32_t id,int16_t channel=-1) override {return graph_.host(node).selectSound(id,channel);}
-        bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override {return graph_.host(node).discardSound(id,cutTail);}
+        bool selectSound(NodeId node,uint32_t id,int16_t channel=-1) override {edited_.insert(node);return graph_.host(node).selectSound(id,channel);}
+        bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override {edited_.insert(node);return graph_.host(node).discardSound(id,cutTail);}
         GraphState graphState() const override;
         NodeId add( const std::string& name, const std::string& path, const std::string& pluginId = {} ) override;
         NodeId addEffectContext(const std::string& name,NodeId source) override;
@@ -543,7 +543,8 @@ namespace oscairn
         // Those of `kept` that no outgoing node not kept plays into while it sounds: a tail ringing out through its own chain
         // needs that chain carried over (Graph::ringOut), so a node it feeds is not kept for the next one.
         std::set<NodeId> unfed(std::set<NodeId> kept) const;
-        std::set<NodeId> edited_; // open nodes edited in their plugin's own editor (a gesture) since the Performance opened (holding)
+        std::set<NodeId> edited_; // open nodes changed since the Performance opened, so not kept unseen at a reload (holding): a gesture in their plugin's own
+                                  // editor, a sound prepared, selected or discarded or a property set, a scene recalled (issue 333: not edits of the Performance)
         bool memoryFits(const Estimate& e) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
@@ -910,6 +911,7 @@ namespace oscairn
         uint64_t beside_ = 0;                             // besideSounds()
         static constexpr size_t warmLimit = 32; // without memory classes; with them, memory bounds them (evictOpportunistic)
         bool keepInstances_ = false;                      // an audition opening a Performance: take over nothing set aside
+        bool fresh_ = false;                              // a fresh load (issue 333): no instance reused, every node loaded anew
         std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free, const Sharing& sharing);
         void open(Prepared& prepared, bool seamless, bool fades = false, const std::set<NodeId>& released = {}); // released: not carried over
         // Issue 330 (C): the ways out of `nodes` into the rest of the playing graph fade from 1 to 0 over fadeSeconds on this live

@@ -2397,6 +2397,9 @@
                 "directory": {
                   "type": "string",
                   "minLength": 1
+                },
+                "fresh": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -2876,6 +2879,9 @@
                 "id": {
                   "type": "string",
                   "minLength": 1
+                },
+                "fresh": {
+                  "type": "boolean"
                 }
               },
               "required": [

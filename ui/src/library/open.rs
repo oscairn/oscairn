@@ -49,12 +49,17 @@ pub struct Open {
     save_as: Option<String>,
     /// Whether it opens beside the one playing (else it is a cut).
     seamless: bool,
+    /// Pressed again within FRESH_WITHIN of the press before on it (issue 333, the owner 2026-11-27): it opens fresh, keeping nothing.
+    fresh: bool,
     since: Instant,
 }
 
+/// How soon a second press on the same Performance asks for a fresh load (issue 333: "within a couple of seconds").
+pub const FRESH_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
+
 impl Open {
     fn new(item: &Item) -> Open {
-        Open { id: item.id.clone(), name: item.title().to_string(), path: item.path.clone(), step: Step::Info, open_name: String::new(), open_saved: false, save_as: None, seamless: true, since: Instant::now() }
+        Open { id: item.id.clone(), name: item.title().to_string(), path: item.path.clone(), step: Step::Info, open_name: String::new(), open_saved: false, save_as: None, seamless: true, fresh: false, since: Instant::now() }
     }
 
     /// What the line under the list says while it opens: what, and how long it has been.
@@ -64,6 +69,13 @@ impl Open {
     }
 }
 
+/// A fresh load said (issue 333).
+const FRESH: &str = "Performance opened fresh: every plugin loaded again from its saved files.";
+
+fn load_params(id: &str, fresh: bool) -> Value {
+    if fresh { json!({"id": id, "fresh": true}) } else { json!({"id": id}) }
+}
+
 /// The reference's words for what a Performance that would not fit beside the one ringing out does.
 const CUT: &str = "Opened at once: it and the last Performance ringing out would not fit this device together.";
 
@@ -71,7 +83,10 @@ impl Screen {
     /// A press on a Performance: it opens in place of the open one (after the question about unsaved changes).
     pub(super) fn open_performance(&mut self, id: &str) {
         let Some(item) = self.items.iter().find(|i| i.id == id).cloned() else { return };
-        let open = Open::new(&item);
+        let mut open = Open::new(&item);
+        let now = Instant::now();
+        open.fresh = self.last_press.as_ref().is_some_and(|(last, at)| *last == item.id && now.duration_since(*at) < FRESH_WITHIN);
+        self.last_press = Some((item.id.clone(), now));
         if self.job.is_some() {
             // The last chosen is the one that opens next (Engine.cpp `soundAction`).
             self.say(format!("{} opens next", open.name));
@@ -97,7 +112,7 @@ impl Screen {
             Step::Save => ("library.save", name.map_or(json!({}), |n| json!({"name": n}))),
             Step::Estimate => ("budget.estimate", json!({"directory": path})),
             Step::Prepare => ("performance.prepare", json!({"directory": path})),
-            Step::Load => ("library.load", json!({"id": id})),
+            Step::Load => ("library.load", load_params(&id, job.fresh)),
         };
         self.push(Request::Open(step), method, params);
     }
@@ -156,12 +171,15 @@ impl Screen {
                 if let Some(job) = &mut self.job {
                     job.seamless = seamless;
                 }
-                self.go(if seamless { Step::Prepare } else { Step::Load });
+                // A fresh load reads its own: what is prepared ahead is not published (control-protocol.md).
+                let fresh = self.job.as_ref().is_some_and(|j| j.fresh);
+                self.go(if seamless && !fresh { Step::Prepare } else { Step::Load });
             }
             (Step::Prepare, Ok(_)) => self.go(Step::Load),
             (Step::Load, Ok(_)) => {
                 let cut = self.job.as_ref().is_some_and(|j| !j.seamless);
-                self.say(if cut { format!("Performance opened. Press Play or play a note. {CUT}") } else { "Performance opened. Press Play or play a note.".to_string() });
+                let opened = if self.job.as_ref().is_some_and(|j| j.fresh) { FRESH } else { "Performance opened. Press Play or play a note." };
+                self.say(if cut { format!("{opened} {CUT}") } else { opened.to_string() });
                 self.finished();
                 self.query(); // it is now the most recent
                 return true;
@@ -178,7 +196,7 @@ impl Screen {
             Step::Save => ("library.save", job.save_as.clone().map_or(json!({}), |n| json!({"name": n}))),
             Step::Estimate => ("budget.estimate", json!({"directory": job.path})),
             Step::Prepare => ("performance.prepare", json!({"directory": job.path})),
-            Step::Load => ("library.load", json!({"id": job.id})),
+            Step::Load => ("library.load", load_params(&job.id, job.fresh)),
         }
     }
 

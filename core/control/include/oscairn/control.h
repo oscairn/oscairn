@@ -377,7 +377,9 @@ namespace oscairn
         struct SigningKey { std::string name, id, key; };
         virtual std::vector<SigningKey> signingKeys() = 0;
         virtual SigningKey makeSigningKey(const std::string& name) = 0;
-        virtual void loadPerformance(const std::string& directory) = 0;
+        // fresh (issue 333): keep nothing, every node loaded anew from the saved files (no instance kept as it is, taken over, claimed or
+        // kept warm reused), so a sound gone wrong in a plugin the host cannot see is rebuilt.
+        virtual void loadPerformance(const std::string& directory, bool fresh = false) = 0;
         // The next Performance, read and its plugins loaded off the audio thread while this one
         // plays (RFC 0021), so loading it then only publishes it. False: it would not fit beside
         // what plays now (RFC 0025), and loads when loaded, as a cut; with memory classes it is
@@ -452,7 +454,7 @@ namespace oscairn
         // Save: over the open library Performance (renamed when name is given), else a new one.
         // asNew: always a new one, with its own ID. Returns its ID.
         virtual std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) = 0;
-        virtual void loadPerformanceFromLibrary(const std::string& id) = 0;
+        virtual void loadPerformanceFromLibrary(const std::string& id, bool fresh = false) = 0; // fresh: as loadPerformance's
         // The app's start (RFC 0028): opens the Performance last opened or saved on this device (the
         // data folder's library/last.json), as any open, after the app has set the budget; from
         // then on each one opened or saved is remembered. An engine that has opened, saved or edited

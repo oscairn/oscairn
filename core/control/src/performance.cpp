@@ -773,7 +773,8 @@ namespace {
 
 void Session::tailNotice(const std::string& notice) { notices_.push_back(notice); std::fprintf(stderr,"oscairn: %s\n",notice.c_str()); }
 
-void Session::loadPerformance(const std::string& directory) {
+void Session::loadPerformance(const std::string& directory,bool fresh) {
+    struct Fresh{bool& on;~Fresh(){on=false;}} freshly{fresh_=fresh};
     try{openPerformance(directory);}
     catch(const std::exception& e){++refusedLoads_;refusal_=e.what();throw;}
 }
@@ -839,7 +840,7 @@ void Session::openPerformance(const std::string& directory) {
                              static_cast<unsigned long long>(freed>>20),static_cast<unsigned long long>(have>>20),static_cast<unsigned long long>(need>>20),static_cast<unsigned long long>(fresh>>20));}}
     // Prepared ahead (RFC 0021), the cue only publishes it; another one prepared is let go first.
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
-    if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
+    if(prepared && (fresh_ || prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset(); // a fresh load reads its own
     // One that keeps a playing instance as it is (issue 330) no longer may once something changed that instance since.
     if(prepared && std::any_of(prepared->held.begin(),prepared->held.end(),[&](const auto& h){return unsaved() || edited_.count(h.first) || !nodes_.count(h.first);}))prepared.reset();
     // Issue 330 (C): what it lets go while it sounds fades out first (the memory case too, which was a cut of about 1 ms on the
@@ -849,7 +850,7 @@ void Session::openPerformance(const std::string& directory) {
     struct Unfade{Session& s;bool on;~Unfade(){if(on)try{s.unfade();}catch(...){}}} unfading{*this,!faded.empty()};
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them;
     // those let go for it, whether they sounded or not.
-    if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming,shares,released,shares.steps.memory);
+    if(!prepared)prepared=readTaking(root,!keepInstances_ && !fresh_,!seamless,incoming,shares,released,shares.steps.memory);
     auto stats=prepared->stats;
     size_t keptSounding=0; // instances kept as they are while they sound, budget or not
     for(const auto& [was,now]:prepared->held)keptSounding+=graph_.contains(was) && !graph_.silent(was,uint64_t(sampleRate_/10));
@@ -879,7 +880,7 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
     checkWorkers();
     std::vector<NodeId> stopped;auto stoppedNow=[&]{for(const auto& [n,name]:nodes_)if(!graph_.host(n).failure().empty() && std::find(stopped.begin(),stopped.end(),n)==stopped.end())stopped.push_back(n);};
     stoppedNow();
-    auto free=warm_;
+    auto free=fresh_?std::vector<Free>{}:warm_; // a fresh load takes none kept warm either
     if(playing){auto more=freeInstances(all,released);
         // The middle rule (RFC 0021): unless it cuts, a playing instance is kept warm instead of taken
         // over while keeping it fits the warm limit and, with memory classes, what admission leaves
@@ -1054,7 +1055,7 @@ std::vector<Session::Free> Session::freeInstances(bool all,const std::set<NodeId
 // worker: learning 2026-11-21): it opened from that state (its source, or a state of the same bytes) and nothing changed it since,
 // no edit of this Performance (a control moved counts) and none in its plugin's own editor (a gesture, edited_).
 NodeId Session::holding(const fs::path& root,const std::string& key,const std::string& id,const std::string& version,const std::set<NodeId>& skip) const {
-    if(keepInstances_ || unsaved())return 0; // an audition takes nothing set aside over
+    if(keepInstances_ || fresh_ || unsaved())return 0; // an audition takes nothing set aside over; a fresh load keeps nothing
     const auto folder=root/"nodes"/key;
     std::error_code e;const auto when=fs::last_write_time(root/"performance.json",e);if(e)return 0;
     const auto source=folder.string()+"@"+std::to_string(static_cast<long long>(when.time_since_epoch().count())); // as read() names it
@@ -1173,6 +1174,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // is known (below), in document order as the estimate finds them; neither claimed nor taken over by another node.
     std::map<std::string,NodeId> holds;std::set<NodeId> holders;std::vector<std::pair<NodeId,NodeId>> held;
     auto playing=[&](const std::string& id,const std::string& path,const std::string& version,uint32_t count)->std::optional<NodeId>{
+        if(fresh_)return std::nullopt; // a fresh load: an engine of its own
         for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(holders.count(n) || p.id!=id || p.path!=path || p.version!=version || !h.failure().empty())continue; // one kept as it is stays alone (issue 340)
             // One of its groups to a playing engine: two in one would share an instance they would not share opened fresh (RFC 0045).
             const auto r=h.effectResources();auto& taken=claimed[graph_.effectSource(n)];
@@ -1221,7 +1223,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto keeps=[&](const std::shared_ptr<PluginHost>& h){return std::any_of(free.begin(),free.end(),[&](const Free& f){return f.host==h && sources.count(f.loaded.source);});};
     // leading: as take's.
     auto claim=[&](V node,V plugin,const std::string& key,uint64_t room,bool leading)->std::optional<NodeId>{
-        if(keepInstances_)return std::nullopt;
+        if(keepInstances_ || fresh_)return std::nullopt;
         std::optional<Want> w;
         for(const auto& [n,name]:nodes_){
             const auto loaded=loaded_.find(n);if(loaded==loaded_.end() || holders.count(n) || std::find(taken.begin(),taken.end(),n)!=taken.end() || keeps(graph_.node(n).host))continue;
@@ -1295,7 +1297,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         return runtime;};
     // The playing Performance's engines of the plugin, build and placement a node would load; none in an audition.
     auto playingEngines=[&](V plugin){
-        std::vector<std::shared_ptr<SoundContext::Engine>> out;if(keepInstances_)return out;
+        std::vector<std::shared_ptr<SoundContext::Engine>> out;if(keepInstances_ || fresh_)return out;
         std::optional<Want> w;
         for(const auto& [n,name]:nodes_)if(const auto* c=dynamic_cast<const SoundContext*>(&graph_.host(n))){
             const auto& e=c->engine();if(std::find(out.begin(),out.end(),e)!=out.end() || !e->host->failure().empty())continue; // a failed worker's engine takes nothing
@@ -3280,11 +3282,11 @@ std::vector<std::string> Session::libraryFolders() { return library().folders();
 void Session::addLibraryFolder(const std::string& folder) { library().addFolder(folder); }
 void Session::removeLibraryFolder(const std::string& folder) { library().removeFolder(folder); }
 
-void Session::loadPerformanceFromLibrary(const std::string& id) {
+void Session::loadPerformanceFromLibrary(const std::string& id,bool fresh) {
     auto& l=library();
     const auto* item=l.find(id);
     if(!item || item->kind!="performance")bad("no such Performance in the library");
-    loadPerformance(item->path);
+    loadPerformance(item->path,fresh);
     l.used(id);
 }
 

@@ -1095,6 +1095,11 @@ a Sound saves its sound on its own, and `parts.saveSound` no longer refuses one 
 
 `performance.save` and `performance.load` take `{"directory":"/path/to/performance"}`;
 returns are `{"saved":true}` and `{"loaded":true}`. Both are advertised by `session.hello`.
+`performance.load` (and `library.load`) also take `"fresh":true` (issue 333): nothing is kept or
+reused, every node loads anew from the saved files: no instance kept as it is, taken over, given
+its sounds beside another's or made a context of a playing engine, none kept warm reused, nothing
+prepared ahead published. It rebuilds a sound that went wrong in a way the engine cannot see; what
+sounds rings out beside it as at any change, and the memory rules hold as at any change.
 Files use the [Performance version 13 format/schema](performance-format.md). Saving refuses
 existing directories and staged graph edits. Loading validates a complete replacement;
 a load failure leaves the playing graph intact. Successful publication emits a graph resync (a
@@ -1252,7 +1257,7 @@ is listed.
   false or absent) writes a Performance opened from the library over its folder (saved
   beside it, then swapped), renamed when `name` is given; Save As New (`new: true`) gives it
   a new ID. Either way, one not in the library goes to a new folder named after it.
-  `library.load` takes `{id}`. Both mark the item recently used.
+  `library.load` takes `{id}`, and `"fresh":true` as `performance.load` does. Both mark the item recently used.
 
 ### Sounds
 

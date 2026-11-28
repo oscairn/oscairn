@@ -265,6 +265,8 @@ pub struct Screen {
     /// The Performance being opened, and the one chosen meanwhile (opened next, the last chosen).
     job: Option<open::Open>,
     waiting: Option<open::Open>,
+    /// The Performance last pressed and when: a second press on it soon after opens it fresh (issue 333).
+    last_press: Option<(String, std::time::Instant)>,
     message: String,
     asking: Option<Asking>,
     menu: Option<(String, Vec<menu::Item>)>,
@@ -333,6 +335,7 @@ impl Screen {
             part: 0,
             job: None,
             waiting: None,
+            last_press: None,
             message: String::new(),
             asking: None,
             menu: None,

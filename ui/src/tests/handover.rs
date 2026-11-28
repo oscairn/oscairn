@@ -271,6 +271,12 @@ fn nothing_in_the_library_app_hands_the_display_over() {
     settle(&mut f);
     assert_eq!(ui.get_screen(), 13, "the Library tile opens the Rust Library");
     no_handover(&ui, "the Library tile");
+    // The screens the launcher lists, from its model alone (the Library's two kinds, each its own list screen; the
+    // sidebar lines narrow a kind's list, they do not open a screen), computed before the walk dabbles: the walk must
+    // reach every one, and pressing into and through a screen costs presses, whose floor a full walk clears.
+    let expected_screens: Vec<String> = crate::library::Kind::ALL.iter().map(|k| format!("13:Library › {}", k.plural())).collect();
+    const MIN_PRESSES_PER_SCREEN: usize = 8; // enter the screen, its stops and the bar's actions
+    let expected = expected_screens.len() * MIN_PRESSES_PER_SCREEN;
     let (mut seen, mut pressed) = (HashSet::new(), 0);
     for page in 0..2 {
         walk(&mut f, 1, 7, &mut seen, &mut pressed, &mut vec![Step::Page(page)]);
@@ -296,9 +302,15 @@ fn nothing_in_the_library_app_hands_the_display_over() {
     let mut screens: Vec<&String> = seen.iter().collect();
     screens.sort();
     eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());
+    // The walk reached every screen the launcher lists, and pressed through them all: the floor is the model's own
+    // (a screen takes at least `MIN_PRESSES_PER_SCREEN` presses to be pressed through), not the walk's, so a screen
+    // the walk skips falls short of it, whatever the walk counted inside.
+    for s in &expected_screens {
+        assert!(seen.contains(s), "the walk never reached the launcher's screen {s}: {screens:?}");
+    }
+    assert!(pressed >= expected, "the walk pressed {pressed}, below the {expected} presses the {} listed screens need", expected_screens.len());
     assert!(seen.iter().any(|s| s.starts_with("13:Library")), "the Library's list was walked: {screens:?}");
     assert!(seen.len() >= 2, "the walk went into what opens (filters, menus, the catalog): {screens:?}");
-    assert!(pressed > 25, "the walk pressed {pressed}");
 }
 
 // The same walk from Home's Settings tile: every page of its rail, every stop and bar action, the menus and questions.

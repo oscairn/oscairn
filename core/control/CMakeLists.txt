@@ -541,3 +541,8 @@ add_test(NAME control-version-moves COMMAND oscairn-version-moves-test $<TARGET_
 add_test(NAME control-version-moves-workers COMMAND oscairn-version-moves-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2>
     $<TARGET_FILE:kick-clap-fixture-v2_changed> $<TARGET_FILE:kick-clap-fixture-v2_ports> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn-plugin-worker>)
 set_tests_properties(control-version-moves control-version-moves-workers PROPERTIES TIMEOUT 120)
+
+add_executable(oscairn-moves-review-test tests/moves_review.cpp)
+target_link_libraries(oscairn-moves-review-test PRIVATE oscairn_control)
+add_dependencies(oscairn-moves-review-test oscairn-sign)
+add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>)

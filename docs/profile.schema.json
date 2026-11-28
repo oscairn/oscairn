@@ -125,7 +125,13 @@
         },
         "captureSeconds": {
           "type": "integer",
-          "description": "the retroactive buffer's length in seconds until one is chosen in Recordings (RFC 0020), held in memory (11.5 MB a minute of stereo at 48 kHz) and locked at instrument level; 0: off, nothing allocated; omitted: 2 minutes with 2 GB or less, 10 minutes above",
+          "description": "the capture buffer's length in seconds the device starts with (issue #19), snapped down to Off (0), 10, 15, 30, 60 or 120 and held in memory (11.5 MB a minute of stereo at 48 kHz); omitted: 30",
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "captureBufferMax": {
+          "type": "integer",
+          "description": "the most seconds of capture this device's memory allows (issue #19); omitted or 0: 120",
           "minimum": 0,
           "maximum": 3600
         },

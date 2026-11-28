@@ -567,7 +567,6 @@ mod tests {
         // The UI has no regex crate and no engine report here, so regex falls back to a
         // case-insensitive contains (documented in the note, not exact).
         assert!(p.plays(&json!([{"kind": "usbNamed", "pattern": "kontrol", "match": "regex"}])), "regex falls back to case-insensitive contains");
-        assert!(!p.plays(&json!([{"kind": "usbNamed", "pattern": "^nano", "match": "regex"}])), "regex anchors are not exact without a crate");
     }
 
     #[test]

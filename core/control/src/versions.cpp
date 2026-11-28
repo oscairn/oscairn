@@ -157,7 +157,7 @@ namespace oscairn
             char path[4096]; uint32_t size = sizeof path;
             if(_NSGetExecutablePath(path, &size) == 0) self = path;
 #else
-            std::error_code e; self = fs::read_symlink("/proc/self/exe", e);
+            std::error_code unread; self = fs::read_symlink("/proc/self/exe", unread);
 #endif
             std::error_code e;
             if(!self.empty() && fs::is_regular_file(self.parent_path() / "oscairn-plugin-worker", e)) return (self.parent_path() / "oscairn-plugin-worker").string();

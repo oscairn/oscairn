@@ -99,14 +99,17 @@ runs:
 
     # Saving ----------------------------------------------------------------------------------------
     # Main saves after every run, and the older entry of the same job is deleted, so the repository holds one
-    # generation of each (GitHub's limit is 10 GB, then the least recently used go first). Another branch
-    # saves only when it restored nothing (a first run with no cache of main's to start from); a pull request
-    # of a branch with main's cache never fills the repository's room.
+    # generation of each (GitHub's limit is 10 GB, then the least recently used go first). Another ref saves
+    # when it restored nothing (a first run with no cache of main's to start from) or when it compiled
+    # something new (misses), so the next push of a pull request starts from its own objects and not only from
+    # main's; its older entry is deleted, one generation per ref, and an unused one is the first to be evicted.
     - name: Cache sizes
       if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled()
       shell: bash
       run: |
         ccache -s || true
+        # This run's misses (the stats were zeroed after the restore): a pull request saves only when it compiled something new.
+        echo "OSCAIRN_CCACHE_MISSES=$(ccache --print-stats | awk -F'\t' '$1 == "cache_miss" { print $2 }')" >> "$GITHUB_ENV"
         {
           echo "### Cache sizes (${{ inputs.name }})"
           echo "ccache: restored \`${OSCAIRN_CCACHE_RESTORED:-nothing}\`, now $(du -sh "$CCACHE_DIR" | cut -f1) on disk"
@@ -117,7 +120,7 @@ runs:
 
     - name: Save ccache
       id: save-ccache
-      if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled() && (github.ref == 'refs/heads/main' || env.OSCAIRN_CCACHE_RESTORED == '')
+      if: inputs.enabled == 'true' && inputs.phase == 'save' && !cancelled() && (github.ref == 'refs/heads/main' || env.OSCAIRN_CCACHE_RESTORED == '' || (env.OSCAIRN_CCACHE_MISSES != '0' && env.OSCAIRN_CCACHE_MISSES != ''))
       uses: actions/cache/save@v4
       with:
         path: ~/.ccache

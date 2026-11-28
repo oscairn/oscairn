@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -50,6 +51,8 @@ namespace oscairn
         controllers_ = std::make_unique<ControllerInput>( *this );
         transport_.setPlaying( false );
         baseline_ = std::make_shared<const Model>( model() );
+        // RFC 0043: a library move or undo a crash cut short is finished or rolled back before anything reads the library.
+        try { recoverVersionMoves(); } catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: kept moves not settled: %s\n", e.what() ); }
     }
 
     Session::~Session()

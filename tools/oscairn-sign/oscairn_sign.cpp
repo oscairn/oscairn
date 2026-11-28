@@ -246,6 +246,7 @@ int main(int argc, char** argv)
             stageLicenses(licenseFiles, staged);
             writePackage(rest[0], p, staged, key.get());
             try { readPackage(rest[0], {}); } catch(...) { fs::remove(rest[0]); throw; } // its ID, format, bundles, license and source as a reader takes them
+            if(!key && (!opensFrom.empty() || !soundChanges.empty())) std::printf("the claim is signed by --key only: without it no device keeps the claim\n");
             std::printf("packed %s %s %s with %zu builds%s\n", format.c_str(), ids.c_str(), version.c_str(), p.plugins[0].builds.size(),
                         key ? (", signed by " + signing::keyId(key->publicKey)).c_str() : "");
             for(const auto& o : outside) std::printf("packed with --allow-outside-libraries, loading from outside the system and its bundle: %s\n", o.c_str());

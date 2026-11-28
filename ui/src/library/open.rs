@@ -49,12 +49,13 @@ pub struct Open {
     save_as: Option<String>,
     /// Whether it opens beside the one playing (else it is a cut).
     seamless: bool,
-    /// Pressed again within FRESH_WITHIN of the press before on it (issue 333, the owner 2026-11-27): it opens fresh, keeping nothing.
+    /// The open Performance itself, pressed within FRESH_WITHIN of this screen opening it (issue 333, the owner 2026-11-27): it opens
+    /// fresh, keeping nothing. Told by `performance.info`'s id.
     fresh: bool,
     since: Instant,
 }
 
-/// How soon a second press on the same Performance asks for a fresh load (issue 333: "within a couple of seconds").
+/// How soon after it opened a press on the same Performance asks for a fresh load (issue 333: "within a couple of seconds").
 pub const FRESH_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Open {
@@ -83,10 +84,7 @@ impl Screen {
     /// A press on a Performance: it opens in place of the open one (after the question about unsaved changes).
     pub(super) fn open_performance(&mut self, id: &str) {
         let Some(item) = self.items.iter().find(|i| i.id == id).cloned() else { return };
-        let mut open = Open::new(&item);
-        let now = Instant::now();
-        open.fresh = self.last_press.as_ref().is_some_and(|(last, at)| *last == item.id && now.duration_since(*at) < FRESH_WITHIN);
-        self.last_press = Some((item.id.clone(), now));
+        let open = Open::new(&item);
         if self.job.is_some() {
             // The last chosen is the one that opens next (Engine.cpp `soundAction`).
             self.say(format!("{} opens next", open.name));
@@ -152,9 +150,11 @@ impl Screen {
         match (step, result) {
             (Step::Info, Ok(r)) => {
                 let unsaved = r["unsaved"] == true;
+                let recent = self.last_opened.clone();
                 if let Some(job) = &mut self.job {
                     job.open_name = r["name"].as_str().unwrap_or_default().to_string();
                     job.open_saved = r["id"].as_str().is_some_and(|i| !i.is_empty());
+                    job.fresh = r["id"].as_str() == Some(job.id.as_str()) && recent.is_some_and(|(id, at)| id == job.id && at.elapsed() < FRESH_WITHIN);
                 }
                 if unsaved {
                     self.ask_to_save(&name);
@@ -179,6 +179,7 @@ impl Screen {
             (Step::Load, Ok(_)) => {
                 let cut = self.job.as_ref().is_some_and(|j| !j.seamless);
                 let opened = if self.job.as_ref().is_some_and(|j| j.fresh) { FRESH } else { "Performance opened. Press Play or play a note." };
+                self.last_opened = self.job.as_ref().map(|j| (j.id.clone(), Instant::now()));
                 self.say(if cut { format!("{opened} {CUT}") } else { opened.to_string() });
                 self.finished();
                 self.query(); // it is now the most recent
@@ -327,7 +328,7 @@ mod tests {
     use std::time::Duration;
 
     fn open_named(name: &str, since: Instant) -> Open {
-        Open { id: "id".into(), name: name.into(), path: "p".into(), step: Step::Info, open_name: String::new(), open_saved: false, save_as: None, seamless: true, since }
+        Open { id: "id".into(), name: name.into(), path: "p".into(), step: Step::Info, open_name: String::new(), open_saved: false, save_as: None, seamless: true, fresh: false, since }
     }
 
     // The line under the list while it opens: what, and the whole seconds once it has been a second (docs/rust-ui.md

@@ -18,6 +18,9 @@ on:
       tag:
         description: 'With publish: the existing tag (v and the version) to build and to attach to'
         default: ''
+      fantom_base:
+        description: 'fantom-0: a prebuilt Buildroot base image to build Oscairn on (ghcr.io/oscairn/oscairn-os-base:KEY, from the FANTOM base workflow, which is not run yet); empty: build everything'
+        default: ''
       cache:
         description: 'Use the build caches of the desktop jobs (ccache and cargo; off: they build from nothing and save nothing)'
         type: boolean
@@ -154,9 +157,20 @@ jobs:
             fantom-0-buildroot-${{ hashFiles('os/buildroot/**', 'os/docker/Dockerfile', 'os/scripts/container-build.sh') }}-
             fantom-0-buildroot-
 
+      - name: Pull the prebuilt base
+        if: matrix.kind == 'fantom' && inputs.fantom_base != ''
+        env:
+          BASE: ${{ inputs.fantom_base }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$BASE" || { echo "::error::$BASE is not published: run the FANTOM base workflow first (docs/releasing.md)"; exit 1; }
+
       - name: Build the bundle
         id: bundle
         if: matrix.kind == 'fantom'
+        env:
+          OSCAIRN_OS_BASE_IMAGE: ${{ inputs.fantom_base }}
         run: |
           work=$RUNNER_TEMP/oscairn-os
           mkdir -p "$work"

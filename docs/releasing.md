@@ -112,8 +112,9 @@ no compiler launcher. To start from nothing, delete the entries (`gh cache delet
 
 **Who saves.** A run on `main` saves right after its build (not after its tests, so a slow or failed test run does
 not lose it) and then deletes the older entry of the same job on `main`: one generation per job. A run on any other
-branch or pull request saves only when it restored nothing (its first run, before `main` has entries); a branch that
-finds `main`'s entries restores them and writes none, so branches do not push `main`'s out. GitHub also deletes
+branch or pull request saves the ccache when it restored nothing or compiled something new (ccache's miss count
+of that run is not 0), and deletes its own older entry, so its next push starts from its own objects and not only
+from `main`'s; an entry nobody restores is the first GitHub evicts. GitHub also deletes
 entries unused for seven days. The workflows have `actions: write` for the deletion; a token without it (a pull
 request from a fork) only skips that step.
 
@@ -147,11 +148,61 @@ min is mostly `oscairn-ui` itself (3.6 min, fat LTO, rebuilt every time). The co
 object is compiled by several targets (JUCE's modules once per executable), which ccache serves from its own entries
 within the run.
 
-The thread-sanitizer job runs as four parallel shards (`thread-sanitizer (shard N of 4)`), each on its own runner
-with the same cached build. `tools/ci-ctest-shard.sh BUILD_DIR 4 N REGEX` runs ctest's stride (`-I N+1,,4`) over the
-test numbers and first checks, from `ctest -N`, that the four shards' own tests are exactly the full list (a test in
-no shard or in two fails the job); ctest also adds the fixture setup tests a slice needs, so a few cheap ones run in
-every shard. Shard 0 saves the cache. To change the count, change the matrix and the `4` in the same job.
+**Why the tests are the long pole.** On a warm run the Build step of build-and-test, the C++ host job and the sanitizer
+is 3 to 4 min; the tests are 10 to 21 min (Linux 1007 s, macOS 1294 s, C++ host 589 s) and 80 min for the sanitizer,
+and the longest single sanitizer test is 440 s. The earlier "after" row of the issue (build-and-test 29 and 28 min) was
+the first run on `main` with the caches: a pull request's caches are its own and `main` could not read them, so that
+run built cold (ccache 39% hits, Build 7 min); the next run on `main` restored it (78% hits, Build 3 min) and its
+remaining time was the tests. The roughly 100 misses of every warm run are `core/control`'s sources, which each
+commit touches.
+
+**CI test shards.** `ci.yml` builds each tree once (`build`, `thread-sanitizer-build`, `cpp-reference-host-build`: the
+only jobs that restore and save the ccache) and packs the build folder as an artifact (`.github/actions/tree-handoff`:
+a zstd tarball without the object files, kept a day; the folder holds absolute paths of the runner's workspace, which are the same on every
+runner of an OS). The test jobs unpack it into the same path and run one shard each: the thread sanitizer 10, Linux 4,
+macOS 4, the C++ host 2. `tools/ci-ctest-shard.sh BUILD_DIR SHARDS SHARD EXCLUDE [COSTS [INCLUDE]]` deals the tests out
+by cost, longest first to the shard with the least so far (`tools/ci-costs/*.txt`: seconds per test of 3 s or more, from
+CI logs; a test not named counts 1 s; the costs decide only the balance, never which tests run), and runs the shard's
+tests by exact name. Before it runs, it lists every shard's tests with `ctest -N` and fails the job if a test of the
+full list is in no shard or in two, or if ctest selected more than a few fixture tests beyond a shard's own; a few
+cheap fixture setup tests (`test-home-*`) run in every shard. Shard 0 of an OS also runs the steps that need the build
+but no test (the clap-ext check, the production LV2 tests). To change a count, change the matrix and the number in the
+script's arguments together; refresh a costs file from a CI log when the balance drifts (the slowest shard's minutes
+show it). The limit on concurrent jobs: GitHub's documentation gives a Free organization 20 concurrent jobs, 5 of them
+macOS (not verified for this organization; the API reports the plan "free"), so one run's 16 Linux test jobs (and up to 3 builds) and 4
+macOS ones fit, and several runs at once queue.
+
+**Measured**, job minutes (queue time is not in them). Before: `main` run 46113647163, the caches warm, the thread
+sanitizer in four shards that each built. After: pull request run 46126666243, ccache 99% hits, the shards above.
+
+| Job | Before | After |
+| --- | --- | --- |
+| build-and-test, Linux | 21.2 (setup 0.9, Build 3.3, tests 16.8) | build 1.9, then 4 shards of 4.8 to 7.1 |
+| build-and-test, macOS | 26.0 (setup 1.0, Build 3.0, tests 21.6) | build 1.7, then 4 shards of 5.8 to 7.7 |
+| cpp-reference-host | 13.9 (Build 3.2, tests 9.8) | build 1.1, then 2 shards of 6.1 and 6.3 |
+| thread-sanitizer | 4 shards of 15.2 to 31.3 (each: Build 3.5 to 4.2, tests 11.2 to 26.5) | build 2.2, then 10 shards of 8.0 to 10.3 (each: setup 0.4, take the build 0.6 to 2.7, tests 6.2 to 8.9) |
+| standalone-launch | 9.4 | 3.0 |
+
+The longest path of a run without queueing is the changes job (0.1), the sanitizer build (2.2) and the slowest
+sanitizer shard (10.3): about 13 min, from about 31. Wall times seen, queue included: 18.5 min on a run whose shards
+started promptly, 26.5 min on one whose sanitizer shards waited up to 12 min for runners (other runs share the
+organization's limit). The sanitizer's compute is about the same as before (93 against 99 runner minutes: the four
+rebuilds are replaced by ten downloads of the 2 GB tree); only its wall time fell.
+
+**Paths that skip the builds.** The `changes` job of `ci.yml` lists the files a change touches (a pull request against
+its base, a push against the previous head) and `tools/ci-skippable.sh` says whether any of them can matter: Markdown
+anywhere, `notes/`, `.trail/` and `docs/images/` cannot (`docs/`'s `.json` schemas are read by tests, so they
+build). When none can, the build jobs, and so the test jobs, are skipped, and the last job, `CI result`, passes: it
+is the one name a branch rule should require, since a skipped matrix job reports under no name a rule could list.
+
+**The `ui-rust` job** builds the Rust UI, which no other CI job does (`OSCAIRN_UI` is off; only the release workflow
+builds `oscairn-ui`): `cargo test --locked` (every test renders headless through Slint's software renderer) and
+`cargo clippy --locked --all-targets -- -D warnings`, on Linux, in `ui/`, with crates from crates.io at `ui/Cargo.lock`
+and the vendored KMS backend by the patch in `ui/Cargo.toml`. The tests that need the real engine (`OSCAIRN_ENGINE`) or the
+JUCE app (`OSCAIRN_APP`) are not given them here, and skip themselves. It runs when `ui/`, `hosts/standalone/profiles`,
+`hosts/standalone/themes` (which `ui/build.rs` embeds) or `.github/` change (`tools/ci-skippable.sh --ui`), so a change
+to `ui/` alone runs it and skips the C++ builds, and a change to the C++ alone skips it. Cached: `~/.cargo/registry` and
+`ui/target`, keyed by the toolchain, `Cargo.lock`, `Cargo.toml` and `ui/vendor`. Not on macOS: its runners are the scarce ones.
 
 ## The FANTOM-0 bundle
 
@@ -176,9 +227,23 @@ What is realistic, and what is not known:
 - The job uses an arm64 runner because the builder container and the bundle have only been built on arm64.
 - Nothing in this job, or in its cache handling, has been run on GitHub yet. The first run is its test.
 
-## Planned: a prebuilt base for the bundle
+## A prebuilt base for the bundle
 
-Not built yet (issue 336, point 1). The `fantom-0` job builds the whole Buildroot tree each run: the first release run
+**State (issue 336, stage B).** Built and tried locally; nothing is published, run on GitHub, or enabled. The scripts:
+`os/scripts/base-key.sh` (the key), `os/base-image.sh key|build|image|seed`, `OSCAIRN_BASE_MODE=base` in
+`os/scripts/container-build.sh` (builds the 98 base targets `make show-targets` lists, refuses a volume that built
+Oscairn, prunes `build/` to stamps), `os/docker/Dockerfile.base`, and `OSCAIRN_OS_BASE_IMAGE=<image> os/fantom-bundle.sh`,
+which seeds an empty volume from the image first (the entry points `os/build.sh` and `os/fantom-bundle.sh` keep their
+arguments). On GitHub, written and off: `.github/workflows/fantom-base.yml` (only `workflow_dispatch`; it pushes only
+with its `publish` input on and from `main`) and the Release workflow's `fantom_base` input (empty by default).
+Tried on this Mac with a copy of a full bundle build's volume: pruning `build/` from 8.4 GB to 8 MB (with `host/` 741 MB
+and `target/` 172 MB kept) lets Buildroot finish the bundle, building only `oscairn-juce`, `oscairn-samplepack`,
+`oscairn-ui-crates` and `oscairn` and then the root filesystem, never a base package; the tarball is 74.9 MB, and the same size from the seeded volume below;
+the image made from that base is 839 MB of content; a bundle build from an empty volume
+seeded from it, with a cold ccache and no downloads, took 11.4 min (seed copy included). Not tried: building the base
+from nothing (hours), pushing and pulling through the registry, the workflow on a runner. The owner decides whether to
+publish the package (`ghcr.io/oscairn/oscairn-os-base`) and sets its visibility and the repository's access.
+The `fantom-0` job builds the whole Buildroot tree each run: the first release run
 (a cold one, nothing in the Actions cache yet) took 67.9 min; every run compiles the cross toolchain again, since only `dl/` and ccache are kept, and then every base package.
 The plan is to build everything that is not Oscairn once per Buildroot configuration, publish it as a container image, and let
 the job build only Oscairn's four packages (`oscairn`, `oscairn-juce`, `oscairn-samplepack`, `oscairn-ui-crates`) and the

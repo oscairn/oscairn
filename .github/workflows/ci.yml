@@ -25,8 +25,47 @@ permissions:
   contents: read
   actions: write
 
+# Each tree is built once (ccache warm: about three minutes) and its tests run in shards on runners of their own
+# (tools/ci-ctest-shard.sh: the tests dealt out by their measured cost, tools/ci-costs/, and a check that the shards
+# are exactly the whole list); the built folder goes to the shards as an artifact (.github/actions/tree-handoff).
 jobs:
-  build-and-test:
+  changes:
+    # A change that touches only Markdown, notes/, .trail/ or docs/images/ cannot change what a build or a test
+    # does (tools/ci-skippable.sh says which paths): the build jobs are skipped, and "CI result" at the end still
+    # passes, so it is the one check a branch rule can require. The ui-rust job runs when ui/, the profiles and
+    # themes it embeds, or the workflows change, and not for a change to the C++ alone.
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.diff.outputs.build }}
+      ui: ${{ steps.diff.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Which paths changed
+        id: diff
+        run: |
+          tools/ci-skippable.sh --self-test
+          case "$GITHUB_EVENT_NAME" in
+            # the checkout is the pull request merged into the base's tip: its first parent is that tip
+            pull_request) base=HEAD^1 ;;
+            push) base=${{ github.event.before }} ;;
+            *) base= ;;
+          esac
+          if [ -n "$base" ] && git diff --name-only "$base" HEAD > changed.txt 2> /dev/null; then
+            cat changed.txt
+            tools/ci-skippable.sh < changed.txt | tee -a "$GITHUB_OUTPUT"
+            tools/ci-skippable.sh --ui < changed.txt | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "no base to compare with: everything runs"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: build (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -84,15 +123,70 @@ jobs:
           name: ci-build-and-test
           variant: release
 
+      - name: Hand the build to the test jobs
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: pack
+          name: build-${{ matrix.os }}
+          dir: build
+
+  build-and-test:
+    # Shard 0 of each OS also runs the checks that need the build but no test number (the production tests below).
+    name: build-and-test (${{ matrix.os }}, shard ${{ matrix.shard }} of ${{ matrix.shards }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, shards: 4, shard: 0 }
+          - { os: ubuntu-24.04, shards: 4, shard: 1 }
+          - { os: ubuntu-24.04, shards: 4, shard: 2 }
+          - { os: ubuntu-24.04, shards: 4, shard: 3 }
+          - { os: macos-15, shards: 4, shard: 0 }
+          - { os: macos-15, shards: 4, shard: 1 }
+          - { os: macos-15, shards: 4, shard: 2 }
+          - { os: macos-15, shards: 4, shard: 3 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the test tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y liblilv-dev lv2-dev lv2-examples libsndfile1-dev libsamplerate0-dev x42-plugins samplv1-lv2 python3-jsonschema
+
+      - name: Check out pinned upstream LV2 examples (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v4
+        with:
+          repository: lv2/lv2
+          ref: 0bcde338db1c63bbc503b4d1f6d7b55ed43154af
+          path: upstream-lv2
+
+      - name: Install the test tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install lilv lv2
+
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
+      - name: Take the build from the build job
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: unpack
+          name: build-${{ matrix.os }}
+          dir: build
+
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: tools/ci-ctest-shard.sh build ${{ matrix.shards }} ${{ matrix.shard }} "" tools/ci-costs/release.txt
 
       - name: Check core/clap-ext against its pinned oscairn-clap commit
+        if: matrix.shard == 0
         env:
           OSCAIRN_REQUIRE_NETWORK: "1"
         run: python3 tools/check-clap-ext.py
 
       - name: Check out pinned MOD MDA sources
+        if: matrix.shard == 0
         uses: actions/checkout@v4
         with:
           repository: mod-audio/mda-lv2
@@ -100,6 +194,7 @@ jobs:
           path: upstream-mod-mda
 
       - name: Check out pinned MOD metadata
+        if: matrix.shard == 0
         uses: actions/checkout@v4
         with:
           repository: mod-audio/mod-lv2-data
@@ -114,16 +209,17 @@ jobs:
             plugins-fixed/mod-mda-Overdrive.lv2
 
       - name: Build and test production MOD instruments and effects
+        if: matrix.shard == 0
         run: |
           python3 core/lv2-host/tests/production/build_mod_mda.py upstream-mod-mda build/production-lv2 --mod-data upstream-mod-data
           python3 core/lv2-host/tests/production/run.py build/core/lv2-host/tests/oscairn-lv2-production-probe build/production-results --mod-root build/production-lv2 --prepared-probe build/core/oscairn-prepared-instances-test --renderer build/hosts/oscairn-render --sequencer build/plugins/oscairn-step-sequencer.clap
 
       - name: Test production x42 EQ with larger Atom buffers (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         run: python3 core/lv2-host/tests/production/run.py build/core/lv2-host/tests/oscairn-lv2-production-probe build/x42-production-results --system-root /usr/lib/lv2 --only x42-fil4-stereo
 
       - name: Test production sampler patch and portable state (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
@@ -131,7 +227,7 @@ jobs:
           build/core/lv2-host/tests/oscairn-lv2-sampler-state-test /usr/lib/lv2/samplv1.lv2
 
       - name: Upload production test measurements
-        if: always()
+        if: always() && matrix.shard == 0
         uses: actions/upload-artifact@v4
         with:
           name: production-lv2-${{ matrix.os }}
@@ -140,10 +236,53 @@ jobs:
             build/x42-production-results/results.json
           if-no-files-found: ignore
 
+  ui-rust:
+    # The Rust UI (ui/) is built by no other CI job (OSCAIRN_UI is off): its tests, which render headless through Slint's
+    # software renderer, and clippy with warnings as errors, as docs/rust-ui.md's gate. Dependencies come from crates.io
+    # at ui/Cargo.lock (--locked), the vendored KMS backend by the patch in ui/Cargo.toml. Not run here: the tests that
+    # need the engine (OSCAIRN_ENGINE) or the JUCE app (OSCAIRN_APP) skip themselves without them.
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the libraries the desktop backend builds against
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev
+      - name: Install Rust 1.95.0 (ui/rust-toolchain.toml's release)
+        run: tools/install-rust.sh
+      - name: Restore cargo
+        id: cargo
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/target
+          # Everything cargo's own fingerprints do not decide: the toolchain, the lock, the manifest and the vendored crates.
+          key: cargo-ci-ui-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ui/rust-toolchain.toml', 'ui/Cargo.lock', 'ui/Cargo.toml', 'ui/vendor/**', 'CMakeLists.txt') }}
+        if: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+      - name: Test
+        working-directory: ui
+        run: cargo test --locked
+      - name: Clippy
+        working-directory: ui
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Save cargo
+        if: ${{ !cancelled() && steps.cargo.outputs.cache-hit != 'true' && github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/target
+          key: cargo-ci-ui-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ui/rust-toolchain.toml', 'ui/Cargo.lock', 'ui/Cargo.toml', 'ui/vendor/**', 'CMakeLists.txt') }}
+
   standalone-launch:
     # The desktop app (JUCE) is otherwise never built; this builds it and runs the desktop-launch
     # test, which starts the real executable. macOS only: a headless Linux run needs xvfb. Its
     # engine runs on the null audio device (--audio null), so the runner needs no audio hardware.
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -178,17 +317,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build-standalone -R "^(desktop-launch|plugin-clap)$" --output-on-failure  # plugin-clap: the DAW plugin's bundle opened as a host does; the others click a real window or time real audio, which a shared runner cannot do
 
-  thread-sanitizer:
-    # The tests are nearly all of the job's time, so they run in parallel shards (tools/ci-ctest-shard.sh: ctest's
-    # stride over the test numbers, and a check that the shards are exactly the whole list); each shard builds
-    # with the cache and runs its slice alone on its own runner.
-    name: thread-sanitizer (shard ${{ matrix.shard }} of 4)
+  thread-sanitizer-build:
+    name: thread-sanitizer build
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
@@ -224,8 +358,7 @@ jobs:
         run: cmake --build build
 
       - name: Save the build caches
-        # one shard saves: the four build the same objects
-        if: ${{ !cancelled() && matrix.shard == 0 }}
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/cache-build
         with:
           phase: save
@@ -233,13 +366,53 @@ jobs:
           name: ci-thread-sanitizer
           variant: debug-tsan
 
+      - name: Hand the build to the test jobs
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: pack
+          name: thread-sanitizer
+          dir: build
+
+  thread-sanitizer:
+    # The tests are nearly all of the job's time: ten shards, each alone on its own runner, on the one build above.
+    name: thread-sanitizer (shard ${{ matrix.shard }} of 10)
+    needs: thread-sanitizer-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the test tools
+        run: sudo apt-get update && sudo apt-get install -y liblilv-dev lv2-dev libsndfile1-dev libsamplerate0-dev
+      - name: Check out pinned upstream sampler
+        uses: actions/checkout@v4
+        with:
+          repository: lv2/lv2
+          ref: 0bcde338db1c63bbc503b4d1f6d7b55ed43154af
+          path: upstream-lv2
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
+      - name: Take the build from the build job
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: unpack
+          name: thread-sanitizer
+          dir: build
+
       - name: Test
         # The scanner tests deliberately crash and hang plugins in child processes.
-        run: tools/ci-ctest-shard.sh build 4 ${{ matrix.shard }} "scanner|benchmark-cli"
+        run: tools/ci-ctest-shard.sh build 10 ${{ matrix.shard }} "scanner|benchmark-cli" tools/ci-costs/tsan.txt
 
-  cpp-reference-host:
+  cpp-reference-host-build:
     # The Rust CLAP host is the default and the jobs above build it; this builds the C++ reference host
     # (-DOSCAIRN_CLAP_HOST=cpp) and runs the tests that go through the engine, the worker and the host.
+    name: cpp-reference-host build
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -270,5 +443,53 @@ jobs:
           name: ci-cpp-reference-host
           variant: release-cpp-host
 
+      - name: Hand the build to the test jobs
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: pack
+          name: cpp-reference-host
+          dir: build-cpp-host
+
+  cpp-reference-host:
+    name: cpp-reference-host (shard ${{ matrix.shard }} of 2)
+    needs: cpp-reference-host-build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the test tools
+        run: sudo apt-get update && sudo apt-get install -y libsndfile1-dev libsamplerate0-dev
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
+      - name: Take the build from the build job
+        uses: ./.github/actions/tree-handoff
+        with:
+          phase: unpack
+          name: cpp-reference-host
+          dir: build-cpp-host
+
       - name: Test
-        run: ctest --test-dir build-cpp-host -R "clap-host|kick-clap|worker|plugin-hosts|plugin-clap|control-|engine-|graph-|pressure-|memory" --output-on-failure
+        run: tools/ci-ctest-shard.sh build-cpp-host 2 ${{ matrix.shard }} "" tools/ci-costs/release.txt "clap-host|kick-clap|worker|plugin-hosts|plugin-clap|control-|engine-|graph-|pressure-|memory"
+
+  result:
+    # Passes when every job above passed or was skipped for a change that cannot matter to it; fails if one failed,
+    # was cancelled or never ran for another reason. The one name a branch rule requires.
+    name: CI result
+    if: always()
+    needs: [changes, ui-rust, build, build-and-test, standalone-launch, thread-sanitizer-build, thread-sanitizer, cpp-reference-host-build, cpp-reference-host]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BUILD: ${{ needs.changes.outputs.build }}
+        run: |
+          echo "$NEEDS" | grep '"result"'
+          if echo "$NEEDS" | grep -q '"result": "\(failure\|cancelled\)"'; then echo "a job failed or was cancelled" >&2; exit 1; fi
+          # skipped is right only for a change that skips the builds
+          # (ui-rust is skipped for a change to the C++ alone, whatever else)
+          if [ "$BUILD" = true ] && echo "$NEEDS" | jq -e 'del(.["ui-rust"]) | [.[].result] | index("skipped")' > /dev/null; then echo "a job was skipped though the change builds" >&2; exit 1; fi

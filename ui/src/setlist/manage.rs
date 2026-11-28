@@ -129,6 +129,8 @@ impl Screen {
     /// The edit made to a copy of the document and saved; `place` is where the cursor goes when it is shown again.
     fn save(&mut self, said: impl Into<String>, edit: impl FnOnce(&mut Value) -> Option<(usize, usize)>) {
         let Some(s) = self.setlist.as_ref() else { return };
+        // Remember the slot `current` steps from, to follow it (its Performance) once the edit is read again.
+        self.slot_was = self.current.and_then(|i| s.slot(i)).map(|x| x.id.clone());
         let mut doc = s.doc.clone();
         let place = edit(&mut doc);
         self.out.push((Request::Save(said.into(), place), "setlists.save", json!({"setlist": doc})));

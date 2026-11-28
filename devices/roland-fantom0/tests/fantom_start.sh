@@ -167,6 +167,14 @@ out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_WORKER_REST from the profile's file, last" "echo \"\$out\" | grep -q 'OSCAIRN_PLUGIN_HOSTS=3 OSCAIRN_WORKER_REST=0 oscairn-engine-run'"
 out=$(OSCAIRN_WORKERS=chain OSCAIRN_ENGINE_AUDIO_CORES=3 OSCAIRN_WORKER_AUDIO_CORES=0-2 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_WORKERS and the engine's and workers' core lists handed to the engine, after it" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_REST=0 OSCAIRN_WORKERS=chain OSCAIRN_ENGINE_AUDIO_CORES=3 OSCAIRN_WORKER_AUDIO_CORES=0-2 oscairn-engine-run'"
+out=$(OSCAIRN_DEADLINE_SLACK_US=700 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_DEADLINE_SLACK_US from the environment, handed to the engine, before the rest" "echo \"\$out\" | grep -q 'OSCAIRN_PLUGIN_HOSTS=3 OSCAIRN_DEADLINE_SLACK_US=700 OSCAIRN_WORKER_REST=0 oscairn-engine-run'"
+check "and not set when the environment and the file have none" "! \"$bundle/oscairn-fantom-start\" --dry-run --engine-only 2>&1 | grep -q OSCAIRN_DEADLINE_SLACK_US"
+echo "OSCAIRN_DEADLINE_SLACK_US='900'" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "or from the profile's file" "echo \"\$out\" | grep -q 'OSCAIRN_PLUGIN_HOSTS=3 OSCAIRN_DEADLINE_SLACK_US=900 OSCAIRN_WORKER_REST=0 oscairn-engine-run'"
+out=$(OSCAIRN_DEADLINE_SLACK_US=700 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "the environment's first" "echo \"\$out\" | grep -q 'OSCAIRN_PLUGIN_HOSTS=3 OSCAIRN_DEADLINE_SLACK_US=700 OSCAIRN_WORKER_REST=0 oscairn-engine-run'"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 # The first-party plugins' device settings: OSCAIRN_SAMPLER_*, _ANALOG_*, _FM_*, _ARPEGGIATOR_*, _EFFECTS_*.

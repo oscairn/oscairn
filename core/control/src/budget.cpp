@@ -887,6 +887,7 @@ namespace oscairn
             for(auto& item : result.items)
                 try { if(const auto e = estimate(item.path); !e.fits) item.unfit = tooMuch(e); }
                 catch(const std::exception&) {} // unreadable: opening it says why
+        for(auto& item : result.items) item.missing = missingPlugins(item.path); // a needed plugin build not installed: an item that opens with a stand-in (N35b)
         return result;
     }
 
@@ -1114,7 +1115,9 @@ namespace oscairn
             std::set<NodeId> lost; // sounding, given up with `given`
             size_t idle = 0;
             for(const auto n : outgoing) if(!busy.count(n)) { ++idle; if(std::find(silent.begin(), silent.end(), n) == silent.end()) lost.insert(n); }
-            if(idle == outgoing.size()) break; // nothing left to ring out: a cut
+            // Nothing left to ring out once some were given up: a cut. Nothing sounding at all (issue 9): no cut, the silent ones go
+            // as memory needs, which a cut here had done wholesale, emptying the instances kept warm with it and saying it would not fit.
+            if(idle == outgoing.size() && i) break;
             std::set<NodeId> gone(kept); gone.insert(lost.begin(), lost.end());
             if(!steps->memory)
             {

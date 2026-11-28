@@ -9,6 +9,18 @@ namespace oscairn::standalone
     namespace
     {
         juce::File captureFile(const juce::File& configuration) { return configuration.getChildFile("capture"); }
+
+        // The capture buffer's choices (issue #19): Off, 10, 15, 30, 60 or 120 seconds, at most the
+        // device's maximum. A value between them (a saved length from before the setting) snaps down
+        // to the nearest choice, so the buffer is always a choice.
+        double discreteCaptureSeconds(double seconds, int max)
+        {
+            if( seconds <= 0 ) return 0;
+            const long cap = std::min( long( seconds ), max > 0 ? long( max ) : 120l );
+            static const int choices[] = {120, 60, 30, 15, 10};
+            for( const int c : choices ) if( c <= cap ) return c;
+            return 0; // the cap is below the shortest choice: Off
+        }
     }
 
     void setUpSession(Control& c, const Profile& profile, uint64_t shell)
@@ -44,14 +56,18 @@ namespace oscairn::standalone
         for( const auto& r : profile.repositories ) shipped.push_back( { r.address, r.name, r.key, "device" } );
         c.setDeviceRepositories( shipped, profile.hideOfficial );
         if( !always.empty() ) c.setAlwaysAvailable( always ); // last: refused when they do not fit (std::invalid_argument)
+        // The capture buffer's setting bounds (issue #19): the device's default and the most
+        // seconds its memory allows; 30 s and 120 s when the profile does not say.
+        c.setCaptureBufferPolicy( discreteCaptureSeconds( profile.compute.captureSeconds >= 0 ? profile.compute.captureSeconds : 30, profile.compute.captureBufferMax ),
+                                  profile.compute.captureBufferMax > 0 ? std::min( long( profile.compute.captureBufferMax ), 3600l ) : 120 );
     }
 
     double readCaptureSeconds(const juce::File& configuration, const Profile& profile)
     {
         const auto saved = captureFile(configuration).loadFileAsString().trim();
-        if(saved.isNotEmpty() && saved.containsOnly("0123456789.")) return std::clamp(saved.getDoubleValue(), 0.0, 3600.0);
-        if(profile.compute.captureSeconds >= 0) return profile.compute.captureSeconds; // the device's own
-        return profile.compute.memory > 0 && profile.compute.memory <= 2048 ? 120 : 600; // RFC 0020's proposed defaults
+        if(saved.isNotEmpty() && saved.containsOnly("0123456789.")) return discreteCaptureSeconds(saved.getDoubleValue(), profile.compute.captureBufferMax);
+        if(profile.compute.captureSeconds >= 0) return discreteCaptureSeconds(profile.compute.captureSeconds, profile.compute.captureBufferMax); // the device's own
+        return discreteCaptureSeconds(30, profile.compute.captureBufferMax); // issue #19's default
     }
 
     void writeCaptureSeconds(const juce::File& configuration, double seconds)

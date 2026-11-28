@@ -543,11 +543,11 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_accent(c("accent"));
     g.set_positive(c("positive"));
     g.set_danger(c("danger"));
-    g.set_warning(d.warning.unwrap_or(rgb(0xe8c547))); // the JUCE meters' yellow
+    g.set_warning(d.warning.unwrap_or(rgb(0xa78815))); // the meters' yellow, 3:1 on the light theme's background
     g.set_focus(d.focus.unwrap_or(c("accent")));
     g.set_dark(dark(c("background")));
     g.set_on_accent(contrasting(c("accent")));
-    g.set_on_warning(most_readable(d.warning.unwrap_or(rgb(0xe8c547))));
+    g.set_on_warning(most_readable(d.warning.unwrap_or(rgb(0xa78815))));
     let operators = crate::palette::operators(c("accent"), c("surface"), c("background"), c("text"));
     g.set_operators(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.fill).collect::<Vec<_>>())));
     g.set_operators_on(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.on).collect::<Vec<_>>())));

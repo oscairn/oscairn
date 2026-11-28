@@ -67,6 +67,12 @@ none of it settles is in
   SAMPLING, PAD MODE, CLIP BOARD, BANK and HOLD; 16 pads; HOLD, CTRL1 and CTRL2 pedal jacks; MIDI
   IN and OUT; USB COMPUTER, USB MEMORY and an external USB device port. Roland's spec counts
   **eight** control knobs and **eight** sliders on the FANTOM-0 (not four).
+  **MASTER VOLUME is analog and never reaches the engine.** It has no number in Roland's
+  panel tables, so it never appears on the panel bus and the engine never sees it; it
+  attenuates the output in the analog path (or on the BMC side) [inferred]. The engine's
+  software master level and the knob are therefore independent: moving the knob neither
+  reads as a control in the engine nor changes its master level, and the knob does not move
+  with the engine.
 
 ## What the unit shows
 
@@ -1448,7 +1454,9 @@ half-damper pedal reads as one; the CTRL jacks are `pedal:1` and `pedal:2` (anal
 Not in the map, with Roland's numbers for them:
 
 - **MASTER VOLUME:** Roland's tables have no number for it. It never reaches the i.MX as a panel
-  message (inferred: it acts on the BMC side or in the analog path).
+  message (inferred: it acts on the BMC side or in the analog path): an analog master-level
+  control, independent of the engine — the engine's master level neither drives it nor is
+  driven by it.
 - **WRITE, MENU and TEMPO:** numbers 104 to 106 in Roland's tables, but the panel bus never
   carries them (pressed on the unit, they sent nothing there): they are GPIO keys, and Roland's
   programs make the messages themselves from `/dev/input/event1`. The engine reads them there

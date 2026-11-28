@@ -151,6 +151,10 @@ namespace oscairn
             // Performance loads that failed, whichever client (or the engine itself) asked, and why the last did: so an
             // app says why a Performance it did not ask for did not open.
             uint64_t refusedLoads = 0; std::string refusal;
+            // RFC 0043: plugins the open Performance plays at two or more versions at once (stand-ins
+            // aside), each by format and ID with its versions in order; suggested to align, never aligned.
+            struct MixedVersions { std::string format, id; std::vector<std::string> versions; bool operator==(const MixedVersions&) const = default; };
+            std::vector<MixedVersions> mixedVersions;
             // The keys held now on each source that has any (a MIDI input's source, or 0 for the
             // built-in keys, pads and UI notes), in ascending order: what an input's on-screen
             // keyboard lights. Read from the last rendered block.
@@ -532,6 +536,14 @@ namespace oscairn
         struct VersionUndone { std::string id; bool savedSince = false; };
         virtual std::vector<VersionUndone> undoVersionMove(const std::string& move) = 0;
         virtual void forgetVersionMove(const std::string& move) = 0;
+        // The open Performance's nodes of the plugin at plugin.version (all, or those given) moved to
+        // the installed newer version `to` (RFC 0043 step 3): each one's state, saved now, is opened by
+        // the new build first, its ports compared and its parameters read (changes: those that read
+        // differently), and only when every node passes is each replaced by the new build with that
+        // state; one edit, which edit.undo takes back with the old instances. Without the publisher's
+        // claim, only with withoutClaim. A node sharing an instance is refused.
+        struct VersionUsed { uint64_t revision = 0; std::vector<VersionChange> changes; };
+        virtual VersionUsed useVersion(const PluginVersion& plugin, const std::string& to, const std::vector<NodeId>& nodes = {}, bool withoutClaim = false) = 0;
         // Removes a plugin's builds from the store, one platform's or (empty) all. Refused while the
         // open Performance plays the build; items that use it open with a stand-in until it is back.
         virtual void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) = 0;

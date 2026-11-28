@@ -81,7 +81,7 @@ try:
     error(rpc('sounds.select', {'node':'synth','context':prepared}), -32005)
     status = rpc('session.status')['result']
     assert status == {'audioDevice': '', 'midiInputs': [], 'midiOutputs': [], 'sampleRate': 48000,
-                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'lateBlocks': 0, 'silentBlocks': 0, 'badOutputBlocks': 0, 'audioUnderruns': 0, 'audioDeviceList': 0, 'midiPortList': 0, 'refusedLoads': 0, 'refusal': '', 'ringOut': {'cut': 0, 'faded': 0, 'chokedOlder': 0, 'partial': 0, 'panicEnded': 0, 'limitEnded': 0, 'fadeEnded': 0, 'kept': 0, 'releasedSilent': 0, 'releasedFaded': 0}, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': [], 'heldNotes': []}, status
+                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'lateBlocks': 0, 'silentBlocks': 0, 'badOutputBlocks': 0, 'audioUnderruns': 0, 'audioDeviceList': 0, 'midiPortList': 0, 'refusedLoads': 0, 'refusal': '', 'mixedVersions': [], 'ringOut': {'cut': 0, 'faded': 0, 'chokedOlder': 0, 'partial': 0, 'panicEnded': 0, 'limitEnded': 0, 'fadeEnded': 0, 'kept': 0, 'releasedSilent': 0, 'releasedFaded': 0}, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': [], 'heldNotes': []}, status
     error(rpc('session.status', {'unknown': True}), -32602)
     for ident in [None, 0, -1, 2**63 + 7, 'hello\x00\n"\\', 'é🎹', 1.5]:
         assert rpc('transport.get', ident=ident)['id'] == ident

@@ -35,6 +35,9 @@ Checked when built and tested; the sections below say how.
       is read; the claim's same-publisher route through a repository's index is not built, so the
       old version's build must be here for the claim to count)
 - [ ] 3. Moving the open Performance's parts (`parts.useVersion`) and the mixed-versions line (#179)
+      (`parts.useVersion` and `session.status`'s `mixedVersions` built 2026-11-27; the Parts view's
+      line is not, nor the line for a part loaded from a locked Sound; a node sharing an instance
+      is refused rather than moved)
 - [ ] 4. Comparing the two versions by audition (`audition.start`'s `versions`, `audition.switch`) (#181)
 - [ ] 5. Checking the claim by machine: `oscairn-plugin-check --state-from`, the import
       workflow's state check in oscairn/packages, then the repository's Loading check (#183)

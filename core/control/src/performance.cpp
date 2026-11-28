@@ -1071,7 +1071,10 @@ NodeId Session::holding(const fs::path& root,const std::string& key,const std::s
         bool same=loaded->second.source==source;
         if(const auto s=stateOf_.find(n);!same && s!=stateOf_.end() && !s->second.empty()){if(!digest)digest=stateDigest(folder);same=*digest==s->second;}
         if(!same)continue;
-        try{if(h.effectResources())continue;}catch(const std::exception&){continue;} // engines offering effect contexts go by slice 1
+        // An engine offering effect contexts (issue 340): kept as it is, its tail going on, only alone in its group (no other node a context
+        // of it) and opened from this very file (its source, not a state of the same bytes: a file saved again may wire it otherwise);
+        // else it goes by slice 1, as before.
+        try{if(h.effectResources() && (graph_.effectSource(n,{n})!=n || loaded->second.source!=source))continue;}catch(const std::exception&){continue;}
         return n;}
     return 0;
 }
@@ -1162,8 +1165,11 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // now, when it has room for all of them, instead of loading another instance.
     std::map<std::string,uint32_t> group;for(auto node:nodes)++group[text(field(node,"engine"))];
     std::map<NodeId,uint32_t> claimed; // contexts taken per playing engine
+    // Issue 330 (A): by node key, the open nodes whose instance holds its saved state as it is (holding), found once every node
+    // is known (below), in document order as the estimate finds them; neither claimed nor taken over by another node.
+    std::map<std::string,NodeId> holds;std::set<NodeId> holders;std::vector<std::pair<NodeId,NodeId>> held;
     auto playing=[&](const std::string& id,const std::string& path,const std::string& version,uint32_t count)->std::optional<NodeId>{
-        for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(p.id!=id || p.path!=path || p.version!=version || !h.failure().empty())continue;
+        for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(holders.count(n) || p.id!=id || p.path!=path || p.version!=version || !h.failure().empty())continue; // one kept as it is stays alone (issue 340)
             // One of its groups to a playing engine: two in one would share an instance they would not share opened fresh (RFC 0045).
             const auto r=h.effectResources();auto& taken=claimed[graph_.effectSource(n)];
             if(r && !taken && r->capacity>=r->prepared+count){taken=count;return n;}}
@@ -1189,9 +1195,6 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         return Want{id,saved,build,wanted,worker};};
     auto same=[&](const Want& w,const PluginHost& h,const Loaded& l){const auto& p=h.descriptor();std::error_code e;
         return p.id==w.id && p.version==w.version && l.build==w.build && h.inWorker()==w.worker && (p.path==w.path.string() || fs::equivalent(p.path,w.path,e));};
-    // Issue 330 (A): by node key, the open nodes whose instance holds its saved state as it is (holding), found once every node
-    // is known (below), in document order as the estimate finds them; neither claimed nor taken over by another node.
-    std::map<std::string,NodeId> holds;std::set<NodeId> holders;std::vector<std::pair<NodeId,NodeId>> held;
     // leading (RFC 0045): the node may start a group, so no playing instance that could lead one (its state is given last, after the read).
     auto take=[&](V plugin,const std::string& key,bool leading)->std::optional<size_t>{
         if(free.empty())return std::nullopt;

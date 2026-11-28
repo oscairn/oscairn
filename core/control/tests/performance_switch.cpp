@@ -500,6 +500,38 @@ namespace
             check(w.reused == 1 && w.loaded == 0 && w.open.save > 0 && t.sessionStatus().ringOut.kept == 0, "steps, silent: the instance taken over and compared with its file, not kept unseen: " +
                   std::to_string(w.open.save) + " ms saving, " + std::to_string(t.sessionStatus().ringOut.kept) + " kept unseen");
         }
+        // Issue 9: nothing sounding, and the two Performances do not fit together (FANTOM d1: the engine said "opened at once ... would
+        // not fit" at nearly every plain load and let every instance kept warm go, a VA the Performance after next takes among them,
+        // which then loaded afresh in a second). Nothing heard, nothing given up: no cut, the last one's silent instances go as
+        // the memory needs, and the instances kept warm stay as far as there is room for them. X's instrument kept warm,
+        // A's synth and Delay playing, which the incoming takes over (as Hopeless takes TSO's); memory classes with room for the
+        // incoming beside all but a byte of A. Before, the cut let X go, and so did the room made before the read, which counted
+        // what the incoming takes over twice, as A's and again as its.
+        {
+            const auto x = tempPath / "steps-warm-x", c = tempPath / "steps-warm-a"; single(x, argv[4], .5); ringing(c, 0, argv[1], argv[3], .5);
+            Session t(48000, frames);
+            auto gone = [&] { for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1); };
+            load(t, x); quiet(t); load(t, c); gone(); quiet(t);
+            check(t.warmInstances() == 1, "steps, kept warm: X's instrument kept warm: " + std::to_string(t.warmInstances()));
+            uint64_t xBytes = 0; for(const auto& i : t.engineTiming(false).instances) if(!i.inUse) xBytes = i.memory;
+            Session::Budget b{64, 0, uint64_t(1) << 40, 0, 0, 0};
+            t.setBudget(b); t.forgetMeasurements(); blocks(t, 2);
+            const auto next = t.estimate(incoming.string()).memory, open = t.estimate("").memory;
+            b.device = t.memoryState().reserved + next + open - 1;
+            t.setBudget(b);
+            // Room for X beside A: what the incoming's estimate is over a byte (a sanitizer's worker holds more than that guess: X goes here).
+            const bool fitsBefore = xBytes < next;
+            check(t.warmInstances() == (fitsBefore ? 1u : 0u) && !t.estimate(incoming.string()).seamless && t.estimate(incoming.string()).fits, "steps, kept warm: the incoming fits alone, not beside A, X still kept warm where it fits");
+            const auto before = t.sessionStatus().ringOut;
+            load(t, incoming);
+            const auto r = t.sessionStatus().ringOut; const auto m = t.memoryState();
+            const bool room = xBytes <= (m.device > m.reserved + m.committed ? m.device - m.reserved - m.committed : 0);
+            std::printf("steps, kept warm: %llu let go silent, %zu kept warm (X %llu bytes, room %s)\n", (unsigned long long)(r.releasedSilent - before.releasedSilent), t.warmInstances(), (unsigned long long)xBytes, room ? "for it" : "short");
+            check(r.cut == before.cut && r.releasedSilent > before.releasedSilent && t.sessionStatus().notices.empty(), "steps, kept warm: nothing sounding, no cut: A's silent instances let go as memory needs, nothing said: " +
+                  std::to_string(r.releasedSilent - before.releasedSilent) + " let go");
+            check(t.warmInstances() == (fitsBefore && room ? 1u : 0u), "steps, kept warm: X's instrument stays kept warm where there is room for it: " + std::to_string(t.warmInstances()));
+            t.setBudget({});
+        }
         // Back to a Performance after one other, nothing held (FANTOM k6's "again"): A, A again (kept as it is), B, then A. What A
         // left warm at A -> B (or B took over) holds A's state as on main: the return keeps as many as it does with no repeat first.
         // A memory budget everything fits in, as on the device.
@@ -1002,19 +1034,27 @@ int main(int argc, char** argv)
             auto rung = [&] { for(int i = 0; i < int(48000 * 31 / frames) && u.leaving(); ++i) blocks(u, 1); };
             load(u, c); quiet(u); load(u, x); rung(); quiet(u); load(u, g); rung();
             check(u.warmInstances() == 5, "C's Samplers, then X's instrument, kept warm: " + std::to_string(u.warmInstances()));
-            uint64_t instrumentBytes = 0;
-            for(const auto& i : u.engineTiming(false).instances) if(!i.inUse && i.plugin == instrument) instrumentBytes = i.memory;
+            uint64_t instrumentBytes = 0, samplerBytes = 0;
+            for(const auto& i : u.engineTiming(false).instances) if(!i.inUse) (i.plugin == instrument ? instrumentBytes : samplerBytes) += i.memory;
             Session::Budget room{64, 0, uint64_t(1) << 40, 0, 0, 0};
             u.setBudget(room); blocks(u, 2);
             const auto n = u.memoryState();
-            // Half the instrument's memory short of room for everything, what is reserved counted (as above): C fits beside its
-            // Samplers by that much, and with the instrument would not by as much. Without the reserve and exactly at the edge,
-            // a Sampler went too, or the instrument before anything was opened (ThreadSanitizer, 2 of 5).
-            room.device = n.reserved + n.committed + u.estimate(c.string()).memory + n.opportunistic - instrumentBytes / 2;
-            u.setBudget(room);
-            check(u.warmInstances() == 5, "all kept warm while nothing is opened");
-            w = load(u, c); report("G -> C, room for C but not the instrument kept warm", w);
-            check(w.loaded == 0 && w.reused == 4 && u.warmInstances() == 0, "the instrument let go before the read, the Samplers taken over: " + std::to_string(w.loaded) + " loaded");
+            // C's new instances: its estimate less the Samplers kept warm it takes over (issue 9: they are not counted twice).
+            const auto estimate = u.estimate(c.string()).memory, fresh = estimate - std::min(estimate, samplerBytes);
+            std::printf("G -> C: C's estimate %llu bytes, the Samplers kept warm %llu, its new %llu, the instrument %llu\n", (unsigned long long)estimate, (unsigned long long)samplerBytes, (unsigned long long)fresh, (unsigned long long)instrumentBytes);
+            // A sanitizer's workers hold several times the estimate's guess: there C needs nothing new and the case cannot be made.
+            if(fresh <= instrumentBytes) std::printf("G -> C: not checked, C needs no more new memory than the instrument holds\n");
+            else
+            {
+                // Half the instrument's memory short of room for everything, what is reserved counted (as above): C fits beside its
+                // Samplers by that much, and with the instrument would not by as much. Without the reserve and exactly at the edge,
+                // a Sampler went too, or the instrument before anything was opened (ThreadSanitizer, 2 of 5).
+                room.device = n.reserved + n.committed + fresh + n.opportunistic - instrumentBytes / 2;
+                u.setBudget(room);
+                check(u.warmInstances() == 5, "all kept warm while nothing is opened");
+                w = load(u, c); report("G -> C, room for C but not the instrument kept warm", w);
+                check(w.loaded == 0 && w.reused == 4 && u.warmInstances() == 0, "the instrument let go before the read, the Samplers taken over: " + std::to_string(w.loaded) + " loaded");
+            }
             u.setBudget({});
         }
 

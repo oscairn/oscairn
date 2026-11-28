@@ -1894,6 +1894,7 @@ namespace oscairn
     void Session::startScene(const Scene& scene)
     {
         Quiet playing(*this); // switching scenes is playing, not editing
+        for(const auto& [node, name] : nodes_) edited_.insert(node); // but its values are not the file's: a reload gives them back (issue 333)
         transition_.reset();
         if(scene.scope & Scene::Mappings) mappingScene_ = scene.id;
         scene_ = scene.id;

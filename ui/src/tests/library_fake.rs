@@ -347,7 +347,7 @@ impl Library {
                 Ok(json!({"id": id}))
             }
             "library.load" => {
-                self.fields(p, &["id"], &["id"])?;
+                self.fields(p, &["id", "fresh"], &["id"])?;
                 let id = p["id"].as_str().unwrap_or_default().to_string();
                 let item = self.find(&id)?.clone();
                 if !item.unfit.is_empty() {

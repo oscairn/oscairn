@@ -161,7 +161,7 @@ it (`permitted`, json_rpc.cpp:589-616).
 | `library.delete` (:986-995) | `id` | `{accepted:true}` |
 | `library.libraries` (:981) | none | `{libraries:[{id,name,items}]}` |
 | `library.save` (:1194-1200) | `name`, `new` (both optional) | `{id}` |
-| `library.load` (:1194-1200) | `id` | `{loaded:true}`; long (Long requests) |
+| `library.load` (:1194-1200) | `id`, `fresh` (issue 333: the open Performance pressed again within 2 s of this screen opening it loads fresh, src/library/open.rs) | `{loaded:true}`; long (Long requests) |
 | `budget.estimate` (:727-733) | `directory` | `{cpu,memory,fits,seamless,longest,cores,uncertain,budget:{cpu,memory},plugins:[{name,plugin,cpu,memory,measured}]}` |
 | `performance.prepare` (:682-686) | `directory` | `{prepared:bool}`; -32005 on a failure |
 | `performance.info` (:913-926) | none | `{id,name,description,tags,color,unsaved}` |

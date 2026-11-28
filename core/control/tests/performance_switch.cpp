@@ -689,6 +689,60 @@ namespace
             check(again.kept == 0 && leavingAgain >= 1, "steps, kept effects: the file saved again keeps nothing unseen (as before): what sounded rings out beside new instances: " +
                   std::to_string(again.kept) + " kept, " + std::to_string(leavingAgain) + " ringing out");
         }
+        // Issue 333: a fresh load keeps nothing. The same synth through a Delay, a key held: an ordinary reload keeps both as they are, a
+        // fresh one loads both anew and lets the old ones ring out beside them. And an edit of each kind before an ordinary reload (a
+        // parameter, the sound selected, the scene, the mix) keeps nothing unseen: the saved state comes back.
+        {
+            const auto fx = tempPath / "fresh-fx"; ringing(fx, 0, argv[1], argv[3], .5);
+            const auto scened = tempPath / "fresh-scenes";
+            {
+                Session s(48000, frames);
+                const auto n = s.add("synth", argv[1]); const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, n);
+                const auto fxn = s.add("delay", argv[3]); s.insertIntoPart(part, 1, fxn); s.commit();
+                check(s.selectSound(n, s.prepareSound(n, "Scened", {{1, .4}})), "a sound");
+                const auto a = s.addScene("A"); s.storeScene(a);
+                check(s.setParameter(fxn, 2, .2), "the Delay's feedback in scene B"); const auto b = s.addScene("B"); s.storeScene(b);
+                s.selectScene(a); blocks(s, 2); s.savePerformance(scened.string());
+            }
+            auto named = [](Session& t, const std::string& name) { for(const auto& [id, n] : t.graphState().names) if(n == name) return id; return NodeId(0); };
+            auto held = [&](const fs::path& file, const std::function<void(Session&)>& edit, bool fresh, size_t* leaving) {
+                Session t(48000, frames);
+                load(t, file); blocks(t, 20);
+                t.note(true, 60, .8); blocks(t, 40);
+                if(edit) { edit(t); blocks(t, 4); }
+                const auto loaded = pluginInstancesLoaded(), kept = t.keptStates();
+                t.loadPerformance(file.string(), fresh);
+                Switch w; w.loaded = pluginInstancesLoaded() - loaded; w.kept = t.keptStates() - kept;
+                if(leaving) *leaving = t.leaving();
+                t.note(false, 60, 0);
+                return w;
+            };
+            size_t leaving = 0;
+            const auto plain = held(fx, {}, false, &leaving);
+            check(plain.kept == 2 && plain.loaded == 0 && leaving == 0, "fresh: an ordinary reload keeps the synth and its Delay: " + std::to_string(plain.kept) + " kept");
+            const auto fresh = held(fx, {}, true, &leaving);
+            check(fresh.kept == 0 && fresh.loaded == 2 && leaving >= 1, "fresh: a fresh reload keeps nothing, loads both anew, the old ones ringing out beside: " +
+                  std::to_string(fresh.kept) + " kept, " + std::to_string(fresh.loaded) + " loaded, " + std::to_string(leaving) + " ringing out");
+            const std::vector<std::pair<std::string, std::function<void(Session&)>>> edits{
+                {"a parameter", [&](Session& t) { check(t.setParameter(named(t, "delay"), 2, .9), "the Delay's feedback moved"); }},
+                {"the sound selected", [&](Session& t) { const auto n = named(t, "synth"); check(t.selectSound(n, t.prepareSound(n, "Other", {{1, .9}})), "another sound selected"); }},
+                {"the mix", [&](Session& t) { t.setPartLevel(t.graphState().parts.at(0).id, .2, false); }}};
+            for(const auto& [what, edit] : edits)
+            {
+                const auto w = held(fx, edit, false, nullptr);
+                check(w.kept == 0, "fresh: after an edit of " + what + " an ordinary reload keeps nothing unseen: " + std::to_string(w.kept) + " kept");
+            }
+            const auto scene = held(scened, [&](Session& t) { t.selectScene(t.graphState().scenes.at(1).id); }, false, nullptr);
+            check(scene.kept == 0, "fresh: after another scene selected an ordinary reload keeps nothing unseen: " + std::to_string(scene.kept) + " kept");
+            {
+                Session t(48000, frames); load(t, fx); blocks(t, 20); t.note(true, 60, .8); blocks(t, 40);
+                const auto d = named(t, "delay"); const double saved = t.parameter(d, 2);
+                check(t.setParameter(d, 2, .9), "the Delay's feedback moved"); blocks(t, 4);
+                t.loadPerformance(fx.string());
+                check(std::abs(t.parameter(named(t, "delay"), 2) - saved) < 1e-6, "fresh: an ordinary reload after an edit brings the saved value back: " + std::to_string(t.parameter(named(t, "delay"), 2)));
+                t.note(false, 60, 0);
+            }
+        }
         // Issue 340: engine.timing's open gives the callback's longest block in each phase of the load (the FANTOM's longest callback of a
         // pedaled reload fell in the publish). A thread paced as a device's callback reports each block's time as the test sets it: 100 us
         // while the load runs, 900 once it returned for longer than the 512 blocks the "after" phase lasts, then 2000.

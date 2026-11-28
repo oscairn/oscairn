@@ -330,6 +330,9 @@ never write the user's data folder.
   Its effects too (issue 340, 2026-11-28): an engine offering effect contexts alone in its group, opened from that very
   file, is kept with its tail going on, where it loaded afresh beside the old one ringing out (eight new effect workers
   and a second set of tails at every pedaled TSO reload, the callback near its deadline).
+  A sound picked, a property set or a scene recalled since it opened counts as a change (issue 333), and a fresh load
+  (`performance.load`/`library.load` with `fresh`) keeps nothing at all: every node loads anew, memory for both copies or
+  the steps below as at any change.
   When the two still do not fit together, the load (`Session::estimate` with `Steps`) lets go of the outgoing
   plugins in order until the incoming one fits beside what is left: first, short of memory, those making no
   sound (silent three seconds or asleep, nothing sounding feeding them), the largest first and only as many as

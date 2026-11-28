@@ -676,8 +676,8 @@ namespace oscairn
                 return R"({"accepted":true})";
             }
             if(method=="performance.save" || method=="performance.load") {
-                fields(p,{"directory"});const auto directory=std::string(string(member(p,"directory")));
-                try{if(method=="performance.save")c.savePerformance(directory);else c.loadPerformance(directory);}
+                if(method=="performance.save")fields(p,{"directory"});else fields(p,{"directory","fresh"});const auto directory=std::string(string(member(p,"directory")));
+                try{if(method=="performance.save")c.savePerformance(directory);else c.loadPerformance(directory,member(p,"fresh") && boolean(member(p,"fresh")));}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return method=="performance.save"?R"({"saved":true})":R"({"loaded":true})";
             }
@@ -1218,10 +1218,10 @@ namespace oscairn
                 try{return "{\"part\":"+std::to_string(c.partFromSound(std::string(string(member(p,"id")))))+'}';}catch(const std::exception& e){throw Failure{-32005,e.what()};}
             }
             if(method=="library.save" || method=="library.load") {
-                if(method=="library.save")fields(p,{"name","new"});else fields(p,{"id"});
+                if(method=="library.save")fields(p,{"name","new"});else fields(p,{"id","fresh"});
                 try{
                     if(method=="library.save")return "{\"id\":"+quote(c.savePerformanceToLibrary(member(p,"name")?std::string(string(member(p,"name"))):std::string(),member(p,"new")?boolean(member(p,"new")):false))+'}';
-                    c.loadPerformanceFromLibrary(std::string(string(member(p,"id"))));return R"({"loaded":true})";
+                    c.loadPerformanceFromLibrary(std::string(string(member(p,"id"))),member(p,"fresh") && boolean(member(p,"fresh")));return R"({"loaded":true})";
                 }catch(const std::exception& e){throw Failure{-32005,e.what()};}
             }
             if(method=="performance.reopen") {fields(p,{});return "{\"notice\":"+quote(c.reopenPerformance())+'}';}

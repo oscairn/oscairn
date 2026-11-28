@@ -69,13 +69,89 @@ Developer ID, and not notarized: the step that imports the signing secrets is no
 
 | Target | Runner | Makes | Time |
 | --- | --- | --- | --- |
-| `macos-arm64` | `macos-15` | `Oscairn-<version>-macos-arm64.dmg` (`tools/release-macos.sh`) | not measured |
-| `linux-arm64` | `ubuntu-24.04-arm` | `oscairn-<version>-linux-arm64.tar.gz` (`tools/release-linux.sh`) | not measured |
-| `linux-x86_64` | `ubuntu-24.04` | `oscairn-<version>-linux-x86_64.tar.gz` | not measured |
+| `macos-arm64` | `macos-15` | `Oscairn-<version>-macos-arm64.dmg` (`tools/release-macos.sh`) | 12.5 min without caches; 6.0 cold with them, 2.1 warm |
+| `linux-arm64` | `ubuntu-24.04-arm` | `oscairn-<version>-linux-arm64.tar.gz` (`tools/release-linux.sh`) | 17.4 min without caches; 15.0 cold, 6.8 warm |
+| `linux-x86_64` | `ubuntu-24.04` | `oscairn-<version>-linux-x86_64.tar.gz` | 16.7 min without caches; 14.0 cold, 5.5 warm |
 | `fantom-0` | `ubuntu-24.04-arm`, or the larger runner the repository variable `OSCAIRN_FANTOM_RUNNER` names | `oscairn-<version>-fantom-0-bundle.tar.gz`, the USB-install bundle ([below](#the-fantom-0-bundle)) | cold: unknown, hours |
 
 Not built yet: Windows, the OTA upgrade package of the FANTOM-0 (issue 219: its step in the job says
 so and makes no file), signing and notarization.
+
+## The build caches
+
+CI (`ci.yml`) and the desktop jobs of the release workflow (`macos-arm64`, `linux-arm64`, `linux-x86_64`) keep
+two things in the Actions cache between runs, through one composite action, `.github/actions/cache-build`:
+
+- **ccache** for the C++ (`CMAKE_{C,CXX,OBJC,OBJCXX}_COMPILER_LAUNCHER=ccache`, set in the job's environment, so the
+  release scripts need no change). ccache keys each object on the compiler's bytes, its flags and every header it
+  reads, so a hit is the object the compiler would have made. The cache entry's own key names the job, the OS and
+  CPU, the compiler's version and the build's variant (build type, sanitizer, the C++ CLAP host): the
+  thread-sanitizer job's cache is its own and shares nothing with another job's.
+- **cargo**, for the jobs that build `oscairn-ui` (the Linux releases; no CI job builds it): the registry and
+  download folders (`~/.cargo/registry/{index,cache}`, `~/.cargo/git/db`) and the build folder's target folders
+  (`ui-cargo`, `engine-core-cargo`, `samplepack-cargo`). Only `ui/` has crates from crates.io (531 in
+  `ui/Cargo.lock`); `core/` has none, and what is vendored (`ui/vendor`, `core/clap-host/rust/vendor`) is a patched
+  Slint backend and a few crates, a few hundred KB inside the repository, so only the target folders matter.
+  The key names the job, the OS and CPU, the Rust release with its compiler's commit, and a hash of the lock files,
+  `Cargo.toml` files and vendored folders: any change is a new entry, not an old one that keeps growing. Cargo's own
+  fingerprints decide what is stale inside it; the project's own crates always rebuild, since a fresh checkout's
+  files are newer. The release scripts keep these folders when `OSCAIRN_KEEP_CARGO=1` (the workflow sets it)
+  instead of deleting `build-release/`.
+
+Not cached, and why: the FetchContent downloads (JUCE, samplepack) are the configure step, 25 s with juceaide in
+the Linux release's log, not worth an entry, and a kept JUCE checkout would skip its patch step
+(`hosts/juce-patches`) when the patches change. The preinstalled packages (`tools/preinstalled.txt`): the fetch
+reads the signed root and index and every piece on each run on purpose, and takes seconds (6 packages, 2 MB).
+The Rust toolchain: `tools/install-rust.sh` takes under a minute. The CI image `oscairn-ci-rust:24.04` is not in
+this repository and CI does not use it (the jobs run on the hosted runners).
+
+**Running without caches.** CI: Actions, CI, Run workflow, "Use the build caches" off. Release: the same input,
+`cache` (`gh workflow run release.yml -f targets=all -f cache=false`). Or set the repository variable
+`OSCAIRN_CI_CACHE` to `off`: no run, pushes included, then uses them. Off, a job restores and saves nothing and sets
+no compiler launcher. To start from nothing, delete the entries (`gh cache delete --all`).
+
+**Who saves.** A run on `main` saves right after its build (not after its tests, so a slow or failed test run does
+not lose it) and then deletes the older entry of the same job on `main`: one generation per job. A run on any other
+branch or pull request saves only when it restored nothing (its first run, before `main` has entries); a branch that
+finds `main`'s entries restores them and writes none, so branches do not push `main`'s out. GitHub also deletes
+entries unused for seven days. The workflows have `actions: write` for the deletion; a token without it (a pull
+request from a fork) only skips that step.
+
+**Sizes**, compressed, as the first runs on `pipeline-cache` saved them: ccache 17 MB (Linux build-and-test,
+cpp-reference-host), 22 MB (macOS build-and-test), 83 MB (standalone-launch), 130 MB (thread-sanitizer), 26 to 30 MB
+(the three releases); cargo 441 MB and 449 MB (the two Linux releases). The limits (`ccache-size` in the workflows)
+are 300 MB a job, 500 MB for standalone-launch and the thread sanitizer: 2.8 GB if every one filled, against 0.35 GB
+measured. With the cargo entries and the FANTOM-0 job's existing 1.2 GB entry, `main`'s share is 2.4 GB measured and
+4.9 GB at the limits, inside GitHub's 10 GB a repository. Over the limit GitHub evicts the least recently used
+first: the entries of branches and pull requests nobody restores, then `main`'s older keys; `main`'s current entries
+are restored on every run and stay recent.
+
+**Measured**, minutes per job, on branch `pipeline-cache` (issue 336); "without caches" is `main` on 2026-11-27
+(runs 45922858746, 45942565773, 45947928752), the release row the first release run (45975663150):
+
+| Job | Without caches | Cold run | Warm run |
+| --- | --- | --- | --- |
+| CI standalone-launch | 43.9 to 48.2 | 22.1 | 2.7 |
+| CI cpp-reference-host | 14.8 to 16.7 | 19.9 | 10.2 |
+| CI build-and-test, macOS | 24.7 to 27.3 | 30.4 | 23.2 |
+| CI build-and-test, Linux | 19.6 to 20.0 | 25.1 | 17.1 |
+| CI thread-sanitizer | 58.8 to 62.0 | 78.1 | 59.0 |
+| Release macos-arm64 | 12.5 | 6.0 | 2.1 |
+| Release linux-arm64 | 17.4 | 15.0 | 6.8 |
+| Release linux-x86_64 | 16.7 | 14.0 | 5.5 |
+
+The Build steps of the five CI jobs add up to 61 min without caches and 3 min warm. What is left is tests, which no
+cache shortens: 57 min of the thread sanitizer's, 16 to 21 min of build-and-test. The Linux releases' remaining 5 to 7
+min is mostly `oscairn-ui` itself (3.6 min, fat LTO, rebuilt every time). The cold runs' test steps also ran slower than
+`main`'s that day, so their totals say little about the caches; a cold build is already shorter than none where one
+object is compiled by several targets (JUCE's modules once per executable), which ccache serves from its own entries
+within the run.
+
+The thread-sanitizer job runs as four parallel shards (`thread-sanitizer (shard N of 4)`), each on its own runner
+with the same cached build. `tools/ci-ctest-shard.sh BUILD_DIR 4 N REGEX` runs ctest's stride (`-I N+1,,4`) over the
+test numbers and first checks, from `ctest -N`, that the four shards' own tests are exactly the full list (a test in
+no shard or in two fails the job); ctest also adds the fixture setup tests a slice needs, so a few cheap ones run in
+every shard. Shard 0 saves the cache. To change the count, change the matrix and the `4` in the same job.
 
 ## The FANTOM-0 bundle
 
@@ -99,6 +175,62 @@ What is realistic, and what is not known:
   `OSCAIRN_FANTOM_RUNNER` (repository Settings, Variables).
 - The job uses an arm64 runner because the builder container and the bundle have only been built on arm64.
 - Nothing in this job, or in its cache handling, has been run on GitHub yet. The first run is its test.
+
+## Planned: a prebuilt base for the bundle
+
+Not built yet (issue 336, point 1). The `fantom-0` job builds the whole Buildroot tree each run: the first release run
+(a cold one, nothing in the Actions cache yet) took 67.9 min; every run compiles the cross toolchain again, since only `dl/` and ccache are kept, and then every base package.
+The plan is to build everything that is not Oscairn once per Buildroot configuration, publish it as a container image, and let
+the job build only Oscairn's four packages (`oscairn`, `oscairn-juce`, `oscairn-samplepack`, `oscairn-ui-crates`) and the
+root filesystem on top. The same split is the upgrade build of issue 219: the Oscairn layer alone while the base is unchanged.
+
+What was checked: in the builder container, Buildroot 2026.08.1 with `oscairn_fantom_bundle_defconfig`, `make show-targets`
+lists every package the configuration builds (the toolchain, glibc, gcc-final, the host tools, Xorg, libinput, alsa-lib and the
+rest, `rootfs-tar`, and Oscairn's four), and `make sdk` exists. Nothing below it has been run.
+
+**The base.** One image, `ghcr.io/oscairn/oscairn-os-base:<key>`, `FROM oscairn-os-builder` (so Buildroot's host requirements
+and the Rust release are in it) with `/work` holding the Buildroot clone and the output folder after building every target that
+`show-targets` lists except `oscairn*` and `rootfs-*`, from the same defconfig the bundle uses. The same `.config` for the base and the
+bundle is the point: Buildroot never rebuilds a package because an option changed, so a base built from a different
+configuration (the dependencies listed by hand, say) could differ from the bundle's silently. Building with
+the full configuration and leaving out only Oscairn's packages has no such gap, and a dependency the list missed would simply be
+built later in the job. The output folder is pruned before the image is made: `build/` keeps only each package's
+`.stamp_*` and `.files-list*` files, so that Buildroot finds the package built and does not need its sources or objects
+(`host/`, `staging/` and `target/` are kept whole). Unverified, and the first thing to test: that Buildroot builds
+the four packages and the root filesystem from a `build/` reduced like that. If it does not, the fallback is to keep `build/` whole
+(15 GB on the maintainer's machine, so in several layers: a GHCR layer may not pass 10 GB).
+
+**The key.** `fantom-base-<sha256 of the files below, 16 hex digits>-<arm64>`, computed by a script the job and the
+workflow share: `os/buildroot/configs/oscairn_fantom_bundle_defconfig`, `os/buildroot/external.desc` and `external.mk`,
+`os/buildroot/Config.in` and each package's `Config.in` (they select the dependencies, so they change the configuration),
+`os/buildroot/board/fantom-bundle/patches/**` and `board/common/linux.fragment`, `os/docker/Dockerfile` (the Rust release
+and the host packages), and `os/scripts/container-build.sh` (the Buildroot version). Left out, because they change nothing the base
+holds: the overlays, `post-build.sh` and the four Oscairn packages' `.mk`, hash and patch files, which run when the root
+filesystem is made. A package version or an option changed anywhere above is a new key and a new base, never a stale one.
+
+**Making it.** A new workflow, `fantom-base.yml`, on `ubuntu-24.04-arm`: it runs on a push to `main` that touches the files in the
+key, on `workflow_call` (the release workflow's `plan` job calls it when `fantom-0` is chosen, before the bundle job), and by hand.
+It computes the key, stops if the image exists (`docker buildx imagetools inspect`), and otherwise builds as the
+`fantom-0` job does today (the free-space step, `dl/` and ccache in the Actions cache, the build stopped at 5 h 35 min and
+continued by the next run), prunes, builds the image, and pushes it with `GITHUB_TOKEN` (`packages: write`). It publishes only from
+`main`; a branch builds the image without pushing it. This is the first thing under the organization's packages: the first run
+on `main` publishes it, and the package's visibility (public) and the repository's access to it are set once in the
+organization's package settings.
+
+**Using it.** The `fantom-0` job pulls the image for the current key, copies `/work` into its folder
+(`docker run --rm -v "$work":/dst <image> cp -a /work/. /dst/`), and runs `os/fantom-bundle.sh` as now: `container-build.sh`
+applies the defconfig, finds the base built and builds the four packages and the root filesystem. Its own ccache
+(Oscairn's compile, JUCE) stays in the Actions cache. A missing image fails the job with the workflow to run, rather than
+building the base inside the release. The time is then Oscairn's own build, which has not been measured on this runner (an estimate, from the
+Linux arm64 release's 15 min cold: tens of minutes, not the full Buildroot build).
+
+**The 10 GB.** The base lives in the container registry, not in the Actions cache, so it does not count toward the
+repository's 10 GB and nothing evicts it; the Actions cache then holds only the base workflow's `dl/` and ccache (1.2 GB now,
+read only when a base is rebuilt) and the job's small ccache. Old bases are removed by hand or by a retention rule on the package.
+
+**Why not the SDK.** `make sdk` gives a relocatable toolchain and sysroot, and Oscairn could then be built with cmake
+outside Buildroot and added to a base root filesystem. That is a second way to build the Oscairn package, to be kept equal to
+`oscairn.mk` (its cmake options, the vendored Rust crates, the patched JUCE, the install hooks); the plan above keeps the one.
 
 ## The first run
 

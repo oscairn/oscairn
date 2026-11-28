@@ -18,9 +18,15 @@ on:
       tag:
         description: 'With publish: the existing tag (v and the version) to build and to attach to'
         default: ''
+      cache:
+        description: 'Use the build caches of the desktop jobs (ccache and cargo; off: they build from nothing and save nothing)'
+        type: boolean
+        default: true
 
+# actions: write lets a run on main delete the cache entry it replaces (.github/actions/cache-build).
 permissions:
   contents: write
+  actions: write
 
 jobs:
   plan:
@@ -76,7 +82,7 @@ jobs:
       # macOS ---------------------------------------------------------------------------------
       - name: Install Ninja
         if: matrix.kind == 'macos'
-        run: brew install ninja
+        run: brew install ccache ninja
 
       # Signing and notarization need the owner's Apple Developer secrets, and the step that imports them
       # is not written yet (docs/releasing.md), so the dmg is signed ad hoc and the artifact says so.
@@ -87,15 +93,42 @@ jobs:
       # Linux ---------------------------------------------------------------------------------
       - name: Install the build's packages
         if: matrix.kind == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libasound2-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libxi-dev
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build libasound2-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libxi-dev
 
       - name: Install Rust 1.95.0 (samplepack's pinned release)
         if: matrix.kind != 'fantom'
         run: tools/install-rust.sh
 
+      # ccache for the C++ and, on Linux (the only release that builds oscairn-ui), cargo's downloads and target
+      # folders; the key names the job, the OS, the compiler and the Rust release (.github/actions/cache-build).
+      - name: Restore the build caches
+        if: matrix.kind != 'fantom'
+        uses: ./.github/actions/cache-build
+        with:
+          phase: restore
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: release-${{ matrix.target }}
+          variant: release-standalone-ui
+          ccache-size: 300M
+          rust: ${{ matrix.kind == 'linux' }}
+          build-dir: build-release
+
       - name: Build
         if: matrix.kind != 'fantom'
+        env:
+          OSCAIRN_KEEP_CARGO: '1'
         run: tools/release-${{ matrix.kind }}.sh
+
+      - name: Save the build caches
+        if: matrix.kind != 'fantom' && !cancelled()
+        uses: ./.github/actions/cache-build
+        with:
+          phase: save
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: release-${{ matrix.target }}
+          variant: release-standalone-ui
+          rust: ${{ matrix.kind == 'linux' }}
+          build-dir: build-release
 
       # The FANTOM-0 bundle ---------------------------------------------------------------------
       # Buildroot's toolchain and packages in the builder container (os/fantom-bundle.sh). What a run

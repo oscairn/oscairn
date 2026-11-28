@@ -6,6 +6,17 @@ env:
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      cache:
+        description: 'Use the build caches (ccache; off: every job builds from nothing and saves nothing)'
+        type: boolean
+        default: true
+
+# The caches (.github/actions/cache-build): actions: write lets a run on main delete the entry it replaces.
+permissions:
+  contents: read
+  actions: write
 
 jobs:
   build-and-test:
@@ -22,7 +33,7 @@ jobs:
 
       - name: Install Ninja (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build liblilv-dev lv2-dev lv2-examples libsndfile1-dev libsamplerate0-dev x42-plugins samplv1-lv2 python3-jsonschema
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build liblilv-dev lv2-dev lv2-examples libsndfile1-dev libsamplerate0-dev x42-plugins samplv1-lv2 python3-jsonschema
 
       - name: Check out pinned upstream LV2 examples (Linux)
         if: runner.os == 'Linux'
@@ -34,10 +45,19 @@ jobs:
 
       - name: Install Ninja (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja lilv lv2
+        run: brew install ccache ninja lilv lv2
 
       - name: Install Rust 1.95.0 (samplepack's pinned release)
         run: tools/install-rust.sh
+
+      - name: Restore the build caches
+        uses: ./.github/actions/cache-build
+        with:
+          phase: restore
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-build-and-test
+          variant: release
+          ccache-size: 300M
 
       - name: Configure
         run: >
@@ -47,6 +67,15 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      - name: Save the build caches
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/cache-build
+        with:
+          phase: save
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-build-and-test
+          variant: release
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
@@ -112,23 +141,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
-        run: brew install ninja
+        run: brew install ccache ninja
       - name: Install Rust 1.95.0 (samplepack's pinned release)
         run: tools/install-rust.sh
+
+      - name: Restore the build caches
+        uses: ./.github/actions/cache-build
+        with:
+          phase: restore
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-standalone-launch
+          variant: release-standalone
+          ccache-size: 500M
 
       - name: Configure
         run: cmake -S . -B build-standalone -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON
       - name: Build
         run: cmake --build build-standalone
+
+      - name: Save the build caches
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/cache-build
+        with:
+          phase: save
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-standalone-launch
+          variant: release-standalone
+
       - name: Test
         run: ctest --test-dir build-standalone -R "^(desktop-launch|plugin-clap)$" --output-on-failure  # plugin-clap: the DAW plugin's bundle opened as a host does; the others click a real window or time real audio, which a shared runner cannot do
 
   thread-sanitizer:
+    # The tests are nearly all of the job's time, so they run in parallel shards (tools/ci-ctest-shard.sh: ctest's
+    # stride over the test numbers, and a check that the shards are exactly the whole list); each shard builds
+    # with the cache and runs its slice alone on its own runner.
+    name: thread-sanitizer (shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build liblilv-dev lv2-dev libsndfile1-dev libsamplerate0-dev
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build liblilv-dev lv2-dev libsndfile1-dev libsamplerate0-dev
       - name: Check out pinned upstream sampler
         uses: actions/checkout@v4
         with:
@@ -137,6 +194,15 @@ jobs:
           path: upstream-lv2
       - name: Install Rust 1.95.0 (samplepack's pinned release)
         run: tools/install-rust.sh
+
+      - name: Restore the build caches
+        uses: ./.github/actions/cache-build
+        with:
+          phase: restore
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-thread-sanitizer
+          variant: debug-tsan
+          ccache-size: 500M
 
       - name: Configure
         run: >
@@ -149,9 +215,20 @@ jobs:
           -DCMAKE_MODULE_LINKER_FLAGS=-fsanitize=thread
       - name: Build
         run: cmake --build build
+
+      - name: Save the build caches
+        # one shard saves: the four build the same objects
+        if: ${{ !cancelled() && matrix.shard == 0 }}
+        uses: ./.github/actions/cache-build
+        with:
+          phase: save
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-thread-sanitizer
+          variant: debug-tsan
+
       - name: Test
         # The scanner tests deliberately crash and hang plugins in child processes.
-        run: ctest --test-dir build --output-on-failure -E "scanner|benchmark-cli"
+        run: tools/ci-ctest-shard.sh build 4 ${{ matrix.shard }} "scanner|benchmark-cli"
 
   cpp-reference-host:
     # The Rust CLAP host is the default and the jobs above build it; this builds the C++ reference host
@@ -160,12 +237,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libsndfile1-dev libsamplerate0-dev
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build libsndfile1-dev libsamplerate0-dev
       - name: Install Rust 1.95.0 (samplepack's pinned release)
         run: tools/install-rust.sh
+      - name: Restore the build caches
+        uses: ./.github/actions/cache-build
+        with:
+          phase: restore
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-cpp-reference-host
+          variant: release-cpp-host
+          ccache-size: 300M
+
       - name: Configure
         run: cmake -S . -B build-cpp-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_CLAP_HOST=cpp
       - name: Build
         run: cmake --build build-cpp-host
+
+      - name: Save the build caches
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/cache-build
+        with:
+          phase: save
+          enabled: ${{ github.event.inputs.cache != 'false' && vars.OSCAIRN_CI_CACHE != 'off' }}
+          name: ci-cpp-reference-host
+          variant: release-cpp-host
+
       - name: Test
         run: ctest --test-dir build-cpp-host -R "clap-host|kick-clap|worker|plugin-hosts|plugin-clap|control-|engine-|graph-|pressure-|memory" --output-on-failure

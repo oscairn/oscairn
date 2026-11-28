@@ -138,6 +138,28 @@ fn an_open_menu_or_notice_at_rest_draws_no_frame() {
     assert_eq!(s.frame(), None, "a tick with nothing changing draws nothing over the notice");
 }
 
+// The menu (a dialog) scrolls the same way the shared lists do (issue #269): when it holds more rows
+// than a view a scroll bar shows (total > the view), a drag or the bar turns the view to the row asked
+// (page-aligned), and the cursor sits on a shown row.
+#[test]
+fn the_menu_scrolls_a_list_longer_than_its_view() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut m = Menu::open(ui, "M", long_menu());
+    ui.global::<MenuState>().set_rows_per_view(3);
+    m.show();
+    let ms = ui.global::<MenuState>();
+    assert!(ms.get_total() > ms.get_rows_per_view(), "a longer list shows the scroll bar: {} rows, {} in a view", ms.get_total(), ms.get_rows_per_view());
+    m.scroll_to(8);
+    assert_eq!(ms.get_first(), 6, "a drag or the bar turns to the last view (page-aligned)");
+    let shown: Vec<(String, bool)> = ms.get_rows().iter().map(|r| (r.label.to_string(), r.cursor)).collect();
+    assert!(shown.iter().any(|r| r.1), "the cursor is on a shown row after the scroll");
+    m.scroll_to(0);
+    assert_eq!(ms.get_first(), 0, "back to the first view");
+    assert!(ms.get_rows().iter().any(|r| r.cursor), "a cursor is still on a shown row");
+    assert_eq!((ms.get_total(), ms.get_first()), (9, 0), "the list and view stay consistent");
+}
+
 // A long menu fits the small window in the light theme: at 800x480 and at the FANTOM-07's 1280x720 at
 // scale 1.55 the rows' text and the page marks stay inside the window, nothing reaches an edge, and
 // the cursor's focus border is drawn in the light theme.

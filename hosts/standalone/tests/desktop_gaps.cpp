@@ -882,7 +882,7 @@ int main(int argc, char** argv)
                 // Content (asset libraries, RFC 0009): no plugin, Performance or Sound, on a tab of
                 // its own, in every state a package has; one installed only because a package
                 // needed it names that package.
-                Control::RepositoryPackage carts; carts.id = "org.oscairn.fm-cartridges"; carts.name = "FM Cartridges"; carts.publisher = "Oscairn";
+                Control::RepositoryPackage carts; carts.id = "org.oscairn.sampler.init"; carts.name = "Sampler Init"; carts.publisher = "Oscairn";
                 carts.versions.push_back({"1.0.0", "stable", "", "", std::string(64, 'a'), 0, 0, {{"oscairn.asset", 1}}, {}});
                 carts.versions.push_back({"1.1.0", "stable", "", "", std::string(64, 'c'), 0, 0, {{"oscairn.asset", 1}}, {}});
                 auto fmPackage = package("org.oscairn.fm", "0.4.8"); fmPackage.name = "Oscairn FM"; fmPackage.versions[0].dependencies = {{carts.id, "1.0.0"}};

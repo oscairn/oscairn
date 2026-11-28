@@ -7,6 +7,7 @@
 // the type scale.
 
 import { Theme, Section, Button, Cursor } from "theme.slint";
+import { ScrollBar } from "part.slint";
 
 export struct MenuRow {
     label: string,
@@ -26,6 +27,11 @@ export global MenuState {
     in property <bool> up; // a submenu is open: Back goes up a level
     // How many rows fit: set by the component.
     in-out property <int> rows-per-view: 1;
+    // The list's size and the view's first row, for its scroll bar (0: no bar); a drag or a tap on
+    // the bar asks for a view, as the shared lists do.
+    in property <int> total;
+    in property <int> first;
+    callback scrolled(int);
     callback resized();
     callback tapped(int); // a row of the view
     callback back(); // up a level, or closes at the first
@@ -36,10 +42,41 @@ export global MenuState {
 component Entry inherits Section {
     in property <MenuRow> data;
     callback tapped();
+    // A finger drag on this row: once the drag passes the theme's threshold it is a scroll (`drag-move`,
+    // the vertical offset since the press), not a tap; a press and a release within the threshold are a tap.
+    callback drag-move(length);
+    callback drag-end();
+    property <length> press-y: 0px;
+    property <bool> armed: false;
+    property <bool> dragging: false;
     opacity: data.enabled || data.head ? 1 : Theme.disabled;
     fill: data.head ? Theme.background : Theme.surface;
     if !data.head: TouchArea {
-        clicked => { if (root.data.enabled) { root.tapped(); } }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.press-y = self.mouse-y;
+                root.armed = true;
+                root.dragging = false;
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                if (root.armed && !root.dragging && e.kind == PointerEventKind.up) {
+                    root.tapped();
+                }
+                root.armed = false;
+                root.dragging = false;
+                root.drag-end();
+            }
+        }
+        moved => {
+            if (root.armed && !root.dragging) {
+                let dy = self.mouse-y - root.press-y;
+                if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                    root.dragging = true;
+                }
+            }
+            if (root.dragging) {
+                root.drag-move(self.mouse-y - root.press-y);
+            }
+        }
     }
     Text {
         x: Theme.pad;
@@ -78,6 +115,21 @@ export component Menu inherits Rectangle {
     property <int> per-view: max(1, floor((available + gap) / (Theme.touch + gap)));
     property <int> shown: min(MenuState.rows.length, per-view);
     property <length> panel-height: header + footer + 2 * Theme.gap + max(1, shown) * Theme.touch + max(0, shown - 1) * gap;
+    // The scroll bar's lane at the list's right edge, when the list is longer than the view; the rows are narrower by it.
+    property <bool> long: MenuState.total > per-view;
+    property <length> lane: long ? Theme.scroll-lane : 0px;
+    // A finger drag on a list row scrolls the view (as the shared lists' drag does): the anchor and the row pitch.
+    property <bool> dz-on: false;
+    property <int> dz-first0: 0;
+    property <length> dz-y0: 0px;
+    property <length> dz-pitch: Theme.touch + root.gap;
+    function dz-move(dy: length) {
+        if (!root.dz-on) { root.dz-on = true; root.dz-first0 = MenuState.first; root.dz-y0 = dy; }
+        let up = round((root.dz-y0 - dy) / root.dz-pitch);
+        let target = max(0, min(root.dz-first0 + up, MenuState.total - 1));
+        if (target != MenuState.first) { MenuState.scrolled(target); }
+    }
+    function dz-end() { root.dz-on = false; }
     changed per-view => { MenuState.rows-per-view = per-view; MenuState.resized(); }
     init => {
         MenuState.rows-per-view = per-view;
@@ -133,10 +185,23 @@ export component Menu inherits Rectangle {
         for row[i] in MenuState.rows: Entry {
             x: Theme.pad-tight;
             y: root.header + root.gap + i * (Theme.touch + root.gap);
-            width: parent.width - 2 * Theme.pad-tight;
+            width: parent.width - 2 * Theme.pad-tight - root.lane;
             height: Theme.touch;
             data: row;
             tapped => { MenuState.tapped(i); }
+            drag-move(dy) => { root.dz-move(dy); }
+            drag-end() => { root.dz-end(); }
+        }
+        bar := ScrollBar {
+            visible: root.long;
+            x: parent.width - Theme.scroll-lane - Theme.pad-tight;
+            y: root.header + root.gap;
+            width: Theme.scroll-lane;
+            height: parent.height - root.header - root.footer - 2 * root.gap;
+            total: MenuState.total;
+            first: MenuState.first;
+            per-view: root.per-view;
+            scrolled(page) => { MenuState.scrolled(page); }
         }
         Text {
             x: Theme.pad;

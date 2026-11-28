@@ -974,7 +974,7 @@
     },
     "rolandNextBoot": {
       "type": "boolean",
-      "description": "Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn (docs/fantom-0.md): Settings' About row asks the engine about it. Absent: no (the FANTOM-07's says yes)"
+      "description": "Whether the device can start Roland's own system at the next power-on, once, instead of Oscairn (docs/fantom-0.md): Settings' About row asks the engine about it. On a profile whose install is an app-and-boot-hook (the FANTOM-07's) Oscairn starts at once, cold, by default; Roland's app first is the other path, by the roland-first file in the boot folder or the TEMPO tap at power-on (docs/fantom-0.md, \"Starting at power-on\"). Absent: no (the FANTOM-07's says yes)"
     },
     "install": {
       "type": "object",

@@ -7,6 +7,7 @@
 // an accent one; by touch knobs and sliders drag, switches, stops and dropdowns tap.
 
 import { Theme, Section, Button, Cursor, Field, FitText, TabPages, TabLabel, Thumb, SliderBar, SliderStyle, DepthStyle, SectionStyle } from "theme.slint";
+import { ScrollBar } from "part.slint";
 
 export struct GridTile {
     x: length,
@@ -145,6 +146,7 @@ export global GridState {
     callback release(int);
     callback tap(int, int); // a tile and a stop (buttons), or -1
     callback choose(int); // a dropdown's value, or -1 to close it
+    callback list-scrolled(int); // a dropdown's scroll bar or finger drag: a view's first value
     // A touch on a view's panel (its index, the place in the panel's pixels): down says whether it took a handle.
     callback view-down(int, length, length) -> bool;
     callback view-move(int, length, length);
@@ -810,7 +812,10 @@ export component Grid inherits Rectangle {
         color: Theme.muted;
         text: GridState.message;
     }
-    // A dropdown open: its values over the grid, the chosen one under the cursor.
+    // A dropdown open: its values over the grid, the chosen one under the cursor; the shared scroll bar and a finger
+    // drag turn its view when it holds more than fits (issue #269), as the shared lists scroll.
+    property <bool> dz-on: false;
+    property <int> dz-last: 0;
     if GridState.list-open: Rectangle {
         property <int> per: max(1, floor((root.height - root.top - 2 * Theme.margin - Theme.touch) / (Theme.touch + root.gap)));
         init => { GridState.list-per-view = self.per; }
@@ -833,16 +838,57 @@ export component Grid inherits Rectangle {
                 font-size: Theme.small;
                 font-weight: 700;
             }
+            bar := ScrollBar {
+                visible: root.long;
+                x: parent.width - Theme.scroll-lane - Theme.margin;
+                y: Theme.touch + Theme.pad-tight;
+                width: Theme.scroll-lane;
+                height: parent.height - Theme.touch - 2 * Theme.pad-tight - Theme.margin;
+                total: GridState.list.length;
+                first: GridState.list-first;
+                per-view: root.per-list;
+                scrolled(page) => { GridState.list-scrolled(page); }
+            }
             for v[k] in GridState.list: Section {
                 property <int> place: k - GridState.list-first;
                 visible: self.place >= 0 && self.place < root.per-list;
+                property <length> press-y: 0px;
+                property <bool> armed: false;
+                property <bool> dragging: false;
                 x: Theme.margin;
                 y: Theme.touch + self.place * (Theme.touch + root.gap);
-                width: parent.width - 2 * Theme.margin;
+                width: parent.width - 2 * Theme.margin - root.lane;
                 height: Theme.touch;
                 fill: k == GridState.list-cursor ? Theme.wash-color : Theme.raised;
                 TouchArea {
-                    clicked => { GridState.choose(k); }
+                    pointer-event(e) => {
+                        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                            parent.press-y = self.mouse-y;
+                            parent.armed = true;
+                            parent.dragging = false;
+                            root.dz-last = GridState.list-first;
+                        } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                            if (parent.armed && !parent.dragging && e.kind == PointerEventKind.up) {
+                                GridState.choose(k);
+                            }
+                            parent.armed = false;
+                            parent.dragging = false;
+                            root.dz-on = false;
+                        }
+                    }
+                    moved => {
+                        if (parent.armed && !parent.dragging) {
+                            let dy = self.mouse-y - parent.press-y;
+                            if (dy < -Theme.scroll-drag-threshold || dy > Theme.scroll-drag-threshold) {
+                                parent.dragging = true;
+                            }
+                        }
+                        if (parent.dragging) {
+                            let up = round((parent.press-y - self.mouse-y) / (Theme.touch + root.gap));
+                            let target = max(0, min(root.dz-last + up, GridState.list.length - 1));
+                            if (target != GridState.list-first) { GridState.list-scrolled(target); }
+                        }
+                    }
                 }
                 Label {
                     x: Theme.pad;
@@ -860,4 +906,6 @@ export component Grid inherits Rectangle {
         }
     }
     property <int> per-list: GridState.list-per-view;
+    property <bool> long: GridState.list-open && GridState.list.length > per-list;
+    property <length> lane: long ? Theme.scroll-lane : 0px;
 }

@@ -152,6 +152,10 @@ int main()
         check(Profile::parse(replaced(json, cores, cores + ", \"captureSeconds\": 0")).compute.captureSeconds == 0 && Profile::parse(json).compute.captureSeconds == -1 &&
               loadProfile("fantom-07").compute.captureSeconds == 30 && refused(replaced(json, cores, cores + ", \"captureSeconds\": 3601")),
               "the capture buffer's length in seconds, 0 to 3600; none named, the default by memory");
+        // issue #19: the most seconds of capture the device's memory allows; none named, 120.
+        check(Profile::parse(replaced(json, cores, cores + ", \"captureBufferMax\": 30")).compute.captureBufferMax == 30 && Profile::parse(json).compute.captureBufferMax == 0 &&
+              loadProfile("fantom-07").compute.captureBufferMax == 0 && refused(replaced(json, cores, cores + ", \"captureBufferMax\": 3601")),
+              "the capture buffer's maximum in seconds, 0 to 3600; none named, 120");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerDeadline\": true")).compute.workerDeadline && !Profile::parse(json).compute.workerDeadline &&
               refused(replaced(json, cores, cores + ", \"workerDeadline\": 1")), "waiting to the deadline, true or false; none named, the allowance");
         check(Profile::parse(replaced(json, cores, cores + ", \"pluginHosts\": 3, \"ownHost\": [\"org.example.a\"]")).compute.pluginHosts == 3 &&

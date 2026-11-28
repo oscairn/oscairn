@@ -777,6 +777,35 @@ namespace oscairn
                 fields(p,{});const auto a=c.audition();
                 return "{\"id\":"+quote(a.id)+",\"kind\":"+quote(a.kind)+",\"part\":"+std::to_string(a.part)+'}';
             }
+            // RFC 0020's capture as a setting (issue #19): capture.policy gives the device's
+            // default and maximum; capture.buffer with `seconds` saves a choice (Off 0, 10, 15,
+            // 30, 60 or up to the maximum) and arms its rings, without one answers the choice
+            // saved in the engine's config and the memory each choice costs at this sample rate
+            // and channel count.
+            if(method=="capture.policy") {
+                fields(p,{"default","max"});
+                c.setCaptureBufferPolicy(number(member(p,"default")),number(member(p,"max")));
+                return R"({"accepted":true})";
+            }
+            if(method=="capture.buffer") {
+                if(member(p,"seconds")) {
+                    fields(p,{"seconds"});
+                    const double seconds=number(member(p,"seconds"));
+                    try{c.setCaptureBuffer(seconds);}
+                    catch(const std::length_error& e){throw Failure{-32007,e.what(),R"({"reason":"memory"})"};}
+                    catch(const std::invalid_argument& e){throw Failure{-32602,e.what(),R"({"reason":"invalid"})"};} // before logic_error: it derives from it
+                    catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
+                    return "{\"accepted\":true,\"seconds\":"+encode(seconds)+",\"memory\":"+std::to_string(c.captureBufferBytes(seconds))+'}';
+                }
+                fields(p,{});
+                std::string choices,memory;
+                for(const double s : c.captureBufferChoices()){
+                    if(!choices.empty()){choices+=',';memory+=',';}
+                    choices+="{\"seconds\":"+encode(s)+",\"memory\":"+std::to_string(c.captureBufferBytes(s))+'}';
+                    memory+="\""+encode(s)+"\":"+std::to_string(c.captureBufferBytes(s));
+                }
+                return "{\"seconds\":"+encode(c.captureBuffer())+",\"default\":"+encode(c.captureBufferDefault())+",\"max\":"+encode(c.captureBufferMax())+",\"choices\":["+choices+"],\"memory\":{"+memory+"}}";
+            }
             // RFC 0020: recording.
             if(method=="record.start" || method=="record.retro") {
                 if(method=="record.start")fields(p,{"taps","name","from","until","keepGoing"});else fields(p,{"seconds","taps"});
@@ -825,6 +854,10 @@ namespace oscairn
                     }
                 }
                 if(member(p,"keepGoing"))when.keepGoing=boolean(member(p,"keepGoing"));
+                // A capture from the past reads the retroactive rings; with the buffer Off (issue
+                // #19) there are none, so the capture is refused with the reason it is off.
+                if(when.from==When::From::SecondsAgo && c.recordRetroSeconds()==0)
+                    throw Failure{-32007,"the capture buffer is off; set capture.buffer to a length first",R"({"reason":"off"})"};
                 try{return "{\"take\":"+std::to_string(c.recordStart(taps,member(p,"name")?std::string(string(member(p,"name"))):std::string(),when))+'}';}
                 catch(const std::out_of_range& e){throw refused(e,"retro");}
                 catch(const std::invalid_argument& e){throw refused(e,"unknownTap");}
@@ -948,7 +981,7 @@ namespace oscairn
                     const auto type=itemType(i.kind);
                     std::string fields; // what its extractor read (RFC 0023 step 4)
                     for(const auto& [k,v]:i.fields)fields+=std::string(fields.empty()?"":",")+quote(k)+':'+quote(v);
-                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+(i.readOnly?",\"readOnly\":true":"")+(i.inPlace?",\"inPlace\":true":"")+(fields.empty()?std::string():",\"fields\":{"+fields+'}')+'}');}
+                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+(i.missing?",\"missing\":true":"")+(i.readOnly?",\"readOnly\":true":"")+(i.inPlace?",\"inPlace\":true":"")+(fields.empty()?std::string():",\"fields\":{"+fields+'}')+'}');}
                 for(const auto& [tag,n]:r.tags)counts.push_back("{\"tag\":"+quote(tag)+",\"count\":"+std::to_string(n)+'}');
                 std::vector<std::string> colors,hidden;
                 for(const auto& [tag,color]:r.tagColors)colors.push_back("{\"tag\":"+quote(tag)+",\"color\":"+quote(color)+'}');

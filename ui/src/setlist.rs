@@ -189,6 +189,8 @@ pub struct Screen {
     /// The slot stepped from (Play's Previous and Next): the one chosen here, or the first holding the engine's open
     /// Performance. Every slot holding the same Performance is marked as playing.
     current: Option<usize>,
+    /// The slot `current` pointed at when the document was last saved (a Manage edit), to follow it through the change.
+    slot_was: Option<String>,
     /// The engine's open Performance (`performance.info`'s library `id`; empty: none from the library), once reported.
     open: Option<String>,
     opening: bool,
@@ -281,6 +283,7 @@ impl Screen {
             pending: None,
             offered: vec![],
             current: None,
+            slot_was: None,
             open: None,
             opening: false,
             opening_index: None,
@@ -350,6 +353,30 @@ impl Screen {
         }
     }
 
+    /// After a Manage edit changed the document, `current` (the slot stepped from) follows the slot it pointed at when the
+    /// edit began: if that slot is still in the setlist (its Performance), it moves to its new place; if the slot was
+    /// removed, it goes to where the engine's open Performance is, else none. Without this, Previous/Next would step from a
+    /// stale position until the engine happened to reassert the open Performance.
+    fn remap(&mut self) {
+        let Some(was) = self.slot_was.take() else { return };
+        if was.is_empty() {
+            return;
+        }
+        let Some(s) = self.setlist.as_ref() else { return };
+        let holds = |i: usize, id: &str| s.slot(i).is_some_and(|x| x.id == id);
+        if self.current.is_some_and(|i| holds(i, &was)) {
+            return;
+        }
+        let mut now = (0..s.count()).find(|i| holds(*i, &was));
+        if now.is_none() {
+            now = self.open.as_deref().filter(|id| !id.is_empty()).and_then(|id| (0..s.count()).find(|i| holds(*i, id)));
+        }
+        if now != self.current {
+            self.current = now;
+            self.keep();
+        }
+    }
+
     pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) {
         let r = match result {
             Ok(r) => r,
@@ -408,6 +435,9 @@ impl Screen {
                     self.page = self.page.min(s.pages.len() - 1);
                     self.setlist = Some(s);
                     self.follow();
+                    if !other {
+                        self.remap(); // a Manage edit: `current` follows the slot it pointed at through the change
+                    }
                     if other {
                         self.page = self.current_page().unwrap_or(0);
                     }

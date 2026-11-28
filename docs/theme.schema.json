@@ -98,7 +98,7 @@
           "pattern": "^#[0-9a-fA-F]{6}$"
         },
         "warning": {
-          "description": "Optional: a meter past three quarters (the top bar's CPU and RAM in the Rust UI); absent: #E8C547",
+          "description": "Optional: a meter past three quarters (the top bar's CPU and RAM in the Rust UI); absent: #A78815",
           "type": "string",
           "pattern": "^#[0-9a-fA-F]{6}$"
         },

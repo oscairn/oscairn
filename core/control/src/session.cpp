@@ -49,6 +49,13 @@ namespace oscairn
         graph_.setListener( &recorder_ );
         controllers_ = std::make_unique<ControllerInput>( *this );
         transport_.setPlaying( false );
+        // The capture buffer setting the last engine chose, beside the other persistent settings
+        // (issue #19): the rings are not armed here, the host arms what it plays; this only says
+        // what capture.buffer answers and what a capture can read once set.
+        const auto saved = dataHome() / "capture-buffer";
+        double kept = 0; std::ifstream( saved ) >> kept;
+        const auto choices = captureBufferChoices();
+        if( std::find( choices.begin(), choices.end(), kept ) != choices.end() ) captureBuffer_ = kept;
         baseline_ = std::make_shared<const Model>( model() );
     }
 
@@ -1170,6 +1177,37 @@ namespace oscairn
         admitRecording( Recorder::retroBytes( seconds, compiled, sampleRate_, maxFrames_ ), recorder_.retroCommitted() );
         recorder_.setRetro( seconds, compiled );
         retroTaps_ = seconds > 0 ? taps : std::vector<RecordTap>{};
+    }
+
+    // The capture buffer as a setting (issue #19): the discrete choices, Off (0) or up to the
+    // device's maximum, and the rings' memory each costs at the current sample rate and channels.
+    // The engine's config (the data folder) keeps the chosen length across a restart.
+    std::vector<double> Session::captureBufferChoices() const
+    {
+        static constexpr double kChoices[] = {10, 15, 30, 60, 120}; // every one the UI may offer
+        std::vector<double> out{0};
+        for( const double s : kChoices ) if( !captureBufferMax_ || s <= captureBufferMax_ ) out.push_back( s );
+        return out;
+    }
+
+    uint64_t Session::captureBufferBytes( double seconds )
+    {
+        if( seconds <= 0 ) return 0;
+        const auto taps = defaultTaps();
+        return Recorder::retroBytes( seconds, compileTaps( taps, true ), sampleRate_, maxFrames_ );
+    }
+
+    void Session::setCaptureBuffer( double seconds )
+    {
+        const auto choices = captureBufferChoices();
+        if( !std::isfinite( seconds ) || std::find( choices.begin(), choices.end(), seconds ) == choices.end() )
+            throw std::invalid_argument( "capture is Off, 10, 15, 30 or 60 seconds" + (captureBufferMax_ && captureBufferMax_ < 120 ? " up to " + std::to_string(long(captureBufferMax_)) + " on this device" : "") );
+        if( captureBufferMax_ && seconds > captureBufferMax_ )
+            throw std::invalid_argument( "this device keeps at most " + std::to_string( long( captureBufferMax_ ) ) + " seconds of capture" );
+        recordRetro( seconds );     // arms the rings; may throw (memory) or wait (busy), and only fits are saved
+        captureBuffer_ = seconds;
+        const auto file = dataHome() / "capture-buffer";
+        writeAtomically( file, std::to_string( long( seconds ) ) + "\n" );
     }
 
     namespace

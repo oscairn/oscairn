@@ -1176,6 +1176,17 @@ clock reading before 2026-11-01), by a take number the device never gives twice 
   `{"accepted":true}`: those taps kept in memory for the last `seconds`, never written unless a
   take asks. Its memory is committed memory in the budget (RFC 0025); past the budget it is
   `-32007` `memory` and the buffer there is kept; `busy` while a take recording reads it.
+- The capture length as a setting (issue #19): `capture.policy` takes `{default,max}` (the
+  device's own — the profile's, applied when the engine starts; 30 s and 120 s when it says
+  none) and returns `{"accepted":true}`. `capture.buffer` (`{}`) answers
+  `{seconds,default,max,choices,memory}`: the saved choice (0: Off), the device's default and
+  maximum, each discrete choice with the memory its rings cost at the current sample rate and
+  channel count, and `memory` keyed the same way. With `{seconds}` (Off 0, 10, 15, 30, 60 or up
+  to `max`) it saves the choice in the engine's config, arms its rings and returns
+  `{accepted,memory}`: `-32602` `invalid` for a value that is not a choice or is past `max`,
+  `-32007` `memory` when the rings do not fit the budget beside the Performance, `busy` while a
+  take recording reads them. A capture (`record.start` from `{"secondsAgo":s}`) with the buffer
+  Off is refused `-32007` `off`.
 - `record.stop` takes `{take}` and returns `{"accepted":true}`; the take ends at the next block
   and its files close after. `-32602` for a take that is not recording.
   A device's record button (a panel control whose map function is `record`) does the same as the
@@ -1722,6 +1733,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
   for the user's own, and, with a budget set, `unfit` when it does not fit this device: why, from
   its plugins' estimates ([RFC 0025](rfcs/0025-resource-budgets.md#status)); absent when it fits.
+  An item also carries `missing: true` when it names a plugin build (an exact version) that is not
+  installed, so it would open with a stand-in; absent when every one is here.
   An install's `notes` say each item that does not fit. Saving over a locked item, a Performance by `library.save` or a part's
   Sound by `parts.saveSound`, makes a new one.
 - `parts.fromSound` takes `{id}` and returns `{part}`: a new part listening to every key,

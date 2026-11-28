@@ -425,7 +425,7 @@ fn the_settings_tiles_status_is_a_plain_line() {
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 120, "playing": false}));
     let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
-    assert_eq!(lines[4], "Audio: 48000 kHz", "the Settings tile's plain line: {lines:?}");
+    assert_eq!(lines[4], "Audio: 48 kHz", "the Settings tile's plain line: {lines:?}");
 }
 
 // Home at rest costs nothing: shown, nothing changing, ticks of the event loop ask the engine nothing and draw no

@@ -1145,7 +1145,7 @@ impl App {
                 _ => app.line.into(),
             },
             "oscairn.settings" if s.audio_device == "null" => "No audio device (--audio null)".into(),
-            "oscairn.settings" if s.sample_rate > 0 => format!("Audio: {} kHz", s.sample_rate),
+            "oscairn.settings" if s.sample_rate > 0 => format!("Audio: {} kHz", s.sample_rate as f64 / 1000.0),
             _ => app.line.into(),
         }
     }

@@ -1473,11 +1473,14 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   then an object of the type's fields it read, each a string (`{"artist":"...","bpm":"120"}`;
   absent when none); one whose extractor fails is listed without, by name and path.
 - `plugins.list` (`{}`) returns `{plugins}`: the plugin store ([RFC 0006](rfcs/0006-packages-and-portability.md)),
-  each `{format,id,version,name,platforms,bytes,usedBy,open,license}`: the platforms it has builds for,
+  each `{format,id,version,name,platforms,bytes,usedBy,open,license,opensStateFrom,soundChanges,claimKey}`: the platforms it has builds for,
   their size on disk, the names of the library items that use it, whether the open
   Performance plays this device's build from the store, and the SPDX license expression of the
   plugin package it was installed from (empty when unknown, as for a build installed before the
-  store recorded it or one from a library archive).
+  store recorded it or one from a library archive). `opensStateFrom` and `soundChanges` are the
+  publisher's claim kept at install ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim):
+  the oldest version whose saved state this one opens, and what may sound different) and
+  `claimKey` the public key that signed it; each null when none.
 - `plugins.remove` takes `{format,id,version}` and optional `platform` (absent or empty: every
   build) and returns `{"accepted":true}`. A `platform` is one of those `plugins.addBuild` takes.
   It is refused while the open Performance plays the build; items that use it open with a stand-in until it is installed again.

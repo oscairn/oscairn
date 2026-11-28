@@ -282,7 +282,16 @@ def main(tool):
         check(out.returncode == 0 and len(out.stdout.splitlines()) == 2, "oscairn-sign signs a bundle for each of its plugins: " + out.stderr.strip())
         duo_dir = repo / "packages" / "com.example.duo"
         duo_dir.mkdir()
-        out = run(tool, "plugin-package", "--license", "MIT", "--key", keys / "publisher.key", "--plugin", "com.example.duo.a", "Duo A", "--plugin", "com.example.duo.b", "Duo B",
+        # The publisher's claim (RFC 0043): its form is checked when packing.
+        for claim, why in ((["--opens-state-from", "com.example.duo.a", "1.1"], "is newer than its version"),
+                           (["--opens-state-from", "com.example.duo.a", "0.9-beta"], "dotted numbers"),
+                           (["--opens-state-from", "com.example.duo.a", "0.9", "--sound-changes", "com.example.duo.a", "x" * 1001], "over 1,000 bytes"),
+                           (["--opens-state-from", "com.example.other", "0.9"], "does not hold")):
+            out = run(tool, "plugin-package", "--license", "MIT", "--key", keys / "publisher.key", *claim, "--plugin", "com.example.duo.a", "Duo A", "--plugin", "com.example.duo.b", "Duo B",
+                      temp / "claim.olib", "clap", "com.example.duo", "1.0.0", "Example Duo", f"linux-arm64={duo}")
+            check(out.returncode != 0 and why in out.stderr and not (temp / "claim.olib").exists(), "a claim that " + why + " is refused: " + out.stderr.strip())
+        out = run(tool, "plugin-package", "--license", "MIT", "--key", keys / "publisher.key", "--opens-state-from", "com.example.duo.a", "0.9",
+                  "--sound-changes", "com.example.duo.a", "Notes no longer stick.", "--plugin", "com.example.duo.a", "Duo A", "--plugin", "com.example.duo.b", "Duo B",
                   duo_dir / "1.0.0.olib", "clap", "com.example.duo", "1.0.0", "Example Duo", f"linux-arm64={duo}")
         check(out.returncode == 0, "and packs it once: " + out.stderr.strip())
         duo_data = (duo_dir / "1.0.0.olib").read_bytes()
@@ -296,6 +305,9 @@ def main(tool):
             duo_version = next(p for p in duo_index["packages"] if p["id"] == "com.example.duo")["versions"][0]
             check(duo_version["types"] == {"clap": 2} and duo_version["platforms"]["linux-arm64"]["installed"] == len(b"two plugins in one bundle"),
                   "both plugins listed, the bundle counted once: " + json.dumps(duo_version["platforms"]))
+            check(duo_version["plugins"] == [{"format": "clap", "id": "com.example.duo.a", "version": "1.0.0", "platforms": ["linux-arm64"], "opensStateFrom": "0.9"},
+                                             {"format": "clap", "id": "com.example.duo.b", "version": "1.0.0", "platforms": ["linux-arm64"]}],
+                  "each plugin in the index, with its claim and without soundChanges: " + json.dumps(duo_version["plugins"]))
 
         # Dependencies: a plugin package needing an asset library is refused until the library is
         # here at that version or later, and its record must name what its archive needs.

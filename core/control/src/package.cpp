@@ -112,6 +112,16 @@ namespace oscairn
         return platforms.count(name) != 0;
     }
 
+    bool dottedVersion(const std::string& version)
+    {
+        size_t parts = 1, digits = 0;
+        for(const char c : version)
+            if(c == '.') { if(!digits || ++parts > 4) return false; digits = 0; }
+            else if(c >= '0' && c <= '9') { if(++digits > 9) return false; }
+            else return false;
+        return digits > 0;
+    }
+
     std::string pluginFolderName(const std::string& id, const std::string& version)
     {
         std::string safe;
@@ -191,7 +201,8 @@ namespace oscairn
                           ",\"signatures\":" + signatures(b.signatures) + estimate + '}';
             }
             plugins += std::string(plugins.empty() ? "" : ",") + "{\"format\":" + detail::quote(p.format) + ",\"id\":" + detail::quote(p.id) + ",\"version\":" + detail::quote(p.version) +
-                       ",\"name\":" + detail::quote(p.name) + ",\"builds\":[" + builds + "]}";
+                       ",\"name\":" + detail::quote(p.name) + (p.opensStateFrom.empty() ? "" : ",\"opensStateFrom\":" + detail::quote(p.opensStateFrom)) +
+                       (p.soundChanges.empty() ? "" : ",\"soundChanges\":" + detail::quote(p.soundChanges)) + ",\"builds\":[" + builds + "]}";
         }
         for(const auto& [path, sha] : package.files) files += std::string(files.empty() ? "" : ",") + detail::quote(path) + ":" + detail::quote(sha);
         const auto source = package.sourceUrl.empty() ? std::string("null") : "{\"url\":" + detail::quote(package.sourceUrl) + ",\"revision\":" + detail::quote(package.sourceRevision) + "}";
@@ -490,6 +501,18 @@ namespace oscairn
                 Package::Plugin plugin{text(detail::member(e->value, "format")), text(detail::member(e->value, "id")), text(detail::member(e->value, "version")), text(detail::member(e->value, "name")), {}};
                 if((plugin.format != "clap" && plugin.format != "lv2") || plugin.id.empty() || plugin.id.size() > 256 || plugin.version.size() > 128) bad("a plugin's format, ID or version is wrong");
                 if(std::any_of(p.plugins.begin(), p.plugins.end(), [&](const auto& q) { return q.format == plugin.format && q.id == plugin.id && q.version == plugin.version; })) bad("a plugin listed twice: " + plugin.id);
+                // The publisher's claim (RFC 0043): versions that are dotted numbers, the oldest not newer than this one.
+                const V from = detail::member(e->value, "opensStateFrom"), changes = detail::member(e->value, "soundChanges");
+                if((from && from->type != json_type_string) || (changes && changes->type != json_type_string)) bad("a plugin's opensStateFrom or soundChanges is not text: " + plugin.id);
+                if(from) plugin.opensStateFrom = text(from);
+                if(changes) plugin.soundChanges = text(changes);
+                if(from || changes)
+                {
+                    if(!from) bad("a plugin says soundChanges without opensStateFrom: " + plugin.id);
+                    if(!dottedVersion(plugin.version) || !dottedVersion(plugin.opensStateFrom)) bad("a plugin's opensStateFrom needs versions that are dotted numbers (at most four parts): " + plugin.id);
+                    if(assets::older(plugin.version, plugin.opensStateFrom)) bad("a plugin's opensStateFrom is newer than its version: " + plugin.id);
+                    if(plugin.soundChanges.size() > 1000 || (changes && plugin.soundChanges.empty())) bad("a plugin's soundChanges is empty or over 1,000 bytes: " + plugin.id);
+                }
                 const V builds = detail::member(e->value, "builds");
                 if(!builds || builds->type != json_type_array) bad("a plugin lists no builds");
                 for(auto* b = static_cast<const json_array_s*>(builds->payload)->start; b; b = b->next)

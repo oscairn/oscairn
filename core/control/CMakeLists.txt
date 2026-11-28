@@ -189,6 +189,11 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
 add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn-test-sampler>)
+# The independent review's cases (RFC 0043): here any other build stands for version 2, as only the claim's record is checked.
+add_executable(oscairn-moves-review-test tests/moves_review.cpp)
+target_link_libraries(oscairn-moves-review-test PRIVATE oscairn_control)
+add_dependencies(oscairn-moves-review-test oscairn-sign)
+add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:oscairn-sign>)
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)

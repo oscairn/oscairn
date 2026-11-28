@@ -252,7 +252,8 @@ std::vector<signing::Signature> buildSignatures(const fs::path& build,const std:
 }
 // A plugin that is not here stands in its place (RFC 0006), with the saved identity, ports and
 // the parameters its snapshot and the document name, keeping its saved state.
-std::shared_ptr<PluginHost> standIn(V node,const fs::path& snapshot,const std::set<uint32_t>& refs,const std::string& reason){
+// refused: the plugin is here but refused its saved state (the reason says so, not that it is not here).
+std::shared_ptr<PluginHost> standIn(V node,const fs::path& snapshot,const std::set<uint32_t>& refs,const std::string& reason,bool refused=false){
     const V plugin=field(node,"plugin");
     UnavailablePlugin p;
     p.descriptor.path=text(field(plugin,"pathHint"));p.descriptor.id=text(field(plugin,"id"));p.descriptor.version=text(field(plugin,"version"));
@@ -264,7 +265,7 @@ std::shared_ptr<PluginHost> standIn(V node,const fs::path& snapshot,const std::s
     try{const auto bytes=state_files::read(snapshot/"snapshot",2*1024*1024);std::istringstream in(std::string(bytes.begin(),bytes.end()));in.imbue(std::locale::classic());
         std::string kind;unsigned v;uint32_t id;double value;if(in>>kind>>v && kind=="parameters")while(in>>id>>value)ids.insert(id);}catch(const std::exception&){}
     for(const auto id:ids){kick::clap::Parameter q;q.id=id;q.name="Parameter "+std::to_string(id);q.minimum=-1e9;q.maximum=1e9;p.parameters.push_back(q);}
-    p.reason=p.descriptor.id+" "+p.descriptor.version+" is not here ("+reason+"); its place and saved state are kept";
+    p.reason=p.descriptor.id+" "+p.descriptor.version+(refused?" refused its saved state (":" is not here (")+reason+"); its place and saved state are kept";
     return unavailablePlugin(std::move(p));
 }
 // RFC 0021 slice 3: a saved node's place in a shared engine, its `sound`: its MIDI channel and
@@ -317,6 +318,9 @@ std::shared_ptr<SoundContext> joinEngine(const std::shared_ptr<SoundContext::Eng
 // A plugin refused before activating because it declared more memory than the budget left
 // (kick::clap::Host's reason, which reaches here as text, also from a worker): not a stand-in.
 bool memoryRefusal(const std::exception& e){return std::string(e.what()).find(" MiB of memory where ")!=std::string::npos;}
+// A plugin that was given its saved state and refused it (both hosts, in process or in a worker, say so this way); a state
+// file that is missing or damaged never reached the plugin, and is not this.
+bool stateRefusal(const std::exception& e){return std::string(e.what()).find("CLAP state restore failed")!=std::string::npos;}
 // Two saved snapshots alike, file for file and byte for byte.
 bool sameTree(const fs::path& a,const fs::path& b){
     std::error_code e;std::map<fs::path,uintmax_t> files;size_t count=0;
@@ -1342,6 +1346,19 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if(room)h.setMemoryRoom(0);
         checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
         if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");};
+    // A plugin that refuses its saved state does not refuse the Performance: it stands in its place silent, as one that is not
+    // here does, the state kept as saved and written back by a save; a notice names it (#331). Not for a damaged document
+    // (a state file missing, ports that differ), nor when a worker died meanwhile (readTaking reads again for that).
+    auto restoreOrStandIn=[&](NodeId& runtime,V node,uint64_t room,const std::function<void()>& restoring){
+        const auto failed=workerFailures();
+        try{restoring();}
+        catch(const std::exception& e){
+            if(memoryRefusal(e) || !stateRefusal(e) || workerFailures()!=failed)throw;
+            const auto key=text(field(node,"key"));
+            next->remove(runtime);origins.erase(runtime);
+            runtime=next->add(standIn(node,root/"nodes"/key,refs[key],e.what(),true));
+            notices.push_back(text(field(node,"name"))+" ("+text(field(field(node,"plugin"),"id"))+") refused its saved state, so it is silent and its state is kept as saved: "+e.what());
+            restore(runtime,node,room);}};
     // A playing instance's own state, saved before it is given another: put back if the load fails,
     // or if it is let go for a fresh one, so it plays on as before (RFC 0021).
     struct Saved{NodeId node;std::shared_ptr<PluginHost> host;std::unique_ptr<state_files::TemporaryDirectory> folder;};std::vector<Saved> saved;
@@ -1445,14 +1462,14 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             else if(const auto engine=playing(id,path,text(field(plugin,"version")),group[key])){runtime=context(graph_.host(*engine),[&]{return next->addEffectContext(graph_,*engine);});++reused;}
             else if(const auto f=group[key]==1?take(plugin,key,first):std::nullopt){
                 runtime=next->add(free[*f].host);origins[runtime]={free[*f].loaded.build,source(key)};++reused;restored=true;
-                if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreTaken(runtime,node,room,*f);}
+                if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreOrStandIn(runtime,node,room,[&]{restoreTaken(runtime,node,room,*f);});}
                 free[*f].host.reset();}
             else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};LoadWindow window;return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                        [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});fresh=true;
                 // What another Performance may take over later: a plugin of its own, loaded (not a stand-in).
                 if(group[key]==1 && next->host(runtime).failure().empty())origins[runtime]={buildDigest(next->host(runtime).descriptor().path),source(key)};}
-            if(!restored && fresh){LoadWindow window;restore(runtime,node,room);}
-            else if(!restored)restore(runtime,node,room);
+            if(!restored && fresh){LoadWindow window;restoreOrStandIn(runtime,node,room,[&]{restore(runtime,node,room);});}
+            else if(!restored)restoreOrStandIn(runtime,node,room,[&]{restore(runtime,node,room);});
             else if((shared && !apart) || joined){auto& h=joined?*joined->engine()->host:next->host(runtime); // a node saved alone, as its plugin's ports
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
                 if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");}

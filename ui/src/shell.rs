@@ -845,6 +845,7 @@ impl App {
                 self.state_stale = true;
                 self.wake_meters();
             }
+            self.say_new_failures(status);
             self.last_status = Some(key);
             self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
             self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
@@ -861,6 +862,17 @@ impl App {
             self.pending_status = Some(status.clone());
         }
         self.flush_status();
+    }
+
+    /// A plugin that has failed since the last status (a Performance opened with one that refused its state, a worker that
+    /// could not restart) is named once in the bar; the Parts list marks it and says why.
+    fn say_new_failures(&mut self, status: &Value) {
+        let pair = |f: &Value| (f["node"].as_u64().unwrap_or(0), f["name"].as_str().unwrap_or_default().to_string());
+        let before: Vec<(u64, String)> = self.last_status.as_ref().and_then(|k| k["failures"].as_array()).map(|l| l.iter().map(pair).collect()).unwrap_or_default();
+        let new: Vec<String> = status["failures"].as_array().into_iter().flatten().map(pair).filter(|p| !before.contains(p)).map(|p| p.1).collect();
+        if !new.is_empty() {
+            self.say(&format!("{} {} silent. The Parts list says why.", new.join(", "), if new.len() == 1 { "is" } else { "are" }));
+        }
     }
 
     /// The meters of the status that changed: the CPU from it, RAM and the tempo asked; a read the engine refused

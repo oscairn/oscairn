@@ -127,7 +127,8 @@ using a bundled plugin opens on another device or with the app moved. Each is he
 version; as for the saved path and the store, the lock's digest is not compared when loading,
 and the next save locks the build that loaded. The path is **not** a package ID or portability guarantee. There are no silent upgrades
 or untested state conversions: a plugin that is not here, or only in another version, or that
-fails to load, opens as a **stand-in** in its place (RFC 0006's unavailable-node preservation).
+fails to load, or that refuses its saved state, opens as a **stand-in** in its place (RFC 0006's
+unavailable-node preservation); the other parts play, and a notice in `session.status`'s `notices` names it.
 The stand-in keeps the saved identity, ports and the parameters the snapshot and the document
 name, so parts, wires, scenes and controls keep it; it plays silence, is reported among the
 session's `failures` saying why, and writes its saved state back byte for byte on save, so

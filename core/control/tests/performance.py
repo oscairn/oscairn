@@ -192,9 +192,14 @@ try:
         live = rpc('graph.get')['result']
         bad = root / 'bad-state'
         shutil.copytree(moved, bad)
+        # A state the plugin refuses opens the Performance with that part failed, its state kept (#331).
         (bad / 'nodes/node-1/state/state.clap').write_text('oscairn-synth-2\n1 "invalid" NaN')
-        rpc('performance.load', {'directory': str(bad)}, True)
-        assert rpc('graph.get')['result'] == live
+        rpc('performance.load', {'directory': str(bad)})
+        failures = rpc('session.status')['result']['failures']
+        assert len(failures) == 1 and 'refused its saved state' in failures[0]['reason'], failures
+        rpc('performance.load', {'directory': str(moved)})
+        assert rpc('session.status')['result']['failures'] == []
+        live = rpc('graph.get')['result']
         (bad / 'performance.json').write_bytes(b'{\"format\":\"\xff\"}')
         rpc('performance.load', {'directory': str(bad)}, True)
         rpc('performance.load', {'directory': str(moved), 'extra': 1}, True)

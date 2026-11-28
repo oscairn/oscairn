@@ -731,7 +731,8 @@ namespace oscairn
                     ",\"nodes\":"+texts(i.nodes)+",\"parts\":"+texts(i.parts)+",\"worker\":"+quote(i.worker)+'}');
                 const auto& o=t.open;
                 const auto open="{\"name\":"+quote(o.name)+",\"reused\":"+std::to_string(o.reused)+",\"loaded\":"+std::to_string(o.loaded)+",\"kept\":"+std::to_string(o.kept)+",\"total\":"+encode(o.total)+",\"read\":"+encode(o.read)+
-                    ",\"load\":"+encode(o.load)+",\"restore\":"+encode(o.restore)+",\"reset\":"+encode(o.reset)+",\"save\":"+encode(o.save)+",\"beside\":"+encode(o.beside)+",\"publish\":"+encode(o.publish)+'}';
+                    ",\"load\":"+encode(o.load)+",\"restore\":"+encode(o.restore)+",\"reset\":"+encode(o.reset)+",\"save\":"+encode(o.save)+",\"beside\":"+encode(o.beside)+",\"publish\":"+encode(o.publish)+
+                    ",\"callbackMax\":{\"read\":"+encode(o.callbackRead)+",\"publish\":"+encode(o.callbackPublish)+",\"after\":"+encode(o.callbackAfter)+"}}";
                 return "{\"warmupBlocks\":"+std::to_string(BlockTiming::warmupBlocks)+",\"bucketBounds\":["+bounds+"],\"callback\":"+snapshot(t.callback)+
                     ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"],\"instances\":"+join(instances)+",\"cores\":"+quote(t.cores)+",\"open\":"+open+"}";
             }

@@ -1013,6 +1013,9 @@ namespace oscairn
         std::atomic<Transport::ClockSource> clockSource_{ Transport::ClockSource::Internal };
         // engine.timing's callback histograms (blockTimes, audio thread) and the last callback's start.
         BlockTiming callbackTiming_, latenessTiming_;
+        // Issue 340: the callback's longest block in each phase of the last Performance load (engine.timing's open): openPhase_ 0 none, 1 read,
+        // 2 publish, 3 the blocks after (the audio thread ends it after BlockTiming::warmupBlocks); phaseMaxNs_ by phase, written by the audio thread.
+        std::atomic<uint32_t> openPhase_{ 0 }; std::atomic<int64_t> phaseMaxNs_[3]{}; uint32_t afterBlocks_ = 0;
         std::map<const PluginHost*, uint64_t> eventsBase_; // control thread: each worker's events handed at the last reset
         std::map<const PluginHost*, kick::clap::Statistics> timingBase_; // control thread: each worker's counts at the last reset
         std::map<const PluginHost*, kick::clap::Statistics> reusedBase_; // control thread: a reused instance's counts when a Performance took it over (session.status)

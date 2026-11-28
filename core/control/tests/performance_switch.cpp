@@ -689,6 +689,24 @@ namespace
             check(again.kept == 0 && leavingAgain >= 1, "steps, kept effects: the file saved again keeps nothing unseen (as before): what sounded rings out beside new instances: " +
                   std::to_string(again.kept) + " kept, " + std::to_string(leavingAgain) + " ringing out");
         }
+        // Issue 340: engine.timing's open gives the callback's longest block in each phase of the load (the FANTOM's longest callback of a
+        // pedaled reload fell in the publish). A thread paced as a device's callback reports each block's time as the test sets it: 100 us
+        // while the load runs, 900 once it returned for longer than the 512 blocks the "after" phase lasts, then 2000.
+        {
+            const auto same = tempPath / "steps-phases", eight = tempPath / "steps-phases-eight"; single(same, argv[4], .3); many(eight, 1, argv[4], 8); // eight to load: a read of some blocks
+            std::atomic<int64_t> took{100'000};
+            Live l; std::atomic<bool> stop{false};
+            std::thread clock([&] { int64_t at = 0; size_t seen = 0; while(!stop) { for(const auto b = l.block.load(); seen < b; ++seen) { l.s.blockTimes(at, at + took.load(), 2'666'667); at += 2'666'667; } std::this_thread::sleep_for(std::chrono::microseconds(200)); } });
+            l.serve(4); load(l.s, same); l.serve(600);
+            load(l.s, eight); took = 900'000; l.serve(600);
+            const auto o = l.s.engineTiming(false).open;
+            took = 2'000'000; l.serve(100);
+            const auto later = l.s.engineTiming(false).open;
+            stop = true; clock.join();
+            std::printf("steps, callback by phase: read %.0f, publish %.0f, after %.0f us; 100 blocks on, after %.0f us\n", o.callbackRead, o.callbackPublish, o.callbackAfter, later.callbackAfter);
+            check(o.callbackRead == 100 && o.callbackPublish <= 100 && o.callbackAfter == 900, "steps, callback by phase: each phase its own longest block: read " + std::to_string(o.callbackRead) + ", after " + std::to_string(o.callbackAfter));
+            check(later.callbackAfter == 900 && later.callbackRead == 100, "steps, callback by phase: after ends with its 512 blocks: " + std::to_string(later.callbackAfter));
+        }
         // B: four instruments, one key held on the first. Beside all four it does not fit, beside the one sounding it does: the
         // three silent ones go, the held note rings on, and nothing is said.
         {

@@ -780,6 +780,10 @@ void Session::loadPerformance(const std::string& directory) {
 
 void Session::openPerformance(const std::string& directory) {
     const auto began=std::chrono::steady_clock::now();
+    // engine.timing (issue 340): the callback's longest block in each phase of this load, from zero. shortcut: a block the audio thread
+    // records as this begins may land in the last load's "after"; a diagnostic, not worth a lock.
+    openPhase_.store(1,std::memory_order_release);for(auto& m:phaseMaxNs_)m.store(0,std::memory_order_relaxed);
+    struct Phase{std::atomic<uint32_t>& p;~Phase(){uint32_t was=1;p.compare_exchange_strong(was,0);}} phase{openPhase_}; // a load that fails stops at read
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
@@ -849,7 +853,7 @@ void Session::openPerformance(const std::string& directory) {
     auto stats=prepared->stats;
     size_t keptSounding=0; // instances kept as they are while they sound, budget or not
     for(const auto& [was,now]:prepared->held)keptSounding+=graph_.contains(was) && !graph_.silent(was,uint64_t(sampleRate_/10));
-    {Clock publish{stats.publish};open(*prepared,seamless,fades,released);}
+    {Clock publish{stats.publish};openPhase_.store(2,std::memory_order_release);open(*prepared,seamless,fades,released);openPhase_.store(3,std::memory_order_release);}
     unfading.on=false; // those it faded are gone with the plan they played in (fadeOut sets the gain again before it names it)
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
     if(!cut.empty()){if(fades)++ringOut_.faded;else if(!seamless)++ringOut_.cut;tailNotice(cut);}

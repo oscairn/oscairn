@@ -752,7 +752,7 @@ it is refused to apps whatever they were granted.
 | `play` | `notes.*`, `transport.set`, `scenes.select`, `controls.set`, `pads.play`, `pads.pressure` |
 | `play` or `edit` | reading what plays: `transport.get`, `graph.get`, `params.list`, `params.get`, `params.text`, `pads.get`, `assignments.get`, `harmony.get`, `parts.meters`, `wires.meters`, `sounds.get`, `effects.resources`, `state.info`, `window.info`, `presets.list`, `properties.list`, `properties.get`; the `transport`, `params.changed`, `graph.changed` and `controls.changed` topics |
 | `edit` | the rest of `graph`, `parts`, `wires`, `params`, `scenes`, `controls`, `pads`, `edit`, `sounds`, `properties` and `assignments`; `master.set`, `effects.create`, `instruments.share`, `harmony.set`, `state.save`, `window.show` |
-| `library` | `library.*`, `performance.*`, `budget.estimate`, `audition.*`, `assets.*`, `record.*`; the `record` topic |
+| `library` | `library.*`, `performance.*`, `budget.estimate`, `audition.*`, `assets.*`, `record.*`, `versions.*`; the `record` topic |
 | `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `panel.lamps`, `system.rolandNextBoot`, `controllers.inputs`, `controllers.choose`, `controllers.ignore`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `budget.forget`, `performance.reopen`, `memory.*`, `audio.set`, `engine.timing` |
 | `play`, `edit` or `system` | `controllers.get` and the `controllers` topic, which `RemoteControl` subscribes to |
 
@@ -1490,6 +1490,61 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   device's) from a file or bundle here, into the store so exports carry it, replacing that
   platform's build. CLAP only. It cannot be loaded here; the device it is for checks its ID and
   version when it loads it.
+- `versions.plan` takes `{plugin:{format,id,version},to,scope}` and returns `{job}`: what moving
+  library items from that plugin version to the installed version `to` would do
+  ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md)), changing nothing. `scope` is
+  one or more of `items` (IDs), `library` (the user's items whose origin is that library, and that
+  library's own), `setlist` (the Performances a Setlist names) and `all: true`. Only a version newer
+  than `version` (`-32602` otherwise), installed with a build for this device. One version job at
+  a time (`-32007`, `data.reason` `busy`), at most 10,000 items. A job, off the control thread,
+  opens each node that uses the plugin at `version` with `to`'s build, each in a worker of its
+  own (always, whatever the placement policy; with the worker's memory limit and its 30-second
+  reply timeout; refused, `-32005`, when no worker program is found), restores the node's saved
+  state, compares its audio and note ports with the document's, and reads its parameters,
+  compared with what `version`'s build reads from the same state when that build is here. The
+  open Performance's own item, and an item whose folder is outside the data folder or on another
+  drive (a move keeps the item as it was by a rename into the data folder's `Moves/`), are
+  `refused` with that reason. A job ending (the session going) kills the worker an item waits on.
+- `versions.move` takes `{plugin,to,items,withoutClaim?}` and returns `{job}`: the same check for
+  the items given (the plan's), then each item that passes is rewritten in a copy: its nodes'
+  state saved again as `to` writes it, each node's `plugin.version` and `pathHint` (`to`'s build
+  here), the `lock` (this plugin's entries for `version` and `to` replaced by `to`'s builds in the
+  store, one per platform, by digest), and a new revision with its content hash. When the job
+  ends the copy takes the item's place whole, and the item as it was goes under
+  `Moves/<move>/<id>/` in the data folder with `Moves/<move>/move.json` (`{plugin,to,date,state,
+  items:[{id,kind,revision,path}],undoing}`, the revision the move wrote, `path` relative to the
+  data folder). The journal is written durably (file and folder synced) before the first rename
+  (`state` `swapping`), and every step is settled from the disk: a failure ends the job `failed`
+  with what was swapped recorded and the rest as it was, and an engine start settles a move or an
+  undo a crash cut short, finishing or rolling back each item, so the library always holds every
+  item, old or new. An item saved while the job ran is left (`savedSince`). Without the
+  publisher's claim (`plugins.list`'s `opensStateFrom`, honored only when it covers `version`,
+  both versions are dotted numbers, and the key that made it is, at the time of the move, trusted
+  for plugins and not revoked in the trust store and signed `to`'s build here and an installed
+  build of `version`) only one item moves, and only with
+  `withoutClaim: true` (`-32602` otherwise). With `OSCAIRN_RELIABILITY` `instrument` or
+  `pass-through`, refused while the transport runs (`-32005`, "Stop the transport to move
+  sounds", `data.reason` `playing`). Nothing moves on its own: no install, update or open moves an item.
+- `versions.job` takes `{job}` and returns `{state,error,checked,total,items,claim,move}`: `state`
+  `running`, `done` or `failed`; `checked` of `total` items so far; each item `{id,name,kind,
+  status,locked,nodes,changes,reason}`, `status` one of `movable`, `changed` (`changes` lists
+  each parameter that reads differently, `{node,param,name,before,after}`, `before` null for a
+  parameter new in `to`, `after` null for one gone), `locked` (a locked library's item: its
+  publisher moves it with the library's next version), `noClaim` (would move, but `to` does not
+  claim it opens this state), `refused` (`reason`: not in the library, its state does not open in
+  `to`, its ports are not the same, `to`'s build is not that version, a worker failure or time
+  limit), `moved` and `savedSince`; `nodes` the nodes using the plugin. An item that does not
+  use the plugin at `version` is not listed. `claim` is `{opensStateFrom,soundChanges,key,checked}`
+  or null (`checked` false: the repository's check is not read yet); `move` the kept move's ID once
+  a move is done, else null. The copies are put in place when `versions.job` first sees the job
+  done, on the control thread.
+- `versions.moves` (`{}`) returns `{moves}`: the kept moves, newest first, each
+  `{move,date,plugin,to,items,undoable}`, `undoable` while some item still holds what the move
+  wrote. Kept until forgotten; nothing forgets them on its own.
+- `versions.undo` takes `{move}` and returns `{items}`, each `{id,savedSince}`: each item the move
+  wrote and nothing saved since is put back exactly as it was (its folder, state included); one
+  saved since is left and stays in the move. A move with nothing left goes.
+- `versions.forget` takes `{move}` and returns `{"accepted":true}`: the move's kept items go.
 - `trust.list` (`{}`) returns `{keys}`: the trust store ([RFC 0006](rfcs/0006-packages-and-portability.md#signatures)),
   `trust.json` in the data folder, each `{id,key,name,scope,revoked}`: the key's ID (the first
   16 hex digits of the SHA-256 of its 32 bytes, its fingerprint), its Ed25519 public key in hex,

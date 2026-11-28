@@ -101,6 +101,12 @@ namespace oscairn
         void uninstallLibrary(const std::string& library) override;
         void deleteLibraryItem(const std::string& item) override;
         std::vector<InstalledPlugin> installedPlugins() override;
+        uint64_t planVersionMove(const PluginVersion& plugin, const std::string& to, const VersionScope& scope) override;
+        uint64_t moveVersions(const PluginVersion& plugin, const std::string& to, const std::vector<std::string>& items, bool withoutClaim = false) override;
+        VersionJob versionJob(uint64_t id) override;
+        std::vector<VersionMove> versionMoves() override;
+        std::vector<VersionUndone> undoVersionMove(const std::string& move) override;
+        void forgetVersionMove(const std::string& move) override;
         void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) override;
         void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) override;
         uint64_t listRepository(const std::string& source) override;
@@ -951,6 +957,11 @@ namespace oscairn
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes
         uint64_t packageJobs_ = 0;
+        struct VersionWork;                        // the version move job off the control thread (versions.cpp)
+        std::shared_ptr<VersionWork> versionWork_; // joins its thread when it goes
+        uint64_t versionJobs_ = 0;
+        void recoverVersionMoves(); // a move or undo cut short (a crash), settled from its journal: at the start
+        uint64_t startVersionJob(const PluginVersion& plugin, const std::string& to, std::vector<LibraryItem> items, std::vector<std::string> unknown, bool move, bool withoutClaim);
         std::vector<Repository> deviceRepositories_; // the profile's, set by the app; control thread only
         bool hideOfficial_ = false;
         std::filesystem::path preinstallFolder_; // the app's repository snapshot; control thread only

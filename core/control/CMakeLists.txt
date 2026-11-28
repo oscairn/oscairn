@@ -1,4 +1,4 @@
-add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
+add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/versions.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
 set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
 # The library's index (RFC 0023 step 5): no extensions loaded, double-quoted strings refused.
 set_source_files_properties(third_party/sqlite/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DQS=0")
@@ -7,6 +7,8 @@ target_include_directories(oscairn_control PUBLIC include)
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSION="${PROJECT_VERSION}") # what a package's requires.oscairn is checked against (RFC 0031)
 # The release, with its pre-release label (the top-level CMakeLists.txt): what preinstalled.json records the packages that come with it under (RFC 0031).
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
+# RFC 0043: the worker a version move opens plugins in when the placement policy names none and none is beside the program.
+target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSIONS_WORKER="$<TARGET_FILE:oscairn-plugin-worker>")
 target_link_libraries(oscairn_control PUBLIC oscairn_engine PRIVATE $<$<PLATFORM_ID:Linux>:m>)
 target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 
@@ -189,11 +191,16 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
 add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn-test-sampler>)
-# The independent review's cases (RFC 0043): here any other build stands for version 2, as only the claim's record is checked.
+# The independent review's cases (RFC 0043): claims, a failed swap, crashes at each step, worker isolation.
 add_executable(oscairn-moves-review-test tests/moves_review.cpp)
 target_link_libraries(oscairn-moves-review-test PRIVATE oscairn_control)
 add_dependencies(oscairn-moves-review-test oscairn-sign)
-add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:oscairn-sign>)
+add_dependencies(oscairn-moves-review-test oscairn-plugin-worker kick-clap-fixture-v2 kick-clap-fixture-v2_hang kick-clap-fixture-v2_hog)
+add_test(NAME control-moves-review COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-moves-review-isolation COMMAND oscairn-moves-review-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2> $<TARGET_FILE:oscairn-sign>
+    isolation $<TARGET_FILE:kick-clap-fixture-v2_hang> $<TARGET_FILE:kick-clap-fixture-v2_hog>)
+set_tests_properties(control-moves-review PROPERTIES TIMEOUT 300)
+set_tests_properties(control-moves-review-isolation PROPERTIES TIMEOUT 300 ENVIRONMENT "OSCAIRN_WORKER_MEMORY_MB=256")
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)
@@ -519,3 +526,13 @@ add_executable(oscairn-worker-prestart-test tests/worker_prestart.cpp)
 target_link_libraries(oscairn-worker-prestart-test PRIVATE oscairn_control)
 add_test(NAME control-worker-prestart COMMAND oscairn-worker-prestart-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(control-worker-prestart PROPERTIES TIMEOUT 120)
+
+# RFC 0043: moving library items to a newer plugin version, in process and with plugins in workers.
+add_executable(oscairn-version-moves-test tests/version_moves.cpp)
+target_link_libraries(oscairn-version-moves-test PRIVATE oscairn_control)
+add_dependencies(oscairn-version-moves-test oscairn-sign)
+add_test(NAME control-version-moves COMMAND oscairn-version-moves-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2>
+    $<TARGET_FILE:kick-clap-fixture-v2_changed> $<TARGET_FILE:kick-clap-fixture-v2_ports> $<TARGET_FILE:oscairn-sign>)
+add_test(NAME control-version-moves-workers COMMAND oscairn-version-moves-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:kick-clap-fixture-v2>
+    $<TARGET_FILE:kick-clap-fixture-v2_changed> $<TARGET_FILE:kick-clap-fixture-v2_ports> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn-plugin-worker>)
+set_tests_properties(control-version-moves control-version-moves-workers PROPERTIES TIMEOUT 120)

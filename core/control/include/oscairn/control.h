@@ -499,6 +499,39 @@ namespace oscairn
         // signed it, kept from a verified archive at install; empty for none.
         struct InstalledPlugin { std::string format, id, version, name; std::vector<std::string> platforms; uint64_t bytes = 0; std::vector<std::string> usedBy; bool open = false; std::string license, opensStateFrom = {}, soundChanges = {}, claimKey = {}; };
         virtual std::vector<InstalledPlugin> installedPlugins() = 0;
+        // Moving library items to a newer installed version of a plugin (RFC 0043), by an explicit
+        // action, never on its own. A job, off the control thread, opens each node of each item that
+        // uses the plugin at `from` with the build of `to` here (each in a worker of its own where
+        // workers are used), restores its saved state there, compares its ports with the document's
+        // and its parameters with the old build's (when that is here), and for a move saves the
+        // state again as the new version writes it. The plan changes nothing. The move takes the
+        // items the plan offered and swaps each one whole, keeping the item as it was under Moves/
+        // in the data folder for undo; an item saved meanwhile is left. One job at a time.
+        struct PluginVersion { std::string format, id, version; };
+        // Which items: by ID, those whose origin is a library (and that library's own, listed as
+        // locked), those a Setlist names, or every item.
+        struct VersionScope { std::vector<std::string> items; std::string library, setlist; bool all = false; };
+        // A parameter that reads differently in the new version: before is the old build's value,
+        // after the new one's; an absent value is a parameter gone (after) or new (before).
+        struct VersionChange { std::string node, name; uint32_t param = 0; std::optional<double> before, after; };
+        // status: movable, changed (changes say how), locked (a locked library's), noClaim (would move,
+        // but the publisher does not claim the new version opens it), refused (reason), moved, savedSince
+        // (saved while the move ran, left as it was).
+        struct VersionItem { std::string id, name, kind, status, reason; bool locked = false; uint32_t nodes = 0; std::vector<VersionChange> changes; };
+        struct VersionClaim { std::string opensStateFrom, soundChanges, key; bool checked = false; };
+        // state: running, done or failed (error); move: the kept move's ID once a move is done.
+        struct VersionJob { uint64_t id = 0; std::string state, error, move; uint32_t checked = 0, total = 0; std::vector<VersionItem> items; std::optional<VersionClaim> claim; };
+        virtual uint64_t planVersionMove(const PluginVersion& plugin, const std::string& to, const VersionScope& scope) = 0;
+        // Without the publisher's claim only one item moves, and only with withoutClaim.
+        virtual uint64_t moveVersions(const PluginVersion& plugin, const std::string& to, const std::vector<std::string>& items, bool withoutClaim = false) = 0;
+        virtual VersionJob versionJob(uint64_t id) = 0;
+        // The kept moves, newest first; undoable: some item still holds what the move wrote.
+        struct VersionMove { std::string move, date; PluginVersion plugin; std::string to; std::vector<std::string> items; bool undoable = false; };
+        virtual std::vector<VersionMove> versionMoves() = 0;
+        // Puts back each item the move wrote and nothing changed since; one saved since is left (savedSince).
+        struct VersionUndone { std::string id; bool savedSince = false; };
+        virtual std::vector<VersionUndone> undoVersionMove(const std::string& move) = 0;
+        virtual void forgetVersionMove(const std::string& move) = 0;
         // Removes a plugin's builds from the store, one platform's or (empty) all. Refused while the
         // open Performance plays the build; items that use it open with a stand-in until it is back.
         virtual void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) = 0;

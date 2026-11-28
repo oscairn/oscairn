@@ -83,6 +83,12 @@ namespace oscairn
         void uninstallLibrary(const std::string& library) override;
         void deleteLibraryItem(const std::string& item) override;
         std::vector<InstalledPlugin> installedPlugins() override;
+        uint64_t planVersionMove(const PluginVersion& plugin, const std::string& to, const VersionScope& scope) override;
+        uint64_t moveVersions(const PluginVersion& plugin, const std::string& to, const std::vector<std::string>& items, bool withoutClaim = false) override;
+        VersionJob versionJob(uint64_t id) override;
+        std::vector<VersionMove> versionMoves() override;
+        std::vector<VersionUndone> undoVersionMove(const std::string& move) override;
+        void forgetVersionMove(const std::string& move) override;
         void removePlugin(const std::string& format, const std::string& id, const std::string& version, const std::string& platform = {}) override;
         void addPluginBuild(const std::string& format, const std::string& id, const std::string& version, const std::string& platform, const std::string& path) override;
         std::vector<TrustedKey> trustedKeys() override;

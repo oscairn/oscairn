@@ -1144,6 +1144,10 @@ What changes for the plugin:
   archive's signature only, so pack with `--key`, the same key that signed the builds: a device
   keeps it from no other archive (`plugins.list` shows it as `opensStateFrom`). Nothing moves
   on its own: the claim lets a musician move their sounds to the new version on purpose.
+  A move loads each saved state into your new version (in a worker of its own, offline), reads
+  your parameters back to compare them with what the old version reads from the same state, and
+  saves the state again with your new version's state save; so your state load must take every
+  older state the claim covers, and your parameter values must be readable right after it.
   Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),
   named by your plugin package with `--asset-dependency <library-id> <least-version>`: the
   Catalog lists it under Content, and one installed only because your package needed it says
